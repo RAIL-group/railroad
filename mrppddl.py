@@ -1,73 +1,325 @@
 # Re-import required dependencies due to kernel reset
-from typing import List, Tuple, Dict, Set, Union, Optional
+from typing import Callable, List, Tuple, Dict, Set, Union, Optional
 from queue import PriorityQueue
 import itertools
 
-# Redefine Fluent class
-class Fluent:
-    def __init__(self, name: str, *args: str):
+
+class Fluent(object):
+    def __init__(self, name: str, *args: str, negated: bool = False):
         self.name = name
         self.args = args
+        self.negated = negated
 
     def __str__(self) -> str:
-        return f"{self.name} {' '.join(self.args)}"
+        prefix = "not " if self.negated else ""
+        return f"{prefix}{self.name} {' '.join(self.args)}"
 
     def __repr__(self) -> str:
         return f"Fluent<{self}>"
 
     def __hash__(self) -> int:
-        return hash(str(self))
+        return hash((self.name, self.args, self.negated))
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, Fluent) and hash(self) == hash(other)
+        return (
+            isinstance(other, Fluent) and
+            self.name == other.name and
+            self.args == other.args and
+            self.negated == other.negated
+        )
 
     def __invert__(self) -> 'Fluent':
-        if self.name.startswith('not '):
-            return Fluent(self.name[4:], *self.args)
-        return Fluent(f"not {self.name}", *self.args)
+        return Fluent(self.name, *self.args, negated=not self.negated)
 
-# Effect classes
-class Effect:
+    def positive(self) -> 'Fluent':
+        return Fluent(self.name, *self.args, negated=False)
+
+
+class ActiveFluents(object):
+    def __init__(self, fluents: Optional[Set[Fluent]] = None):
+        if fluents and any(fluent.negated for fluent in fluents):
+            raise ValueError("All fluents in active fluents must be positive.")
+        self.fluents: Set[Fluent] = set(fluents) if fluents else set()
+
+    def update(self, fluents: Set[Fluent], relaxed: bool = False) -> 'ActiveFluents':
+        """Apply fluents to the active set: add positives, remove targets of negations."""
+        positives = {f for f in fluents if not f.negated}
+        new_active_fluents = self.copy()
+
+        if not relaxed:
+            negatives = {f.positive() for f in fluents if f.negated}
+            new_active_fluents.fluents -= negatives
+
+        new_active_fluents.fluents |= positives
+        return new_active_fluents
+
+    def copy(self) -> 'ActiveFluents':
+        return ActiveFluents(set(self.fluents))
+
+    def __contains__(self, f: Fluent) -> bool:
+        return f in self.fluents
+
+    def __iter__(self):
+        return iter(self.fluents)
+
+    def __str__(self):
+        return f"{{{', '.join(str(f) for f in sorted(self.fluents, key=str))}}}"
+
+    def __repr__(self):
+        return str(self)
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, ActiveFluents) and self.fluents == other.fluents
+
+    def __hash__(self):
+        return hash(frozenset(self.fluents))
+
+
+TimeExpr = Union[float, Callable[[Dict[str, str]], float]]
+ProbExpr = Union[float, Callable[[Dict[str, str]], float]]
+Binding = Dict[str, str]
+
+class GroundedEffectType:
+    def __init__(self, time: float, resulting_fluents: Set[Fluent]):
+        self.time = time
+    
+    def __lt__(self, other: 'GroundedEffectType') -> bool:
+        return self.time < other.time
+
+class LiftedEffectType:
+    def __init__(self, time: TimeExpr, resulting_fluents: Set[Fluent]):
+        self.time = time
+        self.resulting_fluents = resulting_fluents
+
+    def _ground(self, binding: Binding) -> 'GroundedEffectType':
+        grounded_time = self.time(binding) if callable(self.time) else self.time
+        grounded_fluents = {
+            Fluent(f.name, *[binding.get(arg, arg) for arg in f.args], negated=f.negated)
+            for f in self.resulting_fluents
+        }
+        return GroundedEffect(grounded_time, grounded_fluents)
+
+
+class GroundedEffect(GroundedEffectType):
     def __init__(self, time: float, resulting_fluents: Set[Fluent]):
         self.time = time
         self.resulting_fluents = resulting_fluents
 
-class ProbEffects:
-    def __init__(self, time: float, prob_effects: List[Tuple[float, List[Effect]]], resulting_fluents: Set[Fluent] = set()):
+    def __str__(self):
+        rfs = ", ".join(str(f) for f in self.resulting_fluents)
+        return f"after {self.time}: {rfs}"
+
+    def __repr__(self):
+        return f"GroundedEffect({self})"
+
+
+class Effect(LiftedEffectType):
+    def __init__(self, time: TimeExpr, resulting_fluents: Set[Fluent]):
+        self.time = time
+        self.resulting_fluents = resulting_fluents
+
+class GroundedProbEffect(GroundedEffectType):
+    def __init__(
+        self,
+        time: float,
+        prob_effects: List[Tuple[float, List[GroundedEffectType]]],
+        resulting_fluents: Set[Fluent] = set()
+    ):
         self.time = time
         self.prob_effects = prob_effects
         self.resulting_fluents = resulting_fluents
 
-# Action class
+    def __str__(self):
+        parts = []
+        for prob, effs in self.prob_effects:
+            branch = "; ".join(str(e) for e in effs)
+            parts.append(f"{prob}: [{branch}]")
+        return f"probabilistic after {self.time}: {{ {', '.join(parts)} }}"
+
+    def __repr__(self):
+        return f"ProbEffects({self})"
+
+class ProbEffect(LiftedEffectType):
+    def __init__(
+        self,
+        time: TimeExpr,
+        prob_effects: List[Tuple[ProbExpr, List[Effect]]],
+        resulting_fluents: Set[Fluent] = set()
+    ):
+        self.time = time
+        self.prob_effects = prob_effects
+        self.resulting_fluents = resulting_fluents
+
+    def _ground(self, binding: Binding) -> 'GroundedProbEffect':
+        def evaluate(expr): return expr(binding) if callable(expr) else expr
+
+        grounded_prob_effects = [
+            (evaluate(prob), [e._ground(binding) for e in effect_list])
+            for prob, effect_list in self.prob_effects
+        ]
+
+        grounded_time = evaluate(self.time)
+        grounded_resulting_fluents = {
+            Fluent(f.name, *[binding.get(arg, arg) for arg in f.args], negated=f.negated)
+            for f in self.resulting_fluents
+        }
+
+        return GroundedProbEffect(grounded_time, grounded_prob_effects, grounded_resulting_fluents)
+
+
+
+# class EffectBase(object):
+#     def __init__(self,
+#                  time: float,
+#                  resulting_fluents: Set[Fluent] = set()):
+#         self.time = time
+#         self.resulting_fluents = resulting_fluents
+
+# class Grounded(EffectBase):
+#     def __init__(self,
+#                  time: float):
+#         self.time = time
+
+#     def __lt__(self, other: 'Grounded') -> bool:
+#         return self.time < other.time
+
+# class GroundedEffect(EffectBase, Grounded):
+#     def __init__(self,
+#                  time: float,
+#                  resulting_fluents: Set[Fluent] = set()):
+#         self.time = time
+#         self.resulting_fluents = resulting_fluents
+
+# class Effect(EffectBase):
+#     def __init__(self,
+#                  time: Union[float, Callable[[Dict[str, str]], float]],
+#                  resulting_fluents: Set[Fluent] = set()):
+#         self.time = time
+#         self.resulting_fluents = resulting_fluents
+
+#     def _ground(self, binding: Dict[str, str]) -> 'GroundedEffect':
+#         grounded_time = self.time(binding) if callable(self.time) else self.time
+#         grounded_fluents = {Fluent(f.name, *[binding.get(arg, arg) for arg in f.args], negated=f.negated)
+#                             for f in self.resulting_fluents}
+#         return GroundedEffect(grounded_time, grounded_fluents)
+
+# class GroundedProbEffects(EffectBase, Grounded):
+#     def __init__(
+#         self,
+#         time: float,
+#         prob_effects: List[Tuple[float, List[Effect]]],
+#         resulting_fluents: Set[Fluent] = set()
+#     ):
+#         self.time = time
+#         self.prob_effects = prob_effects
+#         self.resulting_fluents = resulting_fluents
+
+#     def __lt__(self, other: Union['GroundedEffect', 'GroundedProbEffects']) -> bool:
+#         return self.time < other.time
+
+# class ProbEffects(GroundedProbEffects):
+#     def __init__(
+#         self,
+#         time: Union[float, Callable[[Dict[str, str]], float]],
+#         prob_effects: List[Tuple[Union[float, Callable[[Dict[str, str]], float]], List[Effect]]],
+#         resulting_fluents: Set[Fluent] = set()
+#     ):
+#         self.time = time
+#         self.prob_effects = prob_effects
+#         self.resulting_fluents = resulting_fluents
+
+#     def _ground(self, binding: Dict[str, str]) -> 'GroundedProbEffects':
+#         def evaluate(value):
+#             return value(binding) if callable(value) else value
+
+#         grounded_time = evaluate(self.time)
+#         grounded_prob_effects = []
+#         for prob_expr, effect_list in self.prob_effects:
+#             prob = evaluate(prob_expr)
+#             grounded_list = [e._ground(binding) for e in effect_list]
+#             grounded_prob_effects.append((prob, grounded_list))
+
+#         grounded_resulting_fluents = {
+#             Fluent(f.name, *[binding.get(arg, arg) for arg in f.args], negated=f.negated)
+#             for f in self.resulting_fluents
+#         }
+
+#         return GroundedProbEffects(
+#             time=grounded_time,
+#             prob_effects=grounded_prob_effects,
+#             resulting_fluents=grounded_resulting_fluents
+#         )
+
+#     def __str__(self):
+#         prob_lines = []
+#         for p, elist in self.prob_effects:
+#             outcomes = "; ".join(str(e) for e in elist)
+#             prob_lines.append(f"{p}: [{outcomes}]")
+#         return f"probabilistic after {self.time}: {{ {', '.join(prob_lines)} }}"
+
+#     def __repr__(self):
+#         return f"ProbEffects({self})"
+
+
+
 class Action:
-    def __init__(self, preconditions: List[Fluent], effects: List[Union[Effect, ProbEffects]]):
+    def __init__(self, preconditions: List[Fluent], 
+                 effects: List[GroundedEffectType], name: Optional[str] = None):
         self.preconditions = preconditions
         self.effects = effects
+        self.name = name or "anonymous"
 
     def __str__(self):
         pre_str = ", ".join(str(p) for p in self.preconditions)
         eff_strs = []
         for eff in self.effects:
-            if isinstance(eff, Effect):
-                rfs = ", ".join(str(f) for f in eff.resulting_fluents)
-                eff_strs.append(f"after {eff.time}: {rfs}")
-            elif isinstance(eff, ProbEffects):
-                prob_lines = []
-                for p, elist in eff.prob_effects:
-                    outcomes = []
-                    for e in elist:
-                        rf = ", ".join(str(f) for f in e.resulting_fluents)
-                        outcomes.append(f"after {e.time}: {rf}")
-                    prob_lines.append(f"{p}: [{'; '.join(outcomes)}]")
-                eff_strs.append(f"probabilistic after {eff.time}: {{ {', '.join(prob_lines)} }}")
-        return f"Action(\n  Preconditions: [{pre_str}]\n  Effects:\n    " + "\n    ".join(eff_strs) + "\n)"
+            eff_strs.append(f"\n    {str(eff)}")
+        return f"Action('{self.name}'\n  Preconditions: [{pre_str}]\n  Effects:\n    " + "\n    ".join(eff_strs) + "\n)"
 
     def __repr__(self):
         return self.__str__()
 
-# Operator class
+
+class State:
+    def __init__(self, time: float = 0, active_fluents: Optional[Set[Fluent]] = None, upcoming_effects: Optional[PriorityQueue] = None):
+        self.time = time
+        self.active_fluents = ActiveFluents(active_fluents)
+        self.upcoming_effects = upcoming_effects or PriorityQueue()
+
+    def satisfies_precondition(self, action: Action) -> bool:
+        for p in action.preconditions:
+            if p.negated:
+                if p.positive() in self.active_fluents:
+                    return False
+            else:
+                if p not in self.active_fluents:
+                    return False
+        return True
+
+    def copy(self) -> 'State':
+        new_queue = PriorityQueue()
+        new_queue.queue = [x for x in self.upcoming_effects.queue]
+        return State(
+            time=self.time,
+            active_fluents=self.active_fluents.copy().fluents,
+            upcoming_effects=new_queue
+        )
+
+    def __hash__(self) -> int:
+        return hash(self.time) + hash(self.active_fluents)
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, State) and hash(self) == hash(other)
+
+    def __str__(self):
+        return f"State<time={self.time}, active_fluents={self.active_fluents}>"
+
+    def __repr__(self):
+        return self.__str__()
+
+
 class Operator:
-    def __init__(self, name: str, parameters: List[Tuple[str, str]], preconditions: List[Fluent], effects: List[Union[Effect, ProbEffects]]):
+    def __init__(self, name: str, parameters: List[Tuple[str, str]], preconditions: List[Fluent], effects: List[LiftedEffectType]):
         self.name = name
         self.parameters = parameters
         self.preconditions = preconditions
@@ -84,60 +336,20 @@ class Operator:
         return grounded_actions
 
     def _ground(self, binding: Dict[str, str]) -> Action:
+        def evaluate(value):
+            return value(binding) if callable(value) else value
+
         grounded_preconditions = [self._substitute_fluent(f, binding) for f in self.preconditions]
-        grounded_effects = []
-        for eff in self.effects:
-            if isinstance(eff, Effect):
-                grounded_fluents = {self._substitute_fluent(f, binding) for f in eff.resulting_fluents}
-                grounded_effects.append(Effect(eff.time, grounded_fluents))
-            elif isinstance(eff, ProbEffects):
-                grounded_prob_effects = []
-                for prob, effect_list in eff.prob_effects:
-                    grounded_list = [
-                        Effect(e.time, {self._substitute_fluent(f, binding) for f in e.resulting_fluents})
-                        for e in effect_list
-                    ]
-                    grounded_prob_effects.append((prob, grounded_list))
-                grounded_resulting_fluents = {self._substitute_fluent(f, binding) for f in eff.resulting_fluents}
-                grounded_effects.append(ProbEffects(eff.time, grounded_prob_effects, grounded_resulting_fluents))
-        return Action(grounded_preconditions, grounded_effects)
+        grounded_effects = [eff._ground(binding) for eff in self.effects]
+
+        name_str = f"{self.name} " + " ".join(binding[var] for var, _ in self.parameters)
+        return Action(grounded_preconditions, grounded_effects, name=name_str)
 
     def _substitute_fluent(self, fluent: Fluent, binding: Dict[str, str]) -> Fluent:
         grounded_args = tuple(binding.get(arg, arg) for arg in fluent.args)
-        return Fluent(fluent.name, *grounded_args)
+        return Fluent(fluent.name, *grounded_args, negated=fluent.negated)
 
-# State class
-class State:
-    def __init__(self, time: float = 0, active_fluents: Optional[Set[Fluent]] = None, upcoming_effects: Optional[PriorityQueue] = None):
-        self.time = time
-        self.active_fluents = active_fluents or set()
-        self.upcoming_effects = upcoming_effects or PriorityQueue()
 
-    def satisfies_precondition(self, action: Action) -> bool:
-        return all(p in self.active_fluents for p in action.preconditions)
-
-    def copy(self) -> 'State':
-        new_queue = PriorityQueue()
-        new_queue.queue = [x for x in self.upcoming_effects.queue]
-        return State(time=self.time, active_fluents=set(self.active_fluents), upcoming_effects=new_queue)
-
-    def __hash__(self) -> int:
-        return hash(self.time) + sum(hash(f) for f in self.active_fluents)
-
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, State) and hash(self) == hash(other)
-
-    def __str__(self):
-        return f"State<time={self.time}, active_fluents={self.active_fluents}>"
-
-    def __repr__(self):
-        return self.__str__()
-
-# Utility to merge fluents
-def add_fluents(base: Set[Fluent], new_fluents: Set[Fluent]) -> Set[Fluent]:
-    return base.union(new_fluents)
-
-# Transition logic
 def transition(state: State, action: Action) -> List[Tuple[State, float]]:
     if not state.satisfies_precondition(action):
         raise ValueError("Precondition not satisfied for applying action")
@@ -146,127 +358,65 @@ def transition(state: State, action: Action) -> List[Tuple[State, float]]:
     for effect in action.effects:
         new_state.upcoming_effects.put((new_state.time + effect.time, effect))
 
+    # Fixme: is this necessary or can I just pass it to outcomes?
     outcomes: Dict[State, float] = {}
     _advance_to_terminal(new_state, prob=1.0, outcomes=outcomes)
     return list(outcomes.items())
 
+
 def _advance_to_terminal(state: State, prob: float, outcomes: Dict[State, float]) -> None:
     while not state.upcoming_effects.empty():
-        scheduled_time, effect = state.upcoming_effects.get()
-        state.time = scheduled_time
-        state.active_fluents = add_fluents(state.active_fluents, effect.resulting_fluents)
+        scheduled_time, effect = state.upcoming_effects.queue[0]
 
-        if isinstance(effect, ProbEffects):
+        # Check if we're ready to yield this state
+        if scheduled_time > state.time and any(f.name == "free" for f in state.active_fluents):
+            outcomes[state] = prob
+            return
+
+        # Advance time if necessary
+        if scheduled_time > state.time:
+            state.time = scheduled_time
+
+        # Apply effect
+        state.upcoming_effects.get()
+        state.active_fluents.update(effect.resulting_fluents)
+
+        if isinstance(effect, GroundedProbEffect):
             for branch_prob, effects in effect.prob_effects:
                 branched = state.copy()
                 for e in effects:
                     branched.upcoming_effects.put((branched.time + e.time, e))
                 _advance_to_terminal(branched, prob * branch_prob, outcomes)
-            return
+            return  # stop after branching
+
+    # No more effects; yield terminal state
     outcomes[state] = prob
-# Now define and use the search operator in a test case
 
-# Define the search operator again
-search_op = Operator(
-    name="search",
-    parameters=[
-        ("?robot", "robot"),
-        ("?loc_from", "location"),
-        ("?loc_to", "location"),
-        ("?object", "object")
-    ],
-    preconditions=[
-        Fluent("at", "?robot", "?loc_from"),
-        ~Fluent("searched", "?loc_to", "?object"),
-        Fluent("free", "?robot"),
-        ~Fluent("found", "?object")
-    ],
-    effects=[
-        Effect(
-            time=0,
-            resulting_fluents={
-                ~Fluent("free", "?robot"),
-                ~Fluent("found", "?object")
-            }
-        ),
-        ProbEffects(
-            time=5,
-            prob_effects=[
-                (
-                    0.8,
-                    [
-                        Effect(
-                            time=0,
-                            resulting_fluents={
-                                Fluent("at", "?loc_to", "?object"),
-                                Fluent("found", "?object")
-                            }
-                        ),
-                        Effect(
-                            time=3,
-                            resulting_fluents={
-                                Fluent("holding", "?robot", "?object"),
-                                ~Fluent("at", "?loc_to", "?object"),
-                                Fluent("free", "?robot")
-                            }
-                        )
-                    ]
-                ),
-                (
-                    0.2,
-                    [
-                        Effect(
-                            time=0,
-                            resulting_fluents={
-                                Fluent("free", "?robot"),
-                                ~Fluent("at", "?loc_to", "?object")
-                            }
-                        )
-                    ]
-                )
-            ],
-            resulting_fluents={
-                Fluent("at", "?robot", "?loc_to"),
-                ~Fluent("at", "?robot", "?loc_from"),
-                Fluent("searched", "?loc_to", "?object")
-            }
-        )
-    ],
-)
 
-# Ground a specific instance
-objects_by_type = {
-    "robot": ["r1"],
-    "location": ["roomA", "roomB"],
-    "object": ["medkit"]
-}
-search_action = search_op.instantiate(objects_by_type)[0]
+def get_action_by_name(actions: List[Action], name: str) -> Action:
+    for action in actions:
+        if action.name == name:
+            return action
+    raise ValueError(f"No action found with name: {name}")
 
-# Define the initial state
-initial_state = State(
-    time=0,
-    active_fluents={
-        Fluent("at", "r1", "roomA"),
-        Fluent("free", "r1")
-    }
-)
-print(initial_state)
-print(search_action)
 
-# Execute transition
-outcomes = transition(initial_state, search_action)
+def get_next_actions(state: State, all_actions: List[Action]) -> List[Action]:
+    # Step 1: Extract all `free(...)` fluents
+    free_robot_fluents = sorted(
+        [f for f in state.active_fluents if f.name == "free"],
+        key=str
+    )
+    neg_active_fluents = state.active_fluents.update({~f for f in free_robot_fluents})
 
-# Show results
-import pandas as pd
-import ace_tools as tools
+    # Step 2: Check each robot individually
+    for free_pred in free_robot_fluents:
+        # Create a restricted version of the state
+        temp_state = State(time=state.time, active_fluents=neg_active_fluents.update({free_pred}).fluents)
 
-rows = []
-for s, p in outcomes:
-    rows.append({
-        "time": s.time,
-        "probability": round(p, 2),
-        "fluents": ", ".join(sorted(str(f) for f in s.active_fluents))
-    })
+        # Step 3: Check for applicable actions
+        applicable = [a for a in all_actions if temp_state.satisfies_precondition(a)]
+        if applicable:
+            return applicable
 
-df = pd.DataFrame(rows).sort_values("probability", ascending=False)
-tools.display_dataframe_to_user(name="Search Outcomes", dataframe=df)
+    # Step 4: No applicable actions found
+    return []
