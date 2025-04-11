@@ -4,10 +4,23 @@ from queue import PriorityQueue
 import itertools
 
 
-TimeExpr = Union[float, Callable[[Dict[str, str]], float]]
-ProbExpr = Union[float, Callable[[Dict[str, str]], float]]
+Num = Union[float, int]
 Binding = Dict[str, str]
+Bindable = Callable[[Binding], Num]
+OptExpr = Union[float, tuple[Callable[..., float], list[str]]]
 
+# # Older
+# TimeExpr = Union[float, Tuple[Callable[..., Num], str, ...]]
+# ProbExpr = Union[float, Callable[[Dict[str, str]], float]]
+
+def _make_bindable(opt_expr: OptExpr) -> Bindable:
+    if isinstance(opt_expr, Num):
+        return lambda *args: opt_expr
+    else:
+        fn = opt_expr[0]
+        args = opt_expr[1]
+        print(args)
+        return lambda b: fn(*[b.get(arg, arg) for arg in args])
 
 class Fluent(object):
     def __init__(self, name: str, *args: str, negated: bool = False):
@@ -95,18 +108,19 @@ class ActiveFluents(object):
 class GroundedEffectType:
     def __init__(self, time: float, resulting_fluents: Set[Fluent]):
         self.time = time
+        self.resulting_fluents = resulting_fluents
     
     def __lt__(self, other: 'GroundedEffectType') -> bool:
         return self.time < other.time
 
 
 class LiftedEffectType:
-    def __init__(self, time: TimeExpr, resulting_fluents: Set[Fluent]):
-        self.time = time
+    def __init__(self, time: OptExpr, resulting_fluents: Set[Fluent]):
+        self.time = _make_bindable(time)
         self.resulting_fluents = resulting_fluents
 
     def _ground(self, binding: Binding) -> 'GroundedEffectType':
-        grounded_time = self.time(binding) if callable(self.time) else self.time
+        grounded_time = self.time(binding)
         grounded_fluents = {
             Fluent(f.name, *[binding.get(arg, arg) for arg in f.args], negated=f.negated)
             for f in self.resulting_fluents
@@ -116,7 +130,7 @@ class LiftedEffectType:
 
 
 class GroundedEffect(GroundedEffectType):
-    def __init__(self, time: float, resulting_fluents: Set[Fluent]):
+    def __init__(self, time: Num, resulting_fluents: Set[Fluent]):
         self.time = time
         self.resulting_fluents = resulting_fluents
 
@@ -129,8 +143,8 @@ class GroundedEffect(GroundedEffectType):
 
 
 class Effect(LiftedEffectType):
-    def __init__(self, time: TimeExpr, resulting_fluents: Set[Fluent]):
-        self.time = time
+    def __init__(self, time: OptExpr, resulting_fluents: Set[Fluent]):
+        self.time = _make_bindable(time)
         self.resulting_fluents = resulting_fluents
 
 class GroundedProbEffect(GroundedEffectType):
@@ -158,23 +172,23 @@ class GroundedProbEffect(GroundedEffectType):
 class ProbEffect(LiftedEffectType):
     def __init__(
         self,
-        time: TimeExpr,
-        prob_effects: List[Tuple[ProbExpr, List[Effect]]],
+        time: OptExpr,
+        prob_effects: List[Tuple[OptExpr, List[Effect]]],
         resulting_fluents: Set[Fluent] = set()
     ):
-        self.time = time
-        self.prob_effects = prob_effects
+        self.time = _make_bindable(time)
+        self.prob_effects = [(_make_bindable(prob), effects) 
+                             for prob, effects in prob_effects]
         self.resulting_fluents = resulting_fluents
 
     def _ground(self, binding: Binding) -> 'GroundedProbEffect':
-        def evaluate(expr): return expr(binding) if callable(expr) else expr
-
+        # def evaluate(expr): return expr(binding) if callable(expr) else expr
         grounded_prob_effects = [
-            (evaluate(prob), [e._ground(binding) for e in effect_list])
+            (prob(binding), [e._ground(binding) for e in effect_list])
             for prob, effect_list in self.prob_effects
         ]
 
-        grounded_time = evaluate(self.time)
+        grounded_time = self.time(binding)
         grounded_resulting_fluents = {
             Fluent(f.name, *[binding.get(arg, arg) for arg in f.args], negated=f.negated)
             for f in self.resulting_fluents

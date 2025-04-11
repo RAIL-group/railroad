@@ -66,6 +66,56 @@ def test_active_fluents_update_2():
     assert af == expected, f"Unexpected result after re-adding: {af}"
 
 
+def test_ground_effect_time_float():
+    """Show that we can properly ground effects with both floats and lambdas for times."""
+    eff_time = 5
+    lifted = Effect(time=eff_time, resulting_fluents={Fluent("free ?robot")})
+    grounded = lifted._ground({"?robot": "wall-e"})
+
+    assert grounded.time == eff_time
+    assert grounded.resulting_fluents == {Fluent("free wall-e")}
+
+
+def test_ground_effect_time_parametrized():
+    # Define a mock travel-time function
+    def mock_travel_time(robot: str, loc_from: str, loc_to: str) -> float:
+        assert robot == "robot1"
+        assert loc_from == "roomA"
+        assert loc_to == "roomB"
+        return 7.5
+
+    # Create a lifted effect using the new syntax
+    lifted = Effect(
+        time=(mock_travel_time, ("?robot", "?loc_from", "?loc_to")),
+        resulting_fluents={
+            Fluent("free", "?robot"),
+            Fluent("at", "?robot", "?loc_to"),
+            ~Fluent("at", "?robot", "?loc_from")
+        }
+    )
+
+    # Ground it with a specific binding
+    binding = {
+        "?robot": "robot1",
+        "?loc_from": "roomA",
+        "?loc_to": "roomB"
+    }
+    grounded = lifted._ground(binding)
+
+    # Check time is evaluated correctly
+    assert grounded.time == 7.5
+
+    # Check fluents are properly substituted
+    expected_fluents = {
+        Fluent("free", "robot1"),
+        Fluent("at", "robot1", "roomB"),
+        ~Fluent("at", "robot1", "roomA")
+    }
+    assert grounded.resulting_fluents == expected_fluents
+
+
+
+
 @pytest.mark.parametrize("move_time", [5, lambda r, f, t: 5])
 def test_move_sequence(move_time):
     # Define move operator
