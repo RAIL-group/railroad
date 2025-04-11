@@ -16,7 +16,6 @@ def _make_bindable(opt_expr: OptExpr) -> Bindable:
     else:
         fn = opt_expr[0]
         args = opt_expr[1]
-        print(args)
         return lambda b: fn(*[b.get(arg, arg) for arg in args])
 
 class Fluent(object):
@@ -236,21 +235,27 @@ class State:
             upcoming_effects=new_queue
         )
 
-    def zero_out_time(self):
-        # FIXME: this isn't really done...
-        copy = self.copy()
-        copy.time = 0
-        print(copy)
-        return copy
+    def copy_and_zero_out_time(self):
+        dt = self.time
+        new_queue = PriorityQueue()
+        for time, effect in self.upcoming_effects.queue:
+            new_queue.put((time - dt, effect))
+        return State(
+            time=0,
+            active_fluents=self.active_fluents.copy().fluents,
+            upcoming_effects=new_queue
+        )
 
     def __hash__(self) -> int:
-        return hash(self.time) + hash(self.active_fluents)
+        upcoming = tuple((t, effect) for t, effect in self.upcoming_effects.queue)
+        return hash(self.time) + hash(self.active_fluents) + hash(upcoming)
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, State) and hash(self) == hash(other)
 
     def __str__(self):
-        return f"State<time={self.time}, active_fluents={self.active_fluents}>"
+        upcoming = tuple((t, effect) for t, effect in self.upcoming_effects.queue)
+        return f"State<time={self.time}, active_fluents={self.active_fluents}, upcoming_effects={upcoming}>"
 
     def __repr__(self):
         return self.__str__()
