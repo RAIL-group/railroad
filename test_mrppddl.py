@@ -1,9 +1,21 @@
-from .mrppddl import Fluent, ActiveFluents, State, Action
+import pytest
+from .mrppddl import Fluent, Effect, ActiveFluents, Operator, State, get_next_actions, transition, get_action_by_name, ProbEffect
+from .mrppddl_helper import construct_move_operator, construct_search_operator
 
 
 def test_fluent_equality():
     assert Fluent("at", "r1", "roomA") == Fluent("at", "r1", "roomA")
+    assert Fluent("at", "r1", "roomA") == Fluent("at r1 roomA")
     assert not Fluent("at", "r1", "roomA") == Fluent("at", "r1", "roomB")
+    assert not Fluent("at r1 roomA") == Fluent("at r1 roomB")
+    assert not Fluent("at r1 roomA") == Fluent("at r1 rooma")
+    
+    # Test Negation
+    assert Fluent("not at r1 roomA") == ~Fluent("at r1 roomA")
+    assert Fluent("at r1 roomA") == ~Fluent("not at r1 roomA")
+    assert not Fluent("at", "r1", "roomA") == ~Fluent("at", "r1", "roomA")
+    assert not Fluent("at", "r1", "roomA") == ~Fluent("at r1 roomA")
+    assert not Fluent("at", "r1", "roomA") == ~Fluent("at r1 roomA")
 
 
 def test_active_fluents_update_1():
@@ -30,27 +42,152 @@ def test_active_fluents_update_1():
 
 def test_active_fluents_update_2():
     af = ActiveFluents({
-        Fluent('at', 'robot1', 'bedroom'),
-        Fluent('free', 'robot1'),
+        Fluent('at robot1 bedroom'),
+        Fluent('free robot1'),
     })
 
-    upcoming_fluents = {
-        ~Fluent('free', 'robot1'),
-        ~Fluent('at', 'robot1', 'bedroom'),
-        Fluent('at', 'robot1', 'kitchen'),
-        ~Fluent('found', 'fork'),
-    }
-
-    af = af.update(upcoming_fluents)
+    af = af.update({
+        ~Fluent('free robot1'),
+        ~Fluent('at robot1 bedroom'),
+        Fluent('at robot1 kitchen'),
+        ~Fluent('found fork'),
+    })
     expected = ActiveFluents({
-        Fluent('at', 'robot1', 'kitchen'),
+        Fluent('at robot1 kitchen'),
     })
     assert af == expected, f"Unexpected result: {af}"
 
     # Now re-add a positive fluent
-    af = af.update({Fluent('free', 'robot1')})
+    af = af.update({Fluent('free robot1')})
     expected = ActiveFluents({
-        Fluent('free', 'robot1'),
-        Fluent('at', 'robot1', 'kitchen'),
+        Fluent('free robot1'),
+        Fluent('at robot1 kitchen'),
     })
     assert af == expected, f"Unexpected result after re-adding: {af}"
+
+
+@pytest.mark.parametrize("move_time", [5, lambda r, f, t: 5])
+def test_move_sequence(move_time):
+    # Define move operator
+    move_op = construct_move_operator(move_time)
+
+    # Ground actions
+    objects_by_type = {
+        "robot": ["r1", "r2"],
+        "location": ["roomA", "roomB"],
+    }
+    move_actions = move_op.instantiate(objects_by_type)
+
+    # Initial state
+    initial_state = State(
+        time=0,
+        active_fluents={
+            Fluent("at", "r1", "roomA"),
+            Fluent("at", "r2", "roomA"),
+            Fluent("free", "r1"),
+            Fluent("free", "r2")
+        }
+    )
+
+    # First transition: move r1 from roomA to roomB
+    available = get_next_actions(initial_state, move_actions)
+    assert any(a.name == "move r1 roomA roomB" for a in available)
+    a1 = get_action_by_name(available, "move r1 roomA roomB")
+    outcomes = transition(initial_state, a1)
+    assert len(outcomes) == 1
+    state1, prob1 = outcomes[0]
+    assert prob1 == 1.0
+    assert Fluent("free", "r1") not in state1.active_fluents
+    assert Fluent("free", "r2") in state1.active_fluents
+    assert len(state1.upcoming_effects.queue) == 1
+
+    # Second transition: move r2 from roomA to roomB
+    available = get_next_actions(state1, move_actions)
+    assert any(a.name == "move r2 roomA roomB" for a in available)
+    a2 = get_action_by_name(available, "move r2 roomA roomB")
+    outcomes = transition(state1, a2)
+    assert len(outcomes) == 1
+    state2, prob2 = outcomes[0]
+    assert prob2 == 1.0
+    assert Fluent("at", "r1", "roomB") in state2.active_fluents
+    assert Fluent("at", "r2", "roomB") in state2.active_fluents
+    assert Fluent("free", "r1") in state2.active_fluents
+    assert Fluent("free", "r2") in state2.active_fluents
+    assert state2.time == 5
+    assert len(state2.upcoming_effects.queue) == 0
+
+
+def test_search_sequence():
+    # Define objects
+    objects_by_type = {
+        "robot": ["r1"],
+        "location": ["roomA", "roomB"],
+        "object": ["cup", "bowl"]
+    }
+
+    def object_search_prob(robot, search_loc, obj):
+        if obj == 'cup':
+            return 0.8
+        else:
+            return 0.6
+
+    # Ground actions
+    search_actions = construct_search_operator(object_search_prob, 5, 3).instantiate(objects_by_type)
+    # Initial state
+    initial_state = State(
+        time=0,
+        active_fluents={
+            Fluent("at r1 roomA"),
+            Fluent("free r1"),
+        }
+    )
+
+    # Select action: search r1 roomA roomB cup
+    action_1 = get_action_by_name(search_actions, 'search r1 roomA roomB cup')
+    outcomes = transition(initial_state, action_1)
+
+    # Assert both probabilistic outcomes exist
+    assert len(outcomes) == 2
+    probs = {round(p, 2) for _, p in outcomes}
+    assert probs == {0.8, 0.2}
+
+    # Verify high-probability (success) branch
+    high_prob_state = next(s for s, p in outcomes if round(p, 2) == 0.8)
+    assert Fluent("at r1 roomB") in high_prob_state.active_fluents
+    assert Fluent("holding r1 cup") in high_prob_state.active_fluents
+    assert Fluent("free r1") in high_prob_state.active_fluents
+    assert Fluent("found cup") in high_prob_state.active_fluents
+    assert Fluent("searched roomB cup") in high_prob_state.active_fluents
+    assert high_prob_state.time == 8
+
+    # Verify low-probability (failure to find object) branch
+    low_prob_state = next(s for s, p in outcomes if round(p, 2) == 0.2)
+    assert Fluent("at r1 roomB") in low_prob_state.active_fluents
+    assert Fluent("free r1") in low_prob_state.active_fluents
+    assert Fluent("found cup") not in low_prob_state.active_fluents
+    assert Fluent("holding r1 cup") not in low_prob_state.active_fluents
+    assert Fluent("searched roomB cup") in low_prob_state.active_fluents
+    assert low_prob_state.time == 5
+
+    # Continue from high-probability outcome
+    action_2 = get_action_by_name(search_actions, 'search r1 roomB roomA bowl')
+    next_outcomes = transition(high_prob_state, action_2)
+
+    assert len(next_outcomes) == 2
+    for state, prob in next_outcomes:
+        assert Fluent("at", "r1", "roomA") in state.active_fluents
+        assert Fluent("searched", "roomA", "bowl") in state.active_fluents
+        assert Fluent("found", "cup") in state.active_fluents
+        assert Fluent("holding", "r1", "cup") in state.active_fluents
+        if round(prob, 2) == 0.6:
+            assert Fluent("found", "bowl") in state.active_fluents
+            assert Fluent("holding", "r1", "bowl") in state.active_fluents
+            assert Fluent("free", "r1") in state.active_fluents
+            assert state.time == 16
+        elif round(prob, 2) == 0.4:
+            assert Fluent("found", "bowl") not in state.active_fluents
+            assert Fluent("holding", "r1", "bowl") not in state.active_fluents
+            assert Fluent("free", "r1") in state.active_fluents
+            assert state.time == 13
+        else:
+            assert round(prob, 2) in {0.6, 0.4}
