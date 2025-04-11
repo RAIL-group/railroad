@@ -1,5 +1,5 @@
 from .mrppddl import Operator, Fluent, Effect, ProbEffect, OptExpr, OptCallable, Num
-from typing import Callable, Union
+from typing import Callable
 
 F = Fluent
 
@@ -14,11 +14,10 @@ def _invert_prob(opt_expr: OptCallable) -> Callable[..., float]:
         return lambda *args: 1 - opt_expr
     else:
         return lambda *args: 1 - opt_expr(*args)
-    
+
 
 def construct_move_operator(move_time: OptCallable):
     move_time = _make_callable(move_time)
-   
     return Operator(
         name="move",
         parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
@@ -39,7 +38,6 @@ def construct_search_operator(object_find_prob: OptCallable,
     inv_object_find_prob = _invert_prob(object_find_prob)
     move_time = _make_callable(move_time)
     pick_time = _make_callable(pick_time)
-
     return Operator(
         name="search",
         parameters=[

@@ -2,6 +2,7 @@
 from typing import Callable, List, Tuple, Dict, Set, Union, Optional, Sequence
 from queue import PriorityQueue
 import itertools
+import copy
 
 
 Num = Union[float, int]
@@ -19,22 +20,28 @@ def _make_bindable(opt_expr: OptExpr) -> Bindable:
         return lambda b: fn(*[b.get(arg, arg) for arg in args])
 
 class Fluent(object):
+    __slots__ = ('name', 'args', 'negated', '_hash', '_positive')
+
     def __init__(self, name: str, *args: str, negated: bool = False):
         if args:
             self.name = name
             self.args = args
             if "not" in name[:4]:
                 raise ValueError("Use the 'negated' argument or ~Fluent to negate.")
+            self.negated = negated
         else:
             if negated:
                 raise ValueError("Cannot both pass a full string and negated=True. Use 'not' or ~Fluent.")
             split = name.split(" ")
             if split[0] == 'not':
-                negated = True
+                self.negated = True
                 split = split[1:]
+            else:
+                self.negated = False
             self.name = split[0]
             self.args = tuple(split[1:])
-        self.negated = negated
+
+        self._hash = hash((self.name, self.args, self.negated))
 
     def __str__(self) -> str:
         prefix = "not " if self.negated else ""
@@ -44,21 +51,13 @@ class Fluent(object):
         return f"Fluent<{self}>"
 
     def __hash__(self) -> int:
-        return hash((self.name, self.args, self.negated))
+        return self._hash
 
-    def __eq__(self, other: object) -> bool:
-        return (
-            isinstance(other, Fluent) and
-            self.name == other.name and
-            self.args == other.args and
-            self.negated == other.negated
-        )
+    def __eq__(self, other: 'Fluent') -> bool:
+        return hash(self) == hash(other)
 
     def __invert__(self) -> 'Fluent':
         return Fluent(self.name, *self.args, negated=not self.negated)
-
-    def positive(self) -> 'Fluent':
-        return Fluent(self.name, *self.args, negated=False)
 
 
 class ActiveFluents(object):
@@ -73,14 +72,16 @@ class ActiveFluents(object):
         new_active_fluents = self.copy()
 
         if not relaxed:
-            negatives = {f.positive() for f in fluents if f.negated}
-            new_active_fluents.fluents -= negatives
+            flipped_negatives = {~f for f in fluents if f.negated}
+            new_active_fluents.fluents -= flipped_negatives
 
         new_active_fluents.fluents |= positives
         return new_active_fluents
 
-    def copy(self) -> 'ActiveFluents':
-        return ActiveFluents(set(self.fluents))
+    def copy(self) -> 'ActiveFluents':  #noqa
+        new_af = ActiveFluents()
+        new_af.fluents = set(self.fluents)
+        return new_af
 
     def __contains__(self, f: Fluent) -> bool:
         return f in self.fluents
@@ -198,6 +199,8 @@ class Action:
         self.preconditions = preconditions
         self.effects = effects
         self.name = name or "anonymous"
+        self._pos_precond = set(f for f in self.preconditions if not f.negated)
+        self._neg_precond_flipped = set(~f for f in self.preconditions if f.negated)
 
     def __str__(self):
         pre_str = ", ".join(str(p) for p in self.preconditions)
@@ -217,21 +220,15 @@ class State:
         self.upcoming_effects = upcoming_effects or PriorityQueue()
 
     def satisfies_precondition(self, action: Action) -> bool:
-        for p in action.preconditions:
-            if p.negated:
-                if p.positive() in self.active_fluents:
-                    return False
-            else:
-                if p not in self.active_fluents:
-                    return False
-        return True
+        return (action._pos_precond <= self.active_fluents.fluents
+                and self.active_fluents.fluents.isdisjoint(action._neg_precond_flipped))
 
-    def copy(self) -> 'State':
+    def copy(self) -> 'State':  #noqa
         new_queue = PriorityQueue()
         new_queue.queue = [x for x in self.upcoming_effects.queue]
         return State(
             time=self.time,
-            active_fluents=self.active_fluents.copy().fluents,
+            active_fluents=set(self.active_fluents.fluents),
             upcoming_effects=new_queue
         )
 
@@ -242,7 +239,7 @@ class State:
             new_queue.put((time - dt, effect))
         return State(
             time=0,
-            active_fluents=self.active_fluents.copy().fluents,
+            active_fluents=set(self.active_fluents.fluents),
             upcoming_effects=new_queue
         )
 
@@ -357,7 +354,7 @@ def get_next_actions(state: State, all_actions: List[Action]) -> List[Action]:
         temp_state = State(time=state.time, active_fluents=neg_active_fluents.update({free_pred}).fluents)
 
         # Step 3: Check for applicable actions
-        applicable = [a for a in all_actions if temp_state.satisfies_precondition(a)]
+        applicable = set(a for a in all_actions if temp_state.satisfies_precondition(a))
         if applicable:
             return applicable
 

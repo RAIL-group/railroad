@@ -59,7 +59,8 @@ def construct_move_and_visit_operator(move_time: OptCallable) -> Operator:
 def test_graph():
     # Move and Visit Operator
     import random
-    move_time_fn = lambda *args: random.random() + 5.0
+    random.seed(8616)
+    move_time_fn = lambda *args: random.random() + 5.0  #noqa: E731
     move_visit_op = construct_move_and_visit_operator(move_time_fn)
    
     # Ground actions
