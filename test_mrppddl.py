@@ -86,7 +86,7 @@ def test_ground_effect_time_parametrized():
 
     # Create a lifted effect using the new syntax
     lifted = Effect(
-        time=(mock_travel_time, ("?robot", "?loc_from", "?loc_to")),
+        time=(mock_travel_time, ["?robot", "?loc_from", "?loc_to"]),
         resulting_fluents={
             Fluent("free", "?robot"),
             Fluent("at", "?robot", "?loc_to"),
@@ -138,9 +138,13 @@ def test_move_sequence(move_time):
             Fluent("free", "r2")
         }
     )
+    for a in move_actions:
+        print(a)
+    print(initial_state)
 
     # First transition: move r1 from roomA to roomB
     available = get_next_actions(initial_state, move_actions)
+    print(available)
     assert any(a.name == "move r1 roomA roomB" for a in available)
     a1 = get_action_by_name(available, "move r1 roomA roomB")
     outcomes = transition(initial_state, a1)
@@ -182,7 +186,7 @@ def test_search_sequence():
             return 0.6
 
     # Ground actions
-    search_actions = construct_search_operator(object_search_prob, 5, 3).instantiate(objects_by_type)
+    search_actions = construct_search_operator(object_search_prob, 5.0, 3).instantiate(objects_by_type)
     # Initial state
     initial_state = State(
         time=0,

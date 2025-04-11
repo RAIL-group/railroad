@@ -1,5 +1,5 @@
 # Re-import required dependencies due to kernel reset
-from typing import Callable, List, Tuple, Dict, Set, Union, Optional
+from typing import Callable, List, Tuple, Dict, Set, Union, Optional, Sequence
 from queue import PriorityQueue
 import itertools
 
@@ -7,11 +7,8 @@ import itertools
 Num = Union[float, int]
 Binding = Dict[str, str]
 Bindable = Callable[[Binding], Num]
-OptExpr = Union[float, tuple[Callable[..., float], list[str]]]
-
-# # Older
-# TimeExpr = Union[float, Tuple[Callable[..., Num], str, ...]]
-# ProbExpr = Union[float, Callable[[Dict[str, str]], float]]
+OptCallable = Union[Num, Callable[..., float]]
+OptExpr = Union[float, Tuple[Callable[..., float], List[str]]]
 
 def _make_bindable(opt_expr: OptExpr) -> Bindable:
     if isinstance(opt_expr, Num):
@@ -125,7 +122,6 @@ class LiftedEffectType:
             Fluent(f.name, *[binding.get(arg, arg) for arg in f.args], negated=f.negated)
             for f in self.resulting_fluents
         }
-        print(GroundedEffect(grounded_time, grounded_fluents))
         return GroundedEffect(grounded_time, grounded_fluents)
 
 
@@ -261,7 +257,7 @@ class State:
 
 
 class Operator:
-    def __init__(self, name: str, parameters: List[Tuple[str, str]], preconditions: List[Fluent], effects: List[LiftedEffectType]):
+    def __init__(self, name: str, parameters: List[Tuple[str, str]], preconditions: List[Fluent], effects: Sequence[LiftedEffectType]):
         self.name = name
         self.parameters = parameters
         self.preconditions = preconditions
