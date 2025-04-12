@@ -1,6 +1,7 @@
-from .core import Operator, Fluent, Effect, State, transition, OptCallable
+from .core import Operator, Fluent, Effect, State, transition, OptCallable, get_next_actions, get_action_by_name
 from .helper import _make_callable
 from typing import Callable, Union
+import pytest
 
 def _plot_graph(G):
     import matplotlib.pyplot as plt
@@ -56,17 +57,59 @@ def construct_move_and_visit_operator(move_time: OptCallable) -> Operator:
                                       Fluent("at ?robot ?loc_to")})
         ])
 
-def test_graph():
+def test_transition_regression_1():
     # Move and Visit Operator
     import random
+    import hashlib
+    def move_time_fn(robot, start, end):
+        seed_input = robot + start + '::' + end
+        seed = int(hashlib.sha256(seed_input.encode()).hexdigest(), 16)
+        random.seed(seed)
+        return random.random() + 5.0
+
+    move_visit_op = construct_move_and_visit_operator(move_time_fn)
+
+    # Ground actions
+    objects_by_type = {
+        "robot": ["r1", "r2"],
+        "location": ["start", "roomA", "roomB", "roomC"],
+    }
+    actions = move_visit_op.instantiate(objects_by_type)
+    # Initial state
+    initial_state = State(
+        time=0,
+        active_fluents={
+            Fluent("at r1 start"), Fluent("free r1"),
+            Fluent("at r2 start"), Fluent("free r2"),
+            Fluent("visited start"),
+        }
+    )
+    a1 = get_action_by_name(actions, "move_visit r1 start roomB")
+    a2 = get_action_by_name(actions, "move_visit r2 start roomC")
+    s0 = initial_state
+    s1 = transition(s0, a1)[0][0]
+    s2 = transition(s1, a2)[0][0]
+    assert min(a1.effects[-1].time, a2.effects[-1].time) == pytest.approx(s2.time)
+
+def test_graph_traversal():
+    # Move and Visit Operator
+    import random
+    # import hashlib
+    # def move_time_fn(robot, start, end):
+    #     seed_input = robot + start + '::' + end
+    #     seed = int(hashlib.sha256(seed_input.encode()).hexdigest(), 16)
+    #     random.seed(seed)
+    #     return random.random() + 5.0
+
     random.seed(8616)
-    move_time_fn = lambda *args: random.random() + 5.0  #noqa: E731
+    move_time_fn = lambda *args: random.random() + 5.0
     move_visit_op = construct_move_and_visit_operator(move_time_fn)
    
     # Ground actions
     objects_by_type = {
         "robot": ["r1", "r2"],
         "location": ["start", "roomA", "roomB", "roomC", "roomD", "roomE", "roomF"],
+        # "location": ["start", "roomA", "roomB", "roomC"],
     }
     actions = move_visit_op.instantiate(objects_by_type)
     # Initial state
@@ -87,20 +130,21 @@ def test_graph():
 
     expanded_states = set()
     new_states = {initial_state}
-    counter = 0
 
     def is_goal_state(state: State) -> bool:
         return len(objects_by_type['location']) == len([f for f in state.active_fluents
                                                         if f.name == 'visited'])
 
+    counter = 0
     while new_states:
+        counter += 1
         state = new_states.pop()
         if state in expanded_states:
             continue
         expanded_states.add(state)
 
-
-        available_actions = [a for a in actions if state.satisfies_precondition(a)]
+        available_actions = get_next_actions(state, actions)
+        # available_actions = [a for a in actions if state.satisfies_precondition(a)]
         for action in available_actions:
             outcomes = transition(state, action)
             for successor, prob in outcomes:

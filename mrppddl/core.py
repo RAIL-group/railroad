@@ -220,45 +220,92 @@ class Action:
         return self.__str__()
 
 
+# class State:
+#     def __init__(self, time: float = 0, active_fluents: Optional[Union[frozenset[Fluent], Set[Fluent]]] = None, upcoming_effects: Optional[PriorityQueue] = None):
+#         self.time = time
+#         self.active_fluents = ActiveFluents(active_fluents)
+#         self.upcoming_effects = upcoming_effects or PriorityQueue()
+
+#     def satisfies_precondition(self, action: Action) -> bool:
+#         return (action._pos_precond <= self.active_fluents.fluents
+#                 and self.active_fluents.fluents.isdisjoint(action._neg_precond_flipped))
+
+#     def copy(self) -> 'State':  #noqa
+#         new_queue = PriorityQueue()
+#         new_queue.queue = [x for x in self.upcoming_effects.queue]
+#         return State(
+#             time=self.time,
+#             active_fluents=self.active_fluents.fluents,
+#             upcoming_effects=new_queue
+#         )
+
+#     def copy_and_zero_out_time(self):
+#         dt = self.time
+#         new_queue = PriorityQueue()
+#         for time, effect in self.upcoming_effects.queue:
+#             new_queue.put((time - dt, effect))
+#         return State(
+#             time=0,
+#             active_fluents=set(self.active_fluents.fluents),
+#             upcoming_effects=new_queue
+#         )
+
+#     def __hash__(self) -> int:
+#         upcoming = tuple((t, effect) for t, effect in self.upcoming_effects.queue)
+#         return hash((self.time, self.active_fluents, upcoming))
+
+#     def __eq__(self, other: object) -> bool:
+#         return hash(self) == hash(other)
+
+#     def __str__(self):
+#         upcoming = tuple((t, effect) for t, effect in self.upcoming_effects.queue)
+#         return f"State<time={self.time}, active_fluents={self.active_fluents}, upcoming_effects={upcoming}>"
+
+#     def __repr__(self):
+#         return self.__str__()
+
+import heapq
+
 class State:
-    def __init__(self, time: float = 0, active_fluents: Optional[Union[frozenset[Fluent], Set[Fluent]]] = None, upcoming_effects: Optional[PriorityQueue] = None):
+    def __init__(
+        self,
+        time: float = 0,
+        active_fluents: Optional[Union[frozenset[Fluent], Set[Fluent]]] = None,
+        upcoming_effects: Optional[List[Tuple[float, Union[GroundedEffectType]]]] = None
+    ):
         self.time = time
         self.active_fluents = ActiveFluents(active_fluents)
-        self.upcoming_effects = upcoming_effects or PriorityQueue()
+        self.upcoming_effects = upcoming_effects or []
 
     def satisfies_precondition(self, action: Action) -> bool:
         return (action._pos_precond <= self.active_fluents.fluents
                 and self.active_fluents.fluents.isdisjoint(action._neg_precond_flipped))
 
-    def copy(self) -> 'State':  #noqa
-        new_queue = PriorityQueue()
-        new_queue.queue = [x for x in self.upcoming_effects.queue]
+    def copy(self) -> 'State':
         return State(
             time=self.time,
-            active_fluents=set(self.active_fluents.fluents),
-            upcoming_effects=new_queue
+            active_fluents=self.active_fluents.fluents,
+            upcoming_effects=list(self.upcoming_effects)
         )
 
     def copy_and_zero_out_time(self):
         dt = self.time
-        new_queue = PriorityQueue()
-        for time, effect in self.upcoming_effects.queue:
-            new_queue.put((time - dt, effect))
+        new_effects = [(t - dt, e) for t, e in self.upcoming_effects]
         return State(
             time=0,
-            active_fluents=set(self.active_fluents.fluents),
-            upcoming_effects=new_queue
+            active_fluents=self.active_fluents.fluents,
+            upcoming_effects=new_effects
         )
 
     def __hash__(self) -> int:
-        upcoming = tuple((t, effect) for t, effect in self.upcoming_effects.queue)
+        upcoming = tuple((t, effect) for t, effect in self.upcoming_effects)
         return hash((self.time, self.active_fluents, upcoming))
 
     def __eq__(self, other: object) -> bool:
         return hash(self) == hash(other)
 
     def __str__(self):
-        upcoming = tuple((t, effect) for t, effect in self.upcoming_effects.queue)
+        upcoming = tuple((t, effect) for t, effect in self.upcoming_effects)
         return f"State<time={self.time}, active_fluents={self.active_fluents}, upcoming_effects={upcoming}>"
 
     def __repr__(self):
@@ -303,7 +350,7 @@ def transition(state: State, action: Action) -> List[Tuple[State, float]]:
 
     new_state = state.copy()
     for effect in action.effects:
-        new_state.upcoming_effects.put((new_state.time + effect.time, effect))
+        heapq.heappush(new_state.upcoming_effects, (new_state.time + effect.time, effect))
 
     # Fixme: is this necessary or can I just pass it to outcomes?
     outcomes: Dict[State, float] = {}
@@ -312,8 +359,8 @@ def transition(state: State, action: Action) -> List[Tuple[State, float]]:
 
 
 def _advance_to_terminal(state: State, prob: float, outcomes: Dict[State, float]) -> None:
-    while not state.upcoming_effects.empty():
-        scheduled_time, effect = state.upcoming_effects.queue[0]
+    while state.upcoming_effects:
+        scheduled_time, effect = state.upcoming_effects[0]
 
         # Check if we're ready to yield this state
         if scheduled_time > state.time and any(f.name == "free" for f in state.active_fluents):
@@ -325,14 +372,14 @@ def _advance_to_terminal(state: State, prob: float, outcomes: Dict[State, float]
             state.time = scheduled_time
 
         # Apply effect
-        state.upcoming_effects.get()
+        heapq.heappop(state.upcoming_effects)
         state.active_fluents = state.active_fluents.update(effect.resulting_fluents)
 
         if isinstance(effect, GroundedProbEffect):
             for branch_prob, effects in effect.prob_effects:
                 branched = state.copy()
                 for e in effects:
-                    branched.upcoming_effects.put((branched.time + e.time, e))
+                    heapq.heappush(branched.upcoming_effects, (branched.time + e.time, e))
                 _advance_to_terminal(branched, prob * branch_prob, outcomes)
             return  # stop after branching
 
