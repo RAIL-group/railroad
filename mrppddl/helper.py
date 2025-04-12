@@ -1,4 +1,4 @@
-from .mrppddl import Operator, Fluent, Effect, ProbEffect, OptExpr, OptCallable, Num
+from .core import Operator, Fluent, Effect, ProbEffect, OptExpr, OptCallable, Num
 from typing import Callable
 
 F = Fluent

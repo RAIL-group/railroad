@@ -1,6 +1,6 @@
 import pytest
-from .mrppddl import Fluent, Effect, ActiveFluents, Operator, State, get_next_actions, transition, get_action_by_name, ProbEffect
-from .mrppddl_helper import construct_move_operator, construct_search_operator
+from .core import Fluent, Effect, ActiveFluents, Operator, State, get_next_actions, transition, get_action_by_name, ProbEffect
+from .helper import construct_move_operator, construct_search_operator
 
 
 def test_fluent_equality():

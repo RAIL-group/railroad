@@ -2,7 +2,6 @@
 from typing import Callable, List, Tuple, Dict, Set, Union, Optional, Sequence
 from queue import PriorityQueue
 import itertools
-import copy
 
 
 Num = Union[float, int]
@@ -53,7 +52,7 @@ class Fluent(object):
     def __hash__(self) -> int:
         return self._hash
 
-    def __eq__(self, other: 'Fluent') -> bool:
+    def __eq__(self, other: object) -> bool:
         return hash(self) == hash(other)
 
     def __invert__(self) -> 'Fluent':
@@ -61,27 +60,21 @@ class Fluent(object):
 
 
 class ActiveFluents(object):
-    def __init__(self, fluents: Optional[Set[Fluent]] = None):
-        if fluents and any(fluent.negated for fluent in fluents):
-            raise ValueError("All fluents in active fluents must be positive.")
-        self.fluents: Set[Fluent] = set(fluents) if fluents else set()
+    def __init__(self, fluents: Optional[Union[frozenset[Fluent], Set[Fluent]]] = None):
+        self.fluents: frozenset[Fluent] = frozenset(fluents) if fluents else frozenset()
+        self._hash = hash(self.fluents)
 
-    def update(self, fluents: Set[Fluent], relaxed: bool = False) -> 'ActiveFluents':
+    def update(self, fluents: Union[frozenset[Fluent], Set[Fluent]], relaxed: bool = False) -> 'ActiveFluents':
         """Apply fluents to the active set: add positives, remove targets of negations."""
         positives = {f for f in fluents if not f.negated}
-        new_active_fluents = self.copy()
+        fluent_set = set(self.fluents)
 
         if not relaxed:
             flipped_negatives = {~f for f in fluents if f.negated}
-            new_active_fluents.fluents -= flipped_negatives
+            fluent_set -= flipped_negatives
 
-        new_active_fluents.fluents |= positives
-        return new_active_fluents
-
-    def copy(self) -> 'ActiveFluents':  #noqa
-        new_af = ActiveFluents()
-        new_af.fluents = set(self.fluents)
-        return new_af
+        fluent_set |= positives
+        return ActiveFluents(fluent_set)
 
     def __contains__(self, f: Fluent) -> bool:
         return f in self.fluents
@@ -96,10 +89,10 @@ class ActiveFluents(object):
         return str(self)
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, ActiveFluents) and self.fluents == other.fluents
+        return hash(self) == hash(other)
 
     def __hash__(self):
-        return hash(frozenset(self.fluents))
+        return self._hash
 
 
 class GroundedEffectType:
@@ -118,17 +111,18 @@ class LiftedEffectType:
 
     def _ground(self, binding: Binding) -> 'GroundedEffectType':
         grounded_time = self.time(binding)
-        grounded_fluents = {
+        grounded_fluents = frozenset(
             Fluent(f.name, *[binding.get(arg, arg) for arg in f.args], negated=f.negated)
             for f in self.resulting_fluents
-        }
+        )
         return GroundedEffect(grounded_time, grounded_fluents)
 
 
 class GroundedEffect(GroundedEffectType):
-    def __init__(self, time: Num, resulting_fluents: Set[Fluent]):
+    def __init__(self, time: Num, resulting_fluents: frozenset[Fluent]):
         self.time = time
         self.resulting_fluents = resulting_fluents
+        self._hash: int = hash((self.time, self.resulting_fluents))
 
     def __str__(self):
         rfs = ", ".join(str(f) for f in self.resulting_fluents)
@@ -137,6 +131,9 @@ class GroundedEffect(GroundedEffectType):
     def __repr__(self):
         return f"GroundedEffect({self})"
 
+    def __hash__(self):
+        return self._hash
+
 
 class Effect(LiftedEffectType):
     def __init__(self, time: OptExpr, resulting_fluents: Set[Fluent]):
@@ -144,15 +141,18 @@ class Effect(LiftedEffectType):
         self.resulting_fluents = resulting_fluents
 
 class GroundedProbEffect(GroundedEffectType):
+    __slots__ = ('time', 'prob_effects', 'resulting_fluents', '_hash')
+
     def __init__(
         self,
         time: float,
-        prob_effects: List[Tuple[float, List[GroundedEffectType]]],
-        resulting_fluents: Set[Fluent] = set()
+        prob_effects: tuple[tuple[float, tuple[GroundedEffectType, ...]], ...],
+        resulting_fluents: frozenset[Fluent] = frozenset()
     ):
         self.time = time
         self.prob_effects = prob_effects
         self.resulting_fluents = resulting_fluents
+        self._hash: int = hash((self.time, self.resulting_fluents, self.prob_effects))
 
     def __str__(self):
         parts = []
@@ -164,12 +164,15 @@ class GroundedProbEffect(GroundedEffectType):
     def __repr__(self):
         return f"ProbEffects({self})"
 
+    def __hash__(self):
+        return self._hash
 
 class ProbEffect(LiftedEffectType):
     def __init__(
         self,
         time: OptExpr,
         prob_effects: List[Tuple[OptExpr, List[Effect]]],
+
         resulting_fluents: Set[Fluent] = set()
     ):
         self.time = _make_bindable(time)
@@ -179,28 +182,32 @@ class ProbEffect(LiftedEffectType):
 
     def _ground(self, binding: Binding) -> 'GroundedProbEffect':
         # def evaluate(expr): return expr(binding) if callable(expr) else expr
-        grounded_prob_effects = [
-            (prob(binding), [e._ground(binding) for e in effect_list])
+        grounded_prob_effects = tuple(
+            (prob(binding), tuple(e._ground(binding) for e in effect_list))
             for prob, effect_list in self.prob_effects
-        ]
+        )
+        # grounded_prob_effects = [
+        #     (prob(binding), [e._ground(binding) for e in effect_list])
+        #     for prob, effect_list in self.prob_effects
+        # ]
 
-        grounded_time = self.time(binding)
-        grounded_resulting_fluents = {
+        grounded_time: float = self.time(binding)
+        grounded_resulting_fluents = frozenset(
             Fluent(f.name, *[binding.get(arg, arg) for arg in f.args], negated=f.negated)
             for f in self.resulting_fluents
-        }
+        )
 
         return GroundedProbEffect(grounded_time, grounded_prob_effects, grounded_resulting_fluents)
 
 
 class Action:
-    def __init__(self, preconditions: List[Fluent], 
+    def __init__(self, preconditions: frozenset[Fluent], 
                  effects: List[GroundedEffectType], name: Optional[str] = None):
-        self.preconditions = preconditions
+        self.preconditions = frozenset(preconditions)
         self.effects = effects
         self.name = name or "anonymous"
-        self._pos_precond = set(f for f in self.preconditions if not f.negated)
-        self._neg_precond_flipped = set(~f for f in self.preconditions if f.negated)
+        self._pos_precond = frozenset(f for f in self.preconditions if not f.negated)
+        self._neg_precond_flipped = frozenset(~f for f in self.preconditions if f.negated)
 
     def __str__(self):
         pre_str = ", ".join(str(p) for p in self.preconditions)
@@ -214,7 +221,7 @@ class Action:
 
 
 class State:
-    def __init__(self, time: float = 0, active_fluents: Optional[Set[Fluent]] = None, upcoming_effects: Optional[PriorityQueue] = None):
+    def __init__(self, time: float = 0, active_fluents: Optional[Union[frozenset[Fluent], Set[Fluent]]] = None, upcoming_effects: Optional[PriorityQueue] = None):
         self.time = time
         self.active_fluents = ActiveFluents(active_fluents)
         self.upcoming_effects = upcoming_effects or PriorityQueue()
@@ -245,10 +252,10 @@ class State:
 
     def __hash__(self) -> int:
         upcoming = tuple((t, effect) for t, effect in self.upcoming_effects.queue)
-        return hash(self.time) + hash(self.active_fluents) + hash(upcoming)
+        return hash((self.time, self.active_fluents, upcoming))
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, State) and hash(self) == hash(other)
+        return hash(self) == hash(other)
 
     def __str__(self):
         upcoming = tuple((t, effect) for t, effect in self.upcoming_effects.queue)
@@ -279,7 +286,7 @@ class Operator:
         def evaluate(value):
             return value(binding) if callable(value) else value
 
-        grounded_preconditions = [self._substitute_fluent(f, binding) for f in self.preconditions]
+        grounded_preconditions = frozenset(self._substitute_fluent(f, binding) for f in self.preconditions)
         grounded_effects = [eff._ground(binding) for eff in self.effects]
 
         name_str = f"{self.name} " + " ".join(binding[var] for var, _ in self.parameters)
@@ -354,7 +361,7 @@ def get_next_actions(state: State, all_actions: List[Action]) -> List[Action]:
         temp_state = State(time=state.time, active_fluents=neg_active_fluents.update({free_pred}).fluents)
 
         # Step 3: Check for applicable actions
-        applicable = set(a for a in all_actions if temp_state.satisfies_precondition(a))
+        applicable = [a for a in all_actions if temp_state.satisfies_precondition(a)]
         if applicable:
             return applicable
 

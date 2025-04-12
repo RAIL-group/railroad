@@ -1,5 +1,5 @@
-from .mrppddl import Operator, Fluent, Effect, State, transition, OptCallable
-from .mrppddl_helper import _make_callable
+from .core import Operator, Fluent, Effect, State, transition, OptCallable
+from .helper import _make_callable
 from typing import Callable, Union
 
 def _plot_graph(G):
