@@ -1,4 +1,4 @@
-from .core import Operator, Fluent, Effect, State, transition, OptCallable, get_next_actions, get_action_by_name
+from .core import Operator, Fluent, Effect, State, Action, transition, OptCallable, get_next_actions, get_action_by_name
 from .helper import _make_callable
 from typing import Callable, Union
 import pytest
@@ -170,9 +170,9 @@ def test_graph_traversal():
         G: nx.DiGraph,
         start_state: State,
         is_goal_state: Callable[[State], bool]
-    ) -> tuple[float, list[State]]:
+    ) -> tuple[float, list[State], list[Action]]:
         # Step 1: Get shortest path lengths and paths from start_state
-        costs, paths = nx.single_source_dijkstra(G, source=start_state, weight='weight')
+        costs, paths = nx.single_source_dijkstra(G, source=start_state, weight='weight')  # pyright: ignore[reportArgumentType]
 
         # Step 2: Find goal states among reachable nodes
         goal_states = [(state, cost) for state, cost in costs.items() if is_goal_state(state)]

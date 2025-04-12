@@ -153,7 +153,7 @@ def test_move_sequence(move_time):
     assert prob1 == 1.0
     assert Fluent("free", "r1") not in state1.active_fluents
     assert Fluent("free", "r2") in state1.active_fluents
-    assert len(state1.upcoming_effects.queue) == 1
+    assert len(state1.upcoming_effects) == 1
 
     # Second transition: move r2 from roomA to roomB
     available = get_next_actions(state1, move_actions)
@@ -168,7 +168,7 @@ def test_move_sequence(move_time):
     assert Fluent("free", "r1") in state2.active_fluents
     assert Fluent("free", "r2") in state2.active_fluents
     assert state2.time == 5
-    assert len(state2.upcoming_effects.queue) == 0
+    assert len(state2.upcoming_effects) == 0
 
 
 def test_search_sequence():
