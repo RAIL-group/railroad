@@ -67,8 +67,8 @@ move_visit_op = construct_move_and_visit_operator(move_time_fn)
 # Ground actions
 objects_by_type = {
     "robot": ["r1", "r2"],
-    # "location": ["start", "roomA", "roomB", "roomC", "roomD", "roomE", "roomF"],
-    "location": ["start", "roomA", "roomB", "roomC"],
+    "location": ["start", "roomA", "roomB", "roomC", "roomD", "roomE", "roomF"],
+    # "location": ["start", "roomA", "roomB", "roomC"],
 }
 actions = move_visit_op.instantiate(objects_by_type)
 # Initial state

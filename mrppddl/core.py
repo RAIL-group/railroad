@@ -1,9 +1,7 @@
 # Re-import required dependencies due to kernel reset
 from typing import Callable, List, Tuple, Dict, Set, Union, Optional, Sequence
-from queue import PriorityQueue
 import itertools
 import heapq
-
 
 Num = Union[float, int]
 Binding = Dict[str, str]
@@ -54,7 +52,7 @@ class Fluent(object):
         return self._hash
 
     def __eq__(self, other: object) -> bool:
-        return hash(self) == hash(other)
+        return self._hash == other._hash
 
     def __invert__(self) -> 'Fluent':
         return Fluent(self.name, *self.args, negated=not self.negated)
@@ -90,7 +88,7 @@ class ActiveFluents(object):
         return str(self)
 
     def __eq__(self, other: object) -> bool:
-        return hash(self) == hash(other)
+        return self._hash == other._hash
 
     def __hash__(self):
         return self._hash
