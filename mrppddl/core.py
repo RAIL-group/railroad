@@ -18,13 +18,13 @@ def _make_bindable(opt_expr: OptExpr) -> Bindable:
         return lambda b: fn(*[b.get(arg, arg) for arg in args])
 
 class Fluent(object):
-    __slots__ = ('name', 'args', 'negated', '_hash', '_positive')
+    __slots__ = ('name', 'args', 'negated', '_hash')
 
     def __init__(self, name: str, *args: str, negated: bool = False):
         if args:
             self.name = name
             self.args = args
-            if "not" in name[:4]:
+            if "not" == name:
                 raise ValueError("Use the 'negated' argument or ~Fluent to negate.")
             self.negated = negated
         else:
@@ -171,7 +171,6 @@ class ProbEffect(LiftedEffectType):
         self,
         time: OptExpr,
         prob_effects: List[Tuple[OptExpr, List[Effect]]],
-
         resulting_fluents: Set[Fluent] = set()
     ):
         self.time = _make_bindable(time)
@@ -185,10 +184,6 @@ class ProbEffect(LiftedEffectType):
             (prob(binding), tuple(e._ground(binding) for e in effect_list))
             for prob, effect_list in self.prob_effects
         )
-        # grounded_prob_effects = [
-        #     (prob(binding), [e._ground(binding) for e in effect_list])
-        #     for prob, effect_list in self.prob_effects
-        # ]
 
         grounded_time: float = self.time(binding)
         grounded_resulting_fluents = frozenset(
@@ -229,6 +224,7 @@ class State:
         self.time = time
         self.active_fluents = ActiveFluents(active_fluents)
         self.upcoming_effects = upcoming_effects or []
+        self._hash = None
 
     def satisfies_precondition(self, action: Action) -> bool:
         return (action._pos_precond <= self.active_fluents.fluents
@@ -241,6 +237,23 @@ class State:
             upcoming_effects=list(self.upcoming_effects)
         )
 
+    def set_time(self, new_time: float):
+        self.time = new_time
+        self._hash = None
+
+    def update_active_fluents(self, new_fluents: List[Fluent]):
+        self._hash = None
+        self.active_fluents = self.active_fluents.update(new_fluents)
+
+    def queue_effect(self, effect: GroundedEffectType):
+        self._hash = None
+        heapq.heappush(self.upcoming_effects,
+                       (self.time + effect.time, effect))
+
+    def pop_effect(self):
+        self._hash = None
+        heapq.heappop(self.upcoming_effects)
+
     def copy_and_zero_out_time(self):
         dt = self.time
         new_effects = [(t - dt, e) for t, e in self.upcoming_effects]
@@ -251,8 +264,10 @@ class State:
         )
 
     def __hash__(self) -> int:
-        upcoming = tuple((t, effect) for t, effect in self.upcoming_effects)
-        return hash((self.time, self.active_fluents, upcoming))
+        if not self._hash:
+            self._hash = hash((self.time, self.active_fluents, tuple(self.upcoming_effects)))
+        return self._hash
+        # return hash((self.time, self.active_fluents, tuple(self.upcoming_effects)))
 
     def __eq__(self, other: object) -> bool:
         return hash(self) == hash(other)
@@ -303,7 +318,7 @@ def transition(state: State, action: Action) -> List[Tuple[State, float]]:
 
     new_state = state.copy()
     for effect in action.effects:
-        heapq.heappush(new_state.upcoming_effects, (new_state.time + effect.time, effect))
+        new_state.queue_effect(effect)
 
     # Fixme: is this necessary or can I just pass it to outcomes?
     outcomes: Dict[State, float] = {}
@@ -322,11 +337,11 @@ def _advance_to_terminal(state: State, prob: float, outcomes: Dict[State, float]
 
         # Advance time if necessary
         if scheduled_time > state.time:
-            state.time = scheduled_time
+            state.set_time(scheduled_time)
 
         # Apply effect
-        heapq.heappop(state.upcoming_effects)
-        state.active_fluents = state.active_fluents.update(effect.resulting_fluents)
+        state.pop_effect()
+        state.update_active_fluents(effect.resulting_fluents)
 
         if isinstance(effect, GroundedProbEffect):
             for branch_prob, effects in effect.prob_effects:
