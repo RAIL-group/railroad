@@ -2,6 +2,7 @@
 from typing import Callable, List, Tuple, Dict, Set, Union, Optional, Sequence
 from queue import PriorityQueue
 import itertools
+import heapq
 
 
 Num = Union[float, int]
@@ -220,58 +221,12 @@ class Action:
         return self.__str__()
 
 
-# class State:
-#     def __init__(self, time: float = 0, active_fluents: Optional[Union[frozenset[Fluent], Set[Fluent]]] = None, upcoming_effects: Optional[PriorityQueue] = None):
-#         self.time = time
-#         self.active_fluents = ActiveFluents(active_fluents)
-#         self.upcoming_effects = upcoming_effects or PriorityQueue()
-
-#     def satisfies_precondition(self, action: Action) -> bool:
-#         return (action._pos_precond <= self.active_fluents.fluents
-#                 and self.active_fluents.fluents.isdisjoint(action._neg_precond_flipped))
-
-#     def copy(self) -> 'State':  #noqa
-#         new_queue = PriorityQueue()
-#         new_queue.queue = [x for x in self.upcoming_effects.queue]
-#         return State(
-#             time=self.time,
-#             active_fluents=self.active_fluents.fluents,
-#             upcoming_effects=new_queue
-#         )
-
-#     def copy_and_zero_out_time(self):
-#         dt = self.time
-#         new_queue = PriorityQueue()
-#         for time, effect in self.upcoming_effects.queue:
-#             new_queue.put((time - dt, effect))
-#         return State(
-#             time=0,
-#             active_fluents=set(self.active_fluents.fluents),
-#             upcoming_effects=new_queue
-#         )
-
-#     def __hash__(self) -> int:
-#         upcoming = tuple((t, effect) for t, effect in self.upcoming_effects.queue)
-#         return hash((self.time, self.active_fluents, upcoming))
-
-#     def __eq__(self, other: object) -> bool:
-#         return hash(self) == hash(other)
-
-#     def __str__(self):
-#         upcoming = tuple((t, effect) for t, effect in self.upcoming_effects.queue)
-#         return f"State<time={self.time}, active_fluents={self.active_fluents}, upcoming_effects={upcoming}>"
-
-#     def __repr__(self):
-#         return self.__str__()
-
-import heapq
-
 class State:
     def __init__(
         self,
         time: float = 0,
         active_fluents: Optional[Union[frozenset[Fluent], Set[Fluent]]] = None,
-        upcoming_effects: Optional[List[Tuple[float, Union[GroundedEffectType]]]] = None
+        upcoming_effects: Optional[List[Tuple[float, GroundedEffectType]]] = None
     ):
         self.time = time
         self.active_fluents = ActiveFluents(active_fluents)
