@@ -63,12 +63,12 @@ class ActiveFluents(object):
         self.fluents: frozenset[Fluent] = frozenset(fluents) if fluents else frozenset()
         self._hash = hash(self.fluents)
 
-    def update(self, fluents: Union[frozenset[Fluent], Set[Fluent]], relaxed: bool = False) -> 'ActiveFluents':
+    def update(self, fluents: Union[frozenset[Fluent], Set[Fluent]], relax: bool = False) -> 'ActiveFluents':
         """Apply fluents to the active set: add positives, remove targets of negations."""
         positives = {f for f in fluents if not f.negated}
         fluent_set = set(self.fluents)
 
-        if not relaxed:
+        if not relax:
             flipped_negatives = {~f for f in fluents if f.negated}
             fluent_set -= flipped_negatives
 
@@ -226,7 +226,9 @@ class State:
         self.upcoming_effects = upcoming_effects or []
         self._hash = None
 
-    def satisfies_precondition(self, action: Action) -> bool:
+    def satisfies_precondition(self, action: Action, relax: bool = False) -> bool:
+        if relax:
+            return action._pos_precond <= self.active_fluents.fluents
         return (action._pos_precond <= self.active_fluents.fluents
                 and self.active_fluents.fluents.isdisjoint(action._neg_precond_flipped))
 
@@ -241,9 +243,9 @@ class State:
         self.time = new_time
         self._hash = None
 
-    def update_active_fluents(self, new_fluents: List[Fluent]):
+    def update_active_fluents(self, new_fluents: List[Fluent], relax: bool = False):
         self._hash = None
-        self.active_fluents = self.active_fluents.update(new_fluents)
+        self.active_fluents = self.active_fluents.update(new_fluents, relax=relax)
 
     def queue_effect(self, effect: GroundedEffectType):
         self._hash = None
@@ -279,6 +281,9 @@ class State:
     def __repr__(self):
         return self.__str__()
 
+    def __lt__(self, other):
+        return self.time < other.time
+
 
 class Operator:
     def __init__(self, name: str, parameters: List[Tuple[str, str]], preconditions: List[Fluent], effects: Sequence[LiftedEffectType]):
@@ -312,8 +317,8 @@ class Operator:
         return Fluent(fluent.name, *grounded_args, negated=fluent.negated)
 
 
-def transition(state: State, action: Action) -> List[Tuple[State, float]]:
-    if not state.satisfies_precondition(action):
+def transition(state: State, action: Action, relax: bool = False) -> List[Tuple[State, float]]:
+    if not state.satisfies_precondition(action, relax):
         raise ValueError("Precondition not satisfied for applying action")
 
     new_state = state.copy()
@@ -322,16 +327,17 @@ def transition(state: State, action: Action) -> List[Tuple[State, float]]:
 
     # Fixme: is this necessary or can I just pass it to outcomes?
     outcomes: Dict[State, float] = {}
-    _advance_to_terminal(new_state, prob=1.0, outcomes=outcomes)
+    _advance_to_terminal(new_state, prob=1.0, outcomes=outcomes, relax=relax)
     return list(outcomes.items())
 
 
-def _advance_to_terminal(state: State, prob: float, outcomes: Dict[State, float]) -> None:
+def _advance_to_terminal(state: State, prob: float, outcomes: Dict[State, float], relax: bool = False) -> None:
     while state.upcoming_effects:
         scheduled_time, effect = state.upcoming_effects[0]
 
         # Check if we're ready to yield this state
-        if scheduled_time > state.time and any(f.name == "free" for f in state.active_fluents):
+        # FIXME: adding 'and not relax' means that we will always go to the 'terminus' even if another robot is free.
+        if scheduled_time > state.time and any(f.name == "free" for f in state.active_fluents) and not relax:
             outcomes[state] = prob
             return
 
@@ -341,7 +347,7 @@ def _advance_to_terminal(state: State, prob: float, outcomes: Dict[State, float]
 
         # Apply effect
         state.pop_effect()
-        state.update_active_fluents(effect.resulting_fluents)
+        state.update_active_fluents(effect.resulting_fluents, relax=relax)
 
         if isinstance(effect, GroundedProbEffect):
             for branch_prob, effects in effect.prob_effects:
