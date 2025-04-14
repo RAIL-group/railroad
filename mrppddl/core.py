@@ -387,5 +387,5 @@ def get_next_actions(state: State, all_actions: List[Action]) -> List[Action]:
         if applicable:
             return applicable
 
-    # Step 4: No applicable actions found
-    return []
+    # Step 4: Otherwise, return any possible actions
+    return [a for a in all_actions if state.satisfies_precondition(a)]

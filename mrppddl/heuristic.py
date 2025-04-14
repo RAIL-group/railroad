@@ -9,12 +9,13 @@ class RelaxedPlanningGraph:
         self.action_to_duration: Dict[Action, float] = {}
         self.visited_actions: Set[Action] = set()
 
-    def extend(self, new_fluents, state):
+    def extend(self, new_fluents):
         newly_added = new_fluents - self.known_fluents
         self.known_fluents |= new_fluents
 
         while newly_added:
             next_newly_added = set()
+            state = State(time=0, active_fluents=self.known_fluents)
             for action in self.actions:
                 if action in self.visited_actions:
                     continue
@@ -31,6 +32,9 @@ class RelaxedPlanningGraph:
                             self.known_fluents.add(f)
                             next_newly_added.add(f)
                             self.fact_to_action[f] = action
+                        elif f in self.fact_to_action.keys():
+                            self.fact_to_action[f] = min(action, self.fact_to_action[f],
+                                                         key=lambda a: a.effects[-1].time)
             newly_added = next_newly_added
 
     def compute_relaxed_plan_cost(self, initial_fluents: Set[Fluent], goal_fn: Callable[[Set[Fluent]], bool]) -> float:
@@ -72,8 +76,11 @@ def make_ff_heuristic(
     rpg = RelaxedPlanningGraph(actions)
 
     def ff_heuristic(state: State) -> float:
+        ctime = state.time
+        state = transition(state, None, relax=True)[0][0]
+        dtime = state.time - ctime
         current_fluents = set(state.active_fluents.fluents)
-        rpg.extend(current_fluents, state)
-        return rpg.compute_relaxed_plan_cost(current_fluents, goal_fn)
+        rpg.extend(current_fluents)
+        return dtime + rpg.compute_relaxed_plan_cost(current_fluents, goal_fn)
 
     return ff_heuristic

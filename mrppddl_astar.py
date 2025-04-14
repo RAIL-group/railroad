@@ -8,14 +8,14 @@ F = Fluent
 
 # Move and Visit Operator
 random.seed(8616)
-move_time_fn = lambda *args: random.random() + 1.0  #noqa: E731
+move_time_fn = lambda *args: random.random() + 5.0  #noqa: E731
 move_visit_op = Operator(
     name="move_visit",
     parameters=[("?robot", "robot"), ("?loc_from", "location"), ("?loc_to", "location")],
-    preconditions=[F("at ?robot ?loc_from"), ~F("visited ?loc_to"), F("free ?robot")],
+    preconditions=[F("at ?robot ?loc_from"), F("not visited ?loc_to"), F("free ?robot")],
     effects=[
         Effect(time=0,
-               resulting_fluents={~F("free ?robot"), ~F("at ?robot ?loc_from")}),
+               resulting_fluents={F("not free ?robot"), F("not at ?robot ?loc_from")}),
         Effect(time=(move_time_fn, ["?robot", "?loc_from", "?loc_to"]),
                resulting_fluents={F("free ?robot"), F("visited ?loc_to"), F("at ?robot ?loc_to")})
     ])
@@ -52,10 +52,8 @@ objects_by_type = {
 all_actions = (
     move_visit_op.instantiate(objects_by_type)
     + move_home_op.instantiate(objects_by_type)
-    # + wait_op.instantiate(objects_by_type)
+    + wait_op.instantiate(objects_by_type)
 )
-print(all_actions)
-# raise ValueError()
 
 
 # Initial state
@@ -64,9 +62,9 @@ initial_state = State(
     active_fluents={
         F("at r1 start"), F("free r1"),
         F("at r2 start"), F("free r2"),
-        # F("at r3 start"), F("free r3"),
-        # F("at r4 start"), F("free r4"),
-        # F("at r5 start"), F("free r5"),
+        F("at r3 start"), F("free r3"),
+        F("at r4 start"), F("free r4"),
+        F("at r5 start"), F("free r5"),
         F("visited start"),
     })
 
@@ -122,8 +120,8 @@ def reconstruct_path(came_from, current):
 def is_goal_state(active_fluents) -> bool:
     return (
         len(objects_by_type['location']) == len([f for f in active_fluents if f.name == 'visited'])
-        # and (F("at r1 start") in active_fluents)
-        # and (F("at r2 start") in active_fluents)
+        and (F("at r1 start") in active_fluents)
+        and (F("at r2 start") in active_fluents)
         # and (F("at r3 start") in active_fluents)
         # and (F("at r4 start") in active_fluents)
         # and (F("at r5 start") in active_fluents)
@@ -131,14 +129,19 @@ def is_goal_state(active_fluents) -> bool:
 
 from mrppddl.core import Action
 from typing import List, Set, Callable
+
+ff_memory = dict()
 def ff_heuristic(
     state: State,
-    actions: List[Action],
-    goal_fn: Callable[[Set[Fluent]], bool]
 ) -> float:
     # 1. Forward relaxed reachability
+    t0 = state.time
     state = transition(state, None, relax=True)[0][0]
+    dtime = state.time - t0
     known_fluents = set(state.active_fluents.fluents)
+    initial_known_fluents = frozenset(known_fluents)
+    if initial_known_fluents in ff_memory.keys():
+        return dtime + ff_memory[initial_known_fluents]
     newly_added = set(known_fluents)
     fact_to_action = {}       # Fluent -> Action that added it
     action_to_duration = {}   # Action -> Relaxed duration
@@ -147,7 +150,7 @@ def ff_heuristic(
     while newly_added:
         next_newly_added = set()
         state = State(time=0, active_fluents=known_fluents)
-        for action in actions:
+        for action in all_actions:
             if action in visited_actions:
                 continue
             if not state.satisfies_precondition(action, relax=True):
@@ -164,18 +167,18 @@ def ff_heuristic(
                         newly_added.add(f)
                         fact_to_action[f] = action
                     elif f in fact_to_action.keys():
-                        fact_to_action[4] = min(action, fact_to_action[f],
+                        fact_to_action[f] = min(action, fact_to_action[f],
                                                 key=lambda a: a.effects[-1].time)
         newly_added = next_newly_added
 
-    if not goal_fn(known_fluents):
+    if not is_goal_state(known_fluents):
         return float('inf')  # Relaxed goal not reachable
 
     # 2. Extract required goal fluents by ablation
     required_fluents = set()
     for f in known_fluents:
         test_set = known_fluents - {f}
-        if not goal_fn(test_set):
+        if not is_goal_state(test_set):
             required_fluents.add(f)
 
     # 3. Backward relaxed plan extraction
@@ -195,14 +198,18 @@ def ff_heuristic(
                 if p not in state.active_fluents.fluents:
                     needed.add(p)
 
-    return total_duration
+    ff_memory[initial_known_fluents] = total_duration
+    return dtime + total_duration
 
+import time
+stime = time.time()
 # from mrppddl.heuristic import make_ff_heuristic
 # ff_heuristic = make_ff_heuristic(all_actions, is_goal_state, transition)
-# path = astar(initial_state, all_actions, is_goal_state,
-#              lambda state: ff_heuristic(state) / 2)
 path = astar(initial_state, all_actions, is_goal_state,
-             lambda state: ff_heuristic(state, all_actions, is_goal_state))
+             lambda state: ff_heuristic(state))
+# path = astar(initial_state, all_actions, is_goal_state,
+#              lambda state: ff_heuristic(state, all_actions, is_goal_state))
+print(f"Planning time: {time.time() - stime}")
 s = initial_state
 for a in path:
     s = transition(s, a)[0][0]
