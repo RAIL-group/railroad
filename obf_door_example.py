@@ -5,42 +5,98 @@ from typing import Callable, Union, List, Optional
 import random
 import hashlib
 import matplotlib.pyplot as plt
+import numpy as np
 import networkx as nx
+
 
 
 F = Fluent
 
-def _plot_graph(G, state_str=None):
 
-    # Use spring layout for clarity
-    # pos = nx.spring_layout(G, seed=8616)
+def _plot_graph(G, state_str=None, is_goal_fn: Optional[Callable] = None):
     pos = nx.kamada_kawai_layout(G)
 
-    # Extract edge labels (e.g., action name and weight)
     edge_labels = {
         (u, v): f"{data['action'].name.split()[0]}\n{data['weight']:.1f}s"
         for u, v, data in G.edges(data=True)
     }
 
-    # Optional: label nodes by hash or small index
-    if not state_str: 
+    if not state_str:
         state_str = lambda state: '\n'.join([str(f) for f in state.active_fluents])
+    node_labels = {node: f"{state_str(node)}" for node in G.nodes}
 
-    node_labels = {node: f"{state_str(node)}" for idx, node in enumerate(G.nodes)}
+    node_colors = 'lightblue'
+    norm = None
+    cmap = plt.cm.viridis.reversed()
+    color_map = {}
 
-    # Draw nodes
-    nx.draw_networkx_nodes(G, pos, node_color='lightblue', node_size=60)
+    # Goal node processing
+    goal_nodes = set()
+    if is_goal_fn:
+        goal_nodes = {n for n in G.nodes if is_goal_fn(n)}
+        reversed_G = G.reverse(copy=True)
+        min_distance = {}
 
-    # Draw edges
+        for goal in goal_nodes:
+            costs, _ = nx.single_source_dijkstra(reversed_G, source=goal, weight='weight')
+            for node, dist in costs.items():
+                if node not in min_distance or dist < min_distance[node]:
+                    min_distance[node] = dist
+
+        distances = np.array([min_distance.get(n, np.inf) for n in G.nodes])
+        finite_mask = np.isfinite(distances)
+        if finite_mask.any():
+            norm = plt.Normalize(vmin=np.min(distances[finite_mask]), vmax=np.max(distances[finite_mask]))
+            for node in G.nodes:
+                dist = min_distance.get(node, np.inf)
+                color_map[node] = cmap(norm(dist)) if np.isfinite(dist) else 'lightgray'
+        else:
+            color_map = {n: 'lightgray' for n in G.nodes}
+
+    else:
+        color_map = {n: 'lightblue' for n in G.nodes}
+
+    # Separate goal and non-goal nodes
+    non_goal_nodes = [n for n in G.nodes if n not in goal_nodes]
+    goal_nodes = list(goal_nodes)  # Convert to list for indexing
+
+    plt.figure(figsize=(8, 6))
+
+    # Draw non-goal nodes (filled)
+    nx.draw_networkx_nodes(
+        G, pos,
+        nodelist=non_goal_nodes,
+        node_color=[color_map[n] for n in non_goal_nodes],
+        node_size=60,
+    )
+
+    # Draw goal nodes (hollow)
+    nx.draw_networkx_nodes(
+        G, pos,
+        nodelist=goal_nodes,
+        node_color='grey',
+        node_size=80,
+        edgecolors=[color_map[n] for n in goal_nodes],
+        linewidths=1,
+        node_shape='o',
+    )
+
+    # Edges and labels
     nx.draw_networkx_edges(G, pos, arrows=True, arrowstyle='-|>', width=1.5, edge_color="#a0a0a0f0")
-
-    # Draw labels
     nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=6)
     nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=6)
+
+    # Colorbar
+    if is_goal_fn and norm:
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+        sm.set_array([])
+        cbar = plt.colorbar(sm, shrink=0.7, ax=plt.gca())
+        cbar.set_label("Distance to Goal (seconds)")
 
     plt.title("State-Action Graph")
     plt.axis('off')
     plt.tight_layout()
+    plt.show()
 
 
 def _get_productive_edges_for_goal(
@@ -270,7 +326,6 @@ pruned_G = prune_disconnected_nodes(productive_G, initial_state)
 # _plot_graph(productive_G)
 # plt.subplot(223)
 _plot_graph(pruned_G,
-        state_str=lambda state: '\n'.join([str(f) for f in state.active_fluents
-                                           if 'holding' in f.name or 'open' in f.name])
-)
+            state_str=lambda state: '\n'.join([str(f) for f in state.active_fluents if 'holding' in f.name or 'open' in f.name]),
+            is_goal_fn=goal_functions[0])
 plt.show()
