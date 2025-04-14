@@ -318,12 +318,13 @@ class Operator:
 
 
 def transition(state: State, action: Action, relax: bool = False) -> List[Tuple[State, float]]:
-    if not state.satisfies_precondition(action, relax):
+    if action and not state.satisfies_precondition(action, relax):
         raise ValueError("Precondition not satisfied for applying action")
 
     new_state = state.copy()
-    for effect in action.effects:
-        new_state.queue_effect(effect)
+    if action:
+        for effect in action.effects:
+            new_state.queue_effect(effect)
 
     # Fixme: is this necessary or can I just pass it to outcomes?
     outcomes: Dict[State, float] = {}

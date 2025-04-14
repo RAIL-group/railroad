@@ -8,27 +8,55 @@ F = Fluent
 
 # Move and Visit Operator
 random.seed(8616)
-move_time_fn = lambda *args: random.random() + 5.0  #noqa: E731
+move_time_fn = lambda *args: random.random() + 1.0  #noqa: E731
 move_visit_op = Operator(
-        name="move_visit",
-        parameters=[("?robot", "robot"), ("?loc_from", "location"), ("?loc_to", "location")],
-        preconditions=[F("at ?robot ?loc_from"),
-                       # ~F("visited ?loc_to"),
-                       F("free ?robot")],
-        effects=[
-            Effect(time=0,
-                   resulting_fluents={~F("free ?robot"), ~F("at ?robot ?loc_from"),}),
-            Effect(time=(move_time_fn, ["?robot", "?loc_from", "?loc_to"]),
-                   resulting_fluents={F("free ?robot"), F("visited ?loc_to"), F("at ?robot ?loc_to")})
-        ])
+    name="move_visit",
+    parameters=[("?robot", "robot"), ("?loc_from", "location"), ("?loc_to", "location")],
+    preconditions=[F("at ?robot ?loc_from"), ~F("visited ?loc_to"), F("free ?robot")],
+    effects=[
+        Effect(time=0,
+               resulting_fluents={~F("free ?robot"), ~F("at ?robot ?loc_from")}),
+        Effect(time=(move_time_fn, ["?robot", "?loc_from", "?loc_to"]),
+               resulting_fluents={F("free ?robot"), F("visited ?loc_to"), F("at ?robot ?loc_to")})
+    ])
+
+move_home_op = Operator(
+    name="move_home",
+    parameters=[("?robot", "robot"), ("?loc_from", "location")],
+    preconditions=[F("at ?robot ?loc_from"), F("free ?robot")],
+    effects=[
+        Effect(time=0,
+               resulting_fluents={~F("free ?robot"), ~F("at ?robot ?loc_from"),}),
+        Effect(time=(move_time_fn, ["?robot", "?loc_from", "start"]),
+               resulting_fluents={F("free ?robot"), F("at ?robot start")})
+    ])
+
+wait_op = Operator(
+    name="wait",
+    parameters=[("?robot", "robot")],
+    preconditions=[F("free ?robot"), F("not waited ?robot")],
+    effects=[Effect(time=0, resulting_fluents={F("not free ?robot")}),
+             Effect(time=1, resulting_fluents={F("free ?robot"), F("waited ?robot")})])
 
 # Get all actions
 objects_by_type = {
-    "robot": ["r1", "r2"],
+    "robot": ["r1", "r2", "r3", "r4", "r5"],
     # "location": ["start", "roomA", "roomB", "roomC", "roomD", "roomE", "roomF"],
     "location": ["start", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j"],
 }
-all_actions = move_visit_op.instantiate(objects_by_type)
+# objects_by_type = {
+#     "robot": ["r1", "r2"],
+#     "location": ["start", "roomA", "roomB", "roomC", "roomD", "roomE", "roomF"],
+#     # "location": ["start", "a", "b"],
+# }
+all_actions = (
+    move_visit_op.instantiate(objects_by_type)
+    + move_home_op.instantiate(objects_by_type)
+    # + wait_op.instantiate(objects_by_type)
+)
+print(all_actions)
+# raise ValueError()
+
 
 # Initial state
 initial_state = State(
@@ -36,6 +64,9 @@ initial_state = State(
     active_fluents={
         F("at r1 start"), F("free r1"),
         F("at r2 start"), F("free r2"),
+        # F("at r3 start"), F("free r3"),
+        # F("at r4 start"), F("free r4"),
+        # F("at r5 start"), F("free r5"),
         F("visited start"),
     })
 
@@ -54,7 +85,6 @@ def astar(start_state, all_actions, is_goal_state, heuristic_fn=None):
         _, current_g, current = heapq.heappop(open_heap)
 
         if is_goal_state(current.active_fluents):
-            print(counter)
             return reconstruct_path(came_from, current)
 
         if current in closed_set:
@@ -90,8 +120,14 @@ def reconstruct_path(came_from, current):
 
 
 def is_goal_state(active_fluents) -> bool:
-    return len(objects_by_type['location']) == len([f for f in active_fluents
-                                                    if f.name == 'visited'])
+    return (
+        len(objects_by_type['location']) == len([f for f in active_fluents if f.name == 'visited'])
+        # and (F("at r1 start") in active_fluents)
+        # and (F("at r2 start") in active_fluents)
+        # and (F("at r3 start") in active_fluents)
+        # and (F("at r4 start") in active_fluents)
+        # and (F("at r5 start") in active_fluents)
+    )
 
 from mrppddl.core import Action
 from typing import List, Set, Callable
@@ -101,6 +137,7 @@ def ff_heuristic(
     goal_fn: Callable[[Set[Fluent]], bool]
 ) -> float:
     # 1. Forward relaxed reachability
+    state = transition(state, None, relax=True)[0][0]
     known_fluents = set(state.active_fluents.fluents)
     newly_added = set(known_fluents)
     fact_to_action = {}       # Fluent -> Action that added it
@@ -109,6 +146,7 @@ def ff_heuristic(
 
     while newly_added:
         next_newly_added = set()
+        state = State(time=0, active_fluents=known_fluents)
         for action in actions:
             if action in visited_actions:
                 continue
@@ -123,8 +161,11 @@ def ff_heuristic(
                 for f in successor.active_fluents.fluents:
                     if f not in known_fluents:
                         known_fluents.add(f)
-                        next_newly_added.add(f)
+                        newly_added.add(f)
                         fact_to_action[f] = action
+                    elif f in fact_to_action.keys():
+                        fact_to_action[4] = min(action, fact_to_action[f],
+                                                key=lambda a: a.effects[-1].time)
         newly_added = next_newly_added
 
     if not goal_fn(known_fluents):
@@ -149,18 +190,24 @@ def ff_heuristic(
         action = fact_to_action.get(f)
         if action and action not in used_actions:
             used_actions.add(action)
-            total_duration += action_to_duration.get(action, 0.0)
+            total_duration += action_to_duration[action]
             for p in action._pos_precond:
                 if p not in state.active_fluents.fluents:
                     needed.add(p)
 
     return total_duration
 
-
+# from mrppddl.heuristic import make_ff_heuristic
+# ff_heuristic = make_ff_heuristic(all_actions, is_goal_state, transition)
+# path = astar(initial_state, all_actions, is_goal_state,
+#              lambda state: ff_heuristic(state) / 2)
 path = astar(initial_state, all_actions, is_goal_state,
-             lambda state: ff_heuristic(state, all_actions, is_goal_state) / 2)
+             lambda state: ff_heuristic(state, all_actions, is_goal_state))
 s = initial_state
 for a in path:
     s = transition(s, a)[0][0]
     print(a.name)
-    print(s)
+    # print(s)
+
+print(s)
+
