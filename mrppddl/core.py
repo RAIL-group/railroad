@@ -9,6 +9,7 @@ Bindable = Callable[[Binding], Num]
 OptCallable = Union[Num, Callable[..., float]]
 OptExpr = Union[float, Tuple[Callable[..., float], List[str]]]
 
+
 def _make_bindable(opt_expr: OptExpr) -> Bindable:
     if isinstance(opt_expr, Num):
         return lambda *args: opt_expr
@@ -17,8 +18,9 @@ def _make_bindable(opt_expr: OptExpr) -> Bindable:
         args = opt_expr[1]
         return lambda b: fn(*[b.get(arg, arg) for arg in args])
 
+
 class Fluent(object):
-    __slots__ = ('name', 'args', 'negated', '_hash')
+    __slots__ = ("name", "args", "negated", "_hash")
 
     def __init__(self, name: str, *args: str, negated: bool = False):
         if args:
@@ -29,9 +31,11 @@ class Fluent(object):
             self.negated = negated
         else:
             if negated:
-                raise ValueError("Cannot both pass a full string and negated=True. Use 'not' or ~Fluent.")
+                raise ValueError(
+                    "Cannot both pass a full string and negated=True. Use 'not' or ~Fluent."
+                )
             split = name.split(" ")
-            if split[0] == 'not':
+            if split[0] == "not":
                 self.negated = True
                 split = split[1:]
             else:
@@ -54,7 +58,7 @@ class Fluent(object):
     def __eq__(self, other: object) -> bool:
         return self._hash == other._hash
 
-    def __invert__(self) -> 'Fluent':
+    def __invert__(self) -> "Fluent":
         return Fluent(self.name, *self.args, negated=not self.negated)
 
 
@@ -63,7 +67,9 @@ class ActiveFluents(object):
         self.fluents: frozenset[Fluent] = frozenset(fluents) if fluents else frozenset()
         self._hash = hash(self.fluents)
 
-    def update(self, fluents: Union[frozenset[Fluent], Set[Fluent]], relax: bool = False) -> 'ActiveFluents':
+    def update(
+        self, fluents: Union[frozenset[Fluent], Set[Fluent]], relax: bool = False
+    ) -> "ActiveFluents":
         """Apply fluents to the active set: add positives, remove targets of negations."""
         positives = {f for f in fluents if not f.negated}
         fluent_set = set(self.fluents)
@@ -98,8 +104,8 @@ class GroundedEffectType:
     def __init__(self, time: float, resulting_fluents: Set[Fluent]):
         self.time = time
         self.resulting_fluents = resulting_fluents
-    
-    def __lt__(self, other: 'GroundedEffectType') -> bool:
+
+    def __lt__(self, other: "GroundedEffectType") -> bool:
         return self.time < other.time
 
 
@@ -108,10 +114,12 @@ class LiftedEffectType:
         self.time = _make_bindable(time)
         self.resulting_fluents = resulting_fluents
 
-    def _ground(self, binding: Binding) -> 'GroundedEffectType':
+    def _ground(self, binding: Binding) -> "GroundedEffectType":
         grounded_time = self.time(binding)
         grounded_fluents = frozenset(
-            Fluent(f.name, *[binding.get(arg, arg) for arg in f.args], negated=f.negated)
+            Fluent(
+                f.name, *[binding.get(arg, arg) for arg in f.args], negated=f.negated
+            )
             for f in self.resulting_fluents
         )
         return GroundedEffect(grounded_time, grounded_fluents)
@@ -139,14 +147,15 @@ class Effect(LiftedEffectType):
         self.time = _make_bindable(time)
         self.resulting_fluents = resulting_fluents
 
+
 class GroundedProbEffect(GroundedEffectType):
-    __slots__ = ('time', 'prob_effects', 'resulting_fluents', '_hash')
+    __slots__ = ("time", "prob_effects", "resulting_fluents", "_hash")
 
     def __init__(
         self,
         time: float,
         prob_effects: tuple[tuple[float, tuple[GroundedEffectType, ...]], ...],
-        resulting_fluents: frozenset[Fluent] = frozenset()
+        resulting_fluents: frozenset[Fluent] = frozenset(),
     ):
         self.time = time
         self.prob_effects = prob_effects
@@ -166,19 +175,21 @@ class GroundedProbEffect(GroundedEffectType):
     def __hash__(self):
         return self._hash
 
+
 class ProbEffect(LiftedEffectType):
     def __init__(
         self,
         time: OptExpr,
         prob_effects: List[Tuple[OptExpr, List[Effect]]],
-        resulting_fluents: Set[Fluent] = set()
+        resulting_fluents: Set[Fluent] = set(),
     ):
         self.time = _make_bindable(time)
-        self.prob_effects = [(_make_bindable(prob), effects) 
-                             for prob, effects in prob_effects]
+        self.prob_effects = [
+            (_make_bindable(prob), effects) for prob, effects in prob_effects
+        ]
         self.resulting_fluents = resulting_fluents
 
-    def _ground(self, binding: Binding) -> 'GroundedProbEffect':
+    def _ground(self, binding: Binding) -> "GroundedProbEffect":
         # def evaluate(expr): return expr(binding) if callable(expr) else expr
         grounded_prob_effects = tuple(
             (prob(binding), tuple(e._ground(binding) for e in effect_list))
@@ -187,28 +198,42 @@ class ProbEffect(LiftedEffectType):
 
         grounded_time: float = self.time(binding)
         grounded_resulting_fluents = frozenset(
-            Fluent(f.name, *[binding.get(arg, arg) for arg in f.args], negated=f.negated)
+            Fluent(
+                f.name, *[binding.get(arg, arg) for arg in f.args], negated=f.negated
+            )
             for f in self.resulting_fluents
         )
 
-        return GroundedProbEffect(grounded_time, grounded_prob_effects, grounded_resulting_fluents)
+        return GroundedProbEffect(
+            grounded_time, grounded_prob_effects, grounded_resulting_fluents
+        )
 
 
 class Action:
-    def __init__(self, preconditions: frozenset[Fluent], 
-                 effects: List[GroundedEffectType], name: Optional[str] = None):
+    def __init__(
+        self,
+        preconditions: frozenset[Fluent],
+        effects: List[GroundedEffectType],
+        name: Optional[str] = None,
+    ):
         self.preconditions = frozenset(preconditions)
         self.effects = effects
         self.name = name or "anonymous"
         self._pos_precond = frozenset(f for f in self.preconditions if not f.negated)
-        self._neg_precond_flipped = frozenset(~f for f in self.preconditions if f.negated)
+        self._neg_precond_flipped = frozenset(
+            ~f for f in self.preconditions if f.negated
+        )
 
     def __str__(self):
         pre_str = ", ".join(str(p) for p in self.preconditions)
         eff_strs = []
         for eff in self.effects:
             eff_strs.append(f"    {str(eff)}")
-        return f"Action('{self.name}'\n  Preconditions: [{pre_str}]\n  Effects:\n    " + "\n    ".join(eff_strs) + ")"
+        return (
+            f"Action('{self.name}'\n  Preconditions: [{pre_str}]\n  Effects:\n    "
+            + "\n    ".join(eff_strs)
+            + ")"
+        )
 
     def __repr__(self):
         return self.__str__()
@@ -219,7 +244,7 @@ class State:
         self,
         time: float = 0,
         active_fluents: Optional[Union[frozenset[Fluent], Set[Fluent]]] = None,
-        upcoming_effects: Optional[List[Tuple[float, GroundedEffectType]]] = None
+        upcoming_effects: Optional[List[Tuple[float, GroundedEffectType]]] = None,
     ):
         self.time = time
         self.active_fluents = ActiveFluents(active_fluents)
@@ -229,14 +254,16 @@ class State:
     def satisfies_precondition(self, action: Action, relax: bool = False) -> bool:
         if relax:
             return action._pos_precond <= self.active_fluents.fluents
-        return (action._pos_precond <= self.active_fluents.fluents
-                and self.active_fluents.fluents.isdisjoint(action._neg_precond_flipped))
+        return (
+            action._pos_precond <= self.active_fluents.fluents
+            and self.active_fluents.fluents.isdisjoint(action._neg_precond_flipped)
+        )
 
-    def copy(self) -> 'State':
+    def copy(self) -> "State":
         return State(
             time=self.time,
             active_fluents=self.active_fluents.fluents,
-            upcoming_effects=list(self.upcoming_effects)
+            upcoming_effects=list(self.upcoming_effects),
         )
 
     def set_time(self, new_time: float):
@@ -249,8 +276,7 @@ class State:
 
     def queue_effect(self, effect: GroundedEffectType):
         self._hash = None
-        heapq.heappush(self.upcoming_effects,
-                       (self.time + effect.time, effect))
+        heapq.heappush(self.upcoming_effects, (self.time + effect.time, effect))
 
     def pop_effect(self):
         self._hash = None
@@ -262,12 +288,14 @@ class State:
         return State(
             time=0,
             active_fluents=self.active_fluents.fluents,
-            upcoming_effects=new_effects
+            upcoming_effects=new_effects,
         )
 
     def __hash__(self) -> int:
         if not self._hash:
-            self._hash = hash((self.time, self.active_fluents, tuple(self.upcoming_effects)))
+            self._hash = hash(
+                (self.time, self.active_fluents, tuple(self.upcoming_effects))
+            )
         return self._hash
         # return hash((self.time, self.active_fluents, tuple(self.upcoming_effects)))
 
@@ -286,7 +314,13 @@ class State:
 
 
 class Operator:
-    def __init__(self, name: str, parameters: List[Tuple[str, str]], preconditions: List[Fluent], effects: Sequence[LiftedEffectType]):
+    def __init__(
+        self,
+        name: str,
+        parameters: List[Tuple[str, str]],
+        preconditions: List[Fluent],
+        effects: Sequence[LiftedEffectType],
+    ):
         self.name = name
         self.parameters = parameters
         self.preconditions = preconditions
@@ -306,10 +340,14 @@ class Operator:
         def evaluate(value):
             return value(binding) if callable(value) else value
 
-        grounded_preconditions = frozenset(self._substitute_fluent(f, binding) for f in self.preconditions)
+        grounded_preconditions = frozenset(
+            self._substitute_fluent(f, binding) for f in self.preconditions
+        )
         grounded_effects = [eff._ground(binding) for eff in self.effects]
 
-        name_str = f"{self.name} " + " ".join(binding[var] for var, _ in self.parameters)
+        name_str = f"{self.name} " + " ".join(
+            binding[var] for var, _ in self.parameters
+        )
         return Action(grounded_preconditions, grounded_effects, name=name_str)
 
     def _substitute_fluent(self, fluent: Fluent, binding: Dict[str, str]) -> Fluent:
@@ -317,7 +355,9 @@ class Operator:
         return Fluent(fluent.name, *grounded_args, negated=fluent.negated)
 
 
-def transition(state: State, action: Action, relax: bool = False) -> List[Tuple[State, float]]:
+def transition(
+    state: State, action: Action, relax: bool = False
+) -> List[Tuple[State, float]]:
     if action and not state.satisfies_precondition(action, relax):
         raise ValueError("Precondition not satisfied for applying action")
 
@@ -332,13 +372,19 @@ def transition(state: State, action: Action, relax: bool = False) -> List[Tuple[
     return list(outcomes.items())
 
 
-def _advance_to_terminal(state: State, prob: float, outcomes: Dict[State, float], relax: bool = False) -> None:
+def _advance_to_terminal(
+    state: State, prob: float, outcomes: Dict[State, float], relax: bool = False
+) -> None:
     while state.upcoming_effects:
         scheduled_time, effect = state.upcoming_effects[0]
 
         # Check if we're ready to yield this state
         # FIXME: adding 'and not relax' means that we will always go to the 'terminus' even if another robot is free.
-        if scheduled_time > state.time and any(f.name == "free" for f in state.active_fluents) and not relax:
+        if (
+            scheduled_time > state.time
+            and any(f.name == "free" for f in state.active_fluents)
+            and not relax
+        ):
             outcomes[state] = prob
             return
 
@@ -354,7 +400,9 @@ def _advance_to_terminal(state: State, prob: float, outcomes: Dict[State, float]
             for branch_prob, effects in effect.prob_effects:
                 branched = state.copy()
                 for e in effects:
-                    heapq.heappush(branched.upcoming_effects, (branched.time + e.time, e))
+                    heapq.heappush(
+                        branched.upcoming_effects, (branched.time + e.time, e)
+                    )
                 _advance_to_terminal(branched, prob * branch_prob, outcomes)
             return  # stop after branching
 
@@ -372,15 +420,17 @@ def get_action_by_name(actions: List[Action], name: str) -> Action:
 def get_next_actions(state: State, all_actions: List[Action]) -> List[Action]:
     # Step 1: Extract all `free(...)` fluents
     free_robot_fluents = sorted(
-        [f for f in state.active_fluents if f.name == "free"],
-        key=str
+        [f for f in state.active_fluents if f.name == "free"], key=str
     )
     neg_active_fluents = state.active_fluents.update({~f for f in free_robot_fluents})
 
     # Step 2: Check each robot individually
     for free_pred in free_robot_fluents:
         # Create a restricted version of the state
-        temp_state = State(time=state.time, active_fluents=neg_active_fluents.update({free_pred}).fluents)
+        temp_state = State(
+            time=state.time,
+            active_fluents=neg_active_fluents.update({free_pred}).fluents,
+        )
 
         # Step 3: Check for applicable actions
         applicable = [a for a in all_actions if temp_state.satisfies_precondition(a)]
