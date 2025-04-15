@@ -243,16 +243,17 @@ class State:
     def __init__(
         self,
         time: float = 0,
-        active_fluents: Optional[Union[frozenset[Fluent], Set[Fluent], ActiveFluents]] = None,
+        active_fluents: Optional[Union[frozenset[Fluent], Set[Fluent]]] = None,
         upcoming_effects: Optional[List[Tuple[float, GroundedEffectType]]] = None,
     ):
         self.time = time
-        if not active_fluents:
-            self.active_fluents = ActiveFluents()
-        elif isinstance(active_fluents, ActiveFluents):
-            self.active_fluents = active_fluents
-        else:
-            self.active_fluents = ActiveFluents(active_fluents)
+        self.active_fluents = frozenset(active_fluents)
+        # if not active_fluents:
+        #     self.active_fluents = ActiveFluents()
+        # elif isinstance(active_fluents, ActiveFluents):
+        #     self.active_fluents = active_fluents
+        # else:
+        #     self.active_fluents = ActiveFluents(active_fluents)
         self.upcoming_effects = upcoming_effects or []
         self._hash = None
 
@@ -260,14 +261,14 @@ class State:
         if relax:
             return action._pos_precond <= self.active_fluents.fluents
         return (
-            action._pos_precond <= self.active_fluents.fluents
-            and self.active_fluents.fluents.isdisjoint(action._neg_precond_flipped)
+            action._pos_precond <= self.active_fluents
+            and self.active_fluents.isdisjoint(action._neg_precond_flipped)
         )
 
     def copy(self) -> "State":
         return State(
             time=self.time,
-            active_fluents=self.active_fluents.fluents,
+            active_fluents=self.active_fluents,
             upcoming_effects=list(self.upcoming_effects),
         )
 
@@ -277,7 +278,17 @@ class State:
 
     def update_active_fluents(self, new_fluents: frozenset[Fluent], relax: bool = False):
         self._hash = None
-        self.active_fluents = self.active_fluents.update(new_fluents, relax=relax)
+
+        positives = {f for f in new_fluents if not f.negated}
+        if relax:
+            self.active_fluents = frozenset(self.active_fluents | positives)
+        else:
+            flipped_negatives = {~f for f in new_fluents if f.negated}
+            fluent_set = self.active_fluents - flipped_negatives | positives
+            self.active_fluents = frozenset(fluent_set)
+
+        fluent_set |= positives
+        self.active_fluents
 
     def queue_effect(self, effect: GroundedEffectType):
         self._hash = None
@@ -292,7 +303,7 @@ class State:
         new_effects = [(t - dt, e) for t, e in self.upcoming_effects]
         return State(
             time=0,
-            active_fluents=self.active_fluents.fluents,
+            active_fluents=self.active_fluents,
             upcoming_effects=new_effects,
         )
 
@@ -427,14 +438,15 @@ def get_next_actions(state: State, all_actions: List[Action]) -> List[Action]:
     free_robot_fluents = sorted(
         [f for f in state.active_fluents if f.name == "free"], key=str
     )
-    neg_active_fluents = state.active_fluents.update({~f for f in free_robot_fluents})
+    neg_active_fluents = {~f for f in free_robot_fluents}
+    # neg_active_fluents = state.active_fluents.update({~f for f in free_robot_fluents})
 
     # Step 2: Check each robot individually
     for free_pred in free_robot_fluents:
         # Create a restricted version of the state
         temp_state = State(
             time=state.time,
-            active_fluents=neg_active_fluents.update({free_pred}).fluents,
+            active_fluents=neg_active_fluents | {free_pred},
         )
 
         # Step 3: Check for applicable actions

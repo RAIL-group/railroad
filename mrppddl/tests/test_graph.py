@@ -189,11 +189,7 @@ def test_graph_traversal():
 
         return min_cost, path, actions
 
-    import time
-    stime = time.time()
     cost, path, actions = find_lowest_cost_goal_path(G, initial_state, is_goal_state)
-    print(time.time() - stime)
-    raise ValueError()
 
     state = initial_state
     print("Computed path")
