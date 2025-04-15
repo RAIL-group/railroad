@@ -1,5 +1,5 @@
 import pytest
-from mrppddl.core import Fluent, Effect, ActiveFluents, Operator, State, get_next_actions, transition, get_action_by_name, ProbEffect
+from mrppddl.core import Fluent, Effect, State, get_next_actions, transition, get_action_by_name
 from mrppddl.helper import construct_move_operator, construct_search_operator
 
 
@@ -23,47 +23,47 @@ def test_active_fluents_update_1():
     f2 = Fluent("free", "r1")
     f3 = Fluent("holding", "r1", "medkit")
 
-    af = ActiveFluents({f1, f2})
+    s = State(active_fluents={f1, f2})
 
     # Apply update with positive fluent and no conflict
-    af = af.update({f3})
-    assert f3 in af
+    s.update_active_fluents({f3})
+    assert f3 in s.active_fluents
 
-    # Apply update with negation of f2 (should remove f2)
-    af = af.update({~f2})
-    assert f2 not in af
-    assert f3 in af
+    # # Apply update with negation of f2 (should remove f2)
+    s.update_active_fluents({~f2})
+    assert f2 not in s.active_fluents
+    assert f3 in s.active_fluents
 
     # Apply update with both positive and negated fluent
-    af = af.update({~f3, f2})
-    assert f3 not in af
-    assert f2 in af
+    s.update_active_fluents({~f3, f2})
+    assert f3 not in s.active_fluents
+    assert f2 in s.active_fluents
 
 
 def test_active_fluents_update_2():
-    af = ActiveFluents({
+    state = State(active_fluents={
         Fluent('at robot1 bedroom'),
         Fluent('free robot1'),
     })
-
-    af = af.update({
+    state.update_active_fluents({
         ~Fluent('free robot1'),
         ~Fluent('at robot1 bedroom'),
         Fluent('at robot1 kitchen'),
         ~Fluent('found fork'),
     })
-    expected = ActiveFluents({
+    expected = State(active_fluents={
         Fluent('at robot1 kitchen'),
     })
-    assert af == expected, f"Unexpected result: {af}"
+
+    assert state == expected, f"Unexpected result: {state}"
 
     # Now re-add a positive fluent
-    af = af.update({Fluent('free robot1')})
-    expected = ActiveFluents({
+    state.update_active_fluents({Fluent('free robot1')})
+    expected = State(active_fluents={
         Fluent('free robot1'),
         Fluent('at robot1 kitchen'),
     })
-    assert af == expected, f"Unexpected result after re-adding: {af}"
+    assert state == expected, f"Unexpected result after re-adding: {state}"
 
 
 def test_ground_effect_time_float():

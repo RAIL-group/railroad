@@ -1,6 +1,6 @@
 from mrppddl.core import Operator, Fluent, Effect, State, Action, transition, OptCallable, get_next_actions, get_action_by_name
 from mrppddl.helper import _make_callable
-from typing import Callable, Union
+from typing import Callable
 import pytest
 
 def _plot_graph(G):

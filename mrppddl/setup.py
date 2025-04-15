@@ -1,6 +1,6 @@
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
-import pybind11
+import pybind11  # pyright: ignore[reportMissingImports]
 
 class get_pybind_include:
     def __str__(self):
@@ -12,7 +12,7 @@ ext_modules = [
         sources=["src/mrppddl/_bindings.cpp"],
         include_dirs=[
             "include",
-            get_pybind_include(),
+            get_pybind_include(),  # pyright: ignore[reportArgumentType]
         ],
         language="c++",
         extra_compile_args=["-std=c++17"],

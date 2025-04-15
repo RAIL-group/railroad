@@ -62,44 +62,6 @@ class Fluent:
         return Fluent(self.name, *self.args, negated=not self.negated)
 
 
-class ActiveFluents(object):
-    def __init__(self, fluents: Optional[Union[frozenset[Fluent], Set[Fluent]]] = None):
-        self.fluents: frozenset[Fluent] = frozenset(fluents) if fluents else frozenset()
-        self._hash = hash(self.fluents)
-
-    def update(
-        self, fluents: Union[frozenset[Fluent], Set[Fluent]], relax: bool = False
-    ) -> "ActiveFluents":
-        """Apply fluents to the active set: add positives, remove targets of negations."""
-        positives = {f for f in fluents if not f.negated}
-        fluent_set = set(self.fluents)
-
-        if not relax:
-            flipped_negatives = {~f for f in fluents if f.negated}
-            fluent_set -= flipped_negatives
-
-        fluent_set |= positives
-        return ActiveFluents(fluent_set)
-
-    def __contains__(self, f: Fluent) -> bool:
-        return f in self.fluents
-
-    def __iter__(self):
-        return iter(self.fluents)
-
-    def __str__(self):
-        return f"{{{', '.join(str(f) for f in sorted(self.fluents, key=str))}}}"
-
-    def __repr__(self):
-        return str(self)
-
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, ActiveFluents) and self._hash == other._hash
-
-    def __hash__(self):
-        return self._hash
-
-
 class GroundedEffectType:
     def __init__(self, time: float, resulting_fluents: frozenset[Fluent]):
         self.time = time
@@ -247,19 +209,18 @@ class State:
         upcoming_effects: Optional[List[Tuple[float, GroundedEffectType]]] = None,
     ):
         self.time = time
-        self.active_fluents = frozenset(active_fluents)
-        # if not active_fluents:
-        #     self.active_fluents = ActiveFluents()
-        # elif isinstance(active_fluents, ActiveFluents):
-        #     self.active_fluents = active_fluents
-        # else:
-        #     self.active_fluents = ActiveFluents(active_fluents)
+        if not active_fluents:
+            self.active_fluents = frozenset()
+        elif isinstance(active_fluents, frozenset):
+            self.active_fluents = active_fluents
+        else:
+            self.active_fluents = frozenset(active_fluents)
         self.upcoming_effects = upcoming_effects or []
         self._hash = None
 
     def satisfies_precondition(self, action: Action, relax: bool = False) -> bool:
         if relax:
-            return action._pos_precond <= self.active_fluents.fluents
+            return action._pos_precond <= self.active_fluents
         return (
             action._pos_precond <= self.active_fluents
             and self.active_fluents.isdisjoint(action._neg_precond_flipped)
@@ -276,7 +237,7 @@ class State:
         self.time = new_time
         self._hash = None
 
-    def update_active_fluents(self, new_fluents: frozenset[Fluent], relax: bool = False):
+    def update_active_fluents(self, new_fluents: Union[set[Fluent], frozenset[Fluent]], relax: bool = False):
         self._hash = None
 
         positives = {f for f in new_fluents if not f.negated}
@@ -286,9 +247,6 @@ class State:
             flipped_negatives = {~f for f in new_fluents if f.negated}
             fluent_set = self.active_fluents - flipped_negatives | positives
             self.active_fluents = frozenset(fluent_set)
-
-        fluent_set |= positives
-        self.active_fluents
 
     def queue_effect(self, effect: GroundedEffectType):
         self._hash = None

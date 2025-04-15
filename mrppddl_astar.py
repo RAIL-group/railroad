@@ -138,8 +138,8 @@ def ff_heuristic(
     t0 = state.time
     state = transition(state, None, relax=True)[0][0]
     dtime = state.time - t0
-    known_fluents = set(state.active_fluents.fluents)
-    initial_known_fluents = frozenset(known_fluents)
+    initial_known_fluents = state.active_fluents
+    known_fluents = set(state.active_fluents)
     if initial_known_fluents in ff_memory.keys():
         return dtime + ff_memory[initial_known_fluents]
     newly_added = set(known_fluents)
@@ -161,7 +161,7 @@ def ff_heuristic(
                 action_to_duration[action] = duration
                 visited_actions.add(action)
 
-                for f in successor.active_fluents.fluents:
+                for f in successor.active_fluents:
                     if f not in known_fluents:
                         known_fluents.add(f)
                         newly_added.add(f)
@@ -188,14 +188,14 @@ def ff_heuristic(
 
     while needed:
         f = needed.pop()
-        if f in state.active_fluents.fluents:
+        if f in state.active_fluents:
             continue
         action = fact_to_action.get(f)
         if action and action not in used_actions:
             used_actions.add(action)
             total_duration += action_to_duration[action]
             for p in action._pos_precond:
-                if p not in state.active_fluents.fluents:
+                if p not in state.active_fluents:
                     needed.add(p)
 
     ff_memory[initial_known_fluents] = total_duration
