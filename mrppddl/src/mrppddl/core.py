@@ -19,7 +19,7 @@ def _make_bindable(opt_expr: OptExpr) -> Bindable:
         return lambda b: fn(*[b.get(arg, arg) for arg in args])
 
 
-class Fluent(object):
+class Fluent:
     __slots__ = ("name", "args", "negated", "_hash")
 
     def __init__(self, name: str, *args: str, negated: bool = False):
@@ -56,7 +56,7 @@ class Fluent(object):
         return self._hash
 
     def __eq__(self, other: object) -> bool:
-        return self._hash == other._hash
+        return isinstance(other, Fluent) and self._hash == other._hash
 
     def __invert__(self) -> "Fluent":
         return Fluent(self.name, *self.args, negated=not self.negated)
@@ -94,14 +94,14 @@ class ActiveFluents(object):
         return str(self)
 
     def __eq__(self, other: object) -> bool:
-        return self._hash == other._hash
+        return isinstance(other, ActiveFluents) and self._hash == other._hash
 
     def __hash__(self):
         return self._hash
 
 
 class GroundedEffectType:
-    def __init__(self, time: float, resulting_fluents: Set[Fluent]):
+    def __init__(self, time: float, resulting_fluents: frozenset[Fluent]):
         self.time = time
         self.resulting_fluents = resulting_fluents
 
@@ -243,11 +243,16 @@ class State:
     def __init__(
         self,
         time: float = 0,
-        active_fluents: Optional[Union[frozenset[Fluent], Set[Fluent]]] = None,
+        active_fluents: Optional[Union[frozenset[Fluent], Set[Fluent], ActiveFluents]] = None,
         upcoming_effects: Optional[List[Tuple[float, GroundedEffectType]]] = None,
     ):
         self.time = time
-        self.active_fluents = ActiveFluents(active_fluents)
+        if not active_fluents:
+            self.active_fluents = ActiveFluents()
+        elif isinstance(active_fluents, ActiveFluents):
+            self.active_fluents = active_fluents
+        else:
+            self.active_fluents = ActiveFluents(active_fluents)
         self.upcoming_effects = upcoming_effects or []
         self._hash = None
 
@@ -270,7 +275,7 @@ class State:
         self.time = new_time
         self._hash = None
 
-    def update_active_fluents(self, new_fluents: List[Fluent], relax: bool = False):
+    def update_active_fluents(self, new_fluents: frozenset[Fluent], relax: bool = False):
         self._hash = None
         self.active_fluents = self.active_fluents.update(new_fluents, relax=relax)
 
@@ -356,7 +361,7 @@ class Operator:
 
 
 def transition(
-    state: State, action: Action, relax: bool = False
+    state: State, action: Optional[Action], relax: bool = False
 ) -> List[Tuple[State, float]]:
     if action and not state.satisfies_precondition(action, relax):
         raise ValueError("Precondition not satisfied for applying action")

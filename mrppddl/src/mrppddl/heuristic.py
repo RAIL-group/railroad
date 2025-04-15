@@ -60,7 +60,7 @@ class RelaxedPlanningGraph:
             action = self.fact_to_action.get(f)
             if action and action not in used_actions:
                 used_actions.add(action)
-                total_duration += self.action_to_duration.get(action)
+                total_duration += self.action_to_duration[action]
                 for p in action._pos_precond:
                     if p not in initial_fluents:
                         needed.add(p)
