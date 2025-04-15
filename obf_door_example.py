@@ -55,8 +55,6 @@ def _plot_graph(G, state_str=None,
         goal_nodes = {n for n in G.nodes if is_goal_fn(n)}
     else:
         goal_nodes = set()
-    print("AHA")
-    print(goal_nodes)
 
     if node_value_map:
         norm = plt.Normalize(vmin=min(node_value_map.values()), vmax=max(node_value_map.values()))
@@ -183,9 +181,7 @@ def build_full_graph(initial_state, all_actions, is_goal_state: Optional[Callabl
         expanded_states.add(state)
 
         available_actions = get_next_actions(state, all_actions)
-        print("What's available:")
         for action in available_actions:
-            print(action.name)
             outcomes = transition(state, action)
             for successor, prob in outcomes:
                 if prob == 0.0:
@@ -211,56 +207,6 @@ def build_full_graph(initial_state, all_actions, is_goal_state: Optional[Callabl
     
     return G
 
-
-def construct_move_and_visit_operator(move_time: OptCallable) -> Operator:
-    move_time = _make_callable(move_time)
-    return Operator(
-        name="move_visit",
-        parameters=[("?robot", "robot"), ("?loc_from", "location"), ("?loc_to", "location")],
-        preconditions=[F("at ?robot ?loc_from"), F("not visited ?loc_to")],
-        effects=[Effect(time=(move_time, ["?robot", "?loc_from", "?loc_to"]),
-                        resulting_fluents={F("visited ?loc_to"), F("at ?robot ?loc_to")})])
-
-# Move and Visit Operator
-def move_time_fn(robot, start, end):
-    seed_input = start + '::' + end
-    seed = int(hashlib.sha256(seed_input.encode()).hexdigest(), 16)
-    random.seed(seed)
-    return 1.0
-
-random.seed(8616)
-move_visit_op = construct_move_and_visit_operator(move_time_fn)
-
-# Ground actions
-objects_by_type = {
-    "robot": ["robot"],
-    "location": ["start", "roomA", "roomB", "roomC", "roomD", "roomE", "roomF"],
-    # "location": ["start", "roomA", "roomB", "roomC"],
-}
-actions = move_visit_op.instantiate(objects_by_type)
-# Initial state
-initial_state = State(
-    time=0,
-    active_fluents={
-        Fluent("at robot start"), 
-        Fluent("visited start"),
-    }
-)
-
-
-def is_goal_vis_a(state: State) -> bool:
-    return Fluent("visited roomA") in state.active_fluents
-
-def is_goal_vis_b(state: State) -> bool:
-    return Fluent("visited roomB") in state.active_fluents
-
-def is_goal_vis_ab(state: State) -> bool:
-    return (
-        Fluent("visited roomA") in state.active_fluents
-        and Fluent("visited roomB") in state.active_fluents
-    )
-
-
 ## Door World
 def build_door_world():
     objects_by_type = {
@@ -269,17 +215,12 @@ def build_door_world():
         "key": ["blue_key", "red_key"],
         "location": ["start", "rk_loc", "bk_loc", "doors_loc"]
     }
-    def move_time_fn(robot, start, end):
-        seed_input = start + '::' + end
-        seed = int(hashlib.sha256(seed_input.encode()).hexdigest(), 16)
-        random.seed(seed)
-        return 1.0
     operators = []
     operators.append(Operator(
         name="move",
-        parameters=[("?robot", "robot"), ("?loc_from", "location"), ("?loc_to", "location")],
-        preconditions=[F("at ?loc_from ?robot")],
-        effects=[Effect(time=1.0, resulting_fluents={F("at ?loc_to ?robot"), F("not at ?loc_from ?robot")})]))
+        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F("at ?from ?robot")],
+        effects=[Effect(time=1.0, resulting_fluents={F("at ?to ?robot"), F("not at ?from ?robot")})]))
     operators.append(Operator(
         name="pick_key",
         parameters=[("?robot", "robot"), ("?loc", "location"), ("?key", "key")],
@@ -293,7 +234,6 @@ def build_door_world():
     all_actions = [action for operator in operators
                    for action in operator.instantiate(objects_by_type)]
    
-    # Initial state
     initial_state = State(
         time=0,
         active_fluents={
@@ -319,18 +259,9 @@ def build_door_world():
 
 
 initial_state, all_actions, goal_functions = build_door_world()
-print(all_actions)
 G = build_full_graph(initial_state, all_actions)
-for s in G.nodes:
-    print(s)
 productive_G = get_graph_subset_productive_edges(G, goal_functions)
 pruned_G = prune_disconnected_nodes(productive_G, initial_state)
-
-# plt.subplot(221)
-# _plot_graph(G)
-# plt.subplot(222)
-# _plot_graph(productive_G)
-# plt.subplot(223)
 
 pos = nx.kamada_kawai_layout(pruned_G)
 plt.subplot(131)
@@ -351,7 +282,6 @@ plt.subplot(133)
 
 def confusion_fn(values):
     c = (max(values)-min(values))/(max(values) + 0.0001)
-    print(values, c)
     return c
 
 confusion_map = {node: [] for node in pruned_G.nodes}
