@@ -1,7 +1,7 @@
 from mrppddl.core import Operator, Fluent, Effect, transition, OptCallable, get_next_actions, get_action_by_name
 from mrppddl.core import State, Action
 from mrppddl.helper import _make_callable
-from typing import Callable, Union, List, Optional
+from typing import Callable, Union, List, Optional, Dict
 import random
 import hashlib
 import matplotlib.pyplot as plt
@@ -12,20 +12,39 @@ import networkx as nx
 
 F = Fluent
 
+def _get_distance_from_goal(G: nx.DiGraph, is_goal_fn: Callable):
+    goal_nodes = {n for n in G.nodes if is_goal_fn(n)}
+    reversed_G = G.reverse(copy=True)
+    costs, _ = nx.multi_source_dijkstra(reversed_G, sources=goal_nodes,
+                                        weight='weight')
+    return costs
 
-def _plot_graph(G, state_str=None, is_goal_fn: Optional[Callable] = None):
-    pos = nx.kamada_kawai_layout(G)
+    # min_distance = {}
+    # for goal in goal_nodes:
+    #     costs, _ = nx.single_source_dijkstra(reversed_G, source=goal, weight='weight')
+    #     for node, dist in costs.items():
+    #         if node not in min_distance or dist < min_distance[node]:
+    #             min_distance[node] = dist
 
+    # return {node: min_distance.get(node, np.inf) for node in G.nodes}
+
+
+def _plot_graph(G, state_str=None, 
+                node_value_map: Optional[Dict[State, float]] = None,
+                is_goal_fn: Optional[Callable] = None,
+                pos=None):
+    if not pos:
+        pos = nx.kamada_kawai_layout(G)
+
+    # Label the nodes and edges
     edge_labels = {
         (u, v): f"{data['action'].name.split()[0]}\n{data['weight']:.1f}s"
         for u, v, data in G.edges(data=True)
     }
-
     if not state_str:
-        state_str = lambda state: '\n'.join([str(f) for f in state.active_fluents])
+        state_str = lambda state: '\n'.join([str(f) for f in state.active_fluents])  #noqa: E731
     node_labels = {node: f"{state_str(node)}" for node in G.nodes}
 
-    node_colors = 'lightblue'
     norm = None
     cmap = plt.cm.viridis.reversed()
     color_map = {}
@@ -34,33 +53,21 @@ def _plot_graph(G, state_str=None, is_goal_fn: Optional[Callable] = None):
     goal_nodes = set()
     if is_goal_fn:
         goal_nodes = {n for n in G.nodes if is_goal_fn(n)}
-        reversed_G = G.reverse(copy=True)
-        min_distance = {}
-
-        for goal in goal_nodes:
-            costs, _ = nx.single_source_dijkstra(reversed_G, source=goal, weight='weight')
-            for node, dist in costs.items():
-                if node not in min_distance or dist < min_distance[node]:
-                    min_distance[node] = dist
-
-        distances = np.array([min_distance.get(n, np.inf) for n in G.nodes])
-        finite_mask = np.isfinite(distances)
-        if finite_mask.any():
-            norm = plt.Normalize(vmin=np.min(distances[finite_mask]), vmax=np.max(distances[finite_mask]))
-            for node in G.nodes:
-                dist = min_distance.get(node, np.inf)
-                color_map[node] = cmap(norm(dist)) if np.isfinite(dist) else 'lightgray'
-        else:
-            color_map = {n: 'lightgray' for n in G.nodes}
-
     else:
+        goal_nodes = set()
+    print("AHA")
+    print(goal_nodes)
+
+    if node_value_map:
+        norm = plt.Normalize(vmin=min(node_value_map.values()), vmax=max(node_value_map.values()))
+        color_map = {node: cmap(norm(node_value_map[node])) for node in G.nodes}
+    else:
+        norm = None
         color_map = {n: 'lightblue' for n in G.nodes}
 
     # Separate goal and non-goal nodes
     non_goal_nodes = [n for n in G.nodes if n not in goal_nodes]
     goal_nodes = list(goal_nodes)  # Convert to list for indexing
-
-    plt.figure(figsize=(8, 6))
 
     # Draw non-goal nodes (filled)
     nx.draw_networkx_nodes(
@@ -74,8 +81,8 @@ def _plot_graph(G, state_str=None, is_goal_fn: Optional[Callable] = None):
     nx.draw_networkx_nodes(
         G, pos,
         nodelist=goal_nodes,
-        node_color='grey',
-        node_size=80,
+        node_color='lightgrey',
+        node_size=60,
         edgecolors=[color_map[n] for n in goal_nodes],
         linewidths=1,
         node_shape='o',
@@ -87,16 +94,15 @@ def _plot_graph(G, state_str=None, is_goal_fn: Optional[Callable] = None):
     nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=6)
 
     # Colorbar
-    if is_goal_fn and norm:
+    if node_value_map and norm:
         sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
         sm.set_array([])
-        cbar = plt.colorbar(sm, shrink=0.7, ax=plt.gca())
-        cbar.set_label("Distance to Goal (seconds)")
+        cbar = plt.colorbar(sm, shrink=0.9, ax=plt.gca())  #noqa F841
+        # cbar.set_label("Distance to Goal (seconds)")
 
     plt.title("State-Action Graph")
     plt.axis('off')
     plt.tight_layout()
-    plt.show()
 
 
 def _get_productive_edges_for_goal(
@@ -325,7 +331,39 @@ pruned_G = prune_disconnected_nodes(productive_G, initial_state)
 # plt.subplot(222)
 # _plot_graph(productive_G)
 # plt.subplot(223)
+
+pos = nx.kamada_kawai_layout(pruned_G)
+plt.subplot(131)
+node_value_map_0 = _get_distance_from_goal(pruned_G, goal_functions[0])
 _plot_graph(pruned_G,
             state_str=lambda state: '\n'.join([str(f) for f in state.active_fluents if 'holding' in f.name or 'open' in f.name]),
-            is_goal_fn=goal_functions[0])
+            node_value_map=node_value_map_0,
+            is_goal_fn=goal_functions[0],
+            pos=pos)
+plt.subplot(132)
+node_value_map_1 = _get_distance_from_goal(pruned_G, goal_functions[1])
+_plot_graph(pruned_G,
+            state_str=lambda state: '\n'.join([str(f) for f in state.active_fluents if 'holding' in f.name or 'open' in f.name]),
+            node_value_map=node_value_map_1,
+            is_goal_fn=goal_functions[1],
+            pos=pos)
+plt.subplot(133)
+
+def confusion_fn(values):
+    c = (max(values)-min(values))/(max(values) + 0.0001)
+    print(values, c)
+    return c
+
+confusion_map = {node: [] for node in pruned_G.nodes}
+for goal_fn in goal_functions:
+    distances = _get_distance_from_goal(pruned_G, goal_fn)
+    for node in confusion_map.keys():
+        confusion_map[node].append(distances[node])
+        
+
+confusion_map = {node: confusion_fn(values) for node, values in confusion_map.items()}
+_plot_graph(pruned_G,
+            state_str=lambda state: '\n'.join([str(f) for f in state.active_fluents if 'holding' in f.name or 'open' in f.name]),
+            node_value_map=confusion_map,
+            pos=pos)
 plt.show()
