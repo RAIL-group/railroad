@@ -1,5 +1,5 @@
-from .core import Operator, Fluent, Effect, State, Action, transition, OptCallable, get_next_actions, get_action_by_name
-from .helper import _make_callable
+from mrppddl.core import Operator, Fluent, Effect, State, Action, transition, OptCallable, get_next_actions, get_action_by_name
+from mrppddl.helper import _make_callable
 from typing import Callable, Union
 import pytest
 
@@ -189,7 +189,11 @@ def test_graph_traversal():
 
         return min_cost, path, actions
 
+    import time
+    stime = time.time()
     cost, path, actions = find_lowest_cost_goal_path(G, initial_state, is_goal_state)
+    print(time.time() - stime)
+    raise ValueError()
 
     state = initial_state
     print("Computed path")

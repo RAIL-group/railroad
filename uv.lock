@@ -288,6 +288,11 @@ wheels = [
 ]
 
 [[package]]
+name = "mrppddl"
+version = "0.1.0"
+source = { directory = "mrppddl" }
+
+[[package]]
 name = "mypy"
 version = "1.15.0"
 source = { registry = "https://pypi.org/simple" }
@@ -589,12 +594,14 @@ dependencies = [
     { name = "graphx" },
     { name = "ipytest" },
     { name = "matplotlib" },
+    { name = "mrppddl" },
     { name = "mypy" },
     { name = "networkx" },
     { name = "pyqt5" },
     { name = "pyright" },
     { name = "pytest-html" },
     { name = "scipy" },
+    { name = "setuptools" },
     { name = "xlrd" },
 ]
 
@@ -603,12 +610,14 @@ requires-dist = [
     { name = "graphx", specifier = ">=0.0.4" },
     { name = "ipytest", specifier = ">=0.14.2" },
     { name = "matplotlib", specifier = ">=3.10.1" },
+    { name = "mrppddl", directory = "mrppddl" },
     { name = "mypy", specifier = ">=1.15.0" },
     { name = "networkx", specifier = ">=3.4.2" },
     { name = "pyqt5", specifier = ">=5.15.11" },
     { name = "pyright", specifier = ">=1.1.399" },
     { name = "pytest-html", specifier = ">=4.1.1" },
     { name = "scipy", specifier = ">=1.15.2" },
+    { name = "setuptools", specifier = ">=78.1.0" },
     { name = "xlrd", specifier = ">=2.0.1" },
 ]
 
@@ -639,6 +648,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/03/f3/e699e19cabe96bbac5189c04aaa970718f0105cff03d458dc5e2b6bd1e8c/scipy-1.15.2-cp313-cp313t-musllinux_1_2_aarch64.whl", hash = "sha256:bae43364d600fdc3ac327db99659dcb79e6e7ecd279a75fe1266669d9a652828", size = 36545159 },
     { url = "https://files.pythonhosted.org/packages/af/f5/ab3838e56fe5cc22383d6fcf2336e48c8fe33e944b9037fbf6cbdf5a11f8/scipy-1.15.2-cp313-cp313t-musllinux_1_2_x86_64.whl", hash = "sha256:f031846580d9acccd0044efd1a90e6f4df3a6e12b4b6bd694a7bc03a89892b28", size = 39136566 },
     { url = "https://files.pythonhosted.org/packages/0a/c8/b3f566db71461cabd4b2d5b39bcc24a7e1c119535c8361f81426be39bb47/scipy-1.15.2-cp313-cp313t-win_amd64.whl", hash = "sha256:fe8a9eb875d430d81755472c5ba75e84acc980e4a8f6204d402849234d3017db", size = 40477705 },
+]
+
+[[package]]
+name = "setuptools"
+version = "78.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a9/5a/0db4da3bc908df06e5efae42b44e75c81dd52716e10192ff36d0c1c8e379/setuptools-78.1.0.tar.gz", hash = "sha256:18fd474d4a82a5f83dac888df697af65afa82dec7323d09c3e37d1f14288da54", size = 1367827 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/54/21/f43f0a1fa8b06b32812e0975981f4677d28e0f3271601dc88ac5a5b83220/setuptools-78.1.0-py3-none-any.whl", hash = "sha256:3e386e96793c8702ae83d17b853fb93d3e09ef82ec62722e61da5cd22376dcd8", size = 1256108 },
 ]
 
 [[package]]
