@@ -62,9 +62,9 @@ initial_state = State(
     active_fluents={
         F("at r1 start"), F("free r1"),
         F("at r2 start"), F("free r2"),
-        F("at r3 start"), F("free r3"),
-        F("at r4 start"), F("free r4"),
-        F("at r5 start"), F("free r5"),
+        # F("at r3 start"), F("free r3"),
+        # F("at r4 start"), F("free r4"),
+        # F("at r5 start"), F("free r5"),
         F("visited start"),
     })
 
@@ -206,7 +206,7 @@ stime = time.time()
 # from mrppddl.heuristic import make_ff_heuristic
 # ff_heuristic = make_ff_heuristic(all_actions, is_goal_state, transition)
 path = astar(initial_state, all_actions, is_goal_state,
-             lambda state: ff_heuristic(state))
+             lambda state: ff_heuristic(state) / 1.5)
 # path = astar(initial_state, all_actions, is_goal_state,
 #              lambda state: ff_heuristic(state, all_actions, is_goal_state))
 print(f"Planning time: {time.time() - stime}")

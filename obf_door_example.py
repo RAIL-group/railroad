@@ -1,11 +1,7 @@
-from mrppddl.core import Operator, Fluent, Effect, transition, OptCallable, get_next_actions, get_action_by_name
-from mrppddl.core import State, Action
-from mrppddl.helper import _make_callable
-from typing import Callable, Union, List, Optional, Dict
-import random
-import hashlib
+from mrppddl.core import Operator, Fluent, Effect, transition, get_next_actions
+from mrppddl.core import State
+from typing import Callable, List, Optional, Dict
 import matplotlib.pyplot as plt
-import numpy as np
 import networkx as nx
 
 
@@ -18,15 +14,6 @@ def _get_distance_from_goal(G: nx.DiGraph, is_goal_fn: Callable):
     costs, _ = nx.multi_source_dijkstra(reversed_G, sources=goal_nodes,
                                         weight='weight')
     return costs
-
-    # min_distance = {}
-    # for goal in goal_nodes:
-    #     costs, _ = nx.single_source_dijkstra(reversed_G, source=goal, weight='weight')
-    #     for node, dist in costs.items():
-    #         if node not in min_distance or dist < min_distance[node]:
-    #             min_distance[node] = dist
-
-    # return {node: min_distance.get(node, np.inf) for node in G.nodes}
 
 
 def _plot_graph(G, state_str=None, 
