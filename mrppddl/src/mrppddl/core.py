@@ -70,6 +70,7 @@ class GroundedEffectType:
     def __lt__(self, other: "GroundedEffectType") -> bool:
         return self.time < other.time
 
+
 class LiftedEffectType:
     def __init__(self, time: OptExpr, resulting_fluents: Set[Fluent]):
         self.time = _make_bindable(time)
@@ -220,9 +221,8 @@ class State:
     def satisfies_precondition(self, action: Action, relax: bool = False) -> bool:
         if relax:
             return action._pos_precond <= self.fluents
-        return (
-            action._pos_precond <= self.fluents
-            and self.fluents.isdisjoint(action._neg_precond_flipped)
+        return action._pos_precond <= self.fluents and self.fluents.isdisjoint(
+            action._neg_precond_flipped
         )
 
     def copy(self) -> "State":
@@ -236,7 +236,9 @@ class State:
         self.time = new_time
         self._hash = None
 
-    def update_fluents(self, new_fluents: Union[set[Fluent], frozenset[Fluent]], relax: bool = False):
+    def update_fluents(
+        self, new_fluents: Union[set[Fluent], frozenset[Fluent]], relax: bool = False
+    ):
         self._hash = None
 
         positives = {f for f in new_fluents if not f.negated}
@@ -266,9 +268,7 @@ class State:
 
     def __hash__(self) -> int:
         if not self._hash:
-            self._hash = hash(
-                (self.time, self.fluents, tuple(self.upcoming_effects))
-            )
+            self._hash = hash((self.time, self.fluents, tuple(self.upcoming_effects)))
         return self._hash
         # return hash((self.time, self.fluents, tuple(self.upcoming_effects)))
 
@@ -392,9 +392,7 @@ def get_action_by_name(actions: List[Action], name: str) -> Action:
 
 def get_next_actions(state: State, all_actions: List[Action]) -> List[Action]:
     # Step 1: Extract all `free(...)` fluents
-    free_robot_fluents = sorted(
-        [f for f in state.fluents if f.name == "free"], key=str
-    )
+    free_robot_fluents = sorted([f for f in state.fluents if f.name == "free"], key=str)
     # neg_fluents = {~f for f in free_robot_fluents}
     neg_state = state.copy()
     neg_state.update_fluents({~f for f in free_robot_fluents})

@@ -1,6 +1,7 @@
 from .core import Fluent, Action, State, transition
 from typing import Callable, Dict, List, Set, Tuple
 
+
 class RelaxedPlanningGraph:
     def __init__(self, actions: List[Action]):
         self.actions = actions
@@ -33,13 +34,18 @@ class RelaxedPlanningGraph:
                             next_newly_added.add(f)
                             self.fact_to_action[f] = action
                         elif f in self.fact_to_action.keys():
-                            self.fact_to_action[f] = min(action, self.fact_to_action[f],
-                                                         key=lambda a: a.effects[-1].time)
+                            self.fact_to_action[f] = min(
+                                action,
+                                self.fact_to_action[f],
+                                key=lambda a: a.effects[-1].time,
+                            )
             newly_added = next_newly_added
 
-    def compute_relaxed_plan_cost(self, initial_fluents: Set[Fluent], goal_fn: Callable[[Set[Fluent]], bool]) -> float:
+    def compute_relaxed_plan_cost(
+        self, initial_fluents: Set[Fluent], goal_fn: Callable[[Set[Fluent]], bool]
+    ) -> float:
         if not goal_fn(self.known_fluents):
-            return float('inf')
+            return float("inf")
 
         # Identify required goal fluents
         required = set()
@@ -71,7 +77,7 @@ class RelaxedPlanningGraph:
 def make_ff_heuristic(
     actions: List[Action],
     goal_fn: Callable[[Set[Fluent]], bool],
-    transition_fn: Callable[[State, Action, bool], List[Tuple[State, float]]]
+    transition_fn: Callable[[State, Action, bool], List[Tuple[State, float]]],
 ):
     raise NotImplementedError()
     rpg = RelaxedPlanningGraph(actions)
@@ -87,12 +93,7 @@ def make_ff_heuristic(
     return ff_heuristic
 
 
-def ff_heuristic(
-        state: State,
-        is_goal_fn,
-        all_actions,
-        ff_memory = None
-) -> float:
+def ff_heuristic(state: State, is_goal_fn, all_actions, ff_memory=None) -> float:
     # 1. Forward relaxed reachability
     t0 = state.time
     state = transition(state, None, relax=True)[0][0]
@@ -102,8 +103,8 @@ def ff_heuristic(
     if ff_memory and initial_known_fluents in ff_memory.keys():
         return dtime + ff_memory[initial_known_fluents]
     newly_added = set(known_fluents)
-    fact_to_action = {}       # Fluent -> Action that added it
-    action_to_duration = {}   # Action -> Relaxed duration
+    fact_to_action = {}  # Fluent -> Action that added it
+    action_to_duration = {}  # Action -> Relaxed duration
     visited_actions = set()
 
     while newly_added:
@@ -126,12 +127,13 @@ def ff_heuristic(
                         newly_added.add(f)
                         fact_to_action[f] = action
                     elif f in fact_to_action.keys():
-                        fact_to_action[f] = min(action, fact_to_action[f],
-                                                key=lambda a: a.effects[-1].time)
+                        fact_to_action[f] = min(
+                            action, fact_to_action[f], key=lambda a: a.effects[-1].time
+                        )
         newly_added = next_newly_added
 
     if not is_goal_fn(known_fluents):
-        return float('inf')  # Relaxed goal not reachable
+        return float("inf")  # Relaxed goal not reachable
 
     # 2. Extract required goal fluents by ablation
     required_fluents = set()

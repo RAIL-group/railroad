@@ -1,4 +1,5 @@
 import random
+import time
 from mrppddl.core import Fluent, Effect, Operator, State, transition
 from mrppddl.planner import astar
 from mrppddl.heuristic import ff_heuristic
@@ -64,7 +65,6 @@ def is_goal_state(fluents) -> bool:
         and (F("at r2 start") in fluents)
     )
 
-import time
 stime = time.time()
 ff_memory = dict()
 path = astar(initial_state, all_actions, is_goal_state,
