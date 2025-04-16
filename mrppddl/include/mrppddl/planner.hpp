@@ -3,6 +3,7 @@
 #include "mrppddl/core.hpp"
 #include "mrppddl/state.hpp"
 
+#include <iostream>
 #include <algorithm>
 #include <queue>
 #include <unordered_set>
@@ -82,6 +83,7 @@ inline std::vector<Action> reconstruct_path(const CameFromMap& came_from, State 
     std::vector<Action> path;
     auto it = came_from.find(current);
     while (it != came_from.end()) {
+	std::cerr << it->second.second.str() << std::endl;
         path.push_back(it->second.second);
         current = it->second.first;
         it = came_from.find(current);
@@ -121,7 +123,9 @@ inline std::optional<std::vector<Action>> astar(
         open_heap.pop();
 
         if (is_goal_state(current.fluents())) {
-            return reconstruct_path(came_from, current);
+	  std::cerr << current.hash() << std::endl;
+	  std::cerr << current.str() << std::endl;
+	  return reconstruct_path(came_from, current);
         }
 
         if (closed_set.count(current)) continue;
@@ -132,6 +136,10 @@ inline std::optional<std::vector<Action>> astar(
                 if (prob == 0.0) continue;
 
                 double g = successor.time();
+
+		std::cerr << "HSH" << std::endl;
+		std::cerr << current.hash() << std::endl;
+		std::cerr << successor.hash() << std::endl;
                 came_from[successor] = std::make_pair(current, action);
 
                 double h = heuristic_fn ? heuristic_fn(successor) : 0.0;

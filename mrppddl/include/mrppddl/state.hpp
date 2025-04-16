@@ -97,11 +97,12 @@ public:
 
     std::size_t hash() const {
       // FIXME: this isn't narrow enough; missing effects!!
-      std::size_t h;
-      h ^= std::hash<double>{}(time_);
-      for (const auto& f : fluents_) h ^= f.hash();
-      return h;
-      
+      return std::hash<std::string>{}(str());
+      // std::size_t h = 0;
+      // // h ^= std::hash<double>{}(time_);
+      // for (const auto& f : fluents_) h ^= f.hash();
+      // return h;
+
         // // if (!cached_hash_) {
         //     std::size_t h = std::hash<double>{}(time_);
         //     for (const auto& f : fluents_) h ^= f.hash();

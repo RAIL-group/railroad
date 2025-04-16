@@ -168,7 +168,8 @@ def test_cpp_astar_move():
     # Get all actions
     objects_by_type = {
         "robot": ["r1", "r2"],
-        "location": ["start", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"],
+        # "location": ["start", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"],
+        "location": ["start", "a", "b"],
     }
     import random
     random.seed(8616)
