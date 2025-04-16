@@ -35,7 +35,7 @@ inline std::vector<Action> get_next_actions(
         negated.insert(f.invert());
     }
 
-    State neg_state = state.copy();
+    State neg_state = State(state.time(), state.fluents());
     neg_state.update_fluents(negated);
 
     // Step 3: For each free predicate, create temp state with just that one enabled

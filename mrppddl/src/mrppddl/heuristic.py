@@ -73,6 +73,7 @@ def make_ff_heuristic(
     goal_fn: Callable[[Set[Fluent]], bool],
     transition_fn: Callable[[State, Action, bool], List[Tuple[State, float]]]
 ):
+    raise NotImplementedError()
     rpg = RelaxedPlanningGraph(actions)
 
     def ff_heuristic(state: State) -> float:
@@ -85,3 +86,77 @@ def make_ff_heuristic(
 
     return ff_heuristic
 
+
+def ff_heuristic(
+        state: State,
+        is_goal_fn,
+        all_actions,
+        ff_memory = None
+) -> float:
+    # 1. Forward relaxed reachability
+    t0 = state.time
+    state = transition(state, None, relax=True)[0][0]
+    dtime = state.time - t0
+    initial_known_fluents = state.fluents
+    known_fluents = set(state.fluents)
+    if ff_memory and initial_known_fluents in ff_memory.keys():
+        return dtime + ff_memory[initial_known_fluents]
+    newly_added = set(known_fluents)
+    fact_to_action = {}       # Fluent -> Action that added it
+    action_to_duration = {}   # Action -> Relaxed duration
+    visited_actions = set()
+
+    while newly_added:
+        next_newly_added = set()
+        state = State(time=0, fluents=known_fluents)
+        for action in all_actions:
+            if action in visited_actions:
+                continue
+            if not state.satisfies_precondition(action, relax=True):
+                continue
+
+            for successor, _ in transition(state, action, relax=True):
+                duration = successor.time - state.time
+                action_to_duration[action] = duration
+                visited_actions.add(action)
+
+                for f in successor.fluents:
+                    if f not in known_fluents:
+                        known_fluents.add(f)
+                        newly_added.add(f)
+                        fact_to_action[f] = action
+                    elif f in fact_to_action.keys():
+                        fact_to_action[f] = min(action, fact_to_action[f],
+                                                key=lambda a: a.effects[-1].time)
+        newly_added = next_newly_added
+
+    if not is_goal_fn(known_fluents):
+        return float('inf')  # Relaxed goal not reachable
+
+    # 2. Extract required goal fluents by ablation
+    required_fluents = set()
+    for f in known_fluents:
+        test_set = known_fluents - {f}
+        if not is_goal_fn(test_set):
+            required_fluents.add(f)
+
+    # 3. Backward relaxed plan extraction
+    needed = set(required_fluents)
+    used_actions = set()
+    total_duration = 0.0
+
+    while needed:
+        f = needed.pop()
+        if f in state.fluents:
+            continue
+        action = fact_to_action.get(f)
+        if action and action not in used_actions:
+            used_actions.add(action)
+            total_duration += action_to_duration[action]
+            for p in action._pos_precond:
+                if p not in state.fluents:
+                    needed.add(p)
+
+    if ff_memory:
+        ff_memory[initial_known_fluents] = total_duration
+    return dtime + total_duration
