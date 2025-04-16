@@ -1,6 +1,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
+#include <pybind11/functional.h>
 #include "mrppddl/core.hpp"
 #include "mrppddl/state.hpp"
 #include "mrppddl/planner.hpp"
@@ -112,8 +113,8 @@ py::class_<GroundedEffectType>(m, "GroundedEffectType")
 	.def_property_readonly("name", &Action::name)
 	.def_property_readonly("preconditions", &Action::preconditions)
 	.def_property_readonly("effects", &Action::effects)
-	.def_property_readonly("positive_preconditions", &Action::pos_preconditions)
-	.def_property_readonly("negated_preconditions_flipped", &Action::neg_precond_flipped)
+	.def_property_readonly("_pos_precond", &Action::pos_preconditions)
+	.def_property_readonly("_neg_precond_flipped", &Action::neg_precond_flipped)
 	.def("__str__", &Action::str)
 	.def("__repr__", [](const Action& a) { return a.str(); });
 
@@ -161,6 +162,21 @@ py::class_<GroundedEffectType>(m, "GroundedEffectType")
 	    return mrppddl::transition(state, action ? &action->get() : nullptr, relax);
 	  },
 	  py::arg("state"), py::arg("action") = std::nullopt, py::arg("relax") = false);
+
+    m.def("get_next_actions", &get_next_actions,
+	  py::arg("state"), py::arg("all_actions"),
+	  "Return list of applicable actions for at least one free robot");
+
+    m.def("make_goal_test", &mrppddl::make_goal_test, "Construct a goal-checking function",
+	  py::arg("goal_fluents"));
+    m.def("astar", &astar,
+          py::arg("start_state"),
+          py::arg("all_actions"),
+          py::arg("is_goal_state"),
+          py::arg("heuristic_fn") = nullptr,
+          "Run A* search and return the action path");
+
+
 
     // py::bind_vector<std::vector<GroundedEffectType>>(m, "GroundedEffectTypeVec");
     // py::bind_vector<std::vector<ProbBranch>>(m, "GroundedProbBranchVec");

@@ -96,16 +96,24 @@ public:
     }
 
     std::size_t hash() const {
-        if (!cached_hash_) {
-            std::size_t h = std::hash<double>{}(time_);
-            for (const auto& f : fluents_) h ^= f.hash();
-            for (const auto& [t, e] : upcoming_effects_) {
-                h ^= std::hash<double>{}(t);
-                h ^= std::hash<double>{}(e.time());
-            }
-            cached_hash_ = h;
-        }
-        return *cached_hash_;
+      // FIXME: this isn't narrow enough; missing effects!!
+      std::size_t h;
+      h ^= std::hash<double>{}(time_);
+      for (const auto& f : fluents_) h ^= f.hash();
+      return h;
+      
+        // // if (!cached_hash_) {
+        //     std::size_t h = std::hash<double>{}(time_);
+        //     for (const auto& f : fluents_) h ^= f.hash();
+	//     return h;
+        //     for (const auto& [t, e] : upcoming_effects_) {
+        //         h ^= std::hash<double>{}(t);
+        //         h ^= std::hash<double>{}(e.time());
+        //     }
+        //     cached_hash_ = h;
+	//     return h;
+        // // }
+        // return *cached_hash_;
     }
 
     bool operator==(const State& other) const {

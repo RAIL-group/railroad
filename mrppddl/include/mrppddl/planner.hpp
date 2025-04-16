@@ -90,6 +90,18 @@ inline std::vector<Action> reconstruct_path(const CameFromMap& came_from, State 
     return path;
 }
 
+inline std::function<bool(const std::unordered_set<Fluent>&)>
+make_goal_test(const std::unordered_set<Fluent>& goal_fluents) {
+    return [goal_fluents](const std::unordered_set<Fluent>& fluents) {
+        for (const auto& f : goal_fluents) {
+            if (fluents.find(f) == fluents.end()) {
+                return false;
+            }
+        }
+        return true;
+    };
+}
+
 inline std::optional<std::vector<Action>> astar(
     const State& start_state,
     const std::vector<Action>& all_actions,
