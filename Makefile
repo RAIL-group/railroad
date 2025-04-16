@@ -15,3 +15,6 @@ build-cpp:  ## Specifically build the C++ code
 
 clean:  ## Remove build artifacts and the venv
 	@rm -rf .venv mrppddl/build mrppddl/src/mrppddl/*cpython*
+
+typecheck:  ## Runs the typechecker via pyright
+	@uv run pyright -w mrppddl/src/mrppddl mrppddl/tests
