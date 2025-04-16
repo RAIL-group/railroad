@@ -29,7 +29,7 @@ def _plot_graph(G, state_str=None,
         for u, v, data in G.edges(data=True)
     }
     if not state_str:
-        state_str = lambda state: '\n'.join([str(f) for f in state.active_fluents])  #noqa: E731
+        state_str = lambda state: '\n'.join([str(f) for f in state.fluents])  #noqa: E731
     node_labels = {node: f"{state_str(node)}" for node in G.nodes}
 
     norm = None
@@ -223,7 +223,7 @@ def build_door_world():
    
     initial_state = State(
         time=0,
-        active_fluents={
+        fluents={
             F("at start robot"),
             F("at rk_loc red_key"),
             F("at bk_loc blue_key"),
@@ -235,10 +235,10 @@ def build_door_world():
     )
 
     def is_goal_open_red(state: State) -> bool:
-        return Fluent("open red_door") in state.active_fluents
+        return Fluent("open red_door") in state.fluents
 
     def is_goal_open_blue(state: State) -> bool:
-        return Fluent("open blue_door") in state.active_fluents
+        return Fluent("open blue_door") in state.fluents
     
     goal_functions = [is_goal_open_red, is_goal_open_blue]
 
@@ -254,14 +254,14 @@ pos = nx.kamada_kawai_layout(pruned_G)
 plt.subplot(131)
 node_value_map_0 = _get_distance_from_goal(pruned_G, goal_functions[0])
 _plot_graph(pruned_G,
-            state_str=lambda state: '\n'.join([str(f) for f in state.active_fluents if 'holding' in f.name or 'open' in f.name]),
+            state_str=lambda state: '\n'.join([str(f) for f in state.fluents if 'holding' in f.name or 'open' in f.name]),
             node_value_map=node_value_map_0,
             is_goal_fn=goal_functions[0],
             pos=pos)
 plt.subplot(132)
 node_value_map_1 = _get_distance_from_goal(pruned_G, goal_functions[1])
 _plot_graph(pruned_G,
-            state_str=lambda state: '\n'.join([str(f) for f in state.active_fluents if 'holding' in f.name or 'open' in f.name]),
+            state_str=lambda state: '\n'.join([str(f) for f in state.fluents if 'holding' in f.name or 'open' in f.name]),
             node_value_map=node_value_map_1,
             is_goal_fn=goal_functions[1],
             pos=pos)
@@ -280,7 +280,7 @@ for goal_fn in goal_functions:
 
 confusion_map = {node: confusion_fn(values) for node, values in confusion_map.items()}
 _plot_graph(pruned_G,
-            state_str=lambda state: '\n'.join([str(f) for f in state.active_fluents if 'holding' in f.name or 'open' in f.name]),
+            state_str=lambda state: '\n'.join([str(f) for f in state.fluents if 'holding' in f.name or 'open' in f.name]),
             node_value_map=confusion_map,
             pos=pos)
 plt.show()

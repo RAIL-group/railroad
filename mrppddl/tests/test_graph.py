@@ -19,7 +19,7 @@ def _plot_graph(G):
 
     # Optional: label nodes by hash or small index
     def state_str(state):
-        return '\n'.join([str(f) for f in state.active_fluents])
+        return '\n'.join([str(f) for f in state.fluents])
         
     node_labels = {node: f"{state_str(node)}" for idx, node in enumerate(G.nodes)}
 
@@ -78,7 +78,7 @@ def test_transition_regression_1():
     # Initial state
     initial_state = State(
         time=0,
-        active_fluents={
+        fluents={
             Fluent("at r1 start"), Fluent("free r1"),
             Fluent("at r2 start"), Fluent("free r2"),
             Fluent("visited start"),
@@ -115,7 +115,7 @@ def test_graph_traversal():
     # Initial state
     initial_state = State(
         time=0,
-        active_fluents={
+        fluents={
             Fluent("at r1 start"), Fluent("free r1"),
             Fluent("at r2 start"), Fluent("free r2"),
             Fluent("visited start"),
@@ -132,7 +132,7 @@ def test_graph_traversal():
     new_states = {initial_state}
 
     def is_goal_state(state: State) -> bool:
-        return len(objects_by_type['location']) == len([f for f in state.active_fluents
+        return len(objects_by_type['location']) == len([f for f in state.fluents
                                                         if f.name == 'visited'])
 
     counter = 0
@@ -199,7 +199,7 @@ def test_graph_traversal():
         state, _ = transition(state, action)[0]
         print(state)
 
-    print(f"Start: {initial_state.active_fluents}")
+    print(f"Start: {initial_state.fluents}")
     for action in actions:
         print(f"({action.name})")
 

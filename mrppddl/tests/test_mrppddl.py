@@ -18,48 +18,48 @@ def test_fluent_equality():
     assert not Fluent("at", "r1", "roomA") == ~Fluent("at r1 roomA")
 
 
-def test_active_fluents_update_1():
+def test_fluents_update_1():
     f1 = Fluent("at", "r1", "roomA")
     f2 = Fluent("free", "r1")
     f3 = Fluent("holding", "r1", "medkit")
 
-    s = State(active_fluents={f1, f2})
+    s = State(fluents={f1, f2})
 
     # Apply update with positive fluent and no conflict
-    s.update_active_fluents({f3})
-    assert f3 in s.active_fluents
+    s.update_fluents({f3})
+    assert f3 in s.fluents
 
     # # Apply update with negation of f2 (should remove f2)
-    s.update_active_fluents({~f2})
-    assert f2 not in s.active_fluents
-    assert f3 in s.active_fluents
+    s.update_fluents({~f2})
+    assert f2 not in s.fluents
+    assert f3 in s.fluents
 
     # Apply update with both positive and negated fluent
-    s.update_active_fluents({~f3, f2})
-    assert f3 not in s.active_fluents
-    assert f2 in s.active_fluents
+    s.update_fluents({~f3, f2})
+    assert f3 not in s.fluents
+    assert f2 in s.fluents
 
 
-def test_active_fluents_update_2():
-    state = State(active_fluents={
+def test_fluents_update_2():
+    state = State(fluents={
         Fluent('at robot1 bedroom'),
         Fluent('free robot1'),
     })
-    state.update_active_fluents({
+    state.update_fluents({
         ~Fluent('free robot1'),
         ~Fluent('at robot1 bedroom'),
         Fluent('at robot1 kitchen'),
         ~Fluent('found fork'),
     })
-    expected = State(active_fluents={
+    expected = State(fluents={
         Fluent('at robot1 kitchen'),
     })
 
     assert state == expected, f"Unexpected result: {state}"
 
     # Now re-add a positive fluent
-    state.update_active_fluents({Fluent('free robot1')})
-    expected = State(active_fluents={
+    state.update_fluents({Fluent('free robot1')})
+    expected = State(fluents={
         Fluent('free robot1'),
         Fluent('at robot1 kitchen'),
     })
@@ -131,7 +131,7 @@ def test_move_sequence(move_time):
     # Initial state
     initial_state = State(
         time=0,
-        active_fluents={
+        fluents={
             Fluent("at", "r1", "roomA"),
             Fluent("at", "r2", "roomA"),
             Fluent("free", "r1"),
@@ -151,8 +151,8 @@ def test_move_sequence(move_time):
     assert len(outcomes) == 1
     state1, prob1 = outcomes[0]
     assert prob1 == 1.0
-    assert Fluent("free", "r1") not in state1.active_fluents
-    assert Fluent("free", "r2") in state1.active_fluents
+    assert Fluent("free", "r1") not in state1.fluents
+    assert Fluent("free", "r2") in state1.fluents
     assert len(state1.upcoming_effects) == 1
 
     # Second transition: move r2 from roomA to roomB
@@ -163,10 +163,10 @@ def test_move_sequence(move_time):
     assert len(outcomes) == 1
     state2, prob2 = outcomes[0]
     assert prob2 == 1.0
-    assert Fluent("at", "r1", "roomB") in state2.active_fluents
-    assert Fluent("at", "r2", "roomB") in state2.active_fluents
-    assert Fluent("free", "r1") in state2.active_fluents
-    assert Fluent("free", "r2") in state2.active_fluents
+    assert Fluent("at", "r1", "roomB") in state2.fluents
+    assert Fluent("at", "r2", "roomB") in state2.fluents
+    assert Fluent("free", "r1") in state2.fluents
+    assert Fluent("free", "r2") in state2.fluents
     assert state2.time == 5
     assert len(state2.upcoming_effects) == 0
 
@@ -190,7 +190,7 @@ def test_search_sequence():
     # Initial state
     initial_state = State(
         time=0,
-        active_fluents={
+        fluents={
             Fluent("at r1 roomA"),
             Fluent("free r1"),
         }
@@ -207,20 +207,20 @@ def test_search_sequence():
 
     # Verify high-probability (success) branch
     high_prob_state = next(s for s, p in outcomes if round(p, 2) == 0.8)
-    assert Fluent("at r1 roomB") in high_prob_state.active_fluents
-    assert Fluent("holding r1 cup") in high_prob_state.active_fluents
-    assert Fluent("free r1") in high_prob_state.active_fluents
-    assert Fluent("found cup") in high_prob_state.active_fluents
-    assert Fluent("searched roomB cup") in high_prob_state.active_fluents
+    assert Fluent("at r1 roomB") in high_prob_state.fluents
+    assert Fluent("holding r1 cup") in high_prob_state.fluents
+    assert Fluent("free r1") in high_prob_state.fluents
+    assert Fluent("found cup") in high_prob_state.fluents
+    assert Fluent("searched roomB cup") in high_prob_state.fluents
     assert high_prob_state.time == 8
 
     # Verify low-probability (failure to find object) branch
     low_prob_state = next(s for s, p in outcomes if round(p, 2) == 0.2)
-    assert Fluent("at r1 roomB") in low_prob_state.active_fluents
-    assert Fluent("free r1") in low_prob_state.active_fluents
-    assert Fluent("found cup") not in low_prob_state.active_fluents
-    assert Fluent("holding r1 cup") not in low_prob_state.active_fluents
-    assert Fluent("searched roomB cup") in low_prob_state.active_fluents
+    assert Fluent("at r1 roomB") in low_prob_state.fluents
+    assert Fluent("free r1") in low_prob_state.fluents
+    assert Fluent("found cup") not in low_prob_state.fluents
+    assert Fluent("holding r1 cup") not in low_prob_state.fluents
+    assert Fluent("searched roomB cup") in low_prob_state.fluents
     assert low_prob_state.time == 5
 
     # Continue from high-probability outcome
@@ -229,19 +229,19 @@ def test_search_sequence():
 
     assert len(next_outcomes) == 2
     for state, prob in next_outcomes:
-        assert Fluent("at", "r1", "roomA") in state.active_fluents
-        assert Fluent("searched", "roomA", "bowl") in state.active_fluents
-        assert Fluent("found", "cup") in state.active_fluents
-        assert Fluent("holding", "r1", "cup") in state.active_fluents
+        assert Fluent("at", "r1", "roomA") in state.fluents
+        assert Fluent("searched", "roomA", "bowl") in state.fluents
+        assert Fluent("found", "cup") in state.fluents
+        assert Fluent("holding", "r1", "cup") in state.fluents
         if round(prob, 2) == 0.6:
-            assert Fluent("found", "bowl") in state.active_fluents
-            assert Fluent("holding", "r1", "bowl") in state.active_fluents
-            assert Fluent("free", "r1") in state.active_fluents
+            assert Fluent("found", "bowl") in state.fluents
+            assert Fluent("holding", "r1", "bowl") in state.fluents
+            assert Fluent("free", "r1") in state.fluents
             assert state.time == 16
         elif round(prob, 2) == 0.4:
-            assert Fluent("found", "bowl") not in state.active_fluents
-            assert Fluent("holding", "r1", "bowl") not in state.active_fluents
-            assert Fluent("free", "r1") in state.active_fluents
+            assert Fluent("found", "bowl") not in state.fluents
+            assert Fluent("holding", "r1", "bowl") not in state.fluents
+            assert Fluent("free", "r1") in state.fluents
             assert state.time == 13
         else:
             assert round(prob, 2) in {0.6, 0.4}

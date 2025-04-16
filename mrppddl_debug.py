@@ -1,4 +1,4 @@
-from mrppddl.core import Fluent, Effect, ActiveFluents, Operator, State, get_next_actions, transition, get_action_by_name, ProbEffect
+from mrppddl.core import Fluent, Effect, Operator, State, get_next_actions, transition, get_action_by_name, ProbEffect
 from mrppddl.core import Operator, Fluent, Effect, State, transition, OptCallable
 from mrppddl.helper import _make_callable
 from typing import Callable, Union
@@ -20,7 +20,7 @@ def _plot_graph(G):
 
     # Optional: label nodes by hash or small index
     def state_str(state):
-        return '\n'.join([str(f) for f in state.active_fluents])
+        return '\n'.join([str(f) for f in state.fluents])
 
     node_labels = {node: f"{state_str(node)}" for idx, node in enumerate(G.nodes)}
 
@@ -74,7 +74,7 @@ actions = move_visit_op.instantiate(objects_by_type)
 # Initial state
 initial_state = State(
     time=0,
-    active_fluents={
+    fluents={
         Fluent("at r1 start"), Fluent("free r1"),
         Fluent("at r2 start"), Fluent("free r2"),
         Fluent("visited start"),
@@ -92,7 +92,7 @@ new_states = {initial_state}
 counter = 0
 
 def is_goal_state(state: State) -> bool:
-    return len(objects_by_type['location']) == len([f for f in state.active_fluents
+    return len(objects_by_type['location']) == len([f for f in state.fluents
                                                     if f.name == 'visited'])
 
 while new_states:
@@ -157,7 +157,7 @@ for action in actions:
     state, _ = transition(state, action)[0]
     print(state)
 
-print(f"Start: {initial_state.active_fluents}")
+print(f"Start: {initial_state.fluents}")
 for action in actions:
     print(f"({action.name})")
 

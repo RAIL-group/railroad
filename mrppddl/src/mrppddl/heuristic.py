@@ -15,7 +15,7 @@ class RelaxedPlanningGraph:
 
         while newly_added:
             next_newly_added = set()
-            state = State(time=0, active_fluents=self.known_fluents)
+            state = State(time=0, fluents=self.known_fluents)
             for action in self.actions:
                 if action in self.visited_actions:
                     continue
@@ -27,7 +27,7 @@ class RelaxedPlanningGraph:
                     self.action_to_duration[action] = duration
                     self.visited_actions.add(action)
 
-                    for f in successor.active_fluents:
+                    for f in successor.fluents:
                         if f not in self.known_fluents:
                             self.known_fluents.add(f)
                             next_newly_added.add(f)
@@ -79,8 +79,9 @@ def make_ff_heuristic(
         ctime = state.time
         state = transition(state, None, relax=True)[0][0]
         dtime = state.time - ctime
-        current_fluents = set(state.active_fluents)
+        current_fluents = set(state.fluents)
         rpg.extend(current_fluents)
         return dtime + rpg.compute_relaxed_plan_cost(current_fluents, goal_fn)
 
     return ff_heuristic
+

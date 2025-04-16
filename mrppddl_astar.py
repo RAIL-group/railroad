@@ -1,8 +1,10 @@
 import random
 import heapq
 
+
 from mrppddl.core import Fluent, Effect, Operator, State, get_next_actions, transition, get_action_by_name, ProbEffect, OptCallable
 from mrppddl.helper import _make_callable
+from mrppddl.planner import astar
 
 F = Fluent
 
@@ -23,7 +25,7 @@ move_visit_op = Operator(
 move_home_op = Operator(
     name="move_home",
     parameters=[("?robot", "robot"), ("?loc_from", "location")],
-    preconditions=[F("at ?robot ?loc_from"), F("free ?robot")],
+    preconditions=[F("at ?robot ?loc_from"), F("free ?robot"), F("not at ?robot start")],
     effects=[
         Effect(time=0,
                resulting_fluents={~F("free ?robot"), ~F("at ?robot ?loc_from"),}),
@@ -40,9 +42,8 @@ wait_op = Operator(
 
 # Get all actions
 objects_by_type = {
-    "robot": ["r1", "r2", "r3", "r4", "r5"],
-    # "location": ["start", "roomA", "roomB", "roomC", "roomD", "roomE", "roomF"],
-    "location": ["start", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j"],
+    "robot": ["r1", "r2", "r3", "r4"],
+    "location": ["start", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"],
 }
 # objects_by_type = {
 #     "robot": ["r1", "r2"],
@@ -59,7 +60,7 @@ all_actions = (
 # Initial state
 initial_state = State(
     time=0,
-    active_fluents={
+    fluents={
         F("at r1 start"), F("free r1"),
         F("at r2 start"), F("free r2"),
         # F("at r3 start"), F("free r3"),
@@ -70,61 +71,16 @@ initial_state = State(
 
 
 
-def astar(start_state, all_actions, is_goal_state, heuristic_fn=None):
-    open_heap = []
-    heapq.heappush(open_heap, (0, 0, start_state))  # (f = g + h, g, state)
-    came_from = {}
-
-    closed_set = set()
-    counter = 0
-
-    while open_heap:
-        counter += 1
-        _, current_g, current = heapq.heappop(open_heap)
-
-        if is_goal_state(current.active_fluents):
-            return reconstruct_path(came_from, current)
-
-        if current in closed_set:
-            continue
-        closed_set.add(current)
-
-        for action in all_actions:
-            if not current.satisfies_precondition(action):
-                continue
-
-            for successor, prob in transition(current, action):
-                if prob == 0.0:
-                    continue
-
-                g = successor.time
-                came_from[successor] = (current, action)
-
-                h = heuristic_fn(successor) if heuristic_fn else 0
-                f = g + h
-
-                heapq.heappush(open_heap, (f, g, successor))
-
-    return None  # No path found
-
-def reconstruct_path(came_from, current):
-    path = []
-    while current in came_from:
-        prev, action = came_from[current]
-        path.append(action)
-        current = prev
-    path.reverse()
-    return path
 
 
-def is_goal_state(active_fluents) -> bool:
+def is_goal_state(fluents) -> bool:
     return (
-        len(objects_by_type['location']) == len([f for f in active_fluents if f.name == 'visited'])
-        and (F("at r1 start") in active_fluents)
-        and (F("at r2 start") in active_fluents)
-        # and (F("at r3 start") in active_fluents)
-        # and (F("at r4 start") in active_fluents)
-        # and (F("at r5 start") in active_fluents)
+        len(objects_by_type['location']) == len([f for f in fluents if f.name == 'visited'])
+        and (F("at r1 start") in fluents)
+        and (F("at r2 start") in fluents)
+        # and (F("at r3 start") in fluents)
+        # and (F("at r4 start") in fluents)
+        # and (F("at r5 start") in fluents)
     )
 
 from mrppddl.core import Action
@@ -138,8 +94,8 @@ def ff_heuristic(
     t0 = state.time
     state = transition(state, None, relax=True)[0][0]
     dtime = state.time - t0
-    initial_known_fluents = state.active_fluents
-    known_fluents = set(state.active_fluents)
+    initial_known_fluents = state.fluents
+    known_fluents = set(state.fluents)
     if initial_known_fluents in ff_memory.keys():
         return dtime + ff_memory[initial_known_fluents]
     newly_added = set(known_fluents)
@@ -149,7 +105,7 @@ def ff_heuristic(
 
     while newly_added:
         next_newly_added = set()
-        state = State(time=0, active_fluents=known_fluents)
+        state = State(time=0, fluents=known_fluents)
         for action in all_actions:
             if action in visited_actions:
                 continue
@@ -161,7 +117,7 @@ def ff_heuristic(
                 action_to_duration[action] = duration
                 visited_actions.add(action)
 
-                for f in successor.active_fluents:
+                for f in successor.fluents:
                     if f not in known_fluents:
                         known_fluents.add(f)
                         newly_added.add(f)
@@ -188,14 +144,14 @@ def ff_heuristic(
 
     while needed:
         f = needed.pop()
-        if f in state.active_fluents:
+        if f in state.fluents:
             continue
         action = fact_to_action.get(f)
         if action and action not in used_actions:
             used_actions.add(action)
             total_duration += action_to_duration[action]
             for p in action._pos_precond:
-                if p not in state.active_fluents:
+                if p not in state.fluents:
                     needed.add(p)
 
     ff_memory[initial_known_fluents] = total_duration
@@ -206,9 +162,9 @@ stime = time.time()
 # from mrppddl.heuristic import make_ff_heuristic
 # ff_heuristic = make_ff_heuristic(all_actions, is_goal_state, transition)
 path = astar(initial_state, all_actions, is_goal_state,
-             lambda state: ff_heuristic(state) / 1.5)
+             lambda state: ff_heuristic(state))
 # path = astar(initial_state, all_actions, is_goal_state,
-#              lambda state: ff_heuristic(state, all_actions, is_goal_state))
+#              lambda state: ff_heuristic(state, all_actions, is_goal_state) * 2)
 print(f"Planning time: {time.time() - stime}")
 s = initial_state
 for a in path:
