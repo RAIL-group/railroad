@@ -2,9 +2,13 @@
 __pycache__/
 *.py[oc]
 build/
+/mrppddl/src/mrppddl/*.so
 dist/
 wheels/
 *.egg-info
 
 # Virtual environments
 .venv
+
+# MacOS-specific
+*.DS_Store
