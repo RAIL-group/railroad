@@ -105,6 +105,7 @@ def ff_heuristic(state: State, is_goal_fn, all_actions, ff_memory=None) -> float
     newly_added = set(known_fluents)
     fact_to_action = {}  # Fluent -> Action that added it
     action_to_duration = {}  # Action -> Relaxed duration
+    all_actions = set(all_actions)
     visited_actions = set()
 
     while newly_added:
@@ -124,13 +125,14 @@ def ff_heuristic(state: State, is_goal_fn, all_actions, ff_memory=None) -> float
                 for f in successor.fluents:
                     if f not in known_fluents:
                         known_fluents.add(f)
-                        newly_added.add(f)
+                        next_newly_added.add(f)
                         fact_to_action[f] = action
-                    elif f in fact_to_action.keys():
-                        fact_to_action[f] = min(
-                            action, fact_to_action[f], key=lambda a: a.effects[-1].time
-                        )
+                    # elif f in fact_to_action.keys():
+                    #     fact_to_action[f] = min(
+                    #         action, fact_to_action[f], key=lambda a: a.effects[-1].time
+                    #     )
         newly_added = next_newly_added
+        all_actions -= visited_actions
 
     if not is_goal_fn(known_fluents):
         return float("inf")  # Relaxed goal not reachable
@@ -149,14 +151,14 @@ def ff_heuristic(state: State, is_goal_fn, all_actions, ff_memory=None) -> float
 
     while needed:
         f = needed.pop()
-        if f in state.fluents:
+        if f in initial_known_fluents:
             continue
         action = fact_to_action.get(f)
         if action and action not in used_actions:
             used_actions.add(action)
             total_duration += action_to_duration[action]
             for p in action._pos_precond:
-                if p not in state.fluents:
+                if p not in initial_known_fluents:
                     needed.add(p)
 
     if ff_memory:
