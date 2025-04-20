@@ -1,7 +1,7 @@
 import random
 import time
 from mrppddl.core import Fluent, Effect, Operator, State, transition
-from mrppddl.planner import astar
+from mrppddl.planner import astar, mcts
 from mrppddl.heuristic import ff_heuristic
 
 F = Fluent
@@ -34,7 +34,7 @@ wait_op = Operator(
     parameters=[("?robot", "robot")],
     preconditions=[F("free ?robot"), F("not waited ?robot")],
     effects=[Effect(time=0, resulting_fluents={F("not free ?robot")}),
-             Effect(time=1, resulting_fluents={F("free ?robot"), F("waited ?robot")})])
+             Effect(time=10, resulting_fluents={F("free ?robot"), F("waited ?robot")})])
 
 # Get all actions
 objects_by_type = {
@@ -54,6 +54,8 @@ initial_state = State(
     fluents={
         F("at r1 start"), F("free r1"),
         F("at r2 start"), F("free r2"),
+        F("at r3 start"), F("free r3"),
+        F("at r4 start"), F("free r4"),
         F("visited start"),
     })
 
@@ -61,8 +63,10 @@ initial_state = State(
 def is_goal_state(fluents) -> bool:
     return (
         len(objects_by_type['location']) == len([f for f in fluents if f.name == 'visited'])
-        and (F("at r1 start") in fluents)
-        and (F("at r2 start") in fluents)
+        # and F("at r1 start") in fluents
+        # and F("at r2 start") in fluents
+        # and F("at r3 start") in fluents
+        # and F("at r4 start") in fluents
     )
 
 stime = time.time()
@@ -73,7 +77,28 @@ print(f"Planning time: {time.time() - stime}")
 s = initial_state
 for a in path:
     s = transition(s, a)[0][0]
-    print(a.name)
+    print(a.name, ff_heuristic(s, is_goal_state, all_actions, ff_memory=ff_memory))
 
 print(s)
 
+
+## MCTS Solution
+ff_memory = dict()
+is_goal_fn = is_goal_state
+print("MCTS")
+stime = time.time()
+out, node = mcts(initial_state, all_actions, is_goal_fn,
+           lambda state: ff_heuristic(state, is_goal_fn, all_actions, ff_memory=ff_memory),
+                 max_iterations=10000)
+print(f"MCTS Planning time: {time.time() - stime}")
+state = initial_state
+print(state)
+while not is_goal_fn(node.state.fluents):
+    best_action, chance_node = max(node.children.items(), key=lambda item: item[1].value / item[1].visits if item[1].visits > 0 else float('-inf'))
+    node = chance_node.children[0]
+    state = transition(state, best_action)[0][0]
+    print(best_action.name, "Time: ", state.time, ff_heuristic(state, is_goal_fn, all_actions))
+    # print(state.fluents, is_goal_fn(state.fluents))
+
+assert is_goal_fn(node.state.fluents)
+print(state.fluents)

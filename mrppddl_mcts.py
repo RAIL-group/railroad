@@ -74,10 +74,12 @@ def build_door_world():
 
 
 ff_memory = dict()
-stime = time.time()
 initial_state, all_actions, is_goal_fn = build_door_world()
+stime = time.time()
+
 path = astar(initial_state, all_actions, is_goal_fn,
              lambda state: ff_heuristic(state, is_goal_fn, all_actions, ff_memory=ff_memory))
+print(f"A* Planning time: {time.time() - stime}")
 s = initial_state
 print(s)
 for a in path:
@@ -86,17 +88,18 @@ for a in path:
 
 ## MCTS Solution
 print("MCTS")
+stime = time.time()
 out, node = mcts(initial_state, all_actions, is_goal_fn,
-           lambda state: 0.1 * ff_heuristic(state, is_goal_fn, all_actions, ff_memory=ff_memory))
+           lambda state: ff_heuristic(state, is_goal_fn, all_actions, ff_memory=ff_memory))
+print(f"MCTS Planning time: {time.time() - stime}")
 state = initial_state
 print(state)
 while not is_goal_fn(node.state.fluents):
     best_action, chance_node = max(node.children.items(), key=lambda item: item[1].value / item[1].visits if item[1].visits > 0 else float('-inf'))
     node = chance_node.children[0]
     state = transition(state, best_action)[0][0]
-    print(best_action.name, "Time: ", state.time)
+    print(best_action.name, "Time: ", state.time, ff_heuristic(state, is_goal_fn, all_actions))
     # print(state.fluents, is_goal_fn(state.fluents))
     # print(state)
 
-print(f"Planning time: {time.time() - stime}")
 s = initial_state

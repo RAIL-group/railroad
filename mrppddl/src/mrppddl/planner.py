@@ -90,7 +90,7 @@ def mcts(
     goal_fn: Callable[[Set[Fluent]], bool],
     heuristic_fn: Callable[[State], float],
     max_iterations: int = 1000,
-    max_depth: int = 30
+    max_depth: int = 20
 ) -> Dict[State, Action]:
     actions_fn = lambda state: get_next_actions(state, all_actions)  #noqa: E731
     root = MCTSDecisionNode(root_state)
