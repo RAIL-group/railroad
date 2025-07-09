@@ -1,4 +1,4 @@
-from .core import Operator, Fluent, Effect, ProbEffect, OptCallable, Num
+from .core import Operator, Fluent, Effect, OptCallable, Num
 from typing import Callable
 
 F = Fluent
@@ -64,7 +64,7 @@ def construct_search_operator(
                     Fluent("searched ?loc_to ?object"),
                 },
             ),
-            ProbEffect(
+            Effect(
                 time=(move_time, ["?robot", "?loc_from"]),
                 resulting_fluents={Fluent("at ?robot ?loc_to")},
                 prob_effects=[

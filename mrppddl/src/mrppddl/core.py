@@ -62,40 +62,43 @@ class Fluent:
         return Fluent(self.name, *self.args, negated=not self.negated)
 
 
-class GroundedEffectType:
-    def __init__(self, time: float, resulting_fluents: frozenset[Fluent]):
-        self.time = time
-        self.resulting_fluents = resulting_fluents
+class ProbBranch:
+    def __init__(self, prob: float, effects: tuple["GroundedEffect", ...]):
+        self.prob = prob
+        self.effects = effects
 
-    def __lt__(self, other: "GroundedEffectType") -> bool:
-        return self.time < other.time
-
-
-class LiftedEffectType:
-    def __init__(self, time: OptExpr, resulting_fluents: Set[Fluent]):
-        self.time = _make_bindable(time)
-        self.resulting_fluents = resulting_fluents
-
-    def _ground(self, binding: Binding) -> "GroundedEffectType":
-        grounded_time = self.time(binding)
-        grounded_fluents = frozenset(
-            Fluent(
-                f.name, *[binding.get(arg, arg) for arg in f.args], negated=f.negated
-            )
-            for f in self.resulting_fluents
+    def __eq__(self, other):
+        return (
+            isinstance(other, ProbBranch)
+            and self.prob == other.prob
+            and self.effects == other.effects
         )
-        return GroundedEffect(grounded_time, grounded_fluents)
+
+    def __hash__(self):
+        return hash((self.prob, tuple(self.effects)))
 
 
-class GroundedEffect(GroundedEffectType):
-    def __init__(self, time: Num, resulting_fluents: frozenset[Fluent]):
+class GroundedEffect:
+    __slots__ = (
+        "time",
+        "prob_effects",
+        "resulting_fluents",
+        "is_probabilistic",
+        "_hash",
+    )
+
+    def __init__(
+        self,
+        time: float,
+        *,
+        resulting_fluents: frozenset[Fluent] = frozenset(),
+        prob_effects: tuple["ProbBranch", ...] = tuple(),
+    ):
         self.time = time
+        self.prob_effects = prob_effects
         self.resulting_fluents = resulting_fluents
-        self._hash: int = hash((self.time, self.resulting_fluents))
-
-    def __str__(self):
-        rfs = ", ".join(str(f) for f in self.resulting_fluents)
-        return f"after {self.time}: {rfs}"
+        self.is_probabilistic = bool(self.prob_effects)
+        self._hash: int = hash((self.time, self.resulting_fluents, self.prob_effects))
 
     def __repr__(self):
         return f"GroundedEffect({self})"
@@ -103,46 +106,30 @@ class GroundedEffect(GroundedEffectType):
     def __hash__(self):
         return self._hash
 
-
-class Effect(LiftedEffectType):
-    def __init__(self, time: OptExpr, resulting_fluents: Set[Fluent]):
-        self.time = _make_bindable(time)
-        self.resulting_fluents = resulting_fluents
-
-
-class GroundedProbEffect(GroundedEffectType):
-    __slots__ = ("time", "prob_effects", "resulting_fluents", "_hash")
-
-    def __init__(
-        self,
-        time: float,
-        prob_effects: tuple[tuple[float, tuple[GroundedEffectType, ...]], ...],
-        resulting_fluents: frozenset[Fluent] = frozenset(),
-    ):
-        self.time = time
-        self.prob_effects = prob_effects
-        self.resulting_fluents = resulting_fluents
-        self._hash: int = hash((self.time, self.resulting_fluents, self.prob_effects))
+    def __eq__(self, other):
+        return isinstance(other, GroundedEffect) and self._hash == other._hash
 
     def __str__(self):
-        parts = []
-        for prob, effs in self.prob_effects:
-            branch = "; ".join(str(e) for e in effs)
-            parts.append(f"{prob}: [{branch}]")
-        return f"probabilistic after {self.time}: {{ {', '.join(parts)} }}"
+        out_str = ""
+        if self.is_probabilistic:
+            parts = []
+            for branch in self.prob_effects:
+                effs = "; ".join(str(e) for e in branch.effects)
+                parts.append(f"{branch.prob}: [{effs}]")
+            out_str += f"probabilistic after {self.time}: {{ {', '.join(parts)} }}  "
 
-    def __repr__(self):
-        return f"ProbEffects({self})"
+        rfs = ", ".join(str(f) for f in self.resulting_fluents)
+        return out_str + f"after {self.time}: {rfs}"
 
-    def __hash__(self):
-        return self._hash
+    def __lt__(self, other: "GroundedEffect") -> bool:
+        return self.time < other.time
 
 
-class ProbEffect(LiftedEffectType):
+class Effect:
     def __init__(
         self,
         time: OptExpr,
-        prob_effects: List[Tuple[OptExpr, List[Effect]]],
+        prob_effects: List[Tuple[OptExpr, List["Effect"]]] = list(),
         resulting_fluents: Set[Fluent] = set(),
     ):
         self.time = _make_bindable(time)
@@ -150,13 +137,19 @@ class ProbEffect(LiftedEffectType):
             (_make_bindable(prob), effects) for prob, effects in prob_effects
         ]
         self.resulting_fluents = resulting_fluents
+        self.is_probabilistic = bool(self.prob_effects)
 
-    def _ground(self, binding: Binding) -> "GroundedProbEffect":
+    def _ground(self, binding: Binding) -> "GroundedEffect":
         # def evaluate(expr): return expr(binding) if callable(expr) else expr
-        grounded_prob_effects = tuple(
-            (prob(binding), tuple(e._ground(binding) for e in effect_list))
-            for prob, effect_list in self.prob_effects
-        )
+        if self.is_probabilistic:
+            grounded_prob_effects = tuple(
+                ProbBranch(
+                    prob(binding), tuple(e._ground(binding) for e in effect_list)
+                )
+                for prob, effect_list in self.prob_effects
+            )
+        else:
+            grounded_prob_effects = tuple()
 
         grounded_time: float = self.time(binding)
         grounded_resulting_fluents = frozenset(
@@ -166,8 +159,10 @@ class ProbEffect(LiftedEffectType):
             for f in self.resulting_fluents
         )
 
-        return GroundedProbEffect(
-            grounded_time, grounded_prob_effects, grounded_resulting_fluents
+        return GroundedEffect(
+            grounded_time,
+            prob_effects=grounded_prob_effects,
+            resulting_fluents=grounded_resulting_fluents,
         )
 
 
@@ -175,7 +170,7 @@ class Action:
     def __init__(
         self,
         preconditions: frozenset[Fluent],
-        effects: List[GroundedEffectType],
+        effects: List[GroundedEffect],
         name: Optional[str] = None,
     ):
         self.preconditions = frozenset(preconditions)
@@ -206,7 +201,7 @@ class State:
         self,
         time: float = 0,
         fluents: Optional[Union[frozenset[Fluent], Set[Fluent]]] = None,
-        upcoming_effects: Optional[List[Tuple[float, GroundedEffectType]]] = None,
+        upcoming_effects: Optional[List[Tuple[float, GroundedEffect]]] = None,
     ):
         self.time = time
         if not fluents:
@@ -249,7 +244,7 @@ class State:
             fluent_set = self.fluents - flipped_negatives | positives
             self.fluents = frozenset(fluent_set)
 
-    def queue_effect(self, effect: GroundedEffectType):
+    def queue_effect(self, effect: GroundedEffect):
         self._hash = None
         heapq.heappush(self.upcoming_effects, (self.time + effect.time, effect))
 
@@ -292,7 +287,7 @@ class Operator:
         name: str,
         parameters: List[Tuple[str, str]],
         preconditions: List[Fluent],
-        effects: Sequence[LiftedEffectType],
+        effects: Sequence[Effect],
     ):
         self.name = name
         self.parameters = parameters
@@ -369,8 +364,10 @@ def _advance_to_terminal(
         state.pop_effect()
         state.update_fluents(effect.resulting_fluents, relax=relax)
 
-        if isinstance(effect, GroundedProbEffect):
-            for branch_prob, effects in effect.prob_effects:
+        if effect.is_probabilistic:
+            for prob_effect in effect.prob_effects:
+                branch_prob = prob_effect.prob
+                effects = prob_effect.effects
                 branched = state.copy()
                 for e in effects:
                     heapq.heappush(
