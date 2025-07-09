@@ -50,7 +50,7 @@ class Fluent:
         return f"{prefix}{self.name} {' '.join(self.args)}"
 
     def __repr__(self) -> str:
-        return f"Fluent<{self}>"
+        return f"F({self})"
 
     def __hash__(self) -> int:
         return self._hash
@@ -116,10 +116,10 @@ class GroundedEffect:
             for branch in self.prob_effects:
                 effs = "; ".join(str(e) for e in branch.effects)
                 parts.append(f"{branch.prob}: [{effs}]")
-            out_str += f"probabilistic after {self.time}: {{ {', '.join(parts)} }}  "
+            out_str += f"probabilistic after {self.time:.3f}: {{ {', '.join(parts)} }}  "
 
         rfs = ", ".join(str(f) for f in self.resulting_fluents)
-        return out_str + f"after {self.time}: {rfs}"
+        return out_str + f"after {self.time:.3f}: {rfs}"
 
     def __lt__(self, other: "GroundedEffect") -> bool:
         return self.time < other.time
@@ -271,8 +271,8 @@ class State:
         return hash(self) == hash(other)
 
     def __str__(self):
-        upcoming = tuple((t, effect) for t, effect in self.upcoming_effects)
-        return f"State<time={self.time}, fluents={self.fluents}, upcoming_effects={upcoming}>"
+        upcoming = ", ".join(f"({t:.3f}, {effect})" for t, effect in self.upcoming_effects)
+        return f"State<time={self.time:.3f}, fluents={self.fluents}, upcoming_effects={upcoming}>"
 
     def __repr__(self):
         return self.__str__()
