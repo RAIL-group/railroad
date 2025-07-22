@@ -37,32 +37,6 @@ PYBIND11_MODULE(_bindings, m) {
 	return oss.str();
       });
 
-    // py::class_<GroundedEffect>(m, "GroundedEffect")
-    //   .def(py::init<double, std::unordered_set<Fluent>>(),
-    // 	   py::arg("time"), py::arg("resulting_fluents"))
-    //   .def_property_readonly("time", &GroundedEffect::time)
-    //   .def_property_readonly("resulting_fluents", &GroundedEffect::resulting_fluents)
-    //   .def("__lt__", &GroundedEffect::operator<)
-    //   .def("__repr__", [](const GroundedEffect& ge) {
-    // 	std::ostringstream oss;
-    // 	oss << "<GroundedEffect t=" << ge.time() << ", size=" << ge.resulting_fluents().size() << ">";
-    // 	return oss.str();
-    //   });
-
-
-// // ProbBranchWrapper
-// py::class_<ProbBranchWrapper>(m, "ProbBranch")
-//     .def(py::init<double, std::vector<GroundedEffect>>(),
-//          py::arg("prob"), py::arg("effects"))
-//     .def_property_readonly("prob", &ProbBranchWrapper::prob)
-//     .def_property_readonly("effects", &ProbBranchWrapper::effects)
-//     .def("__repr__", [](const ProbBranchWrapper& b) {
-//         std::ostringstream oss;
-//         oss << "<ProbBranch p=" << b.prob()
-//             << ", n_effects=" << b.effects().size() << ">";
-//         return oss.str();
-//     });
-
 // GroundedEffect
 py::class_<GroundedEffect>(m, "GroundedEffect")
     .def(py::init<double,
@@ -83,29 +57,6 @@ py::class_<GroundedEffect>(m, "GroundedEffect")
     .def("__hash__", [](const GroundedEffect& eff) {
         return static_cast<std::size_t>(eff.hash());
     });
-
-
-    // py::class_<GroundedEffect, GroundedEffect>(m, "GroundedEffect")
-    //   .def(py::init<double, std::unordered_set<Fluent>>(),
-    // 	   py::arg("time"), py::arg("resulting_fluents"))
-    //   .def("__hash__", &GroundedEffect::hash)
-    //   .def("__eq__", &GroundedEffect::operator==)
-    //   .def("__str__", &GroundedEffect::str)
-    //   .def("__repr__", [](const GroundedEffect& ge) {
-    //     return "GroundedEffect(" + ge.str() + ")";
-    //   });
-
-    // py::class_<GroundedProbEffect, GroundedEffect>(m, "GroundedProbEffect")
-    //   .def(py::init<double, std::vector<ProbBranch>, std::unordered_set<Fluent>>(),
-    // 	   py::arg("time"),
-    // 	   py::arg("prob_effects"),
-    // 	   py::arg("resulting_fluents") = std::unordered_set<Fluent>{})
-    //   .def_property_readonly("prob_effects", &GroundedProbEffect::prob_effects)
-    //   .def("__hash__", &GroundedProbEffect::hash)
-    //   .def("__str__", &GroundedProbEffect::str)
-    //   .def("__repr__", [](const GroundedProbEffect& gpe) {
-    //     return "ProbEffects(" + gpe.str() + ")";
-    //   });
 
     py::class_<Action>(m, "Action")
 	.def(py::init<std::unordered_set<Fluent>, std::vector<GroundedEffect>, std::string>(),
@@ -175,8 +126,6 @@ py::class_<GroundedEffect>(m, "GroundedEffect")
           py::arg("is_goal_state"),
           py::arg("heuristic_fn") = nullptr,
           "Run A* search and return the action path");
-
-
 
     // py::bind_vector<std::vector<GroundedEffect>>(m, "GroundedEffectVec");
     // py::bind_vector<std::vector<ProbBranch>>(m, "GroundedProbBranchVec");
