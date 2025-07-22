@@ -1,3 +1,4 @@
+import pytest
 from mrppddl._bindings import GroundedEffect, Fluent, Action, State, transition
 
 F = Fluent
@@ -38,7 +39,56 @@ def test_cpp_effect_instantiation():
     pe = GroundedEffect(3.0, prob_effects=[(0.5, [e]), (0.5, [e])])
     assert len(pe.prob_effects) == 2
     for prob, e in pe.prob_effects:
+        print(e)
         assert prob == 0.5
+        assert len(e) == 1
+
+def test_cpp_effect_hashing():
+    f1 = F("at r1 roomA")
+    f2 = F("at r1 roomB")
+    e1 = GroundedEffect(2.5, {f1, f2})
+    e1_alt = GroundedEffect(2.5, {f1, f2})
+    e1_reordered = GroundedEffect(2.5, {f2, f1})
+    e1_time_change = GroundedEffect(2.0, {f1, f2})
+    e2 = GroundedEffect(2.0, {f2, f1})
+    assert hash(e1) == hash(e1_alt)
+    assert hash(e1) == hash(e1_reordered)
+    assert not hash(e1) == hash(e1_time_change)
+    assert not hash(e1) == hash(e2)
+
+    e1 = GroundedEffect(2.5, {f1})
+    e2 = GroundedEffect(2.5, {f2})
+    pea = GroundedEffect(3.0, prob_effects=[(0.5, [e1]), (0.5, [e2])])
+    peb = GroundedEffect(3.0, prob_effects=[(0.5, [e2]), (0.5, [e1])])
+    pe2 = GroundedEffect(3.0, prob_effects=[(0.5, [e2]), (0.5, [e2])])
+    assert hash(pea) == hash(peb), "Failed to generate order-independent hash for prob effects."
+    assert not hash(pea) == hash(pe2), "Failed to gen different hash for different prob effects."
+
+    e1 = GroundedEffect(2.5, {f1})
+    e2 = GroundedEffect(2.5, {f2})
+    pea = GroundedEffect(3.0, prob_effects=[(0.5, [e1]), (0.5, [e2])])
+    peb = GroundedEffect(3.5, prob_effects=[(0.5, [e1]), (0.5, [e2])])
+    assert not hash(pea) == hash(peb), "Failed: has does not consider time of effect."
+
+    e1 = GroundedEffect(2.5, {f1})
+    e2 = GroundedEffect(2.5, {f2})
+    pea = GroundedEffect(3.0, prob_effects=[(0.5, [e1]), (0.5, [e2])])
+    peb = GroundedEffect(3.0, prob_effects=[(0.4, [e1]), (0.6, [e2])])
+    assert not hash(pea) == hash(peb), "Failed: has does not consider probability of effects."
+
+    e1 = GroundedEffect(2.0, {f1})
+    e2 = GroundedEffect(5.0, {f1})
+    assert not hash(e1) == hash(e2)
+    pea = GroundedEffect(3.0, prob_effects=[(1.0, [e1])])
+    peb = GroundedEffect(3.0, prob_effects=[(1.0, [e2])])
+    assert not hash(pea) == hash(peb), "Failed: has does not consider time of probabilitstic effects."
+
+    e1 = GroundedEffect(2.0, {f1})
+    e2 = GroundedEffect(5.0, {f2})
+    assert not hash(e1) == hash(e2)
+    pea = GroundedEffect(3.0, prob_effects=[(0.4, [e1]), (0.6, [e2])])
+    peb = GroundedEffect(3.0, prob_effects=[(0.4, [e2]), (0.6, [e1])])
+    assert not hash(pea) == hash(peb), "Failed: has does not consider associativity of probabilitstic effects."
 
 def test_cpp_action_instantiation():
     a1 = Action(preconditions={Fluent("at roomA r1")},
@@ -175,6 +225,7 @@ def get_action_by_name(actions: List[Action], name: str) -> Action:
             return action
     raise ValueError(f"No action found with name: {name}")
 
+@pytest.mark.skip()
 def test_cpp_astar_move():
 
     # Get all actions

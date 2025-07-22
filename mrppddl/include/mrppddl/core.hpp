@@ -10,6 +10,10 @@
 
 namespace mrppddl {
 
+inline void hash_combine(std::size_t& seed, std::size_t value) {
+seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+}
+
 class Fluent {
 public:
     Fluent(std::string name, std::vector<std::string> args = {}, bool negated = false)
@@ -153,29 +157,70 @@ GroundedEffect(
     }
 
     std::size_t hash() const {
-        std::size_t h = std::hash<double>{}(time_);
-        for (const auto& f : resulting_fluents_) {
-            h ^= f.hash();
-        }
-        for (const auto& branch : prob_effects_) {
-            h ^= std::hash<double>{}(branch.prob());
-            for (const auto& inner_eff : branch.effects()) {
-                h ^= inner_eff.hash();
-            }
-        }
-        return h;
+	std::size_t h_time = std::hash<double>{}(time_);
+
+	// Hash fluents (unordered)
+	std::size_t h_fluents = 0;
+	for (const auto& f : resulting_fluents_) {
+	  h_fluents ^= f.hash();
+	}
+
+	// Hash branches (unordered)
+	std::size_t h_branches = 0;
+	for (const auto& branch : prob_effects_) {
+	    std::size_t h_branch = 0;
+
+	    // Effects inside branch (unordered)
+	    for (const auto& inner_eff : branch.effects()) {
+	      h_branch ^= inner_eff.hash();
+	    }
+
+	    // Combine prob into branch hash (unordered)
+	    hash_combine(h_branch, std::hash<double>{}(branch.prob()));
+
+	    // Fold branch hash into set-of-branches hash (unordered)
+	    h_branches ^= h_branch;
+	}
+
+	// Final combination: time, fluents, branches (unordered)
+	std::size_t h = 0;
+	hash_combine(h, h_time);
+	hash_combine(h, h_fluents);
+	hash_combine(h, h_branches);
+
+	return h;
     }
 
+
     std::string str() const {
-        std::ostringstream out;
+      std::ostringstream out;
         if (is_probabilistic()) {
+	  std::size_t h = std::hash<double>{}(time_);
+	  for (const auto& branch : prob_effects_) {
+	    std::size_t h_branch = std::hash<double>{}(branch.prob());
+	    for (const auto& inner_eff : branch.effects()) {
+	      h_branch ^= inner_eff.hash();
+	    }
+	    out << " H[" << h_branch << "] ";
+	    h ^= h_branch;
+	  }
+          out << "H[" << h << "] ";
+
             out << "probabilistic after " << time_ << ": { ";
             for (const auto& branch : prob_effects_) {
                 out << branch.prob() << ": [";
                 for (size_t i = 0; i < branch.effects().size(); ++i) {
                     out << branch.effects()[i].str();
+                    out << " [" << branch.effects()[i].hash() << "] ";
                     if (i + 1 < branch.effects().size()) out << "; ";
                 }
+
+		std::size_t h_branch = std::hash<double>{}(branch.prob());
+		for (const auto& inner_eff : branch.effects()) {
+		  h_branch ^= inner_eff.hash();
+		}
+		out << " H[" << h_branch << "] ";
+
                 out << "], ";
             }
             out << "}";
