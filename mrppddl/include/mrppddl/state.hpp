@@ -14,7 +14,7 @@ namespace mrppddl {
 
 class State {
 public:
-    using EffectQueue = std::vector<std::pair<double, GroundedEffectType>>;
+    using EffectQueue = std::vector<std::pair<double, GroundedEffect>>;
 
     State(double time = 0,
           std::unordered_set<Fluent> fluents = {},
@@ -75,7 +75,7 @@ public:
         }
     }
 
-    void queue_effect(const GroundedEffectType& effect) {
+    void queue_effect(const GroundedEffect& effect) {
         cached_hash_ = std::nullopt;
         upcoming_effects_.emplace_back(time_ + effect.time(), effect);
         std::push_heap(upcoming_effects_.begin(), upcoming_effects_.end(), effect_cmp);
@@ -150,8 +150,8 @@ private:
     EffectQueue upcoming_effects_;
     mutable std::optional<std::size_t> cached_hash_;
 
-    static bool effect_cmp(const std::pair<double, GroundedEffectType>& a,
-                           const std::pair<double, GroundedEffectType>& b) {
+    static bool effect_cmp(const std::pair<double, GroundedEffect>& a,
+                           const std::pair<double, GroundedEffect>& b) {
         return a.first > b.first;
     }
 };
@@ -198,7 +198,7 @@ inline void advance_to_terminal(
 	  for (const auto& branch : effect.prob_effects()) {
 	    State branched = state.copy();
 	    for (const auto& e : branch.effects()) {
-	      branched.queue_effect(GroundedEffectType(e.time(), e.resulting_fluents()));
+	      branched.queue_effect(GroundedEffect(e.time(), e.resulting_fluents()));
 	    }
 	    advance_to_terminal(branched, prob * branch.prob(), outcomes, relax);
 	  }

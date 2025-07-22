@@ -100,27 +100,27 @@ namespace std {
 
 namespace mrppddl {
 
-class GroundedEffectType;  // Forward declaration
+class GroundedEffect;  // Forward declaration
 
 class ProbBranchWrapper {
 public:
-    ProbBranchWrapper(double prob, std::vector<GroundedEffectType> effects)
+    ProbBranchWrapper(double prob, std::vector<GroundedEffect> effects)
         : prob_(prob), effects_(std::move(effects)) {}
 
     double prob() const { return prob_; }
-    const std::vector<GroundedEffectType>& effects() const { return effects_; }
+    const std::vector<GroundedEffect>& effects() const { return effects_; }
 
 private:
     double prob_;
-    std::vector<GroundedEffectType> effects_;
+    std::vector<GroundedEffect> effects_;
 };
 
-class GroundedEffectType {
+class GroundedEffect {
 public:
-  GroundedEffectType(
+  GroundedEffect(
 		     double time,
 		     std::unordered_set<Fluent> resulting_fluents,
-		     std::vector<std::pair<double, std::vector<GroundedEffectType>>> prob_pairs
+		     std::vector<std::pair<double, std::vector<GroundedEffect>>> prob_pairs
 		     )
     : time_(time), resulting_fluents_(std::move(resulting_fluents))
   {
@@ -128,7 +128,7 @@ public:
       prob_effects_.emplace_back(p, std::move(effects));
     }
   }
-GroundedEffectType(
+GroundedEffect(
     double time,
     std::unordered_set<Fluent> resulting_fluents
 )
@@ -142,11 +142,11 @@ GroundedEffectType(
 
     bool is_probabilistic() const { return !prob_effects_.empty(); }
 
-    bool operator<(const GroundedEffectType& other) const {
+    bool operator<(const GroundedEffect& other) const {
         return time_ < other.time_;
     }
 
-    bool operator==(const GroundedEffectType& other) const {
+    bool operator==(const GroundedEffect& other) const {
         return time_ == other.time_ &&
                resulting_fluents_ == other.resulting_fluents_ &&
                prob_effects_ == other.prob_effects_;  // Optional: you can omit this
@@ -206,8 +206,8 @@ inline bool operator==(const ProbBranchWrapper& a, const ProbBranchWrapper& b) {
 
 namespace std {
   template <>
-  struct hash<mrppddl::GroundedEffectType> {
-    std::size_t operator()(const mrppddl::GroundedEffectType& eff) const noexcept {
+  struct hash<mrppddl::GroundedEffect> {
+    std::size_t operator()(const mrppddl::GroundedEffect& eff) const noexcept {
       return eff.hash();
     }
   };
@@ -219,7 +219,7 @@ namespace mrppddl {
 class Action {
 public:
     Action(std::unordered_set<Fluent> preconditions,
-           std::vector<GroundedEffectType> effects,
+           std::vector<GroundedEffect> effects,
            std::string name = "anonymous")
         : preconditions_(std::move(preconditions)),
           effects_(std::move(effects)),
@@ -239,7 +239,7 @@ public:
   Action& operator=(const Action&) = default;
 
     const std::unordered_set<Fluent>& preconditions() const { return preconditions_; }
-    const std::vector<GroundedEffectType>& effects() const { return effects_; }
+    const std::vector<GroundedEffect>& effects() const { return effects_; }
     const std::string& name() const { return name_; }
     const std::unordered_set<Fluent>& pos_preconditions() const { return pos_precond_; }
     const std::unordered_set<Fluent>& neg_precond_flipped() const { return neg_precond_flipped_; }
@@ -272,7 +272,7 @@ public:
 
 private:
     std::unordered_set<Fluent> preconditions_;
-    std::vector<GroundedEffectType> effects_;
+    std::vector<GroundedEffect> effects_;
     std::string name_;
     std::unordered_set<Fluent> pos_precond_;
     std::unordered_set<Fluent> neg_precond_flipped_;

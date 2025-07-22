@@ -1,6 +1,5 @@
-from mrppddl._bindings import GroundedEffectType, Fluent, Action, State, transition
+from mrppddl._bindings import GroundedEffect, Fluent, Action, State, transition
 
-GroundedEffect = GroundedEffectType
 F = Fluent
 
 def test_cpp_fluent_equality():
@@ -17,6 +16,22 @@ def test_cpp_fluent_equality():
     assert not Fluent("at", "r1", "roomA") == ~Fluent("at r1 roomA")
     assert not Fluent("at", "r1", "roomA") == ~Fluent("at r1 roomA")
 
+
+def test_cpp_fluent_equality_hash():
+
+    assert hash(F("at", "r1", "roomA")) == hash(F("at", "r1", "roomA"))
+    assert hash(F("at", "r1", "roomA")) == hash(F("at r1 roomA"))
+    assert not hash(F("at", "r1", "roomA")) == hash(F("at", "r1", "roomB"))
+    assert not hash(F("at r1 roomA")) == hash(F("at r1 roomB"))
+    assert not hash(F("at r1 roomA")) == hash(F("at r1 rooma"))
+
+    # Test Negation
+    assert hash(F("not at r1 roomA")) == hash(~F("at r1 roomA"))
+    assert hash(F("at r1 roomA")) == hash(~F("not at r1 roomA"))
+    assert not hash(F("at", "r1", "roomA")) == hash(~F("at", "r1", "roomA"))
+    assert not hash(F("at", "r1", "roomA")) == hash(~F("at r1 roomA"))
+    assert not hash(F("at", "r1", "roomA")) == hash(~F("at r1 roomA"))
+
 def test_cpp_effect_instantiation():
     f = Fluent("at r1 roomA")
     e = GroundedEffect(2.5, {f})
@@ -24,7 +39,6 @@ def test_cpp_effect_instantiation():
     assert len(pe.prob_effects) == 2
     for prob, e in pe.prob_effects:
         assert prob == 0.5
-
 
 def test_cpp_action_instantiation():
     a1 = Action(preconditions={Fluent("at roomA r1")},
@@ -155,13 +169,11 @@ def construct_move_operator(move_time: OptCallable):
         ],
     )
 
-
 def get_action_by_name(actions: List[Action], name: str) -> Action:
     for action in actions:
         if action.name == name:
             return action
     raise ValueError(f"No action found with name: {name}")
-
 
 def test_cpp_astar_move():
 

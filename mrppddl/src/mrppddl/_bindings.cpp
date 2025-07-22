@@ -37,13 +37,13 @@ PYBIND11_MODULE(_bindings, m) {
 	return oss.str();
       });
 
-    // py::class_<GroundedEffectType>(m, "GroundedEffect")
+    // py::class_<GroundedEffect>(m, "GroundedEffect")
     //   .def(py::init<double, std::unordered_set<Fluent>>(),
     // 	   py::arg("time"), py::arg("resulting_fluents"))
-    //   .def_property_readonly("time", &GroundedEffectType::time)
-    //   .def_property_readonly("resulting_fluents", &GroundedEffectType::resulting_fluents)
-    //   .def("__lt__", &GroundedEffectType::operator<)
-    //   .def("__repr__", [](const GroundedEffectType& ge) {
+    //   .def_property_readonly("time", &GroundedEffect::time)
+    //   .def_property_readonly("resulting_fluents", &GroundedEffect::resulting_fluents)
+    //   .def("__lt__", &GroundedEffect::operator<)
+    //   .def("__repr__", [](const GroundedEffect& ge) {
     // 	std::ostringstream oss;
     // 	oss << "<GroundedEffect t=" << ge.time() << ", size=" << ge.resulting_fluents().size() << ">";
     // 	return oss.str();
@@ -52,7 +52,7 @@ PYBIND11_MODULE(_bindings, m) {
 
 // // ProbBranchWrapper
 // py::class_<ProbBranchWrapper>(m, "ProbBranch")
-//     .def(py::init<double, std::vector<GroundedEffectType>>(),
+//     .def(py::init<double, std::vector<GroundedEffect>>(),
 //          py::arg("prob"), py::arg("effects"))
 //     .def_property_readonly("prob", &ProbBranchWrapper::prob)
 //     .def_property_readonly("effects", &ProbBranchWrapper::effects)
@@ -63,29 +63,29 @@ PYBIND11_MODULE(_bindings, m) {
 //         return oss.str();
 //     });
 
-// GroundedEffectType
-py::class_<GroundedEffectType>(m, "GroundedEffectType")
+// GroundedEffect
+py::class_<GroundedEffect>(m, "GroundedEffect")
     .def(py::init<double,
 	 std::unordered_set<Fluent>,
-	 std::vector<std::pair<double, std::vector<GroundedEffectType>>>>(),
+	 std::vector<std::pair<double, std::vector<GroundedEffect>>>>(),
          py::arg("time"),
          py::arg("resulting_fluents") = std::unordered_set<Fluent>{},
-	 py::arg("prob_effects") = std::vector<std::pair<double, std::vector<GroundedEffectType>>>{})
-    .def_property_readonly("time", &GroundedEffectType::time)
-    .def_property_readonly("resulting_fluents", &GroundedEffectType::resulting_fluents)
-    .def_property_readonly("prob_effects", &GroundedEffectType::prob_effects)
-    .def("is_probabilistic", &GroundedEffectType::is_probabilistic)
-    .def("__str__", &GroundedEffectType::str)
-    .def("__repr__", [](const GroundedEffectType& eff) {
+	 py::arg("prob_effects") = std::vector<std::pair<double, std::vector<GroundedEffect>>>{})
+    .def_property_readonly("time", &GroundedEffect::time)
+    .def_property_readonly("resulting_fluents", &GroundedEffect::resulting_fluents)
+    .def_property_readonly("prob_effects", &GroundedEffect::prob_effects)
+    .def("is_probabilistic", &GroundedEffect::is_probabilistic)
+    .def("__str__", &GroundedEffect::str)
+    .def("__repr__", [](const GroundedEffect& eff) {
         return "GroundedEffect(" + eff.str() + ")";
     })
-    .def("__eq__", &GroundedEffectType::operator==)
-    .def("__hash__", [](const GroundedEffectType& eff) {
+    .def("__eq__", &GroundedEffect::operator==)
+    .def("__hash__", [](const GroundedEffect& eff) {
         return static_cast<std::size_t>(eff.hash());
     });
 
 
-    // py::class_<GroundedEffect, GroundedEffectType>(m, "GroundedEffect")
+    // py::class_<GroundedEffect, GroundedEffect>(m, "GroundedEffect")
     //   .def(py::init<double, std::unordered_set<Fluent>>(),
     // 	   py::arg("time"), py::arg("resulting_fluents"))
     //   .def("__hash__", &GroundedEffect::hash)
@@ -95,7 +95,7 @@ py::class_<GroundedEffectType>(m, "GroundedEffectType")
     //     return "GroundedEffect(" + ge.str() + ")";
     //   });
 
-    // py::class_<GroundedProbEffect, GroundedEffectType>(m, "GroundedProbEffect")
+    // py::class_<GroundedProbEffect, GroundedEffect>(m, "GroundedProbEffect")
     //   .def(py::init<double, std::vector<ProbBranch>, std::unordered_set<Fluent>>(),
     // 	   py::arg("time"),
     // 	   py::arg("prob_effects"),
@@ -108,7 +108,7 @@ py::class_<GroundedEffectType>(m, "GroundedEffectType")
     //   });
 
     py::class_<Action>(m, "Action")
-	.def(py::init<std::unordered_set<Fluent>, std::vector<GroundedEffectType>, std::string>(),
+	.def(py::init<std::unordered_set<Fluent>, std::vector<GroundedEffect>, std::string>(),
 	    py::arg("preconditions"), py::arg("effects"), py::arg("name") = "anonymous")
 	.def_property_readonly("name", &Action::name)
 	.def_property_readonly("preconditions", &Action::preconditions)
@@ -121,10 +121,10 @@ py::class_<GroundedEffectType>(m, "GroundedEffectType")
     py::class_<State>(m, "State")
       .def(py::init<double,
 	   std::unordered_set<Fluent>,
-	   std::vector<std::pair<double, GroundedEffectType>>>(),
+	   std::vector<std::pair<double, GroundedEffect>>>(),
 	   py::arg("time") = 0.0,
 	   py::arg("fluents") = std::unordered_set<Fluent>{},
-	   py::arg("upcoming_effects") = std::vector<std::pair<double, GroundedEffectType>>{})
+	   py::arg("upcoming_effects") = std::vector<std::pair<double, GroundedEffect>>{})
       .def_property("time", &State::time, &State::set_time)
       .def_property_readonly("fluents", &State::fluents)
       .def_property_readonly("upcoming_effects", &State::upcoming_effects)
@@ -141,7 +141,7 @@ py::class_<GroundedEffectType>(m, "GroundedEffectType")
       .def("__str__", &State::str)
       .def("__repr__", [](const State& s) { return s.str(); });
     py::class_<ProbBranchWrapper>(m, "ProbBranch")
-      .def(py::init<double, std::vector<GroundedEffectType>>())
+      .def(py::init<double, std::vector<GroundedEffect>>())
       .def_property_readonly("prob", &ProbBranchWrapper::prob)
       .def_property_readonly("effects", &ProbBranchWrapper::effects)
       .def("__getitem__", [](const ProbBranchWrapper& b, std::size_t i) -> py::object {
@@ -178,7 +178,7 @@ py::class_<GroundedEffectType>(m, "GroundedEffectType")
 
 
 
-    // py::bind_vector<std::vector<GroundedEffectType>>(m, "GroundedEffectTypeVec");
+    // py::bind_vector<std::vector<GroundedEffect>>(m, "GroundedEffectVec");
     // py::bind_vector<std::vector<ProbBranch>>(m, "GroundedProbBranchVec");
     // py::bind_tuple<ProbBranch>(m, "ProbBranch");
 }
