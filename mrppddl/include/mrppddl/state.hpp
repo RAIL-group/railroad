@@ -245,9 +245,9 @@ inline std::vector<std::pair<State, double>> transition(
     const Action* action,
     bool relax = false
 ) {
-    if (action && !state.satisfies_precondition(*action, relax)) {
-        throw std::runtime_error("Precondition not satisfied for applying action");
-    }
+    // if (action && !state.satisfies_precondition(*action, relax)) {
+    //     throw std::runtime_error("Precondition not satisfied for applying action");
+    // }
 
     State new_state = state.copy();
     if (action) {

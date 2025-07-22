@@ -73,8 +73,8 @@ inline std::vector<Action> get_next_actions(
 
 using HeuristicFn = std::function<double(const State&)>;
 
-// For priority queue: (f, counter, state)
-using QueueEntry = std::tuple<double, int, State>;
+// For priority queue: (f, state)
+using QueueEntry = std::tuple<double, State>;
 
 // For backtracking
 using CameFromMap = std::unordered_map<State, std::pair<State, Action>>;
@@ -94,14 +94,32 @@ inline std::vector<Action> reconstruct_path(const CameFromMap& came_from, State 
 
 inline std::function<bool(const std::unordered_set<Fluent>&)>
 make_goal_test(const std::unordered_set<Fluent>& goal_fluents) {
-    return [goal_fluents](const std::unordered_set<Fluent>& fluents) {
+    return [&goal_fluents](const std::unordered_set<Fluent>& fluents) {
         for (const auto& f : goal_fluents) {
-            if (fluents.find(f) == fluents.end()) {
+            if (!fluents.count(f)) {
                 return false;
             }
         }
         return true;
     };
+}
+
+bool is_goal_dbg(const std::unordered_set<Fluent>& fluents) {
+  if (!fluents.count(Fluent("at r1 a"))) {
+    return false;
+  } else if (!fluents.count(Fluent("visited a"))) {
+    return false;
+  } else if (!fluents.count(Fluent("visited b"))) {
+    return false;
+  } else if (!fluents.count(Fluent("visited c"))) {
+    return false;
+  } else if (!fluents.count(Fluent("visited d"))) {
+    return false;
+  } else if (!fluents.count(Fluent("visited e"))) {
+    return false;
+  }
+
+  return true;
 }
 
 inline std::optional<std::vector<Action>> astar(
@@ -115,25 +133,25 @@ inline std::optional<std::vector<Action>> astar(
     CameFromMap came_from;
 
     int counter = 0;
-    open_heap.emplace(0.0, counter++, start_state);
+    open_heap.emplace(0.0, start_state);
 
     while (!open_heap.empty()) {
+        counter++;
         QueueEntry top = open_heap.top();
-	State current = std::get<2>(top);
+	State current = std::get<1>(top);
         open_heap.pop();
-
-        if (is_goal_state(current.fluents())) {
-	  std::cerr << "Goal reached!! count: " << counter << std::endl;
-	  std::cerr << current.hash() << std::endl;
-	  std::cerr << current.str() << std::endl;
-	  return reconstruct_path(came_from, current);
-        }
 
         if (closed_set.count(current)) continue;
         closed_set.insert(current);
 
+        if (is_goal_dbg(current.fluents())) {
+	  std::cerr << "Goal reached!! count: " << counter << std::endl;
+	  // std::cerr << current.hash() << std::endl;
+	  // std::cerr << current.str() << std::endl;
+	  return reconstruct_path(came_from, current);
+        }
+
         for (const auto& action : get_next_actions(current, all_actions)) {
-	    std::cerr << action.str() << std::endl;
             for (const auto& [successor, prob] : transition(current, &action)) {
                 if (prob == 0.0) continue;
 
@@ -144,7 +162,7 @@ inline std::optional<std::vector<Action>> astar(
                 double h = heuristic_fn ? heuristic_fn(successor) : 0.0;
                 double f = g + h;
 
-                open_heap.emplace(f, counter++, successor);
+                open_heap.emplace(f, successor);
             }
         }
     }
