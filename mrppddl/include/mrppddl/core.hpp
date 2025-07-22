@@ -126,7 +126,7 @@ public:
 		     std::unordered_set<Fluent> resulting_fluents,
 		     std::vector<std::pair<double, std::vector<GroundedEffect>>> prob_pairs
 		     )
-    : time_(time), resulting_fluents_(std::move(resulting_fluents))
+    : time_(time), resulting_fluents_(std::move(resulting_fluents)), cached_hash_(std::nullopt)
   {
     for (auto& [p, effects] : prob_pairs) {
       prob_effects_.emplace_back(p, std::move(effects));
@@ -157,70 +157,56 @@ GroundedEffect(
     }
 
     std::size_t hash() const {
-	std::size_t h_time = std::hash<double>{}(time_);
+      if (cached_hash_) {
+	return *cached_hash_;
+      }
 
-	// Hash fluents (unordered)
-	std::size_t h_fluents = 0;
-	for (const auto& f : resulting_fluents_) {
-	  h_fluents ^= f.hash();
+      std::size_t h_time = std::hash<double>{}(time_);
+
+      // Hash fluents
+      std::size_t h_fluents = 0;
+      for (const auto& f : resulting_fluents_) {
+	h_fluents ^= f.hash();
+      }
+
+      // Hash branches
+      std::size_t h_branches = 0;
+      for (const auto& branch : prob_effects_) {
+	std::size_t h_branch = 0;
+
+	// Effects inside branch
+	for (const auto& inner_eff : branch.effects()) {
+	  h_branch ^= inner_eff.hash();
 	}
 
-	// Hash branches (unordered)
-	std::size_t h_branches = 0;
-	for (const auto& branch : prob_effects_) {
-	    std::size_t h_branch = 0;
+	// Combine prob into branch hash
+	hash_combine(h_branch, std::hash<double>{}(branch.prob()));
 
-	    // Effects inside branch (unordered)
-	    for (const auto& inner_eff : branch.effects()) {
-	      h_branch ^= inner_eff.hash();
-	    }
+	// Fold branch hash into set-of-branches hash (unordered)
+	h_branches ^= h_branch;
+      }
 
-	    // Combine prob into branch hash (unordered)
-	    hash_combine(h_branch, std::hash<double>{}(branch.prob()));
+      // Final combination: time, fluents, branches (ordered)
+      std::size_t h = 0;
+      hash_combine(h, h_time);
+      hash_combine(h, h_fluents);
+      hash_combine(h, h_branches);
+      cached_hash_ = h;
 
-	    // Fold branch hash into set-of-branches hash (unordered)
-	    h_branches ^= h_branch;
-	}
-
-	// Final combination: time, fluents, branches (unordered)
-	std::size_t h = 0;
-	hash_combine(h, h_time);
-	hash_combine(h, h_fluents);
-	hash_combine(h, h_branches);
-
-	return h;
+      return h;
     }
 
 
     std::string str() const {
       std::ostringstream out;
         if (is_probabilistic()) {
-	  std::size_t h = std::hash<double>{}(time_);
-	  for (const auto& branch : prob_effects_) {
-	    std::size_t h_branch = std::hash<double>{}(branch.prob());
-	    for (const auto& inner_eff : branch.effects()) {
-	      h_branch ^= inner_eff.hash();
-	    }
-	    out << " H[" << h_branch << "] ";
-	    h ^= h_branch;
-	  }
-          out << "H[" << h << "] ";
-
             out << "probabilistic after " << time_ << ": { ";
             for (const auto& branch : prob_effects_) {
                 out << branch.prob() << ": [";
                 for (size_t i = 0; i < branch.effects().size(); ++i) {
                     out << branch.effects()[i].str();
-                    out << " [" << branch.effects()[i].hash() << "] ";
                     if (i + 1 < branch.effects().size()) out << "; ";
                 }
-
-		std::size_t h_branch = std::hash<double>{}(branch.prob());
-		for (const auto& inner_eff : branch.effects()) {
-		  h_branch ^= inner_eff.hash();
-		}
-		out << " H[" << h_branch << "] ";
-
                 out << "], ";
             }
             out << "}";
@@ -241,6 +227,7 @@ private:
     double time_;
     std::unordered_set<Fluent> resulting_fluents_;
     std::vector<ProbBranchWrapper> prob_effects_;
+    mutable std::optional<std::size_t> cached_hash_;
 };
 
 inline bool operator==(const ProbBranchWrapper& a, const ProbBranchWrapper& b) {

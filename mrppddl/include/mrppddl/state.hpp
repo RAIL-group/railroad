@@ -96,6 +96,37 @@ public:
     }
 
     std::size_t hash() const {
+      if (cached_hash_) {
+	return *cached_hash_;
+      }
+
+      std::size_t h_time = std::hash<double>{}(time_);
+
+      // Hash fluents
+      std::size_t h_fluents = 0;
+      for (const auto& f : fluents_) {
+	h_fluents ^= f.hash();
+      }
+
+      std::size_t h_upcoming = 0;
+      for (const auto& [t, eff] : upcoming_effects_) {
+	std::size_t h_effect = 0;
+	hash_combine(h_effect, std::hash<double>{}(t));
+	hash_combine(h_effect, eff.hash());
+	h_upcoming ^= h_effect;
+      }
+
+      std::size_t h = 0;
+      hash_combine(h, h_time);
+      hash_combine(h, h_fluents);
+      hash_combine(h, h_upcoming);
+      cached_hash_ = h;
+
+      return h;
+
+
+
+
       // FIXME: this isn't narrow enough; missing effects!!
       return std::hash<std::string>{}(str());
       // std::size_t h = 0;

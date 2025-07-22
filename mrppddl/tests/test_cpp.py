@@ -55,6 +55,11 @@ def test_cpp_effect_hashing():
     assert hash(e1) == hash(e1_reordered)
     assert not hash(e1) == hash(e1_time_change)
     assert not hash(e1) == hash(e2)
+    # Doubled for caching
+    assert hash(e1) == hash(e1_alt)
+    assert hash(e1) == hash(e1_reordered)
+    assert not hash(e1) == hash(e1_time_change)
+    assert not hash(e1) == hash(e2)
 
     e1 = GroundedEffect(2.5, {f1})
     e2 = GroundedEffect(2.5, {f2})
@@ -212,9 +217,9 @@ def construct_move_operator(move_time: OptCallable):
         parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
         preconditions=[F("at ?r ?from"), F("free ?r"), F("not visited ?to")],
         effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r")}),
+            Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?r ?from")}),
             Effect(time=(move_time, ["?r", "?from", "?to"]),
-                   resulting_fluents={F("free ?r"), F("not at ?r ?from"), F("at ?r ?to"), F("visited ?to")},
+                   resulting_fluents={F("free ?r"), F("at ?r ?to"), F("visited ?to")},
             ),
         ],
     )
@@ -225,14 +230,14 @@ def get_action_by_name(actions: List[Action], name: str) -> Action:
             return action
     raise ValueError(f"No action found with name: {name}")
 
-@pytest.mark.skip()
+# @pytest.mark.skip()
 def test_cpp_astar_move():
 
     # Get all actions
     objects_by_type = {
         "robot": ["r1", "r2"],
-        # "location": ["start", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"],
-        "location": ["start", "a", "b"],
+        "location": ["start", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"],
+        # "location": ["start", "a", "b"],
     }
     import random
     random.seed(8616)
@@ -255,21 +260,26 @@ def test_cpp_astar_move():
     # s = transition(s, get_action_by_name(all_actions, "move r2 b c"))[0][0]
     # print(s)
     goal_fn = make_goal_test({
-        F("at r1 a")
-        # F("visited a"), 
-        # F("visited b"),
-        # F("visited c"),
-        # F("visited d"),
+        F("at r1 a"),
+        F("visited a"), 
+        F("visited b"),
+        F("visited c"),
+        F("visited d"),
         # F("visited e"),
     })
     # from mrppddl.planner import astar
     # def goal_fn(fluents):
     #     return F("at r1 a") in fluents
+    from time import time
+    tstart = time()
     path = astar(initial_state, all_actions, goal_fn)
+    print(time() - tstart)
     s = initial_state
     for action in path:
         print(s)
-        print(action)
+        print(action.name)
         assert s.satisfies_precondition(action)
         s = transition(s, action)[0][0]
+    print("State")
+    print(s)
     raise ValueError()

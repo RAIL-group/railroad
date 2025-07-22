@@ -123,6 +123,7 @@ inline std::optional<std::vector<Action>> astar(
         open_heap.pop();
 
         if (is_goal_state(current.fluents())) {
+	  std::cerr << "Goal reached!! count: " << counter << std::endl;
 	  std::cerr << current.hash() << std::endl;
 	  std::cerr << current.str() << std::endl;
 	  return reconstruct_path(came_from, current);
@@ -132,14 +133,12 @@ inline std::optional<std::vector<Action>> astar(
         closed_set.insert(current);
 
         for (const auto& action : get_next_actions(current, all_actions)) {
+	    std::cerr << action.str() << std::endl;
             for (const auto& [successor, prob] : transition(current, &action)) {
                 if (prob == 0.0) continue;
 
                 double g = successor.time();
 
-		std::cerr << "HSH" << std::endl;
-		std::cerr << current.hash() << std::endl;
-		std::cerr << successor.hash() << std::endl;
                 came_from[successor] = std::make_pair(current, action);
 
                 double h = heuristic_fn ? heuristic_fn(successor) : 0.0;
