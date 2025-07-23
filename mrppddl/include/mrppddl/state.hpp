@@ -54,23 +54,14 @@ public:
 
     void update_fluents(const std::unordered_set<Fluent>& new_fluents, bool relax = false) {
         cached_hash_ = std::nullopt;
-
-        std::unordered_set<Fluent> positives, flipped_negatives;
         for (const auto& f : new_fluents) {
             if (f.is_negated()) {
                 if (!relax) {
-                    flipped_negatives.insert(f.invert());
+		  fluents_.erase(f.invert());
                 }
             } else {
-                positives.insert(f);
+	      fluents_.insert(f);
             }
-        }
-
-        if (relax) {
-            fluents_.insert(positives.begin(), positives.end());
-        } else {
-            for (const auto& f : flipped_negatives) fluents_.erase(f);
-            fluents_.insert(positives.begin(), positives.end());
         }
     }
 
@@ -122,29 +113,6 @@ public:
       cached_hash_ = h;
 
       return h;
-
-
-
-
-      // FIXME: this isn't narrow enough; missing effects!!
-      return std::hash<std::string>{}(str());
-      // std::size_t h = 0;
-      // // h ^= std::hash<double>{}(time_);
-      // for (const auto& f : fluents_) h ^= f.hash();
-      // return h;
-
-        // // if (!cached_hash_) {
-        //     std::size_t h = std::hash<double>{}(time_);
-        //     for (const auto& f : fluents_) h ^= f.hash();
-	//     return h;
-        //     for (const auto& [t, e] : upcoming_effects_) {
-        //         h ^= std::hash<double>{}(t);
-        //         h ^= std::hash<double>{}(e.time());
-        //     }
-        //     cached_hash_ = h;
-	//     return h;
-        // // }
-        // return *cached_hash_;
     }
 
     bool operator==(const State& other) const {
@@ -179,7 +147,6 @@ private:
     std::unordered_set<Fluent> fluents_;
     EffectQueue upcoming_effects_;
     mutable std::optional<std::size_t> cached_hash_;
-
     static bool effect_cmp(const std::pair<double, GroundedEffect>& a,
                            const std::pair<double, GroundedEffect>& b) {
         return a.first > b.first;

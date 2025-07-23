@@ -108,7 +108,7 @@ namespace std {
 
 namespace mrppddl {
 
-class GroundedEffect;  // Forward declaration
+class GroundedEffect;
 
 class ProbBranchWrapper {
 public:
@@ -118,9 +118,12 @@ public:
     double prob() const { return prob_; }
     const std::vector<GroundedEffect>& effects() const { return effects_; }
 
+  std::size_t hash() const;
+
 private:
     double prob_;
     std::vector<GroundedEffect> effects_;
+    mutable std::optional<std::size_t> cached_hash_;
 };
 
 class GroundedEffect {
@@ -135,6 +138,7 @@ public:
     for (auto& [p, effects] : prob_pairs) {
       prob_effects_.emplace_back(p, std::move(effects));
     }
+    hash();
   }
 GroundedEffect(
     double time,
@@ -155,9 +159,7 @@ GroundedEffect(
     }
 
     bool operator==(const GroundedEffect& other) const {
-        return time_ == other.time_ &&
-               resulting_fluents_ == other.resulting_fluents_ &&
-               prob_effects_ == other.prob_effects_;  // Optional: you can omit this
+      return hash() == other.hash();
     }
 
     std::size_t hash() const {
@@ -176,30 +178,16 @@ GroundedEffect(
       // Hash branches
       std::size_t h_branches = 0;
       for (const auto& branch : prob_effects_) {
-	std::size_t h_branch = 0;
-
-	// Effects inside branch
-	for (const auto& inner_eff : branch.effects()) {
-	  h_branch ^= inner_eff.hash();
-	}
-
-	// Combine prob into branch hash
-	hash_combine(h_branch, std::hash<double>{}(branch.prob()));
-
-	// Fold branch hash into set-of-branches hash (unordered)
-	h_branches ^= h_branch;
+	h_branches ^= branch.hash();
       }
 
       // Final combination: time, fluents, branches (ordered)
-      std::size_t h = 0;
-      hash_combine(h, h_time);
-      hash_combine(h, h_fluents);
-      hash_combine(h, h_branches);
-      cached_hash_ = h;
+      hash_combine(h_time, h_fluents);
+      hash_combine(h_time, h_branches);
+      cached_hash_ = h_time;
 
-      return h;
+      return h_time;
     }
-
 
     std::string str() const {
       std::ostringstream out;
@@ -313,6 +301,18 @@ private:
     std::unordered_set<Fluent> pos_precond_;
     std::unordered_set<Fluent> neg_precond_flipped_;
 };
+
+std::size_t ProbBranchWrapper::hash() const {
+    if (cached_hash_) return *cached_hash_;
+
+    std::size_t h_branch = 0;
+    for (const auto& inner_eff : effects_) {
+        h_branch ^= inner_eff.hash();
+    }
+    hash_combine(h_branch, std::hash<double>{}(prob_));
+    cached_hash_ = h_branch;
+    return h_branch;
+}
 
 
 }  // namespace mrppddl

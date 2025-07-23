@@ -126,7 +126,7 @@ inline std::optional<std::vector<Action>> astar(
     goal_fluents.emplace(Fluent("visited b"));
     goal_fluents.emplace(Fluent("visited c"));
     goal_fluents.emplace(Fluent("visited d"));
-    // goal_fluents.emplace(Fluent("visited e"));
+    goal_fluents.emplace(Fluent("visited e"));
 
     int counter = 0;
     open_heap.emplace(0.0, start_state);
