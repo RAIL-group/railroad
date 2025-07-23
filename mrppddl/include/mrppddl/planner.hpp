@@ -15,7 +15,7 @@
 
 namespace mrppddl {
 
-inline std::vector<Action> get_next_actions(
+inline std::vector<const Action*> get_next_actions(
     const State& state,
     const std::vector<Action>& all_actions
 ) {
@@ -44,10 +44,10 @@ inline std::vector<Action> get_next_actions(
     for (const auto& free_pred : free_robot_fluents) {
         temp_state.update_fluents({free_pred});
 
-        std::vector<Action> applicable;
+        std::vector<const Action*> applicable;
         for (const auto& action : all_actions) {
             if (temp_state.satisfies_precondition(action)) {
-                applicable.push_back(action);
+                applicable.push_back(&action);
             }
         }
 
@@ -57,10 +57,10 @@ inline std::vector<Action> get_next_actions(
     }
 
     // Step 4: Fall back to any applicable action
-    std::vector<Action> fallback;
+    std::vector<const Action*> fallback;
     for (const auto& action : all_actions) {
         if (state.satisfies_precondition(action)) {
-            fallback.push_back(action);
+            fallback.push_back(&action);
         }
     }
 
@@ -149,11 +149,14 @@ inline std::optional<std::vector<Action>> astar(
 
         for (const auto& action : get_next_actions(current, all_actions)) {
             for (const auto& [successor, prob] : transition(current, &action)) {
+	auto next_actions = get_next_actions(current, all_actions);
+        for (const auto action : next_actions) {
+            for (const auto& [successor, prob] : transition(current, action)) {
                 if (prob == 0.0) continue;
 
                 double g = successor.time();
 
-                came_from[successor.hash()] = std::make_pair(current.hash(), &action);
+                came_from[successor.hash()] = std::make_pair(current.hash(), action);
 
                 double h = heuristic_fn ? heuristic_fn(successor) : 0.0;
                 double f = g + h;
