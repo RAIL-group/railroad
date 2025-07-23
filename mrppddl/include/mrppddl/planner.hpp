@@ -147,8 +147,6 @@ inline std::optional<std::vector<Action>> astar(
 	  // return reconstruct_path(came_from, current);
         }
 
-        for (const auto& action : get_next_actions(current, all_actions)) {
-            for (const auto& [successor, prob] : transition(current, &action)) {
 	auto next_actions = get_next_actions(current, all_actions);
         for (const auto action : next_actions) {
             for (const auto& [successor, prob] : transition(current, action)) {
