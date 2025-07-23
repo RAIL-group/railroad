@@ -35,16 +35,14 @@ public:
 
     bool satisfies_precondition(const Action& action, bool relax = false) const {
         const auto& pos = action.pos_preconditions();
-        const auto& neg = action.neg_precond_flipped();
-
-        if (relax) {
-            return std::all_of(pos.begin(), pos.end(),
-                               [&](const Fluent& f) { return fluents_.count(f); });
-        }
-
         bool has_all_positive = std::all_of(pos.begin(), pos.end(),
                                             [&](const Fluent& f) { return fluents_.count(f); });
-	if (!has_all_positive) { return false; }
+
+	if (!has_all_positive || relax) {
+	  return has_all_positive;
+	}
+
+        const auto& neg = action.neg_precond_flipped();
         bool disjoint_negative = std::none_of(neg.begin(), neg.end(),
                                              [&](const Fluent& f) { return fluents_.count(f); });
         return has_all_positive && disjoint_negative;
@@ -212,7 +210,7 @@ inline void advance_to_terminal(
 
         if (scheduled_time > state.time() && !relax &&
             std::any_of(state.fluents().begin(), state.fluents().end(),
-                        [](const Fluent& f) { return f.name() == "free"; }))
+                        [](const Fluent& f) { return f.is_free(); }))
         {
             outcomes[state] += prob;
             return;
@@ -250,10 +248,8 @@ inline std::vector<std::pair<State, double>> transition(
     // }
 
     State new_state = state;
-    if (action) {
-        for (const auto& effect : action->effects()) {
-            new_state.queue_effect(effect);
-        }
+    for (const auto& effect : action->effects()) {
+      new_state.queue_effect(effect);
     }
 
     std::unordered_map<State, double> outcomes;

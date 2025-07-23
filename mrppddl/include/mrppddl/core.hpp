@@ -50,6 +50,7 @@ public:
             args_.assign(tokens.begin() + 1, tokens.end());
         }
 
+	is_free_ = (name_ == "free");
         cached_hash_ = compute_hash();
     }
 
@@ -62,6 +63,7 @@ public:
   }
 
     std::string name() const { return name_; }
+    bool is_free() const { return is_free_; }
     const std::vector<std::string>& args() const { return args_; }
     bool is_negated() const { return negated_; }
 
@@ -78,6 +80,7 @@ private:
     std::vector<std::string> args_;
     bool negated_;
     std::size_t cached_hash_;
+    bool is_free_;
 
   std::size_t compute_hash() const {
     std::size_t h = std::hash<std::string>{}(name_);

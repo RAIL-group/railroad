@@ -19,16 +19,18 @@ inline std::vector<Action> get_next_actions(
     const State& state,
     const std::vector<Action>& all_actions
 ) {
-    // Step 1: Extract all `free(...)` fluents
-    std::vector<Fluent> free_robot_fluents;
-    for (const auto& f : state.fluents()) {
-        if (f.name() == "free") {
-            free_robot_fluents.push_back(f);
-        }
-    }
+  // Step 1: Extract all `free(...)` fluents (sorting as I go)
+  auto cmp = [](const Fluent& a, const Fluent& b) {
+    return a.name() < b.name();
+  };
 
-    std::sort(free_robot_fluents.begin(), free_robot_fluents.end(),
-              [](const Fluent& a, const Fluent& b) { return a.name() < b.name(); });
+  std::set<Fluent, decltype(cmp)> free_robot_fluents(cmp);
+
+  for (const auto& f : state.fluents()) {
+    if (f.is_free()) {
+      free_robot_fluents.insert(f);
+    }
+  }
 
     // Step 2: Create negated state (excluding all free)
     std::unordered_set<Fluent> negated;
@@ -36,15 +38,10 @@ inline std::vector<Action> get_next_actions(
         negated.insert(f.invert());
     }
 
-    State neg_state = State(state.time(), state.fluents());
-    neg_state.update_fluents(negated);
-
     // Step 3: For each free predicate, create temp state with just that one enabled
+    State temp_state = State(0, state.fluents());
+    temp_state.update_fluents(negated);
     for (const auto& free_pred : free_robot_fluents) {
-        State temp_state = State(
-            state.time(),
-            neg_state.fluents()
-        );
         temp_state.update_fluents({free_pred});
 
         std::vector<Action> applicable;
@@ -121,7 +118,7 @@ inline std::optional<std::vector<Action>> astar(
 ) {
     std::priority_queue<QueueEntry, std::vector<QueueEntry>, std::greater<>> open_heap;
     std::unordered_set<std::size_t> closed_set;
-    std::unordered_map<std::size_t, std::pair<std::size_t, Action>> came_from;
+    std::unordered_map<std::size_t, std::pair<std::size_t, const Action*>> came_from;
 
     std::unordered_set<Fluent> goal_fluents;
     goal_fluents.emplace(Fluent("at r1 a"));
@@ -156,12 +153,12 @@ inline std::optional<std::vector<Action>> astar(
 
                 double g = successor.time();
 
-                came_from[successor.hash()] = std::make_pair(current.hash(), action);
+                came_from[successor.hash()] = std::make_pair(current.hash(), &action);
 
                 double h = heuristic_fn ? heuristic_fn(successor) : 0.0;
                 double f = g + h;
 
-                open_heap.emplace(f, successor);
+                open_heap.emplace(f, std::move(successor));
             }
         }
     }
