@@ -219,6 +219,7 @@ inline std::vector<std::pair<State, double>> transition(
       new_state.queue_effect(effect);
     }
 
+    // Base: 631 ms
     static std::chrono::nanoseconds cumulative_time(0); // Static, initialized once
 
     auto start_time = std::chrono::high_resolution_clock::now();
