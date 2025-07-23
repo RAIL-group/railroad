@@ -44,8 +44,9 @@ public:
 
         bool has_all_positive = std::all_of(pos.begin(), pos.end(),
                                             [&](const Fluent& f) { return fluents_.count(f); });
-        bool disjoint_negative = std::all_of(neg.begin(), neg.end(),
-                                             [&](const Fluent& f) { return !fluents_.count(f); });
+	if (!has_all_positive) { return false; }
+        bool disjoint_negative = std::none_of(neg.begin(), neg.end(),
+                                             [&](const Fluent& f) { return fluents_.count(f); });
         return has_all_positive && disjoint_negative;
     }
 
@@ -92,7 +93,7 @@ public:
         for (const auto& [t, e] : upcoming_effects_) {
             new_effects.emplace_back(t - time_, e);
         }
-        return State(0, fluents_, std::move(new_effects));
+        return State(0, fluents_, new_effects);
     }
 
     std::size_t hash() const {
@@ -209,10 +210,9 @@ inline void advance_to_terminal(
     while (!state.upcoming_effects().empty()) {
         auto [scheduled_time, effect] = state.upcoming_effects().front();
 
-        if (scheduled_time > state.time() &&
+        if (scheduled_time > state.time() && !relax &&
             std::any_of(state.fluents().begin(), state.fluents().end(),
-                        [](const Fluent& f) { return f.name() == "free"; }) &&
-            !relax)
+                        [](const Fluent& f) { return f.name() == "free"; }))
         {
             outcomes[state] += prob;
             return;
@@ -227,9 +227,9 @@ inline void advance_to_terminal(
 
 	if (effect.is_probabilistic()) {
 	  for (const auto& branch : effect.prob_effects()) {
-	    State branched = state.copy();
+	    State branched = state;
 	    for (const auto& e : branch.effects()) {
-	      branched.queue_effect(GroundedEffect(e.time(), e.resulting_fluents()));
+	      branched.queue_effect(e);
 	    }
 	    advance_to_terminal(branched, prob * branch.prob(), outcomes, relax);
 	  }
@@ -249,7 +249,7 @@ inline std::vector<std::pair<State, double>> transition(
     //     throw std::runtime_error("Precondition not satisfied for applying action");
     // }
 
-    State new_state = state.copy();
+    State new_state = state;
     if (action) {
         for (const auto& effect : action->effects()) {
             new_state.queue_effect(effect);

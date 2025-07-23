@@ -1,4 +1,5 @@
 #pragma once
+#include <iostream>
 #include <string>
 #include <vector>
 #include <tuple>
@@ -11,7 +12,7 @@
 namespace mrppddl {
 
 inline void hash_combine(std::size_t& seed, std::size_t value) {
-seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+  seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
 }
 
 class Fluent {
@@ -52,24 +53,24 @@ public:
         cached_hash_ = compute_hash();
     }
 
-   Fluent invert() const {
+
+  const Fluent invert() const {
     Fluent flipped = *this;
     flipped.negated_ = !negated_;
-    flipped.cached_hash_ = flipped.compute_hash();
+    flipped.cached_hash_ = ~cached_hash_;
     return flipped;
   }
-
 
     std::string name() const { return name_; }
     const std::vector<std::string>& args() const { return args_; }
     bool is_negated() const { return negated_; }
 
     bool operator==(const Fluent& other) const {
-        return cached_hash_ == other.cached_hash_;
+        return hash() == other.hash();
     }
 
     std::size_t hash() const {
-        return cached_hash_;
+      return cached_hash_;
     }
 
 private:

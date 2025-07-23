@@ -104,21 +104,12 @@ make_goal_test(const std::unordered_set<Fluent>& goal_fluents) {
     };
 }
 
-bool is_goal_dbg(const std::unordered_set<Fluent>& fluents) {
-  if (!fluents.count(Fluent("at r1 a"))) {
-    return false;
-  } else if (!fluents.count(Fluent("visited a"))) {
-    return false;
-  } else if (!fluents.count(Fluent("visited b"))) {
-    return false;
-  } else if (!fluents.count(Fluent("visited c"))) {
-    return false;
-  } else if (!fluents.count(Fluent("visited d"))) {
-    return false;
-  } else if (!fluents.count(Fluent("visited e"))) {
-    return false;
+bool is_goal_dbg(const std::unordered_set<Fluent>& fluents, const std::unordered_set<Fluent>& goal_fluents) {
+  for (const auto& gf : goal_fluents) {
+    if (!fluents.count(gf)) {
+      return false;
+    }
   }
-
   return true;
 }
 
@@ -129,26 +120,34 @@ inline std::optional<std::vector<Action>> astar(
     HeuristicFn heuristic_fn = nullptr
 ) {
     std::priority_queue<QueueEntry, std::vector<QueueEntry>, std::greater<>> open_heap;
-    std::unordered_set<State> closed_set;
-    CameFromMap came_from;
+    std::unordered_set<std::size_t> closed_set;
+    std::unordered_map<std::size_t, std::pair<std::size_t, Action>> came_from;
+
+    std::unordered_set<Fluent> goal_fluents;
+    goal_fluents.emplace(Fluent("at r1 a"));
+    goal_fluents.emplace(Fluent("visited a"));
+    goal_fluents.emplace(Fluent("visited b"));
+    goal_fluents.emplace(Fluent("visited c"));
+    goal_fluents.emplace(Fluent("visited d"));
+    // goal_fluents.emplace(Fluent("visited e"));
 
     int counter = 0;
     open_heap.emplace(0.0, start_state);
 
+    std::cerr << "Starting the main planning loop." << std::endl;
     while (!open_heap.empty()) {
         counter++;
         QueueEntry top = open_heap.top();
 	State current = std::get<1>(top);
         open_heap.pop();
 
-        if (closed_set.count(current)) continue;
-        closed_set.insert(current);
+        if (closed_set.count(current.hash())) continue;
+        closed_set.insert(current.hash());
 
-        if (is_goal_dbg(current.fluents())) {
+        if (is_goal_dbg(current.fluents(), goal_fluents)) {
 	  std::cerr << "Goal reached!! count: " << counter << std::endl;
-	  // std::cerr << current.hash() << std::endl;
-	  // std::cerr << current.str() << std::endl;
-	  return reconstruct_path(came_from, current);
+	  return std::nullopt;  // no path found
+	  // return reconstruct_path(came_from, current);
         }
 
         for (const auto& action : get_next_actions(current, all_actions)) {
@@ -157,7 +156,7 @@ inline std::optional<std::vector<Action>> astar(
 
                 double g = successor.time();
 
-                came_from[successor] = std::make_pair(current, action);
+                came_from[successor.hash()] = std::make_pair(current.hash(), action);
 
                 double h = heuristic_fn ? heuristic_fn(successor) : 0.0;
                 double f = g + h;
