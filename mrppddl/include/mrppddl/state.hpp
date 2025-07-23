@@ -52,17 +52,20 @@ public:
         return State(time_, fluents_, upcoming_effects_);
     }
 
-    void update_fluents(const std::unordered_set<Fluent>& new_fluents, bool relax = false) {
+    bool update_fluents(const std::unordered_set<Fluent>& new_fluents, bool relax = false) {
         cached_hash_ = std::nullopt;
+	bool freed_robot = false;
         for (const auto& f : new_fluents) {
             if (f.is_negated()) {
                 if (!relax) {
 		  fluents_.erase(f.invert());
                 }
             } else {
+	      if (f.is_free()) { freed_robot = true; }
 	      fluents_.insert(f);
             }
         }
+	return freed_robot;
     }
 
     void queue_effect(const GroundedEffect& effect) {
@@ -172,23 +175,27 @@ inline void advance_to_terminal(
     std::unordered_map<State, double>& outcomes,
     bool relax = false
 ) {
+
+  bool any_free_robots = false;
+  if (!state.upcoming_effects().empty()) {
+    any_free_robots = std::any_of(state.fluents().begin(), state.fluents().end(),
+				  [](const Fluent& f) { return f.is_free(); });
+  }
+
     while (!state.upcoming_effects().empty()) {
         auto [scheduled_time, effect] = state.upcoming_effects().front();
 
-        if (scheduled_time > state.time() && !relax &&
-            std::any_of(state.fluents().begin(), state.fluents().end(),
-                        [](const Fluent& f) { return f.is_free(); }))
+	if (any_free_robots && (scheduled_time > state.time()) && !relax)
         {
-            outcomes[state] += prob;
-            return;
-        }
+	  outcomes[state] += prob;
+	  return;
+        } 
 
         if (scheduled_time > state.time()) {
             state.set_time(scheduled_time);
         }
-
         state.pop_effect();
-        state.update_fluents(effect.resulting_fluents(), relax);
+        any_free_robots = state.update_fluents(effect.resulting_fluents(), relax);
 
 	if (effect.is_probabilistic()) {
 	  for (const auto& branch : effect.prob_effects()) {
@@ -200,8 +207,8 @@ inline void advance_to_terminal(
 	  }
 	  return;  // stop after branching
 	}
-    }
 
+    }
     outcomes[state] += prob;
 }
 
