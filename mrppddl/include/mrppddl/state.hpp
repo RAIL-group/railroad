@@ -219,8 +219,20 @@ inline std::vector<std::pair<State, double>> transition(
       new_state.queue_effect(effect);
     }
 
+    static std::chrono::nanoseconds cumulative_time(0); // Static, initialized once
+
+    auto start_time = std::chrono::high_resolution_clock::now();
+
     std::unordered_map<State, double> outcomes;
     advance_to_terminal(new_state, 1.0, outcomes, relax);
+
+    auto end_time = std::chrono::high_resolution_clock::now();
+
+    cumulative_time += (end_time - start_time);
+
+    std::cout << "Cumulative time in myFunction: "
+              << std::chrono::duration_cast<std::chrono::milliseconds>(cumulative_time).count()
+              << " ms" << std::endl;
 
     return {outcomes.begin(), outcomes.end()};
 }
