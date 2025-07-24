@@ -3,72 +3,70 @@
 #include "mrppddl/core.hpp"
 #include "mrppddl/state.hpp"
 
-#include <iostream>
 #include <algorithm>
-#include <queue>
-#include <unordered_set>
-#include <unordered_map>
-#include <vector>
 #include <functional>
+#include <iostream>
 #include <optional>
+#include <queue>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 namespace mrppddl {
 
-inline std::vector<const Action*> get_next_actions(
-    const State& state,
-    const std::vector<Action>& all_actions
-) {
+inline std::vector<const Action *>
+get_next_actions(const State &state, const std::vector<Action> &all_actions) {
   // Step 1: Extract all `free(...)` fluents (sorting as I go)
-  auto cmp = [](const Fluent& a, const Fluent& b) {
+  auto cmp = [](const Fluent &a, const Fluent &b) {
     return a.name() < b.name();
   };
 
   std::set<Fluent, decltype(cmp)> free_robot_fluents(cmp);
 
-  for (const auto& f : state.fluents()) {
+  for (const auto &f : state.fluents()) {
     if (f.is_free()) {
       free_robot_fluents.insert(f);
     }
   }
 
-    // Step 2: Create negated state (excluding all free)
-    std::unordered_set<Fluent> negated;
-    for (const auto& f : free_robot_fluents) {
-        negated.insert(f.invert());
+  // Step 2: Create negated state (excluding all free)
+  std::unordered_set<Fluent> negated;
+  for (const auto &f : free_robot_fluents) {
+    negated.insert(f.invert());
+  }
+
+  // Step 3: For each free predicate, create temp state with just that one
+  // enabled
+  State temp_state = State(0, state.fluents());
+  temp_state.update_fluents(negated);
+  for (const auto &free_pred : free_robot_fluents) {
+    temp_state.update_fluents({free_pred});
+
+    std::vector<const Action *> applicable;
+    for (const auto &action : all_actions) {
+      if (temp_state.satisfies_precondition(action)) {
+        applicable.push_back(&action);
+      }
     }
 
-    // Step 3: For each free predicate, create temp state with just that one enabled
-    State temp_state = State(0, state.fluents());
-    temp_state.update_fluents(negated);
-    for (const auto& free_pred : free_robot_fluents) {
-        temp_state.update_fluents({free_pred});
-
-        std::vector<const Action*> applicable;
-        for (const auto& action : all_actions) {
-            if (temp_state.satisfies_precondition(action)) {
-                applicable.push_back(&action);
-            }
-        }
-
-        if (!applicable.empty()) {
-            return applicable;
-        }
+    if (!applicable.empty()) {
+      return applicable;
     }
+  }
 
-    // Step 4: Fall back to any applicable action
-    std::vector<const Action*> fallback;
-    for (const auto& action : all_actions) {
-        if (state.satisfies_precondition(action)) {
-            fallback.push_back(&action);
-        }
+  // Step 4: Fall back to any applicable action
+  std::vector<const Action *> fallback;
+  for (const auto &action : all_actions) {
+    if (state.satisfies_precondition(action)) {
+      fallback.push_back(&action);
     }
+  }
 
-    return fallback;
+  return fallback;
 }
 
-
-using HeuristicFn = std::function<double(const State&)>;
+using HeuristicFn = std::function<double(const State &)>;
 
 // For priority queue: (f, state)
 using QueueEntry = std::tuple<double, State>;
@@ -76,33 +74,35 @@ using QueueEntry = std::tuple<double, State>;
 // For backtracking
 using CameFromMap = std::unordered_map<State, std::pair<State, Action>>;
 
-inline std::vector<Action> reconstruct_path(const CameFromMap& came_from, State current) {
-    std::vector<Action> path;
-    auto it = came_from.find(current);
-    while (it != came_from.end()) {
-	std::cerr << it->second.second.str() << std::endl;
-        path.push_back(it->second.second);
-        current = it->second.first;
-        it = came_from.find(current);
+inline std::vector<Action> reconstruct_path(const CameFromMap &came_from,
+                                            State current) {
+  std::vector<Action> path;
+  auto it = came_from.find(current);
+  while (it != came_from.end()) {
+    std::cerr << it->second.second.str() << std::endl;
+    path.push_back(it->second.second);
+    current = it->second.first;
+    it = came_from.find(current);
+  }
+  std::reverse(path.begin(), path.end());
+  return path;
+}
+
+inline std::function<bool(const std::unordered_set<Fluent> &)>
+make_goal_test(const std::unordered_set<Fluent> &goal_fluents) {
+  return [&goal_fluents](const std::unordered_set<Fluent> &fluents) {
+    for (const auto &f : goal_fluents) {
+      if (!fluents.count(f)) {
+        return false;
+      }
     }
-    std::reverse(path.begin(), path.end());
-    return path;
+    return true;
+  };
 }
 
-inline std::function<bool(const std::unordered_set<Fluent>&)>
-make_goal_test(const std::unordered_set<Fluent>& goal_fluents) {
-    return [&goal_fluents](const std::unordered_set<Fluent>& fluents) {
-        for (const auto& f : goal_fluents) {
-            if (!fluents.count(f)) {
-                return false;
-            }
-        }
-        return true;
-    };
-}
-
-bool is_goal_dbg(const std::unordered_set<Fluent>& fluents, const std::unordered_set<Fluent>& goal_fluents) {
-  for (const auto& gf : goal_fluents) {
+bool is_goal_dbg(const std::unordered_set<Fluent> &fluents,
+                 const std::unordered_set<Fluent> &goal_fluents) {
+  for (const auto &gf : goal_fluents) {
     if (!fluents.count(gf)) {
       return false;
     }
@@ -110,62 +110,64 @@ bool is_goal_dbg(const std::unordered_set<Fluent>& fluents, const std::unordered
   return true;
 }
 
-inline std::optional<std::vector<Action>> astar(
-    const State& start_state,
-    const std::vector<Action>& all_actions,
-    const std::function<bool(const std::unordered_set<Fluent>&)>& is_goal_state,
-    HeuristicFn heuristic_fn = nullptr
-) {
-    std::priority_queue<QueueEntry, std::vector<QueueEntry>, std::greater<>> open_heap;
-    std::unordered_set<std::size_t> closed_set;
-    std::unordered_map<std::size_t, std::pair<std::size_t, const Action*>> came_from;
+inline std::optional<std::vector<Action>>
+astar(const State &start_state, const std::vector<Action> &all_actions,
+      const std::function<bool(const std::unordered_set<Fluent> &)>
+          &is_goal_state,
+      HeuristicFn heuristic_fn = nullptr) {
+  std::priority_queue<QueueEntry, std::vector<QueueEntry>, std::greater<>>
+      open_heap;
+  std::unordered_set<std::size_t> closed_set;
+  std::unordered_map<std::size_t, std::pair<std::size_t, const Action *>>
+      came_from;
 
-    std::unordered_set<Fluent> goal_fluents;
-    goal_fluents.emplace(Fluent("at r1 a"));
-    goal_fluents.emplace(Fluent("visited a"));
-    goal_fluents.emplace(Fluent("visited b"));
-    goal_fluents.emplace(Fluent("visited c"));
-    goal_fluents.emplace(Fluent("visited d"));
-    goal_fluents.emplace(Fluent("visited e"));
+  std::unordered_set<Fluent> goal_fluents;
+  goal_fluents.emplace(Fluent("at r1 a"));
+  goal_fluents.emplace(Fluent("visited a"));
+  goal_fluents.emplace(Fluent("visited b"));
+  goal_fluents.emplace(Fluent("visited c"));
+  goal_fluents.emplace(Fluent("visited d"));
+  goal_fluents.emplace(Fluent("visited e"));
 
-    int counter = 0;
-    open_heap.emplace(0.0, start_state);
+  int counter = 0;
+  open_heap.emplace(0.0, start_state);
 
-    std::cerr << "Starting the main planning loop." << std::endl;
-    while (!open_heap.empty()) {
-        counter++;
-        QueueEntry top = open_heap.top();
-	State current = std::get<1>(top);
-        open_heap.pop();
+  std::cerr << "Starting the main planning loop." << std::endl;
+  while (!open_heap.empty()) {
+    counter++;
+    QueueEntry top = open_heap.top();
+    State current = std::get<1>(top);
+    open_heap.pop();
 
-        if (closed_set.count(current.hash())) continue;
-        closed_set.insert(current.hash());
+    if (closed_set.count(current.hash()))
+      continue;
+    closed_set.insert(current.hash());
 
-        if (is_goal_dbg(current.fluents(), goal_fluents)) {
-	  std::cerr << "Goal reached!! count: " << counter << std::endl;
-	  return std::nullopt;  // no path found
-	  // return reconstruct_path(came_from, current);
-        }
-
-	auto next_actions = get_next_actions(current, all_actions);
-        for (const auto action : next_actions) {
-            for (const auto& [successor, prob] : transition(current, action)) {
-                if (prob == 0.0) continue;
-
-                double g = successor.time();
-
-                came_from[successor.hash()] = std::make_pair(current.hash(), action);
-
-                double h = heuristic_fn ? heuristic_fn(successor) : 0.0;
-                double f = g + h;
-
-                open_heap.emplace(f, std::move(successor));
-            }
-        }
+    if (is_goal_dbg(current.fluents(), goal_fluents)) {
+      std::cerr << "Goal reached!! count: " << counter << std::endl;
+      return std::nullopt; // no path found
+                           // return reconstruct_path(came_from, current);
     }
 
-    return std::nullopt;  // no path found
+    auto next_actions = get_next_actions(current, all_actions);
+    for (const auto action : next_actions) {
+      for (const auto &[successor, prob] : transition(current, action)) {
+        if (prob == 0.0)
+          continue;
+
+        double g = successor.time();
+
+        came_from[successor.hash()] = std::make_pair(current.hash(), action);
+
+        double h = heuristic_fn ? heuristic_fn(successor) : 0.0;
+        double f = g + h;
+
+        open_heap.emplace(f, std::move(successor));
+      }
+    }
+  }
+
+  return std::nullopt; // no path found
 }
 
-
-}  // namespace mrppddl
+} // namespace mrppddl
