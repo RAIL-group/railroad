@@ -137,6 +137,14 @@ public:
     for (auto &[p, effects] : prob_pairs) {
       prob_effects_.emplace_back(p, std::move(effects));
     }
+    for (const auto &f : resulting_fluents_) {
+      if (f.is_negated()) {
+        flipped_neg_fluents_.insert(f.invert());
+      } else {
+        pos_fluents_.insert(f);
+      }
+    }
+
     hash();
   }
   GroundedEffect(double time, std::unordered_set<Fluent> resulting_fluents)
@@ -146,6 +154,10 @@ public:
   double time() const { return time_; }
   const std::unordered_set<Fluent> &resulting_fluents() const {
     return resulting_fluents_;
+  }
+  const std::unordered_set<Fluent> &pos_fluents() const { return pos_fluents_; }
+  const std::unordered_set<Fluent> &flipped_neg_fluents() const {
+    return flipped_neg_fluents_;
   }
   const std::vector<ProbBranchWrapper> &prob_effects() const {
     return prob_effects_;
@@ -220,6 +232,8 @@ public:
 private:
   double time_;
   std::unordered_set<Fluent> resulting_fluents_;
+  std::unordered_set<Fluent> pos_fluents_;
+  std::unordered_set<Fluent> flipped_neg_fluents_;
   std::vector<ProbBranchWrapper> prob_effects_;
   mutable std::optional<std::size_t> cached_hash_;
 };

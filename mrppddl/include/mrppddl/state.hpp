@@ -51,6 +51,22 @@ public:
 
   State copy() const { return State(time_, fluents_, upcoming_effects_); }
 
+  bool
+  update_with_effect(const std::shared_ptr<const GroundedEffect> &new_effect) {
+    cached_hash_ = std::nullopt;
+    bool freed_robot = false;
+    for (const auto &f : new_effect->pos_fluents()) {
+      if (f.is_free()) {
+        freed_robot = true;
+      }
+      fluents_.insert(f);
+    }
+    for (const auto &f : new_effect->flipped_neg_fluents()) {
+      fluents_.erase(f);
+    }
+    return freed_robot;
+  }
+
   bool update_fluents(const std::unordered_set<Fluent> &new_fluents,
                       bool relax = false) {
     cached_hash_ = std::nullopt;
@@ -195,8 +211,7 @@ inline void advance_to_terminal(State state, double prob,
       state.set_time(scheduled_time);
     }
     state.pop_effect();
-    any_free_robots = any_free_robots ||
-                      state.update_fluents(effect->resulting_fluents(), relax);
+    any_free_robots = state.update_with_effect(effect);
 
     if (effect->is_probabilistic()) {
       for (const auto &branch : effect->prob_effects()) {
@@ -226,7 +241,7 @@ transition(const State &state, const Action *action, bool relax = false) {
 
   // // Base: 631 ms
   // static std::chrono::nanoseconds cumulative_time(0); // Static, initialized
-  // once auto start_time = std::chrono::high_resolution_clock::now();
+  // auto start_time = std::chrono::high_resolution_clock::now();
   std::unordered_map<State, double> outcomes;
   advance_to_terminal(new_state, 1.0, outcomes, relax);
   // auto end_time = std::chrono::high_resolution_clock::now();
