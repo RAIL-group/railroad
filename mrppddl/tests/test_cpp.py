@@ -113,7 +113,7 @@ def test_cpp_action_instantiation():
 
 import itertools
 from typing import List, Tuple, Sequence, Dict, Set
-from mrppddl._bindings import get_next_actions, astar, make_goal_test
+from mrppddl._bindings import get_next_actions, astar, mcts, make_goal_test
 from mrppddl.core import _make_bindable, OptExpr, Binding
 from mrppddl.helper import _make_callable, OptCallable
 
@@ -268,7 +268,6 @@ def test_cpp_astar_move():
         # F("visited e"),
     })
     goal_fluents = {
-        F("at r1 a"),
         F("visited a"),
         F("visited b"),
         F("visited c"),
@@ -278,9 +277,26 @@ def test_cpp_astar_move():
     # from mrppddl.planner import astar
     # def goal_fn(fluents):
     #     return F("at r1 a") in fluents
+    def is_goal(state):
+        return all(gf in state.fluents
+                   for gf in goal_fluents)
     from time import time
     tstart = time()
-    path = astar(initial_state, all_actions, goal_fluents)
+    state = initial_state
+    for _ in range(15):
+        if is_goal(state):
+            print("Goal found!")
+            break
+        action_name = mcts(state, all_actions, goal_fluents, 200000)
+        action = get_action_by_name(all_actions, action_name)
+
+        state = transition(state, action)[0][0]
+        print(action_name, state, is_goal(state))
+        # action = mcts(state, all_actions, goal_fluents)
+
+    # action_name = mcts(state, all_actions, goal_fluents, 1000)
+    print(path)
+    # path = astar(initial_state, all_actions, goal_fluents)
     print(time() - tstart)
     s = initial_state
     for action in path:

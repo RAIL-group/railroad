@@ -142,6 +142,12 @@ PYBIND11_MODULE(_bindings, m) {
   m.def("astar", &astar, py::arg("start_state"), py::arg("all_actions"),
         py::arg("is_goal_state"), py::arg("heuristic_fn") = nullptr,
         "Run A* search and return the action path");
+  m.def("mcts", &mcts, py::arg("start_state"), py::arg("all_actions"),
+        py::arg("is_goal_state"),
+	py::arg("max_iterations") = 1000,
+	py::arg("max_depth") = 20,
+	py::arg("c") = 1.414,
+        "Run A* search and return the action path");
 
   // py::bind_vector<std::vector<GroundedEffect>>(m, "GroundedEffectVec");
   // py::bind_vector<std::vector<ProbBranch>>(m, "GroundedProbBranchVec");

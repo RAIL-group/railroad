@@ -8,6 +8,7 @@
 #include <iostream>
 #include <optional>
 #include <queue>
+#include <random>
 #include <set>
 #include <tuple>
 #include <unordered_map>
@@ -168,6 +169,217 @@ astar(const State &start_state, const std::vector<Action> &all_actions,
   }
 
   return std::nullopt; // no path found
+}
+
+
+  // ############## MCTS ###############
+
+  using HeuristicFn = std::function<double(const State&)>;
+using GoalFn =
+    std::function<bool(const std::unordered_set<Fluent>&)>;  // same style as your make_goal_test
+
+  // ---------------------- MCTS data structures ----------------------
+
+struct MCTSChanceNode;  // forward
+
+struct MCTSDecisionNode {
+  State state;
+  MCTSChanceNode* parent = nullptr;  // non-owning
+  std::unordered_map<const Action*, std::unique_ptr<MCTSChanceNode>> children;
+  std::vector<const Action*> untried_actions;
+
+  int visits = 0;
+  double value = 0.0;
+
+  explicit MCTSDecisionNode(const State& s, MCTSChanceNode* p = nullptr)
+      : state(s), parent(p) {}
+};
+
+struct MCTSChanceNode {
+  const Action* action = nullptr;  // non-owning
+  MCTSDecisionNode* parent = nullptr;  // non-owning
+
+  std::vector<std::unique_ptr<MCTSDecisionNode>> children;
+  std::vector<double> outcome_weights;  // probabilities aligned with children
+
+  int visits = 0;
+  double value = 0.0;
+
+  MCTSChanceNode(const Action* a, MCTSDecisionNode* p)
+      : action(a), parent(p) {}
+};
+
+// What we return.
+struct MCTSResult {
+  // Keep it consistent with your A* hash map.
+  std::unordered_map<std::size_t, const Action*> policy;
+  std::unique_ptr<MCTSDecisionNode> root;
+};
+
+// ---------------------- helpers ----------------------
+
+inline double ucb_score(int parent_visits, const MCTSChanceNode& child,
+                        double c = std::sqrt(2.0)) {
+  if (child.visits == 0) return std::numeric_limits<double>::infinity();
+  const double exploitation = child.value / static_cast<double>(child.visits);
+  const double exploration =
+      c * std::sqrt(std::log(static_cast<double>(parent_visits)) /
+                    static_cast<double>(child.visits));
+  return exploitation + exploration;
+}
+
+inline std::size_t sample_index(const std::vector<double>& weights,
+                                std::mt19937& rng) {
+  // std::discrete_distribution accepts non-normalized weights.
+  std::discrete_distribution<std::size_t> dist(weights.begin(), weights.end());
+  return dist(rng);
+}
+
+inline void backpropagate(MCTSDecisionNode* leaf, double reward) {
+  MCTSDecisionNode* d = leaf;
+  MCTSChanceNode* c = nullptr;
+
+  while (d || c) {
+    if (d) {
+      d->visits += 1;
+      d->value += reward;
+      c = d->parent;
+      d = nullptr;
+    } else {
+      c->visits += 1;
+      c->value += reward;
+      d = c->parent;
+      c = nullptr;
+    }
+  }
+}
+
+// ---------------------- MCTS core ----------------------
+
+  inline std::string mcts(
+    const State& root_state,
+    const std::vector<Action>& all_actions,
+    const std::unordered_set<Fluent> &goal_fluents,
+    int max_iterations = 1000,
+    int max_depth = 20,
+    double c = std::sqrt(2.0)) {
+  // RNG (thread_local is convenient if you run this in parallel later)
+  static thread_local std::mt19937 rng{std::random_device{}()};
+
+  // Root node
+  auto root = std::make_unique<MCTSDecisionNode>(root_state);
+  root->untried_actions = get_next_actions(root_state, all_actions);
+
+  for (int it = 0; it < max_iterations; ++it) {
+    MCTSDecisionNode* node = root.get();
+    int depth = 0;
+
+    // ---------------- Selection ----------------
+    while (depth < max_depth) {
+      if (!node->untried_actions.empty()) break;
+      if (node->children.empty()) break;
+      if (is_goal_dbg(node->state.fluents(), goal_fluents)) break;
+
+      // choose action / chance node with best UCB
+      const Action* best_action = nullptr;
+      MCTSChanceNode* best_chance = nullptr;
+      double best_score = -std::numeric_limits<double>::infinity();
+
+      for (auto& kv : node->children) {
+        const Action* a = kv.first;
+        MCTSChanceNode* cn = kv.second.get();
+        double score = ucb_score(node->visits, *cn, c);
+        if (score > best_score) {
+          best_score = score;
+          best_action = a;
+          best_chance = cn;
+        }
+      }
+
+      if (!best_chance || best_chance->children.empty()) break;
+
+      // sample a successor decision node according to outcome weights
+      std::size_t idx = sample_index(best_chance->outcome_weights, rng);
+      node = best_chance->children[idx].get();
+      ++depth;
+    }
+
+    // ---------------- Expansion ----------------
+    if (!node->untried_actions.empty()) {
+      const Action* action = node->untried_actions.back();
+      node->untried_actions.pop_back();
+
+      auto outcomes = transition(node->state, action);
+      if (!outcomes.empty()) {
+        auto chance_node = std::make_unique<MCTSChanceNode>(action, node);
+        auto* chance_raw = chance_node.get();
+        node->children.emplace(action, std::move(chance_node));
+
+        chance_raw->children.reserve(outcomes.size());
+        chance_raw->outcome_weights.reserve(outcomes.size());
+
+        for (auto& [succ, prob] : outcomes) {
+          if (prob <= 0.0) continue;
+          auto child_decision =
+              std::make_unique<MCTSDecisionNode>(succ, chance_raw);
+          child_decision->untried_actions =
+              get_next_actions(child_decision->state, all_actions);
+          chance_raw->outcome_weights.push_back(prob);
+          chance_raw->children.push_back(std::move(child_decision));
+        }
+
+        // If all outcomes had prob 0 -> skip this iteration
+        if (chance_raw->children.empty()) continue;
+
+        // Move to one sampled child
+        std::size_t idx = sample_index(chance_raw->outcome_weights, rng);
+        node = chance_raw->children[idx].get();
+        ++depth;
+      }
+    }
+
+    // ---------------- Simulation / Evaluation ----------------
+    // Your Python code uses: reward = -time - heuristic (bounded).
+    double reward;
+    if (is_goal_dbg(node->state.fluents(), goal_fluents)) {
+      reward = -node->state.time();
+    } else {
+      // double h = heuristic_fn ? heuristic_fn(node->state) : 0.0;
+      double h = 0.0;
+      if (h > 1e10) h = 100.0;
+      reward = -node->state.time() - h;
+    }
+
+    // ---------------- Backpropagation ----------------
+    backpropagate(node, reward);
+  }
+
+  // --------------- Extract a (very) shallow policy ---------------
+  MCTSResult result;
+  result.root = std::move(root);
+
+  if (!result.root->children.empty()) {
+    const Action* best_action = nullptr;
+    double best_q = -std::numeric_limits<double>::infinity();
+
+    for (auto& kv : result.root->children) {
+      MCTSChanceNode* cn = kv.second.get();
+      if (cn->visits == 0) continue;
+      double q = cn->value / static_cast<double>(cn->visits);
+      if (q > best_q) {
+        best_q = q;
+        best_action = kv.first;
+      }
+    }
+
+    if (best_action) {
+      return best_action->name();
+      result.policy.emplace(result.root->state.hash(), best_action);
+    }
+  }
+
+  // return result.best_action();
+  // return best_action;
 }
 
 } // namespace mrppddl
