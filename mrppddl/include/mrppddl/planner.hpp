@@ -378,6 +378,8 @@ inline void backpropagate(MCTSDecisionNode* leaf, double reward) {
     }
   }
 
+  return "NONE";
+
   // return result.best_action();
   // return best_action;
 }

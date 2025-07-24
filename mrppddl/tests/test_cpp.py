@@ -268,6 +268,7 @@ def test_cpp_astar_move():
         # F("visited e"),
     })
     goal_fluents = {
+        F("at r1 a"),
         F("visited a"),
         F("visited b"),
         F("visited c"),
@@ -287,7 +288,9 @@ def test_cpp_astar_move():
         if is_goal(state):
             print("Goal found!")
             break
-        action_name = mcts(state, all_actions, goal_fluents, 200000)
+        action_name = mcts(state, all_actions, goal_fluents, 10000)
+        if action_name == "NONE":
+            break
         action = get_action_by_name(all_actions, action_name)
 
         state = transition(state, action)[0][0]
