@@ -113,8 +113,7 @@ bool is_goal_dbg(const std::unordered_set<Fluent> &fluents,
 
 inline std::optional<std::vector<Action>>
 astar(const State &start_state, const std::vector<Action> &all_actions,
-      const std::function<bool(const std::unordered_set<Fluent> &)>
-          &is_goal_state,
+      const std::unordered_set<Fluent> &goal_fluents,
       HeuristicFn heuristic_fn = nullptr) {
   std::priority_queue<QueueEntry, std::vector<QueueEntry>, std::greater<>>
       open_heap;
@@ -122,13 +121,13 @@ astar(const State &start_state, const std::vector<Action> &all_actions,
   std::unordered_map<std::size_t, std::pair<std::size_t, const Action *>>
       came_from;
 
-  std::unordered_set<Fluent> goal_fluents;
-  goal_fluents.emplace(Fluent("at r1 a"));
-  goal_fluents.emplace(Fluent("visited a"));
-  goal_fluents.emplace(Fluent("visited b"));
-  goal_fluents.emplace(Fluent("visited c"));
-  goal_fluents.emplace(Fluent("visited d"));
-  goal_fluents.emplace(Fluent("visited e"));
+  // std::unordered_set<Fluent> goal_fluents;
+  // goal_fluents.emplace(Fluent("at r1 a"));
+  // goal_fluents.emplace(Fluent("visited a"));
+  // goal_fluents.emplace(Fluent("visited b"));
+  // goal_fluents.emplace(Fluent("visited c"));
+  // goal_fluents.emplace(Fluent("visited d"));
+  // goal_fluents.emplace(Fluent("visited e"));
 
   int counter = 0;
   open_heap.emplace(0.0, start_state);

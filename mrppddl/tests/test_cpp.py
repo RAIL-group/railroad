@@ -267,12 +267,20 @@ def test_cpp_astar_move():
         F("visited d"),
         # F("visited e"),
     })
+    goal_fluents = {
+        F("at r1 a"),
+        F("visited a"),
+        F("visited b"),
+        F("visited c"),
+        F("visited d"),
+        F("visited e"),
+    }
     # from mrppddl.planner import astar
     # def goal_fn(fluents):
     #     return F("at r1 a") in fluents
     from time import time
     tstart = time()
-    path = astar(initial_state, all_actions, goal_fn)
+    path = astar(initial_state, all_actions, goal_fluents)
     print(time() - tstart)
     s = initial_state
     for action in path:
