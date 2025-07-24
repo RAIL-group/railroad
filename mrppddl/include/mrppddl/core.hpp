@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <tuple>
+#include <memory>  // for std::shared_ptr
 #include <stdexcept>
 #include <sstream>
 #include <functional>
@@ -112,17 +113,17 @@ class GroundedEffect;
 
 class ProbBranchWrapper {
 public:
-    ProbBranchWrapper(double prob, std::vector<GroundedEffect> effects)
+    ProbBranchWrapper(double prob, std::vector<std::shared_ptr<const GroundedEffect>> effects)
         : prob_(prob), effects_(std::move(effects)) {}
 
     double prob() const { return prob_; }
-    const std::vector<GroundedEffect>& effects() const { return effects_; }
+    const std::vector<std::shared_ptr<const GroundedEffect>>& effects() const { return effects_; }
 
   std::size_t hash() const;
 
 private:
     double prob_;
-    std::vector<GroundedEffect> effects_;
+    std::vector<std::shared_ptr<const GroundedEffect>> effects_;
     mutable std::optional<std::size_t> cached_hash_;
 };
 
@@ -131,7 +132,7 @@ public:
   GroundedEffect(
 		     double time,
 		     std::unordered_set<Fluent> resulting_fluents,
-		     std::vector<std::pair<double, std::vector<GroundedEffect>>> prob_pairs
+		     std::vector<std::pair<double, std::vector<std::shared_ptr<const GroundedEffect>>>> prob_pairs
 		     )
     : time_(time), resulting_fluents_(std::move(resulting_fluents)), cached_hash_(std::nullopt)
   {
@@ -196,7 +197,7 @@ GroundedEffect(
             for (const auto& branch : prob_effects_) {
                 out << branch.prob() << ": [";
                 for (size_t i = 0; i < branch.effects().size(); ++i) {
-                    out << branch.effects()[i].str();
+                    out << branch.effects()[i]->str();
                     if (i + 1 < branch.effects().size()) out << "; ";
                 }
                 out << "], ";
@@ -243,7 +244,7 @@ namespace mrppddl {
 class Action {
 public:
     Action(std::unordered_set<Fluent> preconditions,
-           std::vector<GroundedEffect> effects,
+           std::vector<std::shared_ptr<const GroundedEffect>> effects,
            std::string name = "anonymous")
         : preconditions_(std::move(preconditions)),
           effects_(std::move(effects)),
@@ -258,12 +259,13 @@ public:
         }
     }
 
-  Action() = default;
-  Action(const Action&) = default;
-  Action& operator=(const Action&) = default;
+    // Keep defaults
+    Action() = default;
+    Action(const Action&) = default;
+    Action& operator=(const Action&) = default;
 
     const std::unordered_set<Fluent>& preconditions() const { return preconditions_; }
-    const std::vector<GroundedEffect>& effects() const { return effects_; }
+    const std::vector<std::shared_ptr<const GroundedEffect>>& effects() const { return effects_; }
     const std::string& name() const { return name_; }
     const std::unordered_set<Fluent>& pos_preconditions() const { return pos_precond_; }
     const std::unordered_set<Fluent>& neg_precond_flipped() const { return neg_precond_flipped_; }
@@ -287,8 +289,7 @@ public:
 
         out << "]\n  Effects:\n";
         for (const auto& eff : effects_) {
-            out << "    after " << eff.time() << "...";  // customize if desired
-            out << "\n";
+            out << "    after " << eff->time() << "...\n";
         }
         out << ")";
         return out.str();
@@ -296,7 +297,7 @@ public:
 
 private:
     std::unordered_set<Fluent> preconditions_;
-    std::vector<GroundedEffect> effects_;
+    std::vector<std::shared_ptr<const GroundedEffect>> effects_;
     std::string name_;
     std::unordered_set<Fluent> pos_precond_;
     std::unordered_set<Fluent> neg_precond_flipped_;
@@ -307,7 +308,7 @@ std::size_t ProbBranchWrapper::hash() const {
 
     std::size_t h_branch = 0;
     for (const auto& inner_eff : effects_) {
-        h_branch ^= inner_eff.hash();
+        h_branch ^= inner_eff->hash();
     }
     hash_combine(h_branch, std::hash<double>{}(prob_));
     cached_hash_ = h_branch;

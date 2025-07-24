@@ -38,10 +38,10 @@ PYBIND11_MODULE(_bindings, m) {
       });
 
 // GroundedEffect
-py::class_<GroundedEffect>(m, "GroundedEffect")
+py::class_<GroundedEffect, std::shared_ptr<GroundedEffect>>(m, "GroundedEffect")
     .def(py::init<double,
 	 std::unordered_set<Fluent>,
-	 std::vector<std::pair<double, std::vector<GroundedEffect>>>>(),
+	 std::vector<std::pair<double, std::vector<std::shared_ptr<const GroundedEffect>>>>>(),
          py::arg("time"),
          py::arg("resulting_fluents") = std::unordered_set<Fluent>{},
 	 py::arg("prob_effects") = std::vector<std::pair<double, std::vector<GroundedEffect>>>{})
@@ -59,8 +59,10 @@ py::class_<GroundedEffect>(m, "GroundedEffect")
     });
 
     py::class_<Action>(m, "Action")
-	.def(py::init<std::unordered_set<Fluent>, std::vector<GroundedEffect>, std::string>(),
-	    py::arg("preconditions"), py::arg("effects"), py::arg("name") = "anonymous")
+      .def(py::init<std::unordered_set<Fluent>,
+	   std::vector<std::shared_ptr<const GroundedEffect>>,
+	   std::string>(),
+	   py::arg("preconditions"), py::arg("effects"), py::arg("name") = "anonymous")
 	.def_property_readonly("name", &Action::name)
 	.def_property_readonly("preconditions", &Action::preconditions)
 	.def_property_readonly("effects", &Action::effects)
@@ -72,7 +74,7 @@ py::class_<GroundedEffect>(m, "GroundedEffect")
     py::class_<State>(m, "State")
       .def(py::init<double,
 	   std::unordered_set<Fluent>,
-	   std::vector<std::pair<double, GroundedEffect>>>(),
+	   std::vector<std::pair<double, std::shared_ptr<const GroundedEffect>>>>(),
 	   py::arg("time") = 0.0,
 	   py::arg("fluents") = std::unordered_set<Fluent>{},
 	   py::arg("upcoming_effects") = std::vector<std::pair<double, GroundedEffect>>{})
@@ -84,7 +86,6 @@ py::class_<GroundedEffect>(m, "GroundedEffect")
       .def("update_fluents", &State::update_fluents, py::arg("new_fluents"), py::arg("relax") = false)
       .def("copy", &State::copy)
       .def("copy_and_zero_out_time", &State::copy_and_zero_out_time)
-      .def("queue_effect", &State::queue_effect)
       .def("pop_effect", &State::pop_effect)
       .def("__hash__", &State::hash)
       .def("__eq__", &State::operator==)
@@ -92,7 +93,7 @@ py::class_<GroundedEffect>(m, "GroundedEffect")
       .def("__str__", &State::str)
       .def("__repr__", [](const State& s) { return s.str(); });
     py::class_<ProbBranchWrapper>(m, "ProbBranch")
-      .def(py::init<double, std::vector<GroundedEffect>>())
+      .def(py::init<double, std::vector<std::shared_ptr<const GroundedEffect>>>())
       .def_property_readonly("prob", &ProbBranchWrapper::prob)
       .def_property_readonly("effects", &ProbBranchWrapper::effects)
       .def("__getitem__", [](const ProbBranchWrapper& b, std::size_t i) -> py::object {

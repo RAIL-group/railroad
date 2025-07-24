@@ -14,7 +14,8 @@ namespace mrppddl {
 
 class State {
 public:
-    using EffectQueue = std::vector<std::pair<double, GroundedEffect>>;
+  using EffectQueue = std::vector<std::pair<double, std::shared_ptr<const GroundedEffect>>>;
+
 
     State(double time = 0,
           std::unordered_set<Fluent> fluents = {},
@@ -68,11 +69,11 @@ public:
 	return freed_robot;
     }
 
-    void queue_effect(const GroundedEffect& effect) {
+  void queue_effect(const std::shared_ptr<const GroundedEffect>& effect) {
         cached_hash_ = std::nullopt;
-        upcoming_effects_.emplace_back(time_ + effect.time(), effect);
+        upcoming_effects_.emplace_back(time_ + effect->time(), effect);
         std::push_heap(upcoming_effects_.begin(), upcoming_effects_.end(), effect_cmp);
-    }
+  }
 
     void pop_effect() {
         cached_hash_ = std::nullopt;
@@ -105,7 +106,7 @@ public:
       for (const auto& [t, eff] : upcoming_effects_) {
 	std::size_t h_effect = 0;
 	hash_combine(h_effect, std::hash<double>{}(t));
-	hash_combine(h_effect, eff.hash());
+	hash_combine(h_effect, eff->hash());
 	h_upcoming ^= h_effect;
       }
 
@@ -150,10 +151,12 @@ private:
     std::unordered_set<Fluent> fluents_;
     EffectQueue upcoming_effects_;
     mutable std::optional<std::size_t> cached_hash_;
-    static bool effect_cmp(const std::pair<double, GroundedEffect>& a,
-                           const std::pair<double, GroundedEffect>& b) {
-        return a.first > b.first;
-    }
+  static bool effect_cmp(
+			 const std::pair<double, std::shared_ptr<const GroundedEffect>>& a,
+			 const std::pair<double, std::shared_ptr<const GroundedEffect>>& b)
+  {
+    return a.first > b.first;
+  }
 };
 
 }
@@ -177,15 +180,13 @@ inline void advance_to_terminal(
 ) {
 
   bool any_free_robots = false;
-  if (!state.upcoming_effects().empty()) {
-    any_free_robots = std::any_of(state.fluents().begin(), state.fluents().end(),
-				  [](const Fluent& f) { return f.is_free(); });
-  }
 
     while (!state.upcoming_effects().empty()) {
         auto [scheduled_time, effect] = state.upcoming_effects().front();
 
-	if (any_free_robots && (scheduled_time > state.time()) && !relax)
+	if (scheduled_time > state.time() && !relax && (any_free_robots || 
+            std::any_of(state.fluents().begin(), state.fluents().end(),
+			[](const Fluent& f) { return f.is_free(); })))
         {
 	  outcomes[state] += prob;
 	  return;
@@ -195,10 +196,10 @@ inline void advance_to_terminal(
             state.set_time(scheduled_time);
         }
         state.pop_effect();
-        any_free_robots = state.update_fluents(effect.resulting_fluents(), relax);
+        any_free_robots = any_free_robots || state.update_fluents(effect->resulting_fluents(), relax);
 
-	if (effect.is_probabilistic()) {
-	  for (const auto& branch : effect.prob_effects()) {
+	if (effect->is_probabilistic()) {
+	  for (const auto& branch : effect->prob_effects()) {
 	    State branched = state;
 	    for (const auto& e : branch.effects()) {
 	      branched.queue_effect(e);
@@ -207,7 +208,6 @@ inline void advance_to_terminal(
 	  }
 	  return;  // stop after branching
 	}
-
     }
     outcomes[state] += prob;
 }
