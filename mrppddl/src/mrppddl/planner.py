@@ -116,9 +116,8 @@ def mcts(
             )
             if not best_chance_node.children:
                 break
-            # Sample an outcome node proportionally to visit count or randomly
-            node = random.choices(best_chance_node.children)[0]
-            # print(node.value/node.visits)
+            # Sample an outcome node proportional to its likelihood
+            node = random.choices(best_chance_node.children, weights=best_chance_node.outcome_weights)[0]
             depth += 1
 
         # Expansion
