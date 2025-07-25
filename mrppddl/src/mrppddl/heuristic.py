@@ -127,10 +127,7 @@ def ff_heuristic(state: State, is_goal_fn, all_actions, ff_memory=None) -> float
                         known_fluents.add(f)
                         next_newly_added.add(f)
                         fact_to_action[f] = action
-                    # elif f in fact_to_action.keys():
-                    #     fact_to_action[f] = min(
-                    #         action, fact_to_action[f], key=lambda a: a.effects[-1].time
-                    #     )
+
         newly_added = next_newly_added
         all_actions -= visited_actions
 

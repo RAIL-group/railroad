@@ -235,8 +235,10 @@ transition(const State &state, const Action *action, bool relax = false) {
   // }
 
   State new_state = state;
-  for (const auto &effect : action->effects()) {
-    new_state.queue_effect(effect);
+  if (action) {
+    for (const auto &effect : action->effects()) {
+      new_state.queue_effect(effect);
+    }
   }
 
   // // Base: 631 ms

@@ -2,6 +2,7 @@
 
 #include "mrppddl/core.hpp"
 #include "mrppddl/state.hpp"
+#include "mrppddl/ff_heuristic.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -112,6 +113,15 @@ bool is_goal_dbg(const std::unordered_set<Fluent> &fluents,
   return true;
 }
 
+inline GoalFn make_goal_fn(const std::unordered_set<Fluent>& goal_fluents) {
+  return [goal_fluents](const std::unordered_set<Fluent>& fluents) -> bool {
+    for (const auto& gf : goal_fluents) {
+      if (!fluents.count(gf)) return false;
+    }
+    return true;
+  };
+}
+
 inline std::optional<std::vector<Action>>
 astar(const State &start_state, const std::vector<Action> &all_actions,
       const std::unordered_set<Fluent> &goal_fluents,
@@ -121,6 +131,10 @@ astar(const State &start_state, const std::vector<Action> &all_actions,
   std::unordered_set<std::size_t> closed_set;
   std::unordered_map<std::size_t, std::pair<std::size_t, const Action *>>
       came_from;
+
+  auto is_goal_fn = make_goal_fn(goal_fluents);
+  FFMemory ff_memory;
+  heuristic_fn = make_ff_heuristic(is_goal_fn, all_actions, &ff_memory);
 
   // std::unordered_set<Fluent> goal_fluents;
   // goal_fluents.emplace(Fluent("at r1 a"));
@@ -144,7 +158,7 @@ astar(const State &start_state, const std::vector<Action> &all_actions,
       continue;
     closed_set.insert(current.hash());
 
-    if (is_goal_dbg(current.fluents(), goal_fluents)) {
+    if (is_goal_fn(current.fluents())) {
       std::cerr << "Goal reached!! count: " << counter << std::endl;
       return std::nullopt; // no path found
                            // return reconstruct_path(came_from, current);
@@ -173,10 +187,6 @@ astar(const State &start_state, const std::vector<Action> &all_actions,
 
 
   // ############## MCTS ###############
-
-  using HeuristicFn = std::function<double(const State&)>;
-using GoalFn =
-    std::function<bool(const std::unordered_set<Fluent>&)>;  // same style as your make_goal_test
 
   // ---------------------- MCTS data structures ----------------------
 
@@ -270,6 +280,10 @@ inline void backpropagate(MCTSDecisionNode* leaf, double reward) {
   auto root = std::make_unique<MCTSDecisionNode>(root_state);
   root->untried_actions = get_next_actions(root_state, all_actions);
 
+  auto is_goal_fn = make_goal_fn(goal_fluents);
+  FFMemory ff_memory;
+  auto heuristic_fn = make_ff_heuristic(is_goal_fn, all_actions, &ff_memory);
+
   for (int it = 0; it < max_iterations; ++it) {
     MCTSDecisionNode* node = root.get();
     int depth = 0;
@@ -344,8 +358,7 @@ inline void backpropagate(MCTSDecisionNode* leaf, double reward) {
     if (is_goal_dbg(node->state.fluents(), goal_fluents)) {
       reward = -node->state.time();
     } else {
-      // double h = heuristic_fn ? heuristic_fn(node->state) : 0.0;
-      double h = 0.0;
+      double h = heuristic_fn ? heuristic_fn(node->state) : 0.0;
       if (h > 1e10) h = 100.0;
       reward = -node->state.time() - h;
     }

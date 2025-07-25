@@ -268,12 +268,14 @@ def test_cpp_astar_move():
         # F("visited e"),
     })
     goal_fluents = {
-        F("at r1 a"),
+        # F("at r1 a"),
         F("visited a"),
         F("visited b"),
         F("visited c"),
         F("visited d"),
         F("visited e"),
+        F("visited f"),
+        F("visited g"),
     }
     # from mrppddl.planner import astar
     # def goal_fn(fluents):
@@ -283,23 +285,23 @@ def test_cpp_astar_move():
                    for gf in goal_fluents)
     from time import time
     tstart = time()
-    state = initial_state
-    for _ in range(15):
-        if is_goal(state):
-            print("Goal found!")
-            break
-        action_name = mcts(state, all_actions, goal_fluents, 10000)
-        if action_name == "NONE":
-            break
-        action = get_action_by_name(all_actions, action_name)
+    # state = initial_state
+    # for _ in range(15):
+    #     if is_goal(state):
+    #         print("Goal found!")
+    #         break
+    #     action_name = mcts(state, all_actions, goal_fluents, 10000)
+    #     if action_name == "NONE":
+    #         break
+    #     action = get_action_by_name(all_actions, action_name)
 
-        state = transition(state, action)[0][0]
-        print(action_name, state, is_goal(state))
-        # action = mcts(state, all_actions, goal_fluents)
+    #     state = transition(state, action)[0][0]
+    #     print(action_name, state, is_goal(state))
+    #     # action = mcts(state, all_actions, goal_fluents)
 
-    # action_name = mcts(state, all_actions, goal_fluents, 1000)
-    print(path)
-    # path = astar(initial_state, all_actions, goal_fluents)
+    # # # action_name = mcts(state, all_actions, goal_fluents, 1000)
+    # print(path)
+    path = astar(initial_state, all_actions, goal_fluents)
     print(time() - tstart)
     s = initial_state
     for action in path:
