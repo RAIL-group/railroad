@@ -176,3 +176,23 @@ def mcts(
         state_to_best_action[root.state] = best_action
 
     return state_to_best_action, root
+
+from mrppddl._bindings import astar
+from mrppddl._bindings import MCTSPlanner
+# mcts_cpp = mcts
+# MCTSPlanner_cpp = MCTSPlanner
+
+# class MCTSPlanner(MCTSPlanner):
+
+
+
+def mcts(state, all_actions, goal_fluents, **kwargs):
+    action_name = mcts_cpp(state, all_actions, goal_fluents, **kwargs)
+
+    def _get_action_by_name(name: str) -> Action:
+        for action in all_actions:
+            if action.name == name:
+                return action
+        return None
+
+    return _get_action_by_name(action_name)

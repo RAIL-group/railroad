@@ -143,7 +143,7 @@ class Effect:
         # def evaluate(expr): return expr(binding) if callable(expr) else expr
         if self.is_probabilistic:
             grounded_prob_effects = tuple(
-                ProbBranch(
+                (
                     prob(binding), tuple(e._ground(binding) for e in effect_list)
                 )
                 for prob, effect_list in self.prob_effects
@@ -152,7 +152,7 @@ class Effect:
             grounded_prob_effects = tuple()
 
         grounded_time: float = self.time(binding)
-        grounded_resulting_fluents = frozenset(
+        grounded_resulting_fluents = set(
             Fluent(
                 f.name, *[binding.get(arg, arg) for arg in f.args], negated=f.negated
             )
@@ -409,3 +409,6 @@ def get_next_actions(state: State, all_actions: List[Action]) -> List[Action]:
 
     # Step 4: Otherwise, return any possible actions
     return [a for a in all_actions if state.satisfies_precondition(a)]
+
+
+from mrppddl._bindings import GroundedEffect, Fluent, Action, State

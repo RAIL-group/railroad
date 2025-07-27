@@ -269,7 +269,8 @@ inline void backpropagate(MCTSDecisionNode* leaf, double reward) {
   inline std::string mcts(
     const State& root_state,
     const std::vector<Action>& all_actions,
-    const std::unordered_set<Fluent> &goal_fluents,
+    const GoalFn& is_goal_fn,
+    FFMemory* ff_memory,
     int max_iterations = 1000,
     int max_depth = 20,
     double c = std::sqrt(2.0)) {
@@ -279,10 +280,7 @@ inline void backpropagate(MCTSDecisionNode* leaf, double reward) {
   // Root node
   auto root = std::make_unique<MCTSDecisionNode>(root_state);
   root->untried_actions = get_next_actions(root_state, all_actions);
-
-  auto is_goal_fn = make_goal_fn(goal_fluents);
-  FFMemory ff_memory;
-  auto heuristic_fn = make_ff_heuristic(is_goal_fn, all_actions, &ff_memory);
+  auto heuristic_fn = make_ff_heuristic(is_goal_fn, all_actions, ff_memory);
 
   for (int it = 0; it < max_iterations; ++it) {
     MCTSDecisionNode* node = root.get();
@@ -292,20 +290,17 @@ inline void backpropagate(MCTSDecisionNode* leaf, double reward) {
     while (depth < max_depth) {
       if (!node->untried_actions.empty()) break;
       if (node->children.empty()) break;
-      if (is_goal_dbg(node->state.fluents(), goal_fluents)) break;
+      if (is_goal_fn(node->state.fluents())) break;
 
       // choose action / chance node with best UCB
-      const Action* best_action = nullptr;
       MCTSChanceNode* best_chance = nullptr;
       double best_score = -std::numeric_limits<double>::infinity();
 
       for (auto& kv : node->children) {
-        const Action* a = kv.first;
         MCTSChanceNode* cn = kv.second.get();
         double score = ucb_score(node->visits, *cn, c);
         if (score > best_score) {
           best_score = score;
-          best_action = a;
           best_chance = cn;
         }
       }
@@ -355,11 +350,12 @@ inline void backpropagate(MCTSDecisionNode* leaf, double reward) {
     // ---------------- Simulation / Evaluation ----------------
     // Your Python code uses: reward = -time - heuristic (bounded).
     double reward;
-    if (is_goal_dbg(node->state.fluents(), goal_fluents)) {
+    if (is_goal_fn(node->state.fluents())) {
       reward = -node->state.time();
     } else {
       double h = heuristic_fn ? heuristic_fn(node->state) : 0.0;
-      if (h > 1e10) h = 100.0;
+      //double h = 0;
+      if (h > 1e10) { h = 10.0; }
       reward = -node->state.time() - h;
     }
 
@@ -386,6 +382,7 @@ inline void backpropagate(MCTSDecisionNode* leaf, double reward) {
     }
 
     if (best_action) {
+      std::cout << best_q << std::endl;
       return best_action->name();
       result.policy.emplace(result.root->state.hash(), best_action);
     }
@@ -396,5 +393,54 @@ inline void backpropagate(MCTSDecisionNode* leaf, double reward) {
   // return result.best_action();
   // return best_action;
 }
+
+
+class MCTSPlanner {
+  public:
+    explicit MCTSPlanner(std::vector<Action> all_actions)
+      : all_actions_(std::move(all_actions)) {}
+
+  // Call operator: planner(initial_state, goal_fluents) → string
+
+  std::string operator()(const State& root_state,
+                         const std::unordered_set<Fluent>& goal_fluents,
+                         int max_iterations,
+                         int max_depth,
+                         double c) {
+    auto is_goal_fn   = make_goal_fn(goal_fluents);
+    return mcts(root_state,
+		all_actions_,
+		is_goal_fn,
+		&ff_memory_,
+		max_iterations,
+		max_depth,
+		c);
+  }
+
+  std::string operator()(const State& root_state,
+                         const std::unordered_set<Fluent>& goal_fluents) {
+    auto is_goal_fn   = make_goal_fn(goal_fluents);
+    return mcts(root_state,
+		all_actions_,
+		is_goal_fn,
+		&ff_memory_,
+		max_iterations,
+		max_depth,
+		c);
+  }
+
+  void clear_cache() { ff_memory_.clear(); }
+  std::size_t cache_size() const { return ff_memory_.size(); }
+
+  // Public configuration parameters
+  int max_iterations = 1000;
+  int max_depth = 20;
+  double c = std::sqrt(2.0);
+
+private:
+  std::vector<Action> all_actions_;
+  FFMemory ff_memory_;
+};
+
 
 } // namespace mrppddl
