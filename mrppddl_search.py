@@ -37,6 +37,6 @@ all_actions = search_actions
 mcts = MCTSPlanner(all_actions)
 for _ in range(100):
     stime = time()
-    action = mcts(initial_state, goal_fluents)
+    action = mcts(initial_state, goal_fluents, max_iterations=10000, c=10)
     print(f"MCTS: {{Initial State: Best Action}}, time={time()-stime:.3f}")
     print(action)
