@@ -76,8 +76,7 @@ def build_door_world():
 ff_memory = dict()
 stime = time.time()
 initial_state, all_actions, is_goal_fn = build_door_world()
-path = astar(initial_state, all_actions, is_goal_fn,
-             lambda state: ff_heuristic(state, is_goal_fn, all_actions, ff_memory=ff_memory))
+path = astar(initial_state, all_actions, is_goal_fn)
 print(f"Planning time: {time.time() - stime}")
 s = initial_state
 

@@ -168,8 +168,10 @@ def build_full_graph(initial_state, all_actions, is_goal_state: Optional[Callabl
         expanded_states.add(state)
 
         available_actions = get_next_actions(state, all_actions)
+        print(available_actions)
         for action in available_actions:
             outcomes = transition(state, action)
+            print(outcomes)
             for successor, prob in outcomes:
                 if prob == 0.0:
                     continue
@@ -246,7 +248,10 @@ def build_door_world():
 
 
 initial_state, all_actions, goal_functions = build_door_world()
+print(initial_state)
+print(Fluent('at start robot') in initial_state.fluents)
 G = build_full_graph(initial_state, all_actions)
+print(G)
 productive_G = get_graph_subset_productive_edges(G, goal_functions)
 pruned_G = prune_disconnected_nodes(productive_G, initial_state)
 

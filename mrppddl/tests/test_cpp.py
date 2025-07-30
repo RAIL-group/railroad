@@ -230,7 +230,16 @@ def get_action_by_name(actions: List[Action], name: str) -> Action:
             return action
     raise ValueError(f"No action found with name: {name}")
 
-# @pytest.mark.skip()
+def test_cpp_deepcopy():
+    import copy
+    f = Fluent("at robot")
+    f2 = copy.deepcopy(f)
+    assert f.name == f2.name
+    assert f.args == f2.args
+    assert f.negated == f2.negated
+    assert f == f2
+
+@pytest.mark.skip()
 def test_cpp_astar_move():
 
     # Get all actions

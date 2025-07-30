@@ -25,6 +25,23 @@ PYBIND11_MODULE(_bindings, m) {
       .def_property_readonly("name", &Fluent::name)
       .def_property_readonly("args", &Fluent::args)
       .def_property_readonly("negated", &Fluent::is_negated)
+.def(py::pickle(
+    [](const Fluent &f) {
+        std::string full = f.name();
+        for (const auto &arg : f.args()) {
+            full += " " + arg;
+        }
+        if (f.is_negated()) {
+            full = "not " + full;
+        }
+        return py::make_tuple(full);  // what to serialize
+    },
+    [](py::tuple t) {
+        if (t.size() != 1)
+            throw std::runtime_error("Invalid state for Fluent!");
+        return Fluent(t[0].cast<std::string>());  // how to restore
+    }
+))
       .def("__repr__", [](const Fluent &f) {
         std::ostringstream oss;
         oss << "<Fluent: ";
@@ -53,7 +70,7 @@ PYBIND11_MODULE(_bindings, m) {
       .def_property_readonly("resulting_fluents",
                              &GroundedEffect::resulting_fluents)
       .def_property_readonly("prob_effects", &GroundedEffect::prob_effects)
-      .def("is_probabilistic", &GroundedEffect::is_probabilistic)
+      .def_property_readonly("is_probabilistic", &GroundedEffect::is_probabilistic)
       .def("__str__", &GroundedEffect::str)
       .def("__repr__",
            [](const GroundedEffect &eff) {
@@ -76,6 +93,21 @@ PYBIND11_MODULE(_bindings, m) {
       .def_property_readonly("_pos_precond", &Action::pos_preconditions)
       .def_property_readonly("_neg_precond_flipped",
                              &Action::neg_precond_flipped)
+      .def("__getstate__",
+           [](const Action &a) {
+             return py::make_tuple(a.preconditions(), a.effects(), a.name());
+           })
+      .def(
+          "__setstate__",
+          [](py::tuple t) {
+            if (t.size() != 3)
+              throw std::runtime_error("Invalid state for Action!");
+            // Unpack and re-construct
+            return Action(
+                t[0].cast<std::unordered_set<Fluent>>(),
+                t[1].cast<std::vector<std::shared_ptr<const GroundedEffect>>>(),
+                t[2].cast<std::string>());
+          })
       .def("__str__", &Action::str)
       .def("__repr__", [](const Action &a) { return a.str(); });
 
@@ -96,9 +128,18 @@ PYBIND11_MODULE(_bindings, m) {
            py::arg("relax") = false)
       .def("copy", &State::copy)
       .def("copy_and_zero_out_time", &State::copy_and_zero_out_time)
+      .def("queue_effect", &State::queue_effect)
       .def("pop_effect", &State::pop_effect)
+      .def("set_time", &State::set_time)
       .def("__hash__", &State::hash)
-      .def("__eq__", &State::operator==)
+      .def("__eq__", [](const State &self, py::object other) {
+        // Check if 'other' is instance of State
+        if (!py::isinstance<State>(other))
+          return false;
+        // Perform the actual comparison
+        const auto &other_ref = other.cast<const State &>();
+        return self == other_ref;
+      })
       .def("__lt__", &State::operator<)
       .def("__str__", &State::str)
       .def("__repr__", [](const State &s) { return s.str(); });
