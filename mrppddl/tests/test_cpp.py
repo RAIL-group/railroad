@@ -239,6 +239,42 @@ def test_cpp_deepcopy():
     assert f.negated == f2.negated
     assert f == f2
 
+    ge = GroundedEffect(2.0, {Fluent("at robot counter")})
+    ge_copy = copy.deepcopy(ge)
+    assert hash(ge) == hash(ge_copy)
+
+    ge_alt = GroundedEffect(3.0, {Fluent("at robot cabinet")})
+    ge_prob = GroundedEffect(3.0, prob_effects=[(0.4, [ge]), (0.6, [ge_alt])])
+    ge_prob_copy = copy.deepcopy(ge_prob)
+    print(ge_prob)
+    print(ge_prob_copy)
+    assert hash(ge_prob) == hash(ge_prob_copy)
+
+    # Get all actions
+    objects_by_type = {
+        "robot": ["r1", "r2"],
+        "location": ["start", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"],
+        # "location": ["start", "a", "b"],
+    }
+    import random
+    random.seed(8616)
+    move_op = construct_move_operator(lambda *args: 5.0 + random.random())
+    all_actions = move_op.instantiate(objects_by_type)
+
+    # Initial state
+    initial_state = State(
+        time=0,
+        fluents={
+            F("at r1 start"), F("free r1"),
+            F("at r2 start"), F("free r2"),
+            F("visited start"),
+        })
+
+    # Test deepcopy
+    all_actions = [copy.deepcopy(a) for a in all_actions]
+    initial_state = copy.deepcopy(initial_state)
+
+
 @pytest.mark.skip()
 def test_cpp_astar_move():
 

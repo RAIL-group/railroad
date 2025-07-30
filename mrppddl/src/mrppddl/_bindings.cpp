@@ -25,23 +25,22 @@ PYBIND11_MODULE(_bindings, m) {
       .def_property_readonly("name", &Fluent::name)
       .def_property_readonly("args", &Fluent::args)
       .def_property_readonly("negated", &Fluent::is_negated)
-.def(py::pickle(
-    [](const Fluent &f) {
-        std::string full = f.name();
-        for (const auto &arg : f.args()) {
-            full += " " + arg;
-        }
-        if (f.is_negated()) {
-            full = "not " + full;
-        }
-        return py::make_tuple(full);  // what to serialize
-    },
-    [](py::tuple t) {
-        if (t.size() != 1)
-            throw std::runtime_error("Invalid state for Fluent!");
-        return Fluent(t[0].cast<std::string>());  // how to restore
-    }
-))
+      .def(py::pickle(
+          [](const Fluent &f) {
+            std::string full = f.name();
+            for (const auto &arg : f.args()) {
+              full += " " + arg;
+            }
+            if (f.is_negated()) {
+              full = "not " + full;
+            }
+            return py::make_tuple(full); // what to serialize
+          },
+          [](py::tuple t) {
+            if (t.size() != 1)
+              throw std::runtime_error("Invalid state for Fluent!");
+            return Fluent(t[0].cast<std::string>()); // how to restore
+          }))
       .def("__repr__", [](const Fluent &f) {
         std::ostringstream oss;
         oss << "<Fluent: ";
@@ -70,7 +69,58 @@ PYBIND11_MODULE(_bindings, m) {
       .def_property_readonly("resulting_fluents",
                              &GroundedEffect::resulting_fluents)
       .def_property_readonly("prob_effects", &GroundedEffect::prob_effects)
-      .def_property_readonly("is_probabilistic", &GroundedEffect::is_probabilistic)
+      .def_property_readonly("is_probabilistic",
+                             &GroundedEffect::is_probabilistic)
+      .def(py::pickle(
+          [](const GroundedEffect &eff) {
+            // Serialize the GroundedEffect into a tuple
+            // Flatten prob_effects recursively
+            py::list pickled_prob_effects;
+            for (const auto &pair : eff.prob_effects()) {
+              double prob = pair.prob();
+              py::list sub_effects;
+              for (const auto &sub_eff : pair.effects()) {
+                sub_effects.append(
+                    sub_eff); // Assumes recursive GroundedEffect pickling
+              }
+              pickled_prob_effects.append(py::make_tuple(prob, sub_effects));
+            }
+
+            return py::make_tuple(
+                eff.time(),
+                py::cast(eff.resulting_fluents()), // std::unordered_set<Fluent>
+                pickled_prob_effects // List of (double, list of GroundedEffect)
+            );
+          },
+          [](py::tuple t) {
+            if (t.size() != 3)
+              throw std::runtime_error("Invalid state for GroundedEffect!");
+
+            double time = t[0].cast<double>();
+            auto fluents = t[1].cast<std::unordered_set<Fluent>>();
+
+            auto py_prob_effects = t[2].cast<py::list>();
+            std::vector<std::pair<
+                double, std::vector<std::shared_ptr<const GroundedEffect>>>>
+                prob_effects;
+
+            for (auto item : py_prob_effects) {
+              auto tup = item.cast<py::tuple>();
+              if (tup.size() != 2)
+                throw std::runtime_error("Invalid subeffect structure!");
+
+              double prob = tup[0].cast<double>();
+              std::vector<std::shared_ptr<const GroundedEffect>> effects;
+              for (auto sub : tup[1].cast<py::list>()) {
+                effects.push_back(
+                    sub.cast<std::shared_ptr<const GroundedEffect>>());
+              }
+              prob_effects.emplace_back(prob, std::move(effects));
+            }
+
+            return std::make_shared<GroundedEffect>(time, std::move(fluents),
+                                                    std::move(prob_effects));
+          }))
       .def("__str__", &GroundedEffect::str)
       .def("__repr__",
            [](const GroundedEffect &eff) {
@@ -93,21 +143,27 @@ PYBIND11_MODULE(_bindings, m) {
       .def_property_readonly("_pos_precond", &Action::pos_preconditions)
       .def_property_readonly("_neg_precond_flipped",
                              &Action::neg_precond_flipped)
-      .def("__getstate__",
-           [](const Action &a) {
-             return py::make_tuple(a.preconditions(), a.effects(), a.name());
-           })
-      .def(
-          "__setstate__",
+      .def(py::pickle(
+          [](const Action &a) {
+            // Serialization
+            return py::make_tuple(
+                py::cast(a.preconditions()), // unordered_set<Fluent>
+                py::cast(a.effects()), // vector<shared_ptr<GroundedEffect>>
+                py::cast(a.name())     // string
+            );
+          },
           [](py::tuple t) {
             if (t.size() != 3)
               throw std::runtime_error("Invalid state for Action!");
-            // Unpack and re-construct
-            return Action(
-                t[0].cast<std::unordered_set<Fluent>>(),
-                t[1].cast<std::vector<std::shared_ptr<const GroundedEffect>>>(),
-                t[2].cast<std::string>());
-          })
+
+            auto preconds = t[0].cast<std::unordered_set<Fluent>>();
+            auto effects =
+                t[1].cast<std::vector<std::shared_ptr<const GroundedEffect>>>();
+            auto name = t[2].cast<std::string>();
+
+            return Action(std::move(preconds), std::move(effects),
+                          std::move(name));
+          }))
       .def("__str__", &Action::str)
       .def("__repr__", [](const Action &a) { return a.str(); });
 
@@ -131,15 +187,56 @@ PYBIND11_MODULE(_bindings, m) {
       .def("queue_effect", &State::queue_effect)
       .def("pop_effect", &State::pop_effect)
       .def("set_time", &State::set_time)
+      .def(py::pickle(
+          [](const State &s) {
+            py::list pickled_effects;
+            for (const auto &pair : s.upcoming_effects()) {
+              double t = pair.first;
+              pickled_effects.append(py::make_tuple(t, pair.second));
+            }
+
+            return py::make_tuple(
+                s.time(),
+                py::cast(s.fluents()), // std::unordered_set<Fluent>
+                pickled_effects        // List of (double, GroundedEffect)
+            );
+          },
+          [](py::tuple t) {
+            if (t.size() != 3)
+              throw std::runtime_error("Invalid state for State!");
+
+            double time = t[0].cast<double>();
+            auto fluents = t[1].cast<std::unordered_set<Fluent>>();
+
+            auto py_effects = t[2].cast<py::list>();
+            std::vector<
+                std::pair<double, std::shared_ptr<const GroundedEffect>>>
+                effects;
+
+            for (auto item : py_effects) {
+              auto tup = item.cast<py::tuple>();
+              if (tup.size() != 2)
+                throw std::runtime_error("Invalid effect entry!");
+
+              double t_offset = tup[0].cast<double>();
+              auto effect =
+                  tup[1].cast<std::shared_ptr<const GroundedEffect>>();
+              effects.emplace_back(t_offset, std::move(effect));
+            }
+
+            return State(time, std::move(fluents), std::move(effects));
+          }))
+
       .def("__hash__", &State::hash)
-      .def("__eq__", [](const State &self, py::object other) {
-        // Check if 'other' is instance of State
-        if (!py::isinstance<State>(other))
-          return false;
-        // Perform the actual comparison
-        const auto &other_ref = other.cast<const State &>();
-        return self == other_ref;
-      })
+      .def("__eq__",
+           [](const State &self, py::object other) {
+             // Check if 'other' is instance of State
+             if (!py::isinstance<State>(other))
+               return false;
+             // Perform the actual comparison
+             const auto &other_ref = other.cast<const State &>();
+             return self == other_ref;
+           })
       .def("__lt__", &State::operator<)
       .def("__str__", &State::str)
       .def("__repr__", [](const State &s) { return s.str(); });
