@@ -198,6 +198,21 @@ def test_search_sequence():
 
     # Select action: search r1 roomA roomB cup
     action_1 = get_action_by_name(search_actions, 'search r1 roomA roomB cup')
+    for eff in action_1.effects:
+        if eff.is_probabilistic:
+            assert len(eff.prob_effects) > 1
+            if eff.prob_effects[0].prob == eff.prob_effects[1].prob:
+                continue
+            assert not hash(eff.prob_effects[0]) == hash(eff.prob_effects[1]), \
+                "Hashes for the probabilistic effects must be different!"
+            for peff in eff.prob_effects:
+                print(peff.prob)
+                print(peff.effects)
+            break
+    else:
+        raise ValueError("At least one effect must be probabilistic.")
+
+
     outcomes = transition(initial_state, action_1)
 
     # Assert both probabilistic outcomes exist

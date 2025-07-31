@@ -366,13 +366,12 @@ def _advance_to_terminal(
 
         if effect.is_probabilistic:
             for prob_effect in effect.prob_effects:
+                print(prob_effect)
                 branch_prob = prob_effect.prob
                 effects = prob_effect.effects
                 branched = state.copy()
                 for e in effects:
-                    heapq.heappush(
-                        branched.upcoming_effects, (branched.time + e.time, e)
-                    )
+                    branched.queue_effect(e)
                 _advance_to_terminal(branched, prob * branch_prob, outcomes)
             return  # stop after branching
 
