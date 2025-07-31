@@ -12,3 +12,4 @@ Everything else is run via `uv run`: e.g., `uv run mrppddl_astar.py` will run th
 # TODO Items
 
 - [ ] I can use the FF heuristic (or similar) to determine which actions I never execute and prune those from the set of available actions.
+- [ ] I still need to look over the other hashing functions to avoid using a "bare" XOR, which makes the likelihood of a collision problematically high.
