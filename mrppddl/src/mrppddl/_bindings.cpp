@@ -165,7 +165,11 @@ PYBIND11_MODULE(_bindings, m) {
                           std::move(name));
           }))
       .def("__str__", &Action::str)
-      .def("__repr__", [](const Action &a) { return a.str(); });
+      .def("__repr__", [](const Action &a) { return a.str(); })
+      .def("__eq__", &Action::operator==)
+      .def("__hash__", [](const Action &action) {
+        return static_cast<std::size_t>(action.hash());
+      });
 
   py::class_<State>(m, "State")
       .def(py::init<double, std::unordered_set<Fluent>,

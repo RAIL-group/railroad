@@ -118,14 +118,16 @@ public:
     // Hash fluents
     std::size_t h_fluents = 0;
     for (const auto &f : fluents_) {
-      h_fluents ^= f.hash();
+      std::size_t h = f.hash();
+      hash_combine(h, 0);
+      h_fluents ^= h;
     }
 
     std::size_t h_upcoming = 0;
     for (const auto &[t, eff] : upcoming_effects_) {
       std::size_t h_effect = 0;
-      hash_combine(h_effect, std::hash<double>{}(t));
       hash_combine(h_effect, eff->hash());
+      hash_combine(h_effect, std::hash<double>{}(t));
       h_upcoming ^= h_effect;
     }
 

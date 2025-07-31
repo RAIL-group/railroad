@@ -83,7 +83,8 @@ private:
   std::size_t compute_hash() const {
     std::size_t h = std::hash<std::string>{}(name_);
     for (const auto &arg : args_) {
-      h ^= std::hash<std::string>{}(arg);
+      hash_combine(h, std::hash<std::string>{}(arg));
+      // h ^= std::hash<std::string>{}(arg);
     }
     if (negated_) {
       h = ~h; // flip all bits if negated
@@ -316,6 +317,33 @@ public:
     return out.str();
   }
 
+  bool operator==(const Action &other) const {
+    return hash() == other.hash();
+  }
+
+  std::size_t hash() const {
+    std::size_t h_name = std::hash<std::string>{}(name_);
+
+    // Hash preconditions
+    std::size_t h_preconds = 0;
+    for (const auto &f : preconditions_) {
+      h_preconds ^= f.hash();
+    }
+
+    // Hash effects
+    std::size_t h_effects = 0;
+    for (const auto &eff : effects_) {
+      h_effects ^= eff->hash();
+    }
+
+    // Combine components
+    std::size_t h = h_name;
+    hash_combine(h, h_preconds);
+    hash_combine(h, h_effects);
+
+    return h;
+  }
+
 private:
   std::unordered_set<Fluent> preconditions_;
   std::vector<std::shared_ptr<const GroundedEffect>> effects_;
@@ -323,6 +351,19 @@ private:
   std::unordered_set<Fluent> pos_precond_;
   std::unordered_set<Fluent> neg_precond_flipped_;
 };
+
+} // namespace mrppddl
+
+namespace std {
+template <> struct hash<mrppddl::Action> {
+  std::size_t operator()(const mrppddl::Action &action) const noexcept {
+    return action.hash();
+  }
+};
+} // namespace std
+
+namespace mrppddl {
+
 
 std::size_t ProbBranchWrapper::hash() const {
   if (cached_hash_)
