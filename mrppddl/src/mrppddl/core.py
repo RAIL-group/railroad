@@ -323,62 +323,6 @@ class Operator:
         return Fluent(fluent.name, *grounded_args, negated=fluent.negated)
 
 
-def transition(
-    state: State, action: Optional[Action], relax: bool = False
-) -> List[Tuple[State, float]]:
-    if action and not state.satisfies_precondition(action, relax):
-        raise ValueError("Precondition not satisfied for applying action")
-
-    new_state = state.copy()
-    if action:
-        for effect in action.effects:
-            new_state.queue_effect(effect)
-
-    # Fixme: is this necessary or can I just pass it to outcomes?
-    outcomes: Dict[State, float] = {}
-    _advance_to_terminal(new_state, prob=1.0, outcomes=outcomes, relax=relax)
-    return list(outcomes.items())
-
-
-def _advance_to_terminal(
-    state: State, prob: float, outcomes: Dict[State, float], relax: bool = False
-) -> None:
-    while state.upcoming_effects:
-        scheduled_time, effect = state.upcoming_effects[0]
-
-        # Check if we're ready to yield this state
-        # FIXME: adding 'and not relax' means that we will always go to the 'terminus' even if another robot is free.
-        if (
-            scheduled_time > state.time
-            and any(f.name == "free" for f in state.fluents)
-            and not relax
-        ):
-            outcomes[state] = prob
-            return
-
-        # Advance time if necessary
-        if scheduled_time > state.time:
-            state.set_time(scheduled_time)
-
-        # Apply effect
-        state.pop_effect()
-        state.update_fluents(effect.resulting_fluents, relax=relax)
-
-        if effect.is_probabilistic:
-            for prob_effect in effect.prob_effects:
-                print(prob_effect)
-                branch_prob = prob_effect.prob
-                effects = prob_effect.effects
-                branched = state.copy()
-                for e in effects:
-                    branched.queue_effect(e)
-                _advance_to_terminal(branched, prob * branch_prob, outcomes)
-            return  # stop after branching
-
-    # No more effects; yield terminal state
-    outcomes[state] = prob
-
-
 def get_action_by_name(actions: List[Action], name: str) -> Action:
     for action in actions:
         if action.name == name:
@@ -411,3 +355,4 @@ def get_next_actions(state: State, all_actions: List[Action]) -> List[Action]:
 
 
 from mrppddl._bindings import GroundedEffect, Fluent, Action, State
+from mrppddl._bindings import transition

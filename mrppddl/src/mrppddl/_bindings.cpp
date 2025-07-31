@@ -244,6 +244,13 @@ PYBIND11_MODULE(_bindings, m) {
       .def("__lt__", &State::operator<)
       .def("__str__", &State::str)
       .def("__repr__", [](const State &s) { return s.str(); });
+  m.def("transition",
+	[](const State &state, const Action *action, bool relax) {
+	  return transition(state, action, relax);
+	},
+	py::arg("state"),
+	py::arg("action") = nullptr,
+	py::arg("relax") = false);
   py::class_<ProbBranchWrapper>(m, "ProbBranch")
       .def(py::init<double,
                     std::vector<std::shared_ptr<const GroundedEffect>>>())
