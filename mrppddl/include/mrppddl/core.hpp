@@ -84,7 +84,6 @@ private:
     std::size_t h = std::hash<std::string>{}(name_);
     for (const auto &arg : args_) {
       hash_combine(h, std::hash<std::string>{}(arg));
-      // h ^= std::hash<std::string>{}(arg);
     }
     if (negated_) {
       h = ~h; // flip all bits if negated
@@ -105,7 +104,7 @@ template <> struct hash<mrppddl::Fluent> {
 
 namespace mrppddl {
 
-class GroundedEffect;
+class GroundedEffect; // Forward Declaration
 
 class ProbBranchWrapper {
 public:
@@ -184,13 +183,17 @@ public:
     // Hash fluents
     std::size_t h_fluents = 0;
     for (const auto &f : resulting_fluents_) {
-      h_fluents ^= f.hash();
+      std::size_t h = f.hash();
+      hash_combine(h, 0);
+      h_fluents ^= h;
     }
 
     // Hash branches
     std::size_t h_branches = 0;
     for (const auto &branch : prob_effects_) {
-      h_branches ^= branch.hash();
+      std::size_t h = branch.hash();
+      hash_combine(h, 0);
+      h_branches ^= h;
     }
 
     // Final combination: time, fluents, branches (ordered)
@@ -327,13 +330,17 @@ public:
     // Hash preconditions
     std::size_t h_preconds = 0;
     for (const auto &f : preconditions_) {
-      h_preconds ^= f.hash();
+      std::size_t h = f.hash();
+      hash_combine(h, 0);
+      h_preconds ^= h;
     }
 
     // Hash effects
     std::size_t h_effects = 0;
     for (const auto &eff : effects_) {
-      h_effects ^= eff->hash();
+      std::size_t h = eff->hash();
+      hash_combine(h, 0);
+      h_effects ^= h;
     }
 
     // Combine components
@@ -371,7 +378,9 @@ std::size_t ProbBranchWrapper::hash() const {
 
   std::size_t h_branch = 0;
   for (const auto &inner_eff : effects_) {
-    h_branch ^= inner_eff->hash();
+    std::size_t h = inner_eff->hash();
+    hash_combine(h, 0);
+    h_branch ^= h;
   }
   hash_combine(h_branch, std::hash<double>{}(prob_));
   cached_hash_ = h_branch;

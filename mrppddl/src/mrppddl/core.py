@@ -1,7 +1,9 @@
 # Re-import required dependencies due to kernel reset
-from typing import Callable, List, Tuple, Dict, Set, Union, Optional, Sequence
+from typing import Callable, List, Tuple, Dict, Set, Union, Sequence
 import itertools
-import heapq
+
+from mrppddl._bindings import GroundedEffect, Fluent, Action, State
+from mrppddl._bindings import transition  # noqa: F401
 
 Num = Union[float, int]
 Binding = Dict[str, str]
@@ -17,112 +19,6 @@ def _make_bindable(opt_expr: OptExpr) -> Bindable:
         fn = opt_expr[0]
         args = opt_expr[1]
         return lambda b: fn(*[b.get(arg, arg) for arg in args])
-
-
-class Fluent:
-    __slots__ = ("name", "args", "negated", "_hash")
-
-    def __init__(self, name: str, *args: str, negated: bool = False):
-        if args:
-            self.name = name
-            self.args = args
-            if "not" == name:
-                raise ValueError("Use the 'negated' argument or ~Fluent to negate.")
-            self.negated = negated
-        else:
-            if negated:
-                raise ValueError(
-                    "Cannot both pass a full string and negated=True. Use 'not' or ~Fluent."
-                )
-            split = name.split(" ")
-            if split[0] == "not":
-                self.negated = True
-                split = split[1:]
-            else:
-                self.negated = False
-            self.name = split[0]
-            self.args = tuple(split[1:])
-
-        self._hash = hash((self.name, self.args, self.negated))
-
-    def __str__(self) -> str:
-        prefix = "not " if self.negated else ""
-        return f"{prefix}{self.name} {' '.join(self.args)}"
-
-    def __repr__(self) -> str:
-        return f"F({self})"
-
-    def __hash__(self) -> int:
-        return self._hash
-
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, Fluent) and self._hash == other._hash
-
-    def __invert__(self) -> "Fluent":
-        return Fluent(self.name, *self.args, negated=not self.negated)
-
-
-class ProbBranch:
-    def __init__(self, prob: float, effects: tuple["GroundedEffect", ...]):
-        self.prob = prob
-        self.effects = effects
-
-    def __eq__(self, other):
-        return (
-            isinstance(other, ProbBranch)
-            and self.prob == other.prob
-            and self.effects == other.effects
-        )
-
-    def __hash__(self):
-        return hash((self.prob, tuple(self.effects)))
-
-
-class GroundedEffect:
-    __slots__ = (
-        "time",
-        "prob_effects",
-        "resulting_fluents",
-        "is_probabilistic",
-        "_hash",
-    )
-
-    def __init__(
-        self,
-        time: float,
-        *,
-        resulting_fluents: frozenset[Fluent] = frozenset(),
-        prob_effects: tuple["ProbBranch", ...] = tuple(),
-    ):
-        self.time = time
-        self.prob_effects = prob_effects
-        self.resulting_fluents = resulting_fluents
-        self.is_probabilistic = bool(self.prob_effects)
-        self._hash: int = hash((self.time, self.resulting_fluents, self.prob_effects))
-
-    def __repr__(self):
-        return f"GroundedEffect({self})"
-
-    def __hash__(self):
-        return self._hash
-
-    def __eq__(self, other):
-        return isinstance(other, GroundedEffect) and self._hash == other._hash
-
-    def __str__(self):
-        out_str = ""
-        if self.is_probabilistic:
-            parts = []
-            for branch in self.prob_effects:
-                effs = "; ".join(str(e) for e in branch.effects)
-                parts.append(f"{branch.prob}: [{effs}]")
-            out_str += f"probabilistic after {self.time:.3f}: {{ {', '.join(parts)} }}  "
-
-        rfs = ", ".join(str(f) for f in self.resulting_fluents)
-        return out_str + f"after {self.time:.3f}: {rfs}"
-
-    def __lt__(self, other: "GroundedEffect") -> bool:
-        return self.time < other.time
 
 
 class Effect:
@@ -164,121 +60,6 @@ class Effect:
             prob_effects=grounded_prob_effects,
             resulting_fluents=grounded_resulting_fluents,
         )
-
-
-class Action:
-    def __init__(
-        self,
-        preconditions: frozenset[Fluent],
-        effects: List[GroundedEffect],
-        name: Optional[str] = None,
-    ):
-        self.preconditions = frozenset(preconditions)
-        self.effects = effects
-        self.name = name or "anonymous"
-        self._pos_precond = frozenset(f for f in self.preconditions if not f.negated)
-        self._neg_precond_flipped = frozenset(
-            ~f for f in self.preconditions if f.negated
-        )
-
-    def __str__(self):
-        pre_str = ", ".join(str(p) for p in self.preconditions)
-        eff_strs = []
-        for eff in self.effects:
-            eff_strs.append(f"    {str(eff)}")
-        return (
-            f"Action('{self.name}'\n  Preconditions: [{pre_str}]\n  Effects:\n    "
-            + "\n    ".join(eff_strs)
-            + ")"
-        )
-
-    def __repr__(self):
-        return self.__str__()
-
-
-class State:
-    def __init__(
-        self,
-        time: float = 0,
-        fluents: Optional[Union[frozenset[Fluent], Set[Fluent]]] = None,
-        upcoming_effects: Optional[List[Tuple[float, GroundedEffect]]] = None,
-    ):
-        self.time = time
-        if not fluents:
-            self.fluents = frozenset()
-        elif isinstance(fluents, frozenset):
-            self.fluents = fluents
-        else:
-            self.fluents = frozenset(fluents)
-        self.upcoming_effects = upcoming_effects or []
-        self._hash = None
-
-    def satisfies_precondition(self, action: Action, relax: bool = False) -> bool:
-        if relax:
-            return action._pos_precond <= self.fluents
-        return action._pos_precond <= self.fluents and self.fluents.isdisjoint(
-            action._neg_precond_flipped
-        )
-
-    def copy(self) -> "State":
-        return State(
-            time=self.time,
-            fluents=self.fluents,
-            upcoming_effects=list(self.upcoming_effects),
-        )
-
-    def set_time(self, new_time: float):
-        self.time = new_time
-        self._hash = None
-
-    def update_fluents(
-        self, new_fluents: Union[set[Fluent], frozenset[Fluent]], relax: bool = False
-    ):
-        self._hash = None
-
-        positives = {f for f in new_fluents if not f.negated}
-        if relax:
-            self.fluents = frozenset(self.fluents | positives)
-        else:
-            flipped_negatives = {~f for f in new_fluents if f.negated}
-            fluent_set = self.fluents - flipped_negatives | positives
-            self.fluents = frozenset(fluent_set)
-
-    def queue_effect(self, effect: GroundedEffect):
-        self._hash = None
-        heapq.heappush(self.upcoming_effects, (self.time + effect.time, effect))
-
-    def pop_effect(self):
-        self._hash = None
-        heapq.heappop(self.upcoming_effects)
-
-    def copy_and_zero_out_time(self):
-        dt = self.time
-        new_effects = [(t - dt, e) for t, e in self.upcoming_effects]
-        return State(
-            time=0,
-            fluents=self.fluents,
-            upcoming_effects=new_effects,
-        )
-
-    def __hash__(self) -> int:
-        if not self._hash:
-            self._hash = hash((self.time, self.fluents, tuple(self.upcoming_effects)))
-        return self._hash
-        # return hash((self.time, self.fluents, tuple(self.upcoming_effects)))
-
-    def __eq__(self, other: object) -> bool:
-        return hash(self) == hash(other)
-
-    def __str__(self):
-        upcoming = ", ".join(f"({t:.3f}, {effect})" for t, effect in self.upcoming_effects)
-        return f"State<time={self.time:.3f}, fluents={self.fluents}, upcoming_effects={upcoming}>"
-
-    def __repr__(self):
-        return self.__str__()
-
-    def __lt__(self, other):
-        return self.time < other.time
 
 
 class Operator:
@@ -353,6 +134,3 @@ def get_next_actions(state: State, all_actions: List[Action]) -> List[Action]:
     # Step 4: Otherwise, return any possible actions
     return [a for a in all_actions if state.satisfies_precondition(a)]
 
-
-from mrppddl._bindings import GroundedEffect, Fluent, Action, State
-from mrppddl._bindings import transition
