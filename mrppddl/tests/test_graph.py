@@ -1,7 +1,18 @@
-from mrppddl.core import Operator, Fluent, Effect, State, Action, transition, OptCallable, get_next_actions, get_action_by_name
+from mrppddl.core import (
+    Operator,
+    Fluent,
+    Effect,
+    State,
+    Action,
+    transition,
+    OptCallable,
+    get_next_actions,
+    get_action_by_name,
+)
 from mrppddl.helper import _make_callable
 from typing import Callable
 import pytest
+
 
 def _plot_graph(G):
     import matplotlib.pyplot as plt
@@ -19,22 +30,24 @@ def _plot_graph(G):
 
     # Optional: label nodes by hash or small index
     def state_str(state):
-        return '\n'.join([str(f) for f in state.fluents])
-        
+        return "\n".join([str(f) for f in state.fluents])
+
     node_labels = {node: f"{state_str(node)}" for idx, node in enumerate(G.nodes)}
 
     # Draw nodes
-    nx.draw_networkx_nodes(G, pos, node_color='lightblue', node_size=60)
+    nx.draw_networkx_nodes(G, pos, node_color="lightblue", node_size=60)
 
     # Draw edges
-    nx.draw_networkx_edges(G, pos, arrows=True, arrowstyle='-|>', width=1.5, edge_color="#a0a0a0f0")
+    nx.draw_networkx_edges(
+        G, pos, arrows=True, arrowstyle="-|>", width=1.5, edge_color="#a0a0a0f0"
+    )
 
     # Draw labels
     nx.draw_networkx_labels(G, pos, labels=node_labels, font_size=6)
     nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=6)
 
     plt.title("State-Action Graph")
-    plt.axis('off')
+    plt.axis("off")
     plt.tight_layout()
     plt.show()
 
@@ -43,26 +56,43 @@ def construct_move_and_visit_operator(move_time: OptCallable) -> Operator:
     move_time = _make_callable(move_time)
     return Operator(
         name="move_visit",
-        parameters=[("?robot", "robot"), ("?loc_from", "location"), ("?loc_to", "location")],
-        preconditions=[Fluent("at ?robot ?loc_from"), 
-                       ~Fluent("visited ?loc_to"),
-                       Fluent("free ?robot")],
+        parameters=[
+            ("?robot", "robot"),
+            ("?loc_from", "location"),
+            ("?loc_to", "location"),
+        ],
+        preconditions=[
+            Fluent("at ?robot ?loc_from"),
+            ~Fluent("visited ?loc_to"),
+            Fluent("free ?robot"),
+        ],
         effects=[
-            Effect(time=0,
-                   resulting_fluents={~Fluent("free ?robot"), 
-                                      ~Fluent("at ?robot ?loc_from"),}),
-            Effect(time=(move_time, ["?robot", "?loc_from", "?loc_to"]),
-                   resulting_fluents={Fluent("free ?robot"),
-                                      Fluent("visited ?loc_to"),
-                                      Fluent("at ?robot ?loc_to")})
-        ])
+            Effect(
+                time=0,
+                resulting_fluents={
+                    ~Fluent("free ?robot"),
+                    ~Fluent("at ?robot ?loc_from"),
+                },
+            ),
+            Effect(
+                time=(move_time, ["?robot", "?loc_from", "?loc_to"]),
+                resulting_fluents={
+                    Fluent("free ?robot"),
+                    Fluent("visited ?loc_to"),
+                    Fluent("at ?robot ?loc_to"),
+                },
+            ),
+        ],
+    )
+
 
 def test_transition_regression_1():
     # Move and Visit Operator
     import random
     import hashlib
+
     def move_time_fn(robot, start, end):
-        seed_input = robot + start + '::' + end
+        seed_input = robot + start + "::" + end
         seed = int(hashlib.sha256(seed_input.encode()).hexdigest(), 16)
         random.seed(seed)
         return random.random() + 5.0
@@ -79,10 +109,12 @@ def test_transition_regression_1():
     initial_state = State(
         time=0,
         fluents={
-            Fluent("at r1 start"), Fluent("free r1"),
-            Fluent("at r2 start"), Fluent("free r2"),
+            Fluent("at r1 start"),
+            Fluent("free r1"),
+            Fluent("at r2 start"),
+            Fluent("free r2"),
             Fluent("visited start"),
-        }
+        },
     )
     a1 = get_action_by_name(actions, "move_visit r1 start roomB")
     a2 = get_action_by_name(actions, "move_visit r2 start roomC")
@@ -96,6 +128,7 @@ def test_transition_regression_1():
 def test_graph_traversal():
     # Move and Visit Operator
     import random
+
     # import hashlib
     # def move_time_fn(robot, start, end):
     #     seed_input = robot + start + '::' + end
@@ -106,7 +139,7 @@ def test_graph_traversal():
     random.seed(8616)
     move_time_fn = lambda *args: random.random() + 5.0
     move_visit_op = construct_move_and_visit_operator(move_time_fn)
-   
+
     # Ground actions
     objects_by_type = {
         "robot": ["r1", "r2"],
@@ -118,13 +151,16 @@ def test_graph_traversal():
     initial_state = State(
         time=0,
         fluents={
-            Fluent("at r1 start"), Fluent("free r1"),
-            Fluent("at r2 start"), Fluent("free r2"),
+            Fluent("at r1 start"),
+            Fluent("free r1"),
+            Fluent("at r2 start"),
+            Fluent("free r2"),
             Fluent("visited start"),
-        }
+        },
     )
 
     import networkx as nx
+
     G = nx.DiGraph()
     expanded_states = set()
     new_states = {initial_state.copy_and_zero_out_time()}
@@ -134,8 +170,9 @@ def test_graph_traversal():
     new_states = {initial_state}
 
     def is_goal_state(state: State) -> bool:
-        return len(objects_by_type['location']) == len([f for f in state.fluents
-                                                        if f.name == 'visited'])
+        return len(objects_by_type["location"]) == len(
+            [f for f in state.fluents if f.name == "visited"]
+        )
 
     counter = 0
     while new_states:
@@ -162,22 +199,32 @@ def test_graph_traversal():
                 G.add_node(successor_zeroed)
 
                 duration = successor.time - state.time
-                G.add_edge(state_zeroed, successor_zeroed, action=action, weight=duration, probability=prob)
+                G.add_edge(
+                    state_zeroed,
+                    successor_zeroed,
+                    action=action,
+                    weight=duration,
+                    probability=prob,
+                )
 
                 # Expand successor if not already seen
-                if successor_zeroed not in expanded_states and not is_goal_state(successor_zeroed):
+                if successor_zeroed not in expanded_states and not is_goal_state(
+                    successor_zeroed
+                ):
                     new_states.add(successor_zeroed)
 
     def find_lowest_cost_goal_path(
-        G: nx.DiGraph,
-        start_state: State,
-        is_goal_state: Callable[[State], bool]
+        G: nx.DiGraph, start_state: State, is_goal_state: Callable[[State], bool]
     ) -> tuple[float, list[State], list[Action]]:
         # Step 1: Get shortest path lengths and paths from start_state
-        costs, paths = nx.single_source_dijkstra(G, source=start_state, weight='weight')  # pyright: ignore[reportArgumentType]
+        costs, paths = nx.single_source_dijkstra(
+            G, source=start_state, weight="weight"
+        )  # pyright: ignore[reportArgumentType]
 
         # Step 2: Find goal states among reachable nodes
-        goal_states = [(state, cost) for state, cost in costs.items() if is_goal_state(state)]
+        goal_states = [
+            (state, cost) for state, cost in costs.items() if is_goal_state(state)
+        ]
         if not goal_states:
             raise ValueError("No reachable goal state found.")
 

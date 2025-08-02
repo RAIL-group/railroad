@@ -39,9 +39,7 @@ class Effect:
         # def evaluate(expr): return expr(binding) if callable(expr) else expr
         if self.is_probabilistic:
             grounded_prob_effects = tuple(
-                (
-                    prob(binding), tuple(e._ground(binding) for e in effect_list)
-                )
+                (prob(binding), tuple(e._ground(binding) for e in effect_list))
                 for prob, effect_list in self.prob_effects
             )
         else:
@@ -133,4 +131,3 @@ def get_next_actions(state: State, all_actions: List[Action]) -> List[Action]:
 
     # Step 4: Otherwise, return any possible actions
     return [a for a in all_actions if state.satisfies_precondition(a)]
-

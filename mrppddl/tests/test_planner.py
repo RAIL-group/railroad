@@ -8,34 +8,40 @@ F = Fluent
 
 
 @pytest.mark.parametrize(
-    "initial_fluents", [
-        {F("at r1 start"), F("free r1"),
-         F("visited start")},
-        {F("at r1 start"), F("free r1"),
-         F("at r2 start"), F("free r2"),
-         F("visited start")},
-        {F("at r1 start"), F("free r1"),
-         F("at r2 start"), F("free r2"),
-         F("at r3 start"), F("free r3"),
-         F("visited start")},
+    "initial_fluents",
+    [
+        {F("at r1 start"), F("free r1"), F("visited start")},
+        {
+            F("at r1 start"),
+            F("free r1"),
+            F("at r2 start"),
+            F("free r2"),
+            F("visited start"),
+        },
+        {
+            F("at r1 start"),
+            F("free r1"),
+            F("at r2 start"),
+            F("free r2"),
+            F("at r3 start"),
+            F("free r3"),
+            F("visited start"),
+        },
     ],
-    ids=["one robot", "two robots", "three robots"])
+    ids=["one robot", "two robots", "three robots"],
+)
 def test_planner_mcts_move_visit_multirobot(initial_fluents):
     # Get all actions
     objects_by_type = {
         "robot": ["r1", "r2", "r3"],
-        "location": ["start", "a", "b", "c",
-                     "d", "e", "f", "g", "h",
-                     "i", "j", "k"],
+        "location": ["start", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"],
     }
     random.seed(8616)
     move_op = construct_move_visited_operator(lambda *args: 5.0 + random.random())
     all_actions = move_op.instantiate(objects_by_type)
 
     # Initial state
-    initial_state = State(
-        time=0,
-        fluents=initial_fluents)
+    initial_state = State(time=0, fluents=initial_fluents)
     goal_fluents = {
         F("visited a"),
         F("visited b"),
@@ -43,9 +49,10 @@ def test_planner_mcts_move_visit_multirobot(initial_fluents):
         F("visited d"),
         F("visited e"),
     }
+
     def is_goal(state):
-        return all(gf in state.fluents
-                   for gf in goal_fluents)
+        return all(gf in state.fluents for gf in goal_fluents)
+
     state = initial_state
     mcts = MCTSPlanner(all_actions)
     for _ in range(15):

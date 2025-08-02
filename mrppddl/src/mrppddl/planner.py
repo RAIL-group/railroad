@@ -9,5 +9,3 @@ def reconstruct_path(came_from, current):
         current = prev
     path.reverse()
     return path
-
-
