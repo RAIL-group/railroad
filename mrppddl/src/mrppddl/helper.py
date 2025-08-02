@@ -33,6 +33,20 @@ def construct_move_operator(move_time: OptCallable):
         ],
     )
 
+def construct_move_visited_operator(move_time: OptCallable):
+    move_time = _make_callable(move_time)
+    return Operator(
+        name="move",
+        parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F("at ?r ?from"), F("free ?r")],
+        effects=[
+            Effect(time=0, resulting_fluents={Fluent("not free ?r")}),
+            Effect(
+                time=(move_time, ["?r", "?from", "?to"]),
+                resulting_fluents={F("free ?r"), F("not at ?r ?from"), F("at ?r ?to"), F("visited ?to")},
+            ),
+        ],
+    )
 
 def construct_search_operator(
     object_find_prob: OptCallable, move_time: OptCallable, pick_time: OptCallable
