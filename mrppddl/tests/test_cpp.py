@@ -108,6 +108,21 @@ def test_cpp_action_instantiation():
 
     out = transition(s, a1)
 
+def test_state_effects_pop_order_correct():
+    state = State(fluents={Fluent("free robot")})
+    action = Action(preconditions=set(),
+                    effects=[
+                        GroundedEffect(0, {Fluent("not free robot")}),
+                        GroundedEffect(2.5, {Fluent("free robot")}),
+                        GroundedEffect(3.0, {Fluent("next effect")}),
+                    ], name="queue effects")
+    state_out = transition(state, action)[0][0]
+    assert len(state_out.upcoming_effects) == 1
+    assert state_out.upcoming_effects[0][0] == 3.0
+    assert Fluent("free robot") in state_out.fluents
+    assert Fluent("next effect") not in state_out.fluents
+
+
 
 # DEBUG
 
