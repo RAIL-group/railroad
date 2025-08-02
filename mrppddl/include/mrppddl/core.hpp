@@ -320,9 +320,7 @@ public:
     return out.str();
   }
 
-  bool operator==(const Action &other) const {
-    return hash() == other.hash();
-  }
+  bool operator==(const Action &other) const { return hash() == other.hash(); }
 
   std::size_t hash() const {
     std::size_t h_name = std::hash<std::string>{}(name_);
@@ -370,7 +368,6 @@ template <> struct hash<mrppddl::Action> {
 } // namespace std
 
 namespace mrppddl {
-
 
 std::size_t ProbBranchWrapper::hash() const {
   if (cached_hash_)

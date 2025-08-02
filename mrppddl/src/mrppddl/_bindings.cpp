@@ -244,13 +244,12 @@ PYBIND11_MODULE(_bindings, m) {
       .def("__lt__", &State::operator<)
       .def("__str__", &State::str)
       .def("__repr__", [](const State &s) { return s.str(); });
-  m.def("transition",
-	[](const State &state, const Action *action, bool relax) {
-	  return transition(state, action, relax);
-	},
-	py::arg("state"),
-	py::arg("action") = nullptr,
-	py::arg("relax") = false);
+  m.def(
+      "transition",
+      [](const State &state, const Action *action, bool relax) {
+        return transition(state, action, relax);
+      },
+      py::arg("state"), py::arg("action") = nullptr, py::arg("relax") = false);
   py::class_<ProbBranchWrapper>(m, "ProbBranch")
       .def(py::init<double,
                     std::vector<std::shared_ptr<const GroundedEffect>>>())
@@ -292,19 +291,15 @@ PYBIND11_MODULE(_bindings, m) {
         py::arg("is_goal_state"), py::arg("heuristic_fn") = nullptr,
         "Run A* search and return the action path");
   py::class_<MCTSPlanner>(m, "MCTSPlanner")
-    .def(py::init<std::vector<Action>>(), py::arg("all_actions"))
-    .def("__call__",
-	 [](MCTSPlanner& self,
-	    const State& s,
-	    const std::unordered_set<Fluent>& goal_fluents,
-	    int max_iterations,
-	    int max_depth,
-	    double c) {
-	   return self(s, goal_fluents, max_iterations, max_depth, c);
-	 },
-	 py::arg("state"),
-	 py::arg("goal_fluents"),
-	 py::arg("max_iterations") = 1000,
-	 py::arg("max_depth") = 20,
-	 py::arg("c") = 1.414);
+      .def(py::init<std::vector<Action>>(), py::arg("all_actions"))
+      .def(
+          "__call__",
+          [](MCTSPlanner &self, const State &s,
+             const std::unordered_set<Fluent> &goal_fluents, int max_iterations,
+             int max_depth, double c) {
+            return self(s, goal_fluents, max_iterations, max_depth, c);
+          },
+          py::arg("state"), py::arg("goal_fluents"),
+          py::arg("max_iterations") = 1000, py::arg("max_depth") = 20,
+          py::arg("c") = 1.414);
 }
