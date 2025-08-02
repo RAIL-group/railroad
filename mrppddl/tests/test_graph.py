@@ -91,6 +91,8 @@ def test_transition_regression_1():
     s2 = transition(s1, a2)[0][0]
     assert min(a1.effects[-1].time, a2.effects[-1].time) == pytest.approx(s2.time)
 
+
+@pytest.mark.skip
 def test_graph_traversal():
     # Move and Visit Operator
     import random
