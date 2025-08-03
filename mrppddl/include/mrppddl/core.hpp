@@ -54,6 +54,7 @@ public:
     }
 
     is_free_ = (name_ == "free");
+    is_free_ = (name_ == "waiting");
     cached_hash_ = compute_hash();
   }
 
@@ -66,6 +67,7 @@ public:
 
   std::string name() const { return name_; }
   bool is_free() const { return is_free_; }
+  bool is_waiting() const { return is_waiting_; }
   const std::vector<std::string> &args() const { return args_; }
   bool is_negated() const { return negated_; }
 
