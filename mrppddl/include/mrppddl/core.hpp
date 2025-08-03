@@ -81,6 +81,7 @@ private:
   bool negated_;
   std::size_t cached_hash_;
   bool is_free_;
+  bool is_waiting_;
 
   std::size_t compute_hash() const {
     std::size_t h = std::hash<std::string>{}(name_);
