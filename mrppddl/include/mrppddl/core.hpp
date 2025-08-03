@@ -54,7 +54,7 @@ public:
     }
 
     is_free_ = (name_ == "free");
-    is_free_ = (name_ == "waiting");
+    is_waiting_ = (name_ == "waiting");
     cached_hash_ = compute_hash();
   }
 

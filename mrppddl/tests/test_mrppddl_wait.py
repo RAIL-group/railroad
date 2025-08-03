@@ -39,9 +39,13 @@ def test_wait_for_transition():
                       ])
 
     state = transition(state, action_1)[0][0]
-    state = transition(state, action_2)[0][0]
-    state = transition(state, action_3)[0][0]
+    assert state.time == 0
 
+    state = transition(state, action_2)[0][0]
+    assert state.time == 1
+
+    state = transition(state, action_3)[0][0]
+    assert state.time == 2
     assert F("free r1") in state.fluents
     assert F("waiting r1 r2") not in state.fluents
     assert F("free r2") in state.fluents
