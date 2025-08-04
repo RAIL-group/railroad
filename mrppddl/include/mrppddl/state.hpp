@@ -1,5 +1,6 @@
 #pragma once
 #include "mrppddl/core.hpp"
+#include "mrppddl/constants.hpp"
 #include <algorithm>
 #include <functional>
 #include <sstream>
@@ -250,13 +251,14 @@ transition(const State &state, const Action *action, bool relax = false) {
   vec_outcomes.reserve(outcomes.size());
 
   for (auto &entry : outcomes) {
-    vec_outcomes.emplace_back(
-        std::move(const_cast<State &>(entry.first)),
-        std::move(entry.second));
+    vec_outcomes.emplace_back(std::move(const_cast<State &>(entry.first)),
+                              std::move(entry.second));
   }
 
   // Resolve any 'waiting' predicates
   for (auto &[out_state, prob] : vec_outcomes) {
+    // If a robot is waiting on a now-free robot, 
+    // it is now free and no longer waiting.
     std::unordered_set<Fluent> upd_fluents;
     for (auto &waiting_fluent : out_state.fluents()) {
       if (waiting_fluent.is_waiting() &&
@@ -267,7 +269,27 @@ transition(const State &state, const Action *action, bool relax = false) {
       }
     }
     out_state.update_fluents(upd_fluents);
+
+    // If no robots are free, free all waiting robots
+    // and add penalty for getting stuck.
+    int count_free = 0;
+    for (auto &fluent : out_state.fluents()) {
+      if (fluent.is_free()) { ++count_free; }
+    }
+    if (count_free > 0) { continue; }
+    for (auto &waiting_fluent : out_state.fluents()) {
+      if (waiting_fluent.is_waiting()) {
+        upd_fluents.insert(Fluent("free " + waiting_fluent.args().front()));
+        upd_fluents.insert(waiting_fluent.invert());
+      }
+    }
+    out_state.update_fluents(upd_fluents);
+    out_state.set_time(out_state.time() + ALL_ROBOTS_WAITING_PENALTY);
+
   }
+
+  // If all robots are waiting,	clear all waiting actions
+  
 
   return {vec_outcomes.begin(), vec_outcomes.end()};
 }

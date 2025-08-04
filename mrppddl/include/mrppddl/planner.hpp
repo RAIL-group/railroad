@@ -3,6 +3,7 @@
 #include "mrppddl/core.hpp"
 #include "mrppddl/ff_heuristic.hpp"
 #include "mrppddl/state.hpp"
+#include "mrppddl/constants.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -359,7 +360,7 @@ inline std::string mcts(const State &root_state,
       double h = heuristic_fn ? heuristic_fn(node->state) : 0.0;
       // double h = 0;
       if (h > 1e10) {
-        h = 10.0;
+        h = HEURISTIC_CANNOT_FIND_GOAL_PENALTY;
       }
       reward = -node->state.time() - h;
     }
