@@ -245,7 +245,31 @@ transition(const State &state, const Action *action, bool relax = false) {
   std::unordered_map<State, double> outcomes;
   advance_to_terminal(new_state, 1.0, outcomes, relax);
 
-  return {outcomes.begin(), outcomes.end()};
+  // Move elements from unordered_map to a vector (mutable)
+  std::vector<std::pair<State, double>> vec_outcomes;
+  vec_outcomes.reserve(outcomes.size());
+
+  for (auto &entry : outcomes) {
+    vec_outcomes.emplace_back(
+        std::move(const_cast<State &>(entry.first)),
+        std::move(entry.second));
+  }
+
+  // Resolve any 'waiting' predicates
+  for (auto &[out_state, prob] : vec_outcomes) {
+    std::unordered_set<Fluent> upd_fluents;
+    for (auto &waiting_fluent : out_state.fluents()) {
+      if (waiting_fluent.is_waiting() &&
+          out_state.fluents().count(
+              Fluent("free " + waiting_fluent.args().back()))) {
+        upd_fluents.insert(Fluent("free " + waiting_fluent.args().front()));
+        upd_fluents.insert(waiting_fluent.invert());
+      }
+    }
+    out_state.update_fluents(upd_fluents);
+  }
+
+  return {vec_outcomes.begin(), vec_outcomes.end()};
 }
 
 } // namespace mrppddl
