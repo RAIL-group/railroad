@@ -26,38 +26,42 @@ get_next_actions(const State &state, const std::vector<Action> &all_actions) {
     return a.name() < b.name();
   };
 
-  std::set<Fluent, decltype(cmp)> free_robot_fluents(cmp);
+  // // This filters actions based on the 'next free robot'.
+  // // Not only does it not work properly, but we need to comment
+  // // it out for multi-robot actions to work.
 
-  for (const auto &f : state.fluents()) {
-    if (f.is_free()) {
-      free_robot_fluents.insert(f);
-    }
-  }
+  // std::set<Fluent, decltype(cmp)> free_robot_fluents(cmp);
 
-  // Step 2: Create negated state (excluding all free)
-  std::unordered_set<Fluent> negated;
-  for (const auto &f : free_robot_fluents) {
-    negated.insert(f.invert());
-  }
+  // for (const auto &f : state.fluents()) {
+  //   if (f.is_free()) {
+  //     free_robot_fluents.insert(f);
+  //   }
+  // }
 
-  // Step 3: For each free predicate, create temp state with just that one
-  // enabled
-  State temp_state = State(0, state.fluents());
-  temp_state.update_fluents(negated);
-  for (const auto &free_pred : free_robot_fluents) {
-    temp_state.update_fluents({free_pred});
+  // // Step 2: Create negated state (excluding all free)
+  // std::unordered_set<Fluent> negated;
+  // for (const auto &f : free_robot_fluents) {
+  //   negated.insert(f.invert());
+  // }
 
-    std::vector<const Action *> applicable;
-    for (const auto &action : all_actions) {
-      if (temp_state.satisfies_precondition(action)) {
-        applicable.push_back(&action);
-      }
-    }
+  // // Step 3: For each free predicate, create temp state with just that one
+  // // enabled
+  // State temp_state = State(0, state.fluents());
+  // temp_state.update_fluents(negated);
+  // for (const auto &free_pred : free_robot_fluents) {
+  //   temp_state.update_fluents({free_pred});
 
-    if (!applicable.empty()) {
-      return applicable;
-    }
-  }
+  //   std::vector<const Action *> applicable;
+  //   for (const auto &action : all_actions) {
+  //     if (temp_state.satisfies_precondition(action)) {
+  //       applicable.push_back(&action);
+  //     }
+  //   }
+
+  //   if (!applicable.empty()) {
+  //     return applicable;
+  //   }
+  // }
 
   // Step 4: Fall back to any applicable action
   std::vector<const Action *> fallback;
