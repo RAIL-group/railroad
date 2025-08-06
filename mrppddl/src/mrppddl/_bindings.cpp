@@ -284,6 +284,8 @@ PYBIND11_MODULE(_bindings, m) {
   m.def("get_next_actions", &get_next_actions, py::arg("state"),
         py::arg("all_actions"),
         "Return list of applicable actions for at least one free robot");
+  m.def("get_usable_actions", &get_usable_actions, py::arg("input_state"),
+	py::arg("goal_fluents"), py::arg("all_actions"));
 
   m.def("make_goal_test", &mrppddl::make_goal_test,
         "Construct a goal-checking function", py::arg("goal_fluents"));

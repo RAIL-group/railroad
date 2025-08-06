@@ -1,4 +1,4 @@
-from mrppddl._bindings import astar, MCTSPlanner  # noqa
+from mrppddl._bindings import astar, MCTSPlanner, get_usable_actions  # noqa
 
 
 def reconstruct_path(came_from, current):

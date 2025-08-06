@@ -118,16 +118,6 @@ bool is_goal_dbg(const std::unordered_set<Fluent> &fluents,
   return true;
 }
 
-inline GoalFn make_goal_fn(const std::unordered_set<Fluent> &goal_fluents) {
-  return [goal_fluents](const std::unordered_set<Fluent> &fluents) -> bool {
-    for (const auto &gf : goal_fluents) {
-      if (!fluents.count(gf))
-        return false;
-    }
-    return true;
-  };
-}
-
 inline std::optional<std::vector<Action>>
 astar(const State &start_state, const std::vector<Action> &all_actions,
       const std::unordered_set<Fluent> &goal_fluents,

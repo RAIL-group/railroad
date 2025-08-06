@@ -137,4 +137,86 @@ HeuristicFn make_ff_heuristic(GoalFn is_goal_fn,
   };
 }
 
+inline GoalFn make_goal_fn(const std::unordered_set<Fluent> &goal_fluents) {
+  return [goal_fluents](const std::unordered_set<Fluent> &fluents) -> bool {
+    for (const auto &gf : goal_fluents) {
+      if (!fluents.count(gf))
+        return false;
+    }
+    return true;
+  };
+}
+
+
+const std::vector<Action> get_usable_actions(const State &input_state, 
+					     const std::unordered_set<Fluent> &goal_fluents,
+					     const std::vector<Action> &all_actions) {
+  auto is_goal_fn = make_goal_fn(goal_fluents);
+  auto relaxed_result = transition(input_state, nullptr, true);
+  if (relaxed_result.empty())
+    return std::vector<Action>();
+  State relaxed = relaxed_result[0].first;
+
+  const auto &initial_fluents = relaxed.fluents();
+  std::unordered_set<Fluent> known_fluents(initial_fluents.begin(),
+                                           initial_fluents.end());
+
+  std::unordered_set<Fluent> newly_added = known_fluents;
+  std::unordered_map<Fluent, const Action *> fact_to_action;
+  std::unordered_map<const Action *, double> action_to_duration;
+  std::unordered_set<const Action *> visited_actions;
+  std::unordered_set<const Action *> all_actions_set;
+  for (const auto &a : all_actions) {
+    all_actions_set.insert(&a);
+  }
+
+  // Step 1: Forward relaxed reachability
+  while (!newly_added.empty()) {
+    std::unordered_set<Fluent> next_new;
+    State temp(0.0, known_fluents); // dummy state to test preconditions
+
+    for (const Action *a : all_actions_set) {
+      if (visited_actions.count(a))
+        continue;
+      if (!temp.satisfies_precondition(*a, /*relax=*/true))
+        continue;
+
+      auto succs = transition(temp, a, true);
+      if (succs.empty())
+        continue;
+
+      visited_actions.insert(a);
+      double duration = succs[0].first.time() - temp.time();
+      action_to_duration[a] = duration;
+
+      for (const auto &f : succs[0].first.fluents()) {
+        if (!known_fluents.count(f)) {
+          known_fluents.insert(f);
+          next_new.insert(f);
+          fact_to_action[f] = a;
+        }
+      }
+    }
+
+    newly_added = std::move(next_new);
+    for (const Action *a : visited_actions) {
+      all_actions_set.erase(a);
+    }
+  }
+
+  if (!is_goal_fn(known_fluents)) {
+    throw std::runtime_error("Goal cannot be met.");
+  }
+
+
+  // Return the set of executable actions
+  std::vector<Action> feasible_actions;
+  feasible_actions.reserve(visited_actions.size());
+  for (auto action_ptr : visited_actions) {
+    feasible_actions.push_back(*action_ptr);
+  }
+
+  return feasible_actions;
+}
+
 } // namespace mrppddl

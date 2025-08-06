@@ -8,7 +8,7 @@ from mrppddl.core import (
     Action,
 )
 from mrppddl.helper import construct_move_visited_operator, construct_wait_operator
-from mrppddl.planner import MCTSPlanner
+from mrppddl.planner import MCTSPlanner, get_usable_actions
 import random
 
 F = Fluent
@@ -83,7 +83,7 @@ def test_planner_mcts_move_visit_wait_multirobot(initial_fluents):
     move_op = construct_move_visited_operator(lambda *args: 5.0 + random.random())
     wait_op = construct_wait_operator()
     all_actions = move_op.instantiate(objects_by_type) + wait_op.instantiate(objects_by_type)
-    print(all_actions)
+    
 
     # Initial state
     initial_state = State(time=0, fluents=initial_fluents)
@@ -97,6 +97,7 @@ def test_planner_mcts_move_visit_wait_multirobot(initial_fluents):
         F("visited d"),
         F("visited e"),
     }
+    all_actions = get_usable_actions(initial_state, goal_fluents, all_actions)
 
     def is_goal(state):
         return all(gf in state.fluents for gf in goal_fluents)
