@@ -244,11 +244,11 @@ def build_door_world():
     
     goal_functions = [is_goal_open_red, is_goal_open_blue]
 
-    return initial_state, all_actions, goal_functions
+    return initial_state, all_actions, goal_functions, objects_by_type
 
 
 def main():
-    initial_state, all_actions, goal_functions = build_door_world()
+    initial_state, all_actions, goal_functions, objects_by_type = build_door_world()
     print(initial_state)
     print(Fluent('at start robot') in initial_state.fluents)
     G = build_full_graph(initial_state, all_actions)
@@ -288,7 +288,39 @@ def main():
                 state_str=lambda state: '\n'.join([str(f) for f in state.fluents if 'holding' in f.name or 'open' in f.name]),
                 node_value_map=confusion_map,
                 pos=pos)
-    plt.show()
+    # plt.show()
+
+    # ==== Adversary cost maps ====
+    # Compute a mapping from some index to where the robot is "at". This is what
+    # we'll use to compute costs for some adversary observer, who can impact the
+    # difficulty for a robot to be at a particular location. Thus the adversary
+    # actions are a mapping from location to a set of nodes. Note: these are
+    # node-specific costs. I can compute per action costs separately.
+    adversary_node_actions = {
+        location: set(state for state in pruned_G.nodes if F(f"at {location} robot") in state.fluents)
+        for location in objects_by_type['location']
+    }
+
+    # This is a mapping from "location" to "nodes" in the graph
+    print("Location -> Node Mappings")
+    for location, nodes in adversary_node_actions.items():
+        print(f"Location: {location}")
+        for state in nodes:
+            print(f"  {state.fluents}")
+
+    # To get edge cost actions, we look at the terminal states for each action
+    adversary_edge_actions = {
+        location: {(u, v) for u, v in pruned_G.edges if v in adversary_node_actions[location]}
+        for location in objects_by_type['location']
+    }
+
+    # This is a mapping from "location" to "edges" in the graph.
+    # Each edge is a (head_state, tail_state) pair.
+    print("Location -> Edge Mappings")
+    for location, edges in adversary_edge_actions.items():
+        print(f"Location: {location}")
+        for head_state, tail_state in edges:
+            print(f"  Head: {head_state.fluents} || Tail: {tail_state.fluents}")
 
 
 if __name__ == '__main__':
