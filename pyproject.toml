@@ -5,15 +5,17 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "graphx>=0.0.4",
-    "ipytest>=0.14.2",
-    "matplotlib>=3.10.1",
-    "mypy>=1.15.0",
-    "networkx>=3.4.2",
-    "pyqt5>=5.15.11",
-    "pyright>=1.1.399",
-    "pytest-html>=4.1.1",
-    "scipy>=1.15.2",
-    "setuptools>=78.1.0",
-    "xlrd>=2.0.1",
+    "networkx",
+    "matplotlib",
+    "scipy",
+    "pyqt5",
+    "black",
+    "pyright",
+    "pytest-html",
+    "pytest-pyright",
+    "mrppddl",
+    "rich",
 ]
+
+[tool.uv.sources]
+mrppddl = { path = "./mrppddl" }

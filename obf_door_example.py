@@ -3,7 +3,7 @@ from mrppddl.core import State
 from typing import Callable, List, Optional, Dict
 import matplotlib.pyplot as plt
 import networkx as nx
-
+from rich import print
 
 
 F = Fluent
@@ -302,7 +302,7 @@ def main():
     }
 
     # This is a mapping from "location" to "nodes" in the graph
-    print("Location -> Node Mappings")
+    print("[green]Location -> Node Mappings")
     for location, nodes in adversary_node_actions.items():
         print(f"Location: {location}")
         for state in nodes:
@@ -316,7 +316,7 @@ def main():
 
     # This is a mapping from "location" to "edges" in the graph.
     # Each edge is a (head_state, tail_state) pair.
-    print("Location -> Edge Mappings")
+    print("[green]Location -> Edge Mappings")
     for location, edges in adversary_edge_actions.items():
         print(f"Location: {location}")
         for head_state, tail_state in edges:
