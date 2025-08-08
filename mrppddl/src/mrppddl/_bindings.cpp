@@ -43,14 +43,14 @@ PYBIND11_MODULE(_bindings, m) {
           }))
       .def("__repr__", [](const Fluent &f) {
         std::ostringstream oss;
-        oss << "<Fluent: ";
+        oss << "(";
         if (f.is_negated())
           oss << "not ";
         oss << f.name();
         for (const auto &arg : f.args()) {
           oss << " " << arg;
         }
-        oss << ">";
+        oss << ")";
         return oss.str();
       });
 
