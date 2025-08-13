@@ -19,3 +19,4 @@ dependencies = [
 
 [tool.uv.sources]
 mrppddl = { path = "./mrppddl" }
+environment = { path = "./environment" }
