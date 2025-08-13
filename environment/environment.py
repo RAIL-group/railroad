@@ -1,7 +1,8 @@
+import random
 import numpy as np
 
 GRID_SIZE = 500
-LOCATIONS = ["start", "kitchen", "desk", "shelf", "bedroom", "bathroom", "storage"]
+LOCATIONS = ["kitchen", "desk", "shelf", "bedroom", "bathroom", "storage"]
 OBJECTS = ["Knife", "Notebook", "Pen", "Lamp", "Clock", "Toolset", "Pillow"]
 
 likelihoods = {
@@ -32,8 +33,8 @@ class Map():
         location_coords = {}
         location_objects = {loc: [] for loc in LOCATIONS}
         for loc in LOCATIONS:
-            x, y = np.random.randint(0, GRID_SIZE, 2)
-            location_coords[tuple((x, y))] = loc
+            coords = [random.randint(0, GRID_SIZE)] * 2
+            location_coords[loc] = coords
             # randomly sample objects in those locations
             for object in OBJECTS:
                 ps = likelihoods[loc][object]
