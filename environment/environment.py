@@ -18,26 +18,34 @@ likelihoods = {
 def get_location_object_likelihood(location, object):
     return likelihoods[location][object]
 
+class Location:
+    def __init__(self, name=None, location=None, objects=[]):
+        self.name = name
+        self.location = location
+        self.objects = objects
+
+    def __repr__(self):
+        return f"Location(name={self.name}, location={self.location}, objects={self.objects})"
 
 class Map():
-    def __init__(self, seed=1024):
+    def __init__(self, n=3, seed=1024):
         np.random.seed(seed)
-        self.coords_locations, self.location_objects = self.generate_env()
+        self.n = min(n, len(LOCATIONS))
         self.objects_in_environment = []
-        for objs in self.location_objects.values():
-            for obj in objs:
-                if obj not in self.objects_in_environment:
-                    self.objects_in_environment.append(obj)
+        self.locations = self.generate_env()
 
     def generate_env(self):
-        location_coords = {}
-        location_objects = {loc: [] for loc in LOCATIONS}
-        for loc in LOCATIONS:
+        locations = []
+        for i, loc in enumerate(LOCATIONS):
             coords = [random.randint(0, GRID_SIZE)] * 2
-            location_coords[loc] = coords
             # randomly sample objects in those locations
+            items = []
             for object in OBJECTS:
                 ps = likelihoods[loc][object]
                 if np.random.rand() < ps:
-                    location_objects[loc].append(object)
-        return location_coords, location_objects
+                    items.append(object)
+                    self.objects_in_environment.append(object)
+            locations.append(Location(loc, coords, set(items)))
+            if i + 1 == self.n:
+                break
+        return locations

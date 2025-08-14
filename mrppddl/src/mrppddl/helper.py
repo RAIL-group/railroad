@@ -86,7 +86,7 @@ def construct_search_operator(
                 },
             ),
             Effect(
-                time=(move_time, ["?robot", "?loc_from"]),
+                time=(move_time, ["?robot", "?loc_from", "?loc_to"]),
                 resulting_fluents={Fluent("at ?robot ?loc_to")},
                 prob_effects=[
                     (
