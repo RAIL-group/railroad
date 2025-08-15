@@ -18,7 +18,7 @@ PICK_TIME = 3
 
 if __name__ == "__main__":
     # Initialize environment
-    map = Map(n_robots=2, seed=1015)
+    map = Map(n_robots=2, max_locations=3, seed=1015)
     print("Map locations:", map.locations)
 
     r1 = Robot(name='r1', start=map.robot_poses[0])

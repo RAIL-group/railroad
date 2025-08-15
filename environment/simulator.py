@@ -75,7 +75,7 @@ class SymbolicToRealSimulator():
         self.update_state(delta_t=0, new_fluents=new_fluents)
 
         # one of the robots reaches the target pose (all robots have to stop)
-        if not np.any([r.target_pose == None for r in self.robots]):
+        if np.all([r.targeted for r in self.robots]):
             # robot reaches target pose
             robot = min(self.robots, key=lambda r: r.distance_to_target)
             move_distance = robot.distance_to_target
