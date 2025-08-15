@@ -1,101 +1,57 @@
 import random
 import numpy as np
-from environment import Map, get_location_object_likelihood
+from environment import Map, Location
 from mrppddl.helper import construct_search_operator, construct_move_visited_operator
 import mrppddl
-from environment import SymbolicToRealSimulator
+from environment import SymbolicToRealSimulator, Robot
 from mrppddl.core import State, Fluent, transition, get_next_actions, get_action_by_name
 from mrppddl.planner import MCTSPlanner
 from time import time
 
 PICK_TIME = 3
 
-class Robot:
-    def __init__(self, name=None, pose=None):
-        self.name = name
-        self.prev_pose = None
-        self.pose = pose
-        self.net_motion = 0
 
-    def move(self, target_pose):
-        self.prev_pose = self.pose
-        self.pose = target_pose
-        self.net_motion += np.linalg.norm(np.array(self.prev_pose) - np.array(self.pose))
 
-    # def move(self, distance):
-    #     direction = np.array(self.target_pose) - np.array(self.pose)
-    #     print(f"move {self.name} from {self.pose} towards {self.target_pose}")
-    #     print(f'{direction=}, {distance=}')
-    #     if not np.all(direction) == 0:
-    #         self.pose = self.pose + distance * direction / np.linalg.norm(direction)
-    #         self.net_motion += distance
-    #     print(f'updated_pose = {self.pose}')
 
-class Location:
-    def __init__(self, name=None, location=None):
-        self.name = name
-        self.location = location
+
 
 
 if __name__ == "__main__":
     # Initialize environment
-    map = Map()
-    start = Location(name='start', location=[0, 0])
-    locations = [start] + [Location(name=name, location=location) for name, location in map.coords_locations.items()]
-    for location in locations:
-        print(location.name, location.location)
-    # Initialize robots
-    r1 = Robot(name='r1', pose=start.location)
-    r2 = Robot(name='r2', pose=start.location)
+    map = Map(n_robots=2, seed=1015)
+    print("Map locations:", map.locations)
+
+    r1 = Robot(name='r1', start=map.robot_poses[0])
+    r2 = Robot(name='r2', start=map.robot_poses[1])
     robots = [r1, r2]
+    goal_fluents = {Fluent("found Knife"), Fluent("found Notebook"), Fluent("found Clock")}
 
-    # Make initial state
-    initial_state = State(
-        time=0,
-        fluents={
-            Fluent("at r1 start"),
-            Fluent("at r2 start"),
-            Fluent("free r1"),
-            Fluent("free r2"),
-            Fluent("visited start"),
+    # Simulator: This handles simulation
+    simulator = SymbolicToRealSimulator(map, robots, goal_fluents)
+
+
+    # While goal is not reached, we will keep executing actions
+    i = 0
+    while not simulator.is_goal():
+        objects_by_type = {
+            "robot": [r.name for r in simulator.robots],
+            "location": [location.name for location in simulator.locations if location.name not in simulator.visited_locations],
+            "object": simulator.object_of_interest,
         }
-    )
 
-    goal_fluents = {Fluent("visited storage"), Fluent("visited desk"), Fluent("visited desk"), Fluent("visited kitchen")}
+        search_actions = construct_search_operator(simulator.get_likelihood_of_object,
+                                                simulator.get_move_cost, PICK_TIME).instantiate(objects_by_type)
 
-    # Simulator: This handles everything
-    simulator = SymbolicToRealSimulator(locations, robots, state=initial_state, goal_fluents=goal_fluents)
+        all_actions = search_actions
+        stime = time()
 
-    objects_by_type = {
-        "robot": [r.name for r in robots],
-        "location": [location.name for location in locations],
-    }
-    move_actions = construct_move_visited_operator(simulator.get_move_cost).instantiate(objects_by_type)
+        print('-----------------------------------------')
 
-    for i in range(5):
-        # Filter actions by current simulator state
-        available_actions = get_next_actions(simulator.state, move_actions)
-        print(f"---------TIMESTAMP {i}---------------------")
-        for action in available_actions:
-            print(action.name)
-        # Use MCTS
-        mcts = MCTSPlanner(available_actions)
+        mcts = MCTSPlanner(all_actions)
         action_name = mcts(simulator.state, goal_fluents, max_iterations=10000, c=10)
-        action = get_action_by_name(available_actions, action_name)
+        action = get_action_by_name(all_actions, action_name)
+        print(f"Action selected: {action.name} in {time() - stime:.2f} seconds")
 
-        # Execute action: This moves robot's position, changes state (updates fluents).
-        print(f"MCTS: Best Action: {action.name}")
         simulator.execute_action(action)
-
-
-
-
-
-# objects_by_type = {
-#     "robot": [r.name for r in robots],
-#     "location": [location.name for location in locations],
-#     "object": map.objects_in_environment,
-# }
-# goal_fluents = {Fluent("found Knife"), Fluent("found Notebook")}
-# search_actions = construct_search_operator(simulator.get_likelihood_of_object,
-#                                            simulator.get_move_cost, PICK_TIME).instantiate(objects_by_type)
+        i += 1
+        print(f"Iteration {i}, Current state: {simulator.state.fluents}")

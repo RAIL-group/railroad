@@ -28,16 +28,21 @@ class Location:
         return f"Location(name={self.name}, location={self.location}, objects={self.objects})"
 
 class Map():
-    def __init__(self, n=3, seed=1024):
+    def __init__(self, n_robots=2, max_locations=3, seed=1024):
         np.random.seed(seed)
-        self.n = min(n, len(LOCATIONS))
+        self.n = n_robots
+        self.max_locations = min(max_locations, len(LOCATIONS))
         self.objects_in_environment = []
-        self.locations = self.generate_env()
+        self.locations, self.robot_poses = self.generate_env()
 
     def generate_env(self):
-        locations = []
+        locations, robot_poses = [], []
+        # Robot start locations
+        for i in range(self.n):
+            robot_poses.append(Location(f'r{i+1}_start', (0, 0), set()))
+
         for i, loc in enumerate(LOCATIONS):
-            coords = [random.randint(0, GRID_SIZE)] * 2
+            coords = [np.random.randint(0, GRID_SIZE), np.random.randint(0, GRID_SIZE)]
             # randomly sample objects in those locations
             items = []
             for object in OBJECTS:
@@ -46,6 +51,18 @@ class Map():
                     items.append(object)
                     self.objects_in_environment.append(object)
             locations.append(Location(loc, coords, set(items)))
-            if i + 1 == self.n:
+            if i + 1 == self.max_locations:
                 break
-        return locations
+
+        return locations, robot_poses
+
+    def plot_map(self):
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(5, 5))
+        for loc in self.locations:
+            plt.scatter(*loc.location, label=loc.name)
+        plt.xlim(0, GRID_SIZE)
+        plt.ylim(0, GRID_SIZE)
+        plt.title("Environment Map")
+        plt.legend()
+        plt.savefig("environment_map.png")
