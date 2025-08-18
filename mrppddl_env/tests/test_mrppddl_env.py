@@ -1,4 +1,5 @@
 import pytest
+from copy import copy
 from mrppddl.core import Fluent, State, get_action_by_name
 from mrppddl.core import transition
 from mrppddl.helper import construct_move_operator
@@ -63,13 +64,13 @@ def test_search_reveal_simple():
         return 0.5
 
     objects_at_locations = {
-        "start": [],
-        "roomA": ["objA", "objC"],
-        "roomB": ["objB"],
+        "start": dict(),
+        "roomA": {"object": {"objA", "objC"}},
+        "roomB": {"object": {"objB"}},
     }
 
     objects_by_type = {
-        "robot": set(["r1"]),
+        "robot": set(["r1", "r2"]),
         "location": set(["start", "roomA", "roomB"]),
         "object": set(["objA", "objB"]),
     }
@@ -77,39 +78,68 @@ def test_search_reveal_simple():
         search_op = construct_search_operator(object_find_prob, move_time)
         return search_op.instantiate(objects_by_type)
 
-    def reveal(state, objects_by_type):
-        # Look for locations 'searched' but not 'revealed'.
-        # The set of objects should contain all objects in the revealed locations
+    def reveal(states_and_probs, objects_by_type):
+        # The 'pessimistic' state is the one with the union of predicates.
+        states = [s for s, _ in states_and_probs]
+        new_fluents = set([fluent for fluent in states[0].fluents
+                           if all(fluent in s.fluents for s in states[1:])])
+        new_upcoming = [up_eff for up_eff in states[0].upcoming_effects
+                        if all(up_eff in s.upcoming_effects for s in states[1:])]
+        # for locations 'searched' but not 'revealed'. The set of objects should
+        # contain all objects in the revealed locations
 
-        print(state)
-        all_objects = objects_by_type["object"].union(*(
-            objects_at_locations[location]
-            for location in objects_by_type["location"]
-            if F(f"revealed {location}") in state.fluents
-        ))
-        print(all_objects)
-        
+        # Update the state
+        ## What are the searched locations that are not yet revealed?
+        def _is_location_searched(location, new_fluents):
+            return any(f.name == "searched" and f.args[0] == location
+                       for f in new_fluents)
+
+        newly_revealed_locations = [
+            location for location in objects_by_type["location"]
+            if _is_location_searched(location, new_fluents) 
+            and F(f"revealed {location}") not in new_fluents
+        ]
+
+        new_objects_by_type = copy(objects_by_type)
+        for location in newly_revealed_locations:
+            new_fluents.add(F(f"revealed {location}"))
+            # Add the objects in the newly_revealed_locations
+            for obj_type, objects in objects_at_locations[location].items():
+                new_objects_by_type[obj_type] |= set(objects)
+                for obj in objects:
+                    new_fluents.add(F(f"found {obj}"))
+                    new_fluents.add(F(f"at {location} {obj}"))
+
+        new_state = State(states[0].time, new_fluents, new_upcoming)
         return new_state, new_objects_by_type
-        pass
 
-    state = State(time=0, fluents={F("at r1 start"), F("free r1")})
+    state = State(time=0, fluents={
+        F("revealed start"),
+        F("at r1 start"), F("free r1"),
+        F("at r2 start"), F("free r2"),
+    })
     all_actions = _get_actions_from_objects(objects_by_type)
-    print(all_actions)
+
+    # First action gives r1 an assignment
     a1 = get_action_by_name(all_actions, "search r1 start roomA objA")
-    print(a1)
-    print(state)
     states = transition(state, a1)
-    for resulting_state, prob in states:
-        rstate_revealed = reveal(resulting_state, objects_by_type)
-        print(rstate_revealed)
-    raise NotImplementedError()
+    state, objects_by_type = reveal(states, objects_by_type)
+    assert F("free r1") not in state.fluents
+    assert F("free r2") in state.fluents
 
-    # [This functionality should be inside the simulator eventually, but I'm
-    # just developing for now.]
-    # Execute the selected action:
+    # Second action gives r2 an assignment & moves until r1 free again
+    a2 = get_action_by_name(all_actions, "search r2 start roomB objB")
+    states = transition(state, a2)
+    state, objects_by_type = reveal(states, objects_by_type)
+    assert F("free r1") in state.fluents
+    assert F("free r2") not in state.fluents
+    assert F("revealed roomA") in state.fluents
+    assert F("found objA") in state.fluents
+    assert F("found objC") in state.fluents
 
-    # Identify what locations have been revealed by the robot and update the state accordingly.
-
+    a3 = get_action_by_name(all_actions, "search r1 roomA roomB objB")
+    states = transition(state, a3)
+    state, objects_by_type = reveal(states, objects_by_type)
     
 
 def test_robot_assignment():
