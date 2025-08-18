@@ -14,9 +14,10 @@ dependencies = [
     "pytest-html",
     "pytest-pyright",
     "mrppddl",
+    "mrppddl-env",
     "rich",
 ]
 
 [tool.uv.sources]
 mrppddl = { path = "./mrppddl" }
-environment = { path = "./environment" }
+mrppddl-env = { path = "./mrppddl_env" }

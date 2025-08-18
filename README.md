@@ -13,6 +13,7 @@ Everything else is run via `uv run`: e.g., `uv run mrppddl_astar.py` will run th
 
 - [ ] I can use the FF heuristic (or similar) to determine which actions I never execute and prune those from the set of available actions.
 - [ ] I still need to look over the other hashing functions to avoid using a "bare" XOR, which makes the likelihood of a collision problematically high.
+- [ ] I probably need to modify the mcts function to return actions until all robots are no longer free. Getting only a single robot action and then replanning is not a great idea.
 
 
 # Organization of simulator code
@@ -56,4 +57,8 @@ This process loops until the goal is met. Remember: the simulator should mimic w
 Abhish: the way you have currently implemented things is nothing like this in mutiple ways. The robots should really be keeping track of their current "assignment" (and probably whether or not they can be interrupted in some way). It is from these assignments that you should be able to compute whether the robot is free and when it will be done (from which the upcoming effects are determined).
 
 My idea is something like this: you have a Robot class. When you get some action like `(move r1 start somewhere)` the robot now has some sort of move skill its executing to move and the simulator can basically ask: (1) are you currently executing an action and (2) when will you be done? Based on the current state of the environment and the robots, you should be able to compute the "current state" of the world for the purpose of passing that to the planner. Propagating the state of the world then involves something similar to what you have: the first task to be done is "popped off the stack" in some way.
+
+## Some worked examples (Greg is thinking here)
+
+### A Move Action
 

@@ -291,6 +291,17 @@ version = "0.1.0"
 source = { directory = "mrppddl" }
 
 [[package]]
+name = "mrppddl-env"
+version = "0.1.0"
+source = { directory = "mrppddl_env" }
+dependencies = [
+    { name = "mrppddl" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "mrppddl" }]
+
+[[package]]
 name = "mypy-extensions"
 version = "1.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -649,6 +660,7 @@ dependencies = [
     { name = "black" },
     { name = "matplotlib" },
     { name = "mrppddl" },
+    { name = "mrppddl-env" },
     { name = "networkx" },
     { name = "pyqt5" },
     { name = "pyright" },
@@ -663,6 +675,7 @@ requires-dist = [
     { name = "black" },
     { name = "matplotlib" },
     { name = "mrppddl", directory = "mrppddl" },
+    { name = "mrppddl-env", directory = "mrppddl_env" },
     { name = "networkx" },
     { name = "pyqt5" },
     { name = "pyright" },

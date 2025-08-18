@@ -7,7 +7,7 @@ help:  ## Show this help message
 .PHONY: build
 build:  ## Build the environment
 	@uv sync
-	@uv pip install -e ./mrppddl
+	@uv pip install --force-reinstall -e "mrppddl @ ./mrppddl" "mrppddl_env @ ./mrppddl_env"
 
 build-cpp:  ## Specifically build the C++ code
 	@uv sync

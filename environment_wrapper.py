@@ -40,11 +40,15 @@ if __name__ == "__main__":
         }
 
         search_actions = construct_search_operator(simulator.get_likelihood_of_object,
-                                                simulator.get_move_cost, PICK_TIME).instantiate(objects_by_type)
+                                                   simulator.get_move_cost, PICK_TIME).instantiate(objects_by_type)
 
         all_actions = search_actions
         stime = time()
 
+        for action in all_actions:
+            print(action.name)
+            for eff in action.effects:
+                print("  " + str(eff))
         print('-----------------------------------------')
 
         mcts = MCTSPlanner(all_actions)
@@ -54,4 +58,4 @@ if __name__ == "__main__":
 
         simulator.execute_action(action)
         i += 1
-        print(f"Iteration {i}, Current state: {simulator.state.fluents}")
+        print(f"Iteration {i}, Current state: {simulator.state}")
