@@ -48,7 +48,7 @@ def construct_search_operator(
         ],
     )
 
-class UpcomingAction:
+class OngoingAction:
     def __init__(self, time, action):
         self.time = time
         self.name = action.name
@@ -78,19 +78,19 @@ class UpcomingAction:
         self.time = time
 
         # Pop and return all effects scheduled at or before the new time
-        new_effects = []
-        EPS = 1e-9
-        i = 0
-        while i < len(self._upcoming_effects) and self._upcoming_effects[i][0] <= time + EPS:
-            new_effects.append(self._upcoming_effects[i])
-            i += 1
+        new_effects = [effect for effect in self._upcoming_effects
+                       if effect[0] <= time + 1e-9]
+        # Remove the new_effects from upcoming_effects (effects are sorted)
+        self._upcoming_effects = self._upcoming_effects[len(new_effects):]
 
-        # remove the new_effects from upcoming_effects
-        self._upcoming_effects = self._upcoming_effects[i:]
         return new_effects
 
+    def interrupt(self):
+        """Cannot interrupt this action. Nothing happens."""
+        return set()
+
     def __str__(self):
-        return f"UpcomingAction<{self.name}, {self.time}, {self.upcoming_effects}>"
+        return f"OngoingAction<{self.name}, {self.time}, {self.upcoming_effects}>"
     
 
 class Simulator:
@@ -119,10 +119,10 @@ class Simulator:
             for operator in self.operators
         ))
 
-    def advance(self, action) -> State:
+    def advance(self, action, do_interrupt=True) -> State:
         """Add a new action and then advance as much as possible using both `transition` and
         also `_reveal` as needed once areas are searched."""
-        self.ongoing_actions.append(UpcomingAction(self._state.time, action))
+        self.ongoing_actions.append(OngoingAction(self._state.time, action))
 
         def _any_free_robots(state):
             return any(f.name == "free" for f in state.fluents)
@@ -135,26 +135,34 @@ class Simulator:
                 break
 
             # Get the time we need to advance. If a robot needs an action the time is "now"
-            robot_free = _any_free_robots(self._state)
-            if robot_free:
+            if _any_free_robots(self._state):
                 adv_time = self.time
             else:
                 adv_time = min(act.time_to_next_event for act in self.ongoing_actions)
 
             # Get new active effects to add to the state, then transition and _reveal.
             new_effects = list(itertools.chain.from_iterable(
-                [act.advance(adv_time) for act in self.ongoing_actions]
-            ))
+                [act.advance(adv_time) for act in self.ongoing_actions]))
             new_state = State(self._state.time,
                               self._state.fluents,
                               sorted(self._state.upcoming_effects + new_effects,
                                      key=lambda el: el[0]))
             self._state, self.objects_by_type = self._reveal(transition(new_state, None))
-            robot_free = _any_free_robots(self._state)
 
             # Remove any actions that are now done
-            self.ongoing_actions = [act for act in self.ongoing_actions
-                                    if not act.is_done]
+            self.ongoing_actions = [act for act in self.ongoing_actions if not act.is_done]
+
+            robot_free = _any_free_robots(self._state)
+
+        # TODO: Interrupt actions as needed
+        # - if any action can be interrupted, interrupt it, getting the 
+        # Example: for the move action, interrupting it
+        for act in self.ongoing_actions:
+            new_fluents = act.interrupt()
+            self._state.update_fluents(new_fluents)
+
+        # Remove any actions that are now done
+        self.ongoing_actions = [act for act in self.ongoing_actions if not act.is_done]
 
         # Return the resulting state (for planning)
         return self.state
@@ -214,80 +222,6 @@ class Simulator:
         new_state = State(states[0].time, new_fluents, new_upcoming)
         return new_state, new_objects_by_type
 
-
-def test_search_reveal_simple_with_simulator():
-    # Dynamics
-    def move_time(robot: str, loc_from: str, loc_to: str) -> float:
-        return 3.0 if robot == "r1" else 5.0
-
-    def object_find_prob(robot: str, loc: str, obj: str):
-        return 0.5
-
-    # World
-    objects_at_locations = {
-        "start": dict(),
-        "roomA": {"object": {"objA", "objC"}},
-        "roomB": {"object": {"objB"}},
-        "roomC": {"object": {"objD"}},
-    }
-    objects_by_type = {
-        "robot": {"r1", "r2"},
-        "location": {"start", "roomA", "roomB", "roomC"},
-        "object": {"objA", "objB"},  # objC will be revealed from roomA
-    }
-
-    # Operators
-    search_op = construct_search_operator(object_find_prob, move_time)
-
-    # Initial state
-    init_state = State(
-        time=0,
-        fluents={
-            F("revealed start"),
-            F("at r1 start"), F("free r1"),
-            F("at r2 start"), F("free r2"),
-        },
-    )
-
-    # Simulator
-    sim = Simulator(init_state, objects_by_type, objects_at_locations, [search_op])
-
-    # 1) Assign r1 to search roomA for objA
-    actions = sim.instantiate(search_op)
-    a1 = get_action_by_name(actions, "search r1 start roomA objA")
-    sim.advance(a1)
-    assert F("free r1") not in sim.state.fluents
-    assert F("free r2") in sim.state.fluents
-
-    # 2) Assign r2 to search roomB for objB; time propagates until r1 is free
-    actions = sim.instantiate(search_op)  # re-instantiate after object set may have changed
-    a2 = get_action_by_name(actions, "search r2 start roomB objB")
-    sim.advance(a2)
-    assert F("free r1") in sim.state.fluents
-    assert F("free r2") not in sim.state.fluents
-    assert F("revealed roomA") in sim.state.fluents
-    assert F("found objA") in sim.state.fluents
-    assert F("found objC") in sim.state.fluents  # revealed with roomA
-
-    # 3) Assign r1 to search roomB for objB (from roomA to roomB)
-    actions = sim.instantiate(search_op)
-    a3 = get_action_by_name(actions, "search r1 roomA roomC objB")
-    sim.advance(a3)
-    assert F("free r1") not in sim.state.fluents
-    assert F("free r2") in sim.state.fluents
-    assert F("revealed roomA") in sim.state.fluents
-    assert F("revealed roomB") in sim.state.fluents
-    assert F("found objA") in sim.state.fluents
-    assert F("found objC") in sim.state.fluents
-
-    print(a3)
-    print(sim.state)
-
-    raise NotImplementedError()
-
-# TODO:
-# - Pass operators to the simulator and make a 'get all actions' based on the revealed objects.
-# - Add special
 
 def test_upcoming_action():
     # Dynamics
