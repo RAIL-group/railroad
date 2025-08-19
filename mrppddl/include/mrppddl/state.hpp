@@ -284,7 +284,11 @@ transition(const State &state, const Action *action, bool relax = false) {
       }
     }
     out_state.update_fluents(upd_fluents);
-    out_state.set_time(out_state.time() + ALL_ROBOTS_WAITING_PENALTY);
+    if (action) {
+      out_state.set_time(out_state.time() + ALL_ROBOTS_WAITING_PENALTY);
+    } else {
+      out_state.set_time(out_state.time());
+    }
 
   }
 
