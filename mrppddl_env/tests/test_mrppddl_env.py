@@ -106,6 +106,12 @@ class OngoingMoveAction(OngoingAction):
         self._start_loc = np.array(self.environment.locations[start])
         self._end_loc = np.array(self.environment.locations[end])
 
+    @property
+    def time_to_next_event(self):
+        if self._upcoming_effects:
+            return min(self._upcoming_effects[0][0], 0.01 + self.time)
+        else:
+            return float('inf')
 
     def advance(self, time):
         # Update the robot's location
@@ -169,6 +175,7 @@ class Simulator:
         self.operators = operators
         self.ongoing_actions = []
         self.environment = environment
+        self.storage = dict()
 
     def get_actions(self) -> List:
         """Instantiate an Operator under the *current* objects_by_type."""
@@ -212,16 +219,26 @@ class Simulator:
             # Get new active effects to add to the state, then transition and _reveal.
             new_effects = list(itertools.chain.from_iterable(
                 [act.advance(adv_time) for act in self.ongoing_actions]))
-            new_state = State(self._state.time,
+            new_state = State(adv_time,
                               self._state.fluents,
                               sorted(self._state.upcoming_effects + new_effects,
                                      key=lambda el: el[0]))
             self._state, self.objects_by_type = self._reveal(transition(new_state, None))
 
+
             # Remove any actions that are now done
             self.ongoing_actions = [act for act in self.ongoing_actions if not act.is_done]
 
             robot_free = _any_free_robots(self._state)
+
+            # Try to store the location of the robots (debug)
+            try:
+                self.storage[self.time] = {
+                    "locations": copy(self.environment.locations),
+                    "fluents": copy(self.state.fluents)
+                }
+            except:
+                pass
 
         # TODO: Interrupt actions as needed
         # - if any action can be interrupted, interrupt it, getting the 
@@ -377,6 +394,8 @@ def test_simulator_with_map():
         "roomB": np.array([0, 5]),
         "roomC": np.array([-5, -5]),
     }
+    locations["r1_loc"] = locations["start"]
+    locations["r2_loc"] = locations["start"]
 
     def move_time(robot: str, loc_from: str, loc_to: str) -> float:
         if robot == "r1":
@@ -428,3 +447,13 @@ def test_simulator_with_map():
     ]
     assert robot_loc_actions
     assert pytest.approx(env.locations["r2_loc"]) == np.array([0, 3])
+
+    # Some prototype code to get the robot positions over time.
+    # This works but is untested.
+    print(sim.storage)
+    r1_poses = np.array([[t, v['locations']['r1_loc'][0], v['locations']['r1_loc'][1]]
+                for t, v in sim.storage.items()])
+    print(r1_poses)
+    r2_poses = np.array([[t, v['locations']['r2_loc'][0], v['locations']['r2_loc'][1]]
+                for t, v in sim.storage.items()])
+    print(r2_poses)
