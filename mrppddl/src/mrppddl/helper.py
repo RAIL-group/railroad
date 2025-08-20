@@ -25,10 +25,10 @@ def construct_move_operator(move_time: OptCallable):
         parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
         preconditions=[F("at ?r ?from"), F("free ?r")],
         effects=[
-            Effect(time=0, resulting_fluents={Fluent("not free ?r")}),
+            Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?r ?from")}),
             Effect(
                 time=(move_time, ["?r", "?from", "?to"]),
-                resulting_fluents={F("free ?r"), F("not at ?r ?from"), F("at ?r ?to")},
+                resulting_fluents={F("free ?r"), F("at ?r ?to")},
             ),
         ],
     )

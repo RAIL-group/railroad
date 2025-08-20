@@ -28,9 +28,9 @@ class Location:
         return f"Location(name={self.name}, location={self.location}, objects={self.objects})"
 
 class Environment():
-    def __init__(self, n_robots=2, max_locations=3, seed=1024):
+    def __init__(self, num_robots=2, max_locations=3, seed=1024):
         np.random.seed(seed)
-        self.n = n_robots
+        self.num_robots = num_robots
         self.max_locations = min(max_locations, len(LOCATIONS))
         self.objects_in_environment = []
         self.locations, self.robot_poses = self.generate_env()
@@ -38,7 +38,7 @@ class Environment():
     def generate_env(self):
         locations, robot_poses = [], []
         # Robot start locations
-        for i in range(self.n):
+        for i in range(self.num_robots):
             robot_poses.append(Location(f'r{i+1}_start', (0, 0), set()))
 
         for i, loc in enumerate(LOCATIONS):
