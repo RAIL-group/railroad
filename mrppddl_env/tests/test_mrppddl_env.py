@@ -127,7 +127,12 @@ class OngoingMoveAction(OngoingAction):
         if self.time <= self._start_time:
             return set()
 
-        # This action is done. Treat this as having "reached" the new location, so get all fluents from the upcoming effects and replace the target location with the new location
+        # This action is done. Treat this as having "reached" the destination
+        # but where the destination is robot_loc, which means we must replace
+        # all the old "target location" with "robot_loc". While this may seem
+        # like a fair bit of needless complexity, it means that we don't need to
+        # have a custom function for each new move action: all it's
+        # post-conditions are added automatically.
         robot = self.name.split()[1]
         old_target = self.name.split()[-1]
         new_target = f"{robot}_loc"
@@ -138,32 +143,12 @@ class OngoingMoveAction(OngoingAction):
             for fluent in eff.resulting_fluents:
                 new_fluents.add(F(
                     " ".join([fluent.name] +
-                    [fa if (not fa == old_target) else new_target
+                    [fa if not fa == old_target else new_target
                      for fa in fluent.args]),
                     negated=fluent.negated))
 
         self._upcoming_effects = []
         return new_fluents
-
-        print(self._upcoming_effects)
-        self._upcoming_effects = []
-
-        # FIXME: I want this to be in 'advance'. The robot pose should always be up-to-date.
-        # Update the robot location
-        _, robot, start, end = self.name.split()
-        start_loc = self.environment.locations[start]
-        end_loc = self.environment.locations[end]
-
-        # FIXME: this is just for debugging
-        self.environment.locations[f"{robot}_loc"] = start_loc
-        # Update 
-        self._upcoming_effects = []
-
-        return set([
-            F(f"at {robot} {robot}_loc"),
-            F(f"free {robot}")
-        ])
-        
     
 
 class Simulator:
@@ -371,14 +356,11 @@ def test_upcoming_action():
     actions = sim.get_actions()
     a3 = get_action_by_name(actions, "search r1 roomA roomC objB")
     sim.advance(a3)
-    print(sim.state)
-    assert pytest.approx(sim.state.time) == 5.0
     assert F("free r1") not in sim.state.fluents
     assert F("free r2") in sim.state.fluents
-    assert F("revealed roomA") in sim.state.fluents
     assert F("revealed roomB") in sim.state.fluents
-    assert F("found objA") in sim.state.fluents
-    assert F("found objC") in sim.state.fluents
+    assert F("found objB") in sim.state.fluents
+    assert pytest.approx(sim.state.time) == 5.0
 
 
 def test_simulator_with_map():
@@ -389,11 +371,6 @@ def test_simulator_with_map():
         "object": {"objA", "objB"},
     }
 
-    # Dynamics
-    def object_find_prob(robot: str, loc: str, obj: str):
-        return 0.5
-
-    import numpy as np
     locations = {
         "start": np.array([0, 0]),
         "roomA": np.array([5, 0]),
@@ -410,15 +387,6 @@ def test_simulator_with_map():
         dist = np.linalg.norm(locations[loc_from] - locations[loc_to])
         return dist / rspeed
 
-    # Some things to think about:
-    # - When a robot starts to move, we should remove any "{robot_name}_loc" it leaves behind.
-    # - When a move action is interrupted, the location of that robot should be updated
-    # - As the robot moves, the pose of its corresponding location is updated in the `environment`
-    # - Robot locations are only available to move to when the robot is not "at" some other location.
-
-    # Done
-    # - The move time should be a closure that includes the environment so that movement can include the changing robot poses.
-
     # Operators
     move_op = construct_move_operator(move_time)
 
@@ -431,8 +399,6 @@ def test_simulator_with_map():
             F("at r2 start"), F("free r2"),
         },
     )
-
-    from dataclasses import dataclass
 
     @dataclass
     class Environment:
@@ -461,6 +427,4 @@ def test_simulator_with_map():
         if "r1_loc" in a.name or "r2_loc" in a.name
     ]
     assert robot_loc_actions
-
-    print(sim.state)
-    print(env)
+    assert pytest.approx(env.locations["r2_loc"]) == np.array([0, 3])
