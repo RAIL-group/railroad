@@ -1,6 +1,6 @@
 import numpy as np
 from mrppddl.core import State, Fluent, transition, get_next_actions, get_action_by_name
-from environment import get_location_object_likelihood
+from environments import get_location_object_likelihood
 
 
 get_action_details = lambda s: (s.split()[0], s.split()[1], s.split()[2], s.split()[3], s.split()[4])

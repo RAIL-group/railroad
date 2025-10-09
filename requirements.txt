@@ -1,0 +1,6 @@
+prior
+ai2thor
+sentence_transformers
+
+scikit-image
+shapely

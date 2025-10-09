@@ -1,9 +1,9 @@
 import random
 import numpy as np
-from environment import Map, Location
+from environments import Map, Location
 from mrppddl.helper import construct_search_operator, construct_move_visited_operator
 import mrppddl
-from environment import SymbolicToRealSimulator, Robot
+from environments import SymbolicToRealSimulator, Robot
 from mrppddl.core import State, Fluent, transition, get_next_actions, get_action_by_name
 from mrppddl.planner import MCTSPlanner
 from time import time

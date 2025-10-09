@@ -6,9 +6,13 @@ build/
 dist/
 wheels/
 *.egg-info
+.pytest_cache/
 
 # Virtual environments
 .venv
 
 # MacOS-specific
 *.DS_Store
+
+# Resources
+resources/
