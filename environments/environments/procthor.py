@@ -44,8 +44,6 @@ class ProcTHOREnvironment():
                 coords = self.graph.get_node_position_by_idx(loc_idx)
                 coords = coords if len(coords) == 3 else (coords[0], coords[1], 0)
                 loc_to_coords[loc] = coords
-        # for i in range(self.args.num_robots):
-        #     loc_to_coords[f'r{i+1}_loc'] = loc_to_coords['start']
         return loc_to_coords
 
     def get_move_cost_fn(self):
@@ -64,6 +62,10 @@ class ProcTHOREnvironment():
             loc_to_coords = self.locations[loc_to]
             cost = utils.get_cost(self.grid, loc_from_coords, loc_to_coords)
             return cost
-            # TODO: Use A* to compute distance from to
-            return np.linalg.norm(np.array(loc_from_coords) - np.array(loc_to_coords))
         return move_cost_fn
+
+    def get_intermediate_coordinates(self, time, loc_from, loc_to):
+        loc_from_coords = self.locations[loc_from]
+        loc_to_coords = self.locations[loc_to]
+        path = utils.get_path(self.grid, loc_from_coords, loc_to_coords)
+        return utils.get_coordinates_at_time(path, time)

@@ -11,7 +11,7 @@ from mrppddl.helper import _make_callable, _invert_prob
 
 from typing import Dict, Set, List, Tuple, Callable
 import itertools
-from .actions import OngoingAction, construct_search_operator
+from .actions import OngoingAction
 
 F = Fluent
 

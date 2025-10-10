@@ -91,6 +91,7 @@ class OngoingAction:
         ], key=lambda el: el[0])
         self.environment = environment
 
+
     @property
     def time_to_next_event(self):
         if self._upcoming_effects:
@@ -125,3 +126,53 @@ class OngoingAction:
 
     def __str__(self):
         return f"OngoingAction<{self.name}, {self.time}, {self.upcoming_effects}>"
+
+OngoingSearchAction = OngoingAction
+OngoingPickAction = OngoingAction
+OngoingPlaceAction = OngoingAction
+
+class OngoingMoveAction(OngoingAction):
+    def __init__(self, time, action, environment=None):
+        super().__init__(time, action, environment)
+        # Keep track of initial start and end locations
+        _, self.robot, self.start, self.end = self.name.split()  # (e.g., move r1 locA locB)
+        self._start_loc = self.environment.locations[self.start]
+        self._end_loc = self.environment.locations[self.end]
+
+    def advance(self, time):
+        intermediate_coords = self.environment.get_intermediate_coordinates(time, self._start_loc, self._end_loc)
+        self.environment.locations[f"{self.robot}_loc"] = intermediate_coords
+        return super().advance(time)
+
+    def interrupt(self):
+        """If the time > start_time, it can be interrupted. The robot location
+        is updated, this action is marked as done, and the new fluents are
+        returned."""
+
+        if self.time <= self._start_time:
+            return set() # Cannot interrupt before start time
+
+        # This action is done. Treat this as having "reached" the destination
+        # but where the destination is robot_loc, which means we must replace
+        # all the old "target location" with "robot_loc". While this may seem
+        # like a fair bit of needless complexity, it means that we don't need to
+        # have a custom function for each new move action: all it's
+        # post-conditions are added automatically.
+
+        robot = self.robot
+        old_target = self.end
+        new_target = f"{robot}_loc"
+        new_fluents = set()
+
+        for _, eff in self._upcoming_effects:
+            if eff.is_probabilistic:
+                raise ValueError("Probabilistic effects cannot be interrupted.")
+            for fluent in eff.resulting_fluents:
+                new_fluents.add(
+                    F(" ".join(
+                        [fluent.name]
+                      + [fa if fa != old_target else new_target for fa in fluent.args]),
+                      negated=fluent.negated)
+                )
+        self._upcoming_effects = []
+        return new_fluents
