@@ -1,11 +1,9 @@
-from mrppddl.core import Fluent, State, get_action_by_name
+from mrppddl.core import Fluent as F, State, get_action_by_name
 from mrppddl.helper import _make_callable, _invert_prob
 from mrppddl.core import OptCallable, Operator, Effect
 
 
-F = Fluent
-
-def construct_search_operator(
+def construct_move_and_search_operator(
     object_find_prob: OptCallable, move_time: OptCallable) -> Operator:
     object_find_prob = _make_callable(object_find_prob)
     inv_object_find_prob = _invert_prob(object_find_prob)
@@ -39,6 +37,46 @@ def construct_search_operator(
                        (inv_object_find_prob, ["?robot", "?loc_to", "?object"]), [],
                    )])
         ],
+    )
+
+
+def construct_move_operator(move_time: OptCallable):
+    move_time = _make_callable(move_time)
+    return Operator(
+        name="move",
+        parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F("at ?r ?from"), F("free ?r")],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?r ?from")}),
+            Effect(
+                time=(move_time, ["?r", "?from", "?to"]),
+                resulting_fluents={F("free ?r"), F("at ?r ?to")},
+            ),
+        ],
+    )
+
+
+def construct_search_operator(object_find_prob: OptCallable, search_time: OptCallable) -> Operator:
+    object_find_prob = _make_callable(object_find_prob)
+    inv_object_find_prob = _invert_prob(object_find_prob)
+    search_time = _make_callable(search_time)
+    return Operator(
+        name="search",
+        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
+        preconditions=[F("at ?r ?loc"), F("free ?r"), F("not searched ?loc ?obj"), F("not found ?obj")],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free ?r"), F("lock-search ?loc")}),
+            Effect(time=(search_time, ["?r", "?loc"]),
+                    resulting_fluents={F("free ?r"),
+                                      F("searched ?loc ?obj"),
+                                      F("not lock-search ?loc")
+                                      },
+                   prob_effects=[((object_find_prob, ["?r", "?loc", "?obj"]),
+                                  [Effect(time=0, resulting_fluents={F("found ?obj")})]),
+                                 ((inv_object_find_prob, ["?r", "?loc", "?obj"]),
+                                  [])]
+                   )
+        ]
     )
 
 
