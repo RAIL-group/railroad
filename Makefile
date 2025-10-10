@@ -9,8 +9,8 @@ help:  ## Show this help message
 build:  ## Build the environment
 	@uv sync
 	@uv pip install -r requirements.txt
-	@uv pip install --force-reinstall -e "mrppddl @ ./mrppddl" "mrppddl_env @ ./mrppddl_env"
-	@uv pip install -e ./procthor ./common ./gridmap ./environments
+	@uv pip install -e "mrppddl @ ./mrppddl" "mrppddl_env @ ./mrppddl_env"
+	@uv pip install -e ./procthor -e ./common -e ./gridmap -e ./environments
 
 build-cpp:  ## Specifically build the C++ code
 	@uv sync

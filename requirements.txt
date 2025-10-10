@@ -4,3 +4,8 @@ sentence_transformers
 
 scikit-image
 shapely
+
+google-generativeai
+openai
+python-dotenv
+pandas

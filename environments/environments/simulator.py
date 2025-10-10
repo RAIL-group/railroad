@@ -34,6 +34,7 @@ class Simulator:
         self.ongoing_actions = []
         self.environment = environment
         self.storage = dict()
+        self.trajectory = dict()
 
     @property
     def time(self):
@@ -70,6 +71,9 @@ class Simulator:
         ))
 
     def advance(self, action, do_interrupt=True) -> State:
+        if not self.state.satisfies_precondition(action):
+            raise ValueError(f"Action preconditions not satisfied: {action.name} in state {self.state}")
+
         """Add a new action and then advance as much as possible using both `transition` and
         also `_reveal` as needed once areas are searched."""
         # if action.name.split()[0] == "move":
@@ -166,3 +170,6 @@ class Simulator:
 
         new_state = State(states[0].time, new_fluents, new_upcoming)
         return new_state, new_objects_by_type
+
+    def is_goal_reached(self, goal_fluents: Set[Fluent]) -> bool:
+        return all(f in self.state.fluents for f in goal_fluents)
