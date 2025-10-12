@@ -113,3 +113,97 @@ def test_search_operator():
     assert F("searched roomA objA") in low_prob_state.fluents
     assert F("lock-search roomA") not in low_prob_state.fluents
     assert F("lock-search roomB") in low_prob_state.fluents
+
+
+def test_pick_and_place_operator():
+    objects_by_type = {
+        "robot": {"r1", "r2"},
+        "location": {"start", "roomA", "roomB", "roomC"},
+        "object": {"objA", "objB"}
+    }
+
+    pick_time = lambda r, l, o: 10 if r == "r1" else 15
+    place_time = lambda r, l, o: 10 if r == "r1" else 15
+
+    initial_state = State(
+            time=0,
+            fluents={
+                F("at", "r1", "roomA"), F("at", "objA", "roomA"), F("at", "objC", "roomA"),
+                F("at", "r2", "roomB"), F("at", "objB", "roomB"),
+                F("free", "r1"),
+                F("free", "r2"),
+            },
+    )
+    pick_op = environments.actions.construct_pick_operator(pick_time=pick_time)
+    place_op = environments.actions.construct_place_operator(place_time=place_time)
+
+    pick_actions = pick_op.instantiate(objects_by_type)
+    place_actions = place_op.instantiate(objects_by_type)
+
+    actions = pick_actions + place_actions
+
+    # assign r1
+    a1 = get_action_by_name(actions, "pick r1 roomA objA")
+    outcomes = transition(initial_state, a1)
+    assert len(outcomes) == 1
+    state, _ = outcomes[0]
+    assert state.time == 0
+    # r1 is just assigned to pick objA from roomA
+    assert F("free r1") not in state.fluents
+    assert F("at r1 roomA") in state.fluents
+    assert F("at objA roomA") not in state.fluents
+    assert F("holding r1 objA") not in state.fluents
+    # r2 is unaffected
+    assert F("free r2") in state.fluents
+    assert F("at r2 roomB") in state.fluents
+
+    # assign r2
+    a2 = get_action_by_name(actions, "pick r2 roomB objB")
+    outcomes = transition(state, a2)
+    assert len(outcomes) == 1
+    state, _ = outcomes[0]
+    # r1 finishes picking objA from roomA first
+    assert state.time == 10
+    assert F("free r1") in state.fluents
+    assert F("at r1 roomA") in state.fluents
+    assert F("at objA roomA") not in state.fluents
+    assert F("holding r1 objA") in state.fluents
+    # r2 is still picking objB from roomB
+    assert F("free r2") not in state.fluents
+    assert F("at r2 roomB") in state.fluents
+    assert F("at objB roomB") not in state.fluents
+    assert F("holding r2 objB") not in state.fluents
+
+    # assign r1 to place objA at roomA
+    a3 = get_action_by_name(actions, "place r1 roomA objA")
+    outcomes = transition(state, a3)
+    assert len(outcomes) == 1
+    state, _ = outcomes[0]
+    # r2 finishes picking objB
+    assert state.time == 15
+    assert F("free r2") in state.fluents
+    assert F("at r2 roomB") in state.fluents
+    assert F("holding r2 objB") in state.fluents
+    assert F("at objB roomB") not in state.fluents
+    # r1 is still placing
+    assert F("free r1") not in state.fluents
+    assert F("at r1 roomA") in state.fluents
+    assert F("holding r1 objA") not in state.fluents
+    assert F("at objA roomA") not in state.fluents
+
+    # assign r2 to place objB at roomB
+    a4 = get_action_by_name(actions, "place r2 roomB objB")
+    outcomes = transition(state, a4)
+    assert len(outcomes) == 1
+    state, _ = outcomes[0]
+    # r1 finishes placing objA
+    assert state.time == 20
+    assert F("free r1") in state.fluents
+    assert F("at r1 roomA") in state.fluents
+    assert F("holding r1 objA") not in state.fluents
+    assert F("at objA roomA") in state.fluents
+    # r2 is still placing objB
+    assert F("free r2") not in state.fluents
+    assert F("at r2 roomB") in state.fluents
+    assert F("holding r2 objB") not in state.fluents
+    assert F("at objB roomB") not in state.fluents

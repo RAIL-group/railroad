@@ -11,7 +11,7 @@ from mrppddl.helper import _make_callable, _invert_prob
 
 from typing import Dict, Set, List, Tuple, Callable
 import itertools
-from .actions import OngoingAction
+from .actions import OngoingMoveAction, OngoingSearchAction, OngoingPickAction, OngoingPlaceAction
 
 F = Fluent
 
@@ -76,10 +76,17 @@ class Simulator:
 
         """Add a new action and then advance as much as possible using both `transition` and
         also `_reveal` as needed once areas are searched."""
-        # if action.name.split()[0] == "move":
-        #     new_act = OngoingMoveAction(self._state.time, action, self.environment)
-        # else:
-        new_act = OngoingAction(self._state.time, action, self.environment)
+        action_name = action.name.split()[0]
+        if action_name not in {"move", "pick", "place", "search"}:
+            raise ValueError(f"Action {action.name} not supported in simulator.")
+        if action_name == "move":
+            new_act = OngoingMoveAction(self._state.time, action, self.environment)
+        elif action_name == "search":
+            new_act = OngoingSearchAction(self._state.time, action, self.environment)
+        elif action_name == "pick":
+            new_act = OngoingPickAction(self._state.time, action, self.environment)
+        elif action_name == "place":
+            new_act = OngoingPlaceAction(self._state.time, action, self.environment)
 
         self.ongoing_actions.append(new_act)
 
@@ -166,7 +173,7 @@ class Simulator:
                 new_objects_by_type.setdefault(obj_type, set()).update(objs)
                 for obj in objs:
                     new_fluents.add(F(f"found {obj}"))
-                    new_fluents.add(F(f"at {loc} {obj}"))
+                    new_fluents.add(F(f"at {obj} {loc}"))
 
         new_state = State(states[0].time, new_fluents, new_upcoming)
         return new_state, new_objects_by_type
