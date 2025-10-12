@@ -50,7 +50,6 @@ class OngoingAction:
     def __str__(self):
         return f"OngoingAction<{self.name}, {self.time}, {self.upcoming_effects}>"
 
-OngoingSearchAction = OngoingAction
 
 class OngoingMoveAction(OngoingAction):
     def __init__(self, time, action, environment=None):
@@ -97,56 +96,24 @@ class OngoingMoveAction(OngoingAction):
         return new_fluents
 
 
+class OngoingSearchAction(OngoingAction):
+    pass
+
+
 class OngoingPickAction(OngoingAction):
     def advance(self, time):
         _, robot, loc, obj = self.name.split()  # (e.g., pick r1 locA objA)
         # remove the object from the location
-        self.environment.objects_at_locations[loc]["object"].discard(obj)
+        self.environment.remove_object_from_location(obj, loc)
         return super().advance(time)
+
 
 class OngoingPlaceAction(OngoingAction):
     def advance(self, time):
         _, robot, loc, obj = self.name.split()  # (e.g., place r1 locA objA)
         # add the object to the location
-        self.environment.objects_at_locations[loc]["object"].add(obj)
+        self.environment.add_object_at_location(obj, loc)
         return super().advance(time)
-
-
-def construct_move_and_search_operator(
-    object_find_prob: OptCallable, move_time: OptCallable) -> Operator:
-    object_find_prob = _make_callable(object_find_prob)
-    inv_object_find_prob = _invert_prob(object_find_prob)
-    move_time = _make_callable(move_time)
-    return Operator(
-        name="search",
-        parameters=[("?robot", "robot"),
-                    ("?loc_from", "location"),
-                    ("?loc_to", "location"),
-                    ("?object", "object")],
-        preconditions=[F("free ?robot"),
-                       F("at ?robot ?loc_from"),
-                       F("not lock-search ?loc_to"),
-                       F("not searched ?loc_to ?object"),
-                       F("not revealed ?loc_to"),
-                       F("not found ?object")],
-        effects=[
-            Effect(time=0, resulting_fluents={
-                F("not free ?robot"),
-                F("lock-search ?loc_to"),
-                F("not at ?robot ?loc_from")}),
-            Effect(time=(move_time, ["?robot", "?loc_from", "?loc_to"]),
-                   resulting_fluents={F("at ?robot ?loc_to"),
-                                      F("not lock-search ?loc_to"),
-                                      F("searched ?loc_to ?object"),
-                                      F("free ?robot"),},
-                   prob_effects=[(
-                       (object_find_prob, ["?robot", "?loc_to", "?object"]),
-                       [Effect(time=0, resulting_fluents={F("found ?object")})]
-                   ), (
-                       (inv_object_find_prob, ["?robot", "?loc_to", "?object"]), [],
-                   )])
-        ],
-    )
 
 
 def construct_move_operator(move_time: OptCallable):

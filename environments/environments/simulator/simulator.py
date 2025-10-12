@@ -169,7 +169,7 @@ class Simulator:
             new_fluents.add(F(f"revealed {loc}"))
 
             # Add every object present at this location to type universe and mark as found/located
-            for obj_type, objs in self.environment.objects_at_locations.get(loc, {}).items():
+            for obj_type, objs in self.environment.get_objects_at_location(loc).items():
                 new_objects_by_type.setdefault(obj_type, set()).update(objs)
                 for obj in objs:
                     new_fluents.add(F(f"found {obj}"))

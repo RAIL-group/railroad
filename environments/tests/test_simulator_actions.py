@@ -1,38 +1,37 @@
-import pytest
 import numpy as np
-from dataclasses import dataclass
-from copy import copy
-
 from mrppddl.core import Fluent as F, State, get_action_by_name
-from mrppddl.core import transition
-from mrppddl.helper import construct_move_operator
-
-from mrppddl.core import OptCallable, Operator, Effect
-from mrppddl.helper import _make_callable, _invert_prob
-
-from typing import Dict, Set, List, Tuple, Callable
 import environments
-from environments.simulator import Simulator
+from environments import Simulator
 
 
-class TestEnvironment:
-    def __init__(self):
-        self.locations = {
-            "start": np.array([0, 0]),
-            "roomA": np.array([10, 0]),
-            "roomB": np.array([0, 15]),
-            "roomC": np.array([15, 15]),
-        }
+LOCATIONS = {
+    "start": np.array([0, 0]),
+    "roomA": np.array([10, 0]),
+    "roomB": np.array([0, 15]),
+    "roomC": np.array([15, 15]),
+}
 
-        self.objects_at_locations = {
-            "start": dict(),
-            "roomA": {"object": {"objA", "objC"}},
-            "roomB": {"object": {"objB"}},
-            "roomC": {"object": {"objD"}},
-        }
+OBJECTS_AT_LOCATIONS = {
+    "start": dict(),
+    "roomA": {"object": {"objA", "objC"}},
+    "roomB": {"object": {"objB"}},
+    "roomC": {"object": {"objD"}},
+}
 
+class TestEnvironment(environments.BaseEnvironment):
+    '''This is how the environment wrapper should look like for any simulator.'''
+    def __init__(self, locations):
+        super().__init__(locations)
+        self._objects_at_locations = {loc: {"object": set()} for loc in locations}
 
-    def get_move_time_fn(self):
+    def get_objects_at_location(self, location):
+        objects_found =  OBJECTS_AT_LOCATIONS.get(location, {})
+        for obj in objects_found:
+            # update internal state
+            self.add_object_at_location(obj, location)
+        return objects_found
+
+    def get_move_cost_fn(self):
         def get_move_time(robot, loc_from, loc_to):
             distance = np.linalg.norm(self.locations[loc_from] - self.locations[loc_to])
             return distance
@@ -45,8 +44,16 @@ class TestEnvironment:
         new_coord = coord_from + direction * time
         return new_coord
 
+    def remove_object_from_location(self, obj, location, object_type="object"):
+        self._objects_at_locations[location][object_type].discard(obj)
+
+    def add_object_at_location(self, obj, location, object_type="object"):
+        self._objects_at_locations[location][object_type].add(obj)
+
+
 
 def test_move_action():
+
     '''Test that move action is interrupted correctly.'''
     objects_by_type = {
         "robot": {"r1", "r2"},
@@ -62,8 +69,8 @@ def test_move_action():
                 F("free", "r2"),
             },
     )
-    env = TestEnvironment()
-    move_op = environments.actions.construct_move_operator(move_time=env.get_move_time_fn())
+    env = TestEnvironment(locations=LOCATIONS)
+    move_op = environments.actions.construct_move_operator(move_time=env.get_move_cost_fn())
 
     sim = Simulator(initial_state, objects_by_type, [move_op], env)
     actions = sim.get_actions()
@@ -104,7 +111,7 @@ def test_search_action():
                 F("free", "r2"),
             },
     )
-    env = TestEnvironment()
+    env = TestEnvironment(locations=LOCATIONS)
     search_op = environments.actions.construct_search_operator(object_find_prob=object_find_prob,
                                                                search_time=search_time)
 
@@ -155,7 +162,7 @@ def test_pick_and_place_action():
                 F("free", "r2"),
             },
     )
-    env = TestEnvironment()
+    env = TestEnvironment(locations=LOCATIONS)
     pick_op = environments.actions.construct_pick_operator(pick_time=pick_time)
     place_op = environments.actions.construct_place_operator(place_time=place_time)
 
@@ -172,7 +179,7 @@ def test_pick_and_place_action():
     assert F("at r1 roomA") in sim.state.fluents
     assert F("holding r1 objA") in sim.state.fluents
     assert F("at objA roomA") not in sim.state.fluents
-    assert "objA" not in env.objects_at_locations["roomA"]["object"]
+    assert "objA" not in env._objects_at_locations["roomA"]["object"]
     # R2 is still picking objB
     assert F("free r2") not in sim.state.fluents
     assert F("at r2 roomB") in sim.state.fluents
@@ -188,7 +195,7 @@ def test_pick_and_place_action():
     assert F("at r2 roomB") in sim.state.fluents
     assert F("holding r2 objB") in sim.state.fluents
     assert F("at objB roomB") not in sim.state.fluents
-    assert "objB" not in env.objects_at_locations["roomB"]["object"]
+    assert "objB" not in env._objects_at_locations["roomB"]["object"]
     # R1 is still placing objA
     assert F("free r1") not in sim.state.fluents
     assert F("at r1 roomA") in sim.state.fluents
@@ -204,7 +211,7 @@ def test_pick_and_place_action():
     assert F("at r1 roomA") in sim.state.fluents
     assert F("holding r1 objA") not in sim.state.fluents
     assert F("at objA roomA") in sim.state.fluents
-    assert "objA" in env.objects_at_locations["roomA"]["object"]
+    assert "objA" in env._objects_at_locations["roomA"]["object"]
     # R2 is still placing objB
     assert F("free r2") not in sim.state.fluents
     assert F("at r2 roomB") in sim.state.fluents
