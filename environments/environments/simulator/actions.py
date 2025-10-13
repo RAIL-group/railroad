@@ -148,7 +148,7 @@ def construct_search_operator(object_find_prob: OptCallable, search_time: OptCal
                                       F("not lock-search ?loc")
                                       },
                    prob_effects=[((object_find_prob, ["?r", "?loc", "?obj"]),
-                                  [Effect(time=0, resulting_fluents={F("found ?obj")})]),
+                                  [Effect(time=0, resulting_fluents={F("found ?obj"), F("at ?obj ?loc")})]),
                                  ((inv_object_find_prob, ["?r", "?loc", "?obj"]),
                                   [])]
                    )
