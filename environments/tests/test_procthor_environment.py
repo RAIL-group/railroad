@@ -20,36 +20,47 @@ def get_args():
     args.save_dir = '/data/test_logs'
     return args
 
-def get_objects_from_goal_fluents(goal_fluents):
-    objects = set()
-    for fluent in goal_fluents:
-        objects.update({fluent.args[0]})
-    return objects
 
-# def get_move_cost_fn(env):
-#     def get_move_time(robot, loc_from, loc_to):
-#         if robot == "r1":
-#             return 50.0
-#         return 100.0
-#     return get_move_time
-
-def get_ground_truth_action_name(env, robot="r1"):
-    target_container_idx = env.target_object_info['container_idxs'][0]
-    target_container_name = env.graph.get_node_name_by_idx(target_container_idx)
-    action_name = f"search {robot} start {target_container_name}_{target_container_idx} {env.target_object}"
-    return action_name
-
-def test_procthor_environment_initialization():
+def test_procthor_pick_place():
     args = get_args()
     env = environments.procthor.ProcTHOREnvironment(args)
-    print(env.locations)
-    print(env.target_object)
 
-def test_goal_fluents_to_objects():
-    objects = {"objA"}
-    goal_fluents = {F("found objA")}
-    objects_goal_fluents = get_objects_from_goal_fluents(goal_fluents)
-    assert objects == objects_goal_fluents
+    # pick a random object
+    obj1 = random.choice(list(env.all_objects))
+    obj1_idx = int(obj1.split('_')[1])
+    loc1_idx = list(env.known_graph.get_adjacent_nodes_idx(obj1_idx, filter_by_type=2))[0]
+
+    loc1 = f"{env.known_graph.get_node_name_by_idx(loc1_idx)}_{loc1_idx}"
+    loc1_obj_idxs = env.partial_graph.get_adjacent_nodes_idx(loc1_idx, filter_by_type=3)
+    assert len(loc1_obj_idxs) == 0  # nothing is revealed yet
+
+    # reveal loc1
+    objects = env.get_objects_at_location(loc1)
+    loc1_obj_idxs = env.partial_graph.get_adjacent_nodes_idx(loc1_idx, filter_by_type=3)
+    assert len(loc1_obj_idxs) == len(objects['object']) # objects revealed
+
+    # pick a random object from loc1
+    obj1 = random.choice(list(objects['object']))
+    # remove the object from loc1
+    env.remove_object_from_location(obj1, loc1)
+    loc1_obj_idxs = env.partial_graph.get_adjacent_nodes_idx(loc1_idx, filter_by_type=3)
+    assert len(loc1_obj_idxs) == len(objects['object']) - 1 # one object removed
+    # ensure obj1 is not in loc1 anymore
+    for obj_idx in loc1_obj_idxs:
+        object_name = env.partial_graph.nodes[obj_idx]['object_name']
+        assert object_name != obj1
+
+    # place it at another random location
+    loc2 = random.choice(list(env.locations.keys() - {'start', loc1}))
+    loc2_idx = int(loc2.split('_')[1])
+    loc2_obj_idxs = env.partial_graph.get_adjacent_nodes_idx(loc2_idx, filter_by_type=3)
+    assert len(loc2_obj_idxs) == 0  # nothing is there in loc2 yet
+    env.add_object_at_location(obj1, loc2) # add obj1 to loc2
+    loc2_obj_idxs = env.partial_graph.get_adjacent_nodes_idx(loc2_idx, filter_by_type=3)
+    assert len(loc2_obj_idxs) == 1  # something is there in loc2
+    object_name = env.partial_graph.nodes[loc2_obj_idxs[0]]['object_name']
+    assert object_name == obj1  # obj1 is  at loc2
+
 
 
 def test_simulator_with_procthor_map():

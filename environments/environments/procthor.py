@@ -30,14 +30,17 @@ class ProcTHOREnvironment(BaseEnvironment):
             raise ValueError(f"Location {location} is not valid.")
         location_node_idx = int(location.split('_')[1])
 
-        object_idxs = self.known_graph.get_adjacent_nodes_idx(location_node_idx, filter_by_type=3)
+        # get names of objects already present in partial graph
+        existing_object_idxs = self.partial_graph.get_adjacent_nodes_idx(location_node_idx, filter_by_type=3)
+        object_names = set(self.partial_graph.nodes[idx]['object_name'] for idx in existing_object_idxs)
 
-        object_names = []
+        # add ground truth objects at location from known graph
+        object_idxs = self.known_graph.get_adjacent_nodes_idx(location_node_idx, filter_by_type=3)
         for obj_idx in object_idxs:
             obj_node = self.known_graph.nodes[obj_idx].copy()
             obj_name = f"{obj_node['name']}_{obj_idx}"
             obj_node['object_name'] = obj_name
-            object_names.append(obj_name)
+            object_names.add(obj_name)
             new_obj_idx = self.partial_graph.add_node(obj_node)
             self.partial_graph.add_edge(location_node_idx, new_obj_idx)
 
