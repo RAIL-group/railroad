@@ -21,7 +21,8 @@ OBJECTS_AT_LOCATIONS = {
 class TestEnvironment(environments.BaseEnvironment):
     '''This is how the environment wrapper should look like for any simulator.'''
     def __init__(self, locations):
-        super().__init__(locations)
+        super().__init__()
+        self.locations = locations
         self._objects_at_locations = {loc: {"object": set()} for loc in locations}
 
     def get_objects_at_location(self, location):

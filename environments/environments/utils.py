@@ -3,7 +3,7 @@ import gridmap
 from common import Pose
 
 
-def get_path_between_two_coords(grid, start, end, return_cost=False):
+def get_cost_between_two_coords(grid, start, end, return_path=False):
     occ_grid = np.copy(grid)
     occ_grid[int(start[0])][int(start[1])] = 0
 
@@ -13,12 +13,12 @@ def get_path_between_two_coords(grid, start, end, return_cost=False):
         occ_grid,
         start=[start[0], start[1]],
         use_soft_cost=True)
-    _, path = get_path(target=[end[0], end[1]])
     cost = cost_grid[end[0], end[1]]
 
-    if return_cost:
-        return path, cost
-    return path
+    if return_path:
+        _, path = get_path(target=[end[0], end[1]])
+        return cost, path
+    return cost
 
 
 def get_coordinates_at_time(path, time):
@@ -26,6 +26,7 @@ def get_coordinates_at_time(path, time):
     segment_lengths = np.linalg.norm(diffs, axis=0)
     cumulative_lengths = np.concatenate(([0], np.cumsum(segment_lengths)))
     idx = np.searchsorted(cumulative_lengths, time, side='left')
+    idx = idx if idx < len(cumulative_lengths) else -1
     return path[:, idx]
 
 
