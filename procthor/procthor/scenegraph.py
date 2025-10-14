@@ -12,6 +12,8 @@ class SceneGraph:
     def add_node(self, node_dict, node_idx=None):
         """Add a new node to the graph."""
         node_idx = len(self.nodes) if node_idx is None else node_idx
+        while node_idx in self.nodes.keys():
+            node_idx += 1
         self.nodes[node_idx] = node_dict
         if 'id' in node_dict:
             self.asset_id_to_node_idx_map[node_dict['id']] = node_idx

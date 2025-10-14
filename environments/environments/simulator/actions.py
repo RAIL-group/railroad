@@ -58,9 +58,10 @@ class OngoingMoveAction(OngoingAction):
         _, self.robot, self.start, self.end = self.name.split()  # (e.g., move r1 locA locB)
 
     def advance(self, time):
+        new_effects = super().advance(time)
         intermediate_coords = self.environment.get_intermediate_coordinates(time, self.start, self.end)
         self.environment.locations[f"{self.robot}_loc"] = intermediate_coords
-        return super().advance(time)
+        return new_effects
 
     def interrupt(self):
         """If the time > start_time, it can be interrupted. The robot location
@@ -102,18 +103,22 @@ class OngoingSearchAction(OngoingAction):
 
 class OngoingPickAction(OngoingAction):
     def advance(self, time):
-        _, robot, loc, obj = self.name.split()  # (e.g., pick r1 locA objA)
-        # remove the object from the location
-        self.environment.remove_object_from_location(obj, loc)
-        return super().advance(time)
+        new_effects = super().advance(time)
+        if self.is_done:
+            _, _, loc, obj = self.name.split()  # (e.g., pick r1 locA objA)
+            # remove the object from the location
+            self.environment.remove_object_from_location(obj, loc)
+        return new_effects
 
 
 class OngoingPlaceAction(OngoingAction):
     def advance(self, time):
-        _, robot, loc, obj = self.name.split()  # (e.g., place r1 locA objA)
-        # add the object to the location
-        self.environment.add_object_at_location(obj, loc)
-        return super().advance(time)
+        new_effects = super().advance(time)
+        if self.is_done:
+            _, _, loc, obj = self.name.split()  # (e.g., place r1 locA objA)
+            # add the object to the location
+            self.environment.add_object_at_location(obj, loc)
+        return new_effects
 
 
 def construct_move_operator(move_time: OptCallable):

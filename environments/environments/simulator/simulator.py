@@ -130,7 +130,7 @@ class Simulator:
             except:
                 pass
 
-        # TODO: Interrupt actions as needed
+        # Interrupt actions as needed
         # - if any action can be interrupted, interrupt it, getting the
         # Example: for the move action, interrupting it
         for act in self.ongoing_actions:
