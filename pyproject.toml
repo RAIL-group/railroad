@@ -30,6 +30,7 @@ dependencies = [
     "python-dotenv>=1.2.1",
     "pandas>=2.3.3",
     "pytest-xdist>=3.8.0",
+    "roslibpy",
 ]
 
 [tool.uv.sources]
