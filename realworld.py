@@ -60,61 +60,86 @@ class PlanningLoop():
         self.goal_fluents = goal_fluents
         self.environment = environment
         self.num_robots = num_robots
-        self.upcoming_effects = []
         self.robot_assigned = [False] * self.num_robots
         self.actions = []
+        self.upcoming_effects = {}
+        self.ongoing_actions = []
 
-    @property
-    def state(self):
-        """The state is the internal state with future effects added."""
-        effects = self.upcoming_effects
-        return State(
-            self._state.time,
-            self._state.fluents,
-            sorted(self._state.upcoming_effects + effects,
-                   key=lambda el: el[0])
-        )
+    # @property
+    # def state(self):
+    #     """The state is the internal state with future effects added."""
+    #     effects = self.upcoming_effects
+    #
 
     def advance(self, action):
         def _any_free_robots(state):
             return any(f.name == "free" for f in state.fluents)
         any_robot_free = _any_free_robots(self.state)
         if any_robot_free:
-            self.actions.append(action)
+            self.ongoing_actions.append(action)
             # what are the upcoming effects for this action?
-            self.upcoming_effects.extend(action.upcoming_effects)
+            action_effects = action.effects
+            new_effects = [eff for eff in action_effects if eff[0] <= 0]
+            self.upcoming_effects[action] = action_effects[:len(new_effects)]
         else:
             threads = {}
             for action in self.actions: # move r1 loc_from loc_to
                 _, r, _, to = action.name.split()
-                t = threading.Thread(target=self.environment.move_robot, args=(r, to))
-                t.start()
-                threads[action].append(t)
+                # t = threading.Thread(target=self.environment.move_robot, args=(r, to))
+                # t.start()
+                # threads[action] = t
+                # results = [#r-ongoing, #r-ongoing]
+                # results = [#r-success, #r-success]
+
+
+                robot_succeeded = []
 
             # wait until any one robot finishes moving
             robot_done = False
             while not robot_done:
-                for action, t in threads.items():
-                    if not t.is_alive():
-                        robot_done = True
-                        done_action = action
-                        break
+                results = [self.environment.move_robot(r, to) for action in self.actions]
+                # robot_done is true when one of the results is success
+
+                # for action, t in threads.items():
+                #     if not t.is_alive():
+                #         robot_done = True
+                #         done_action = action
+                #         break
                 time.sleep(0.5)
-
-            ongoing_actions = [act for act, t in threads.items() if t.is_alive()]
-            # add effects of done_action to state
+            # get the effects of the done action
 
 
-            # interrupt ongoing actions
 
 
-            # all robots are done moving
-            self.upcoming_effects = []
-            self.actions = []
+            new_effects = self.upcoming_effects[done_action]
+            self.ongoing_actions = [act for act, t in threads.items() if t.is_alive()]
+
+        # Add new effects to state
+        new_state =  State(
+                self._state.time,
+                self._state.fluents,
+                sorted(self._state.upcoming_effects + new_effects,
+                    key=lambda el: el[0])
+        )
+        self._state = self._get_new_state_by_intersection(transition(new_state, None))
+
+        # interrupt ongoing actions if needed
+        for act in self.ongoing_actions:
+            new_fluents = act.interrupt()
+            self._state.update_fluents(new_fluents)
+
+        # Remove done actions from ongoing actions
 
 
-        # apply action's upcoming effects and return state
-        return self.state
+    def _get_new_state_by_intersection(self, states_and_probs):
+        '''Determine new state by intersecting outcomes'''
+        states = [s for s, _ in states_and_probs]
+        base = states[0]
+        new_fluents = {fl for fl in base.fluents if all(fl in s.fluents for s in states[1:])}
+        new_upcoming = [ue for ue in base.upcoming_effects if all(ue in s.upcoming_effects for s in states[1:])]
+
+        new_state = State(states[0].time, new_fluents, new_upcoming)
+        return new_state
 
 
     def goal_reached(self):
