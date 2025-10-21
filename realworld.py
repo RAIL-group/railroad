@@ -8,6 +8,9 @@ from mrppddl.core import transition
 from mrppddl.core import OptCallable, Operator, Effect
 from mrppddl.helper import _make_callable, _invert_prob
 
+import threading
+import time
+
 from typing import Dict, Set, List, Tuple, Callable
 
 
@@ -52,22 +55,19 @@ class RealEnvironment(environments.BaseEnvironment):
 
 
 class PlanningLoop():
-    def __init__(self, initial_state, goal_fluents, num_robots=1):
-        self.state = initial_state
+    def __init__(self, initial_state, goal_fluents, environment, num_robots=1):
+        self._state = initial_state
         self.goal_fluents = goal_fluents
+        self.environment = environment
         self.num_robots = num_robots
+        self.upcoming_effects = []
         self.robot_assigned = [False] * self.num_robots
+        self.actions = []
 
     @property
     def state(self):
         """The state is the internal state with future effects added."""
-        effects = []
-        for act in self.ongoing_actions:
-            effects += act.upcoming_effects
-        self.ongoing_actions = [
-            act for act in self.ongoing_actions
-            if not act.is_done
-        ]
+        effects = self.upcoming_effects
         return State(
             self._state.time,
             self._state.fluents,
@@ -76,7 +76,46 @@ class PlanningLoop():
         )
 
     def advance(self, action):
-        pass
+        def _any_free_robots(state):
+            return any(f.name == "free" for f in state.fluents)
+        any_robot_free = _any_free_robots(self.state)
+        if any_robot_free:
+            self.actions.append(action)
+            # what are the upcoming effects for this action?
+            self.upcoming_effects.extend(action.upcoming_effects)
+        else:
+            threads = {}
+            for action in self.actions: # move r1 loc_from loc_to
+                _, r, _, to = action.name.split()
+                t = threading.Thread(target=self.environment.move_robot, args=(r, to))
+                t.start()
+                threads[action].append(t)
+
+            # wait until any one robot finishes moving
+            robot_done = False
+            while not robot_done:
+                for action, t in threads.items():
+                    if not t.is_alive():
+                        robot_done = True
+                        done_action = action
+                        break
+                time.sleep(0.5)
+
+            ongoing_actions = [act for act, t in threads.items() if t.is_alive()]
+            # add effects of done_action to state
+
+
+            # interrupt ongoing actions
+
+
+            # all robots are done moving
+            self.upcoming_effects = []
+            self.actions = []
+
+
+        # apply action's upcoming effects and return state
+        return self.state
+
 
     def goal_reached(self):
         if all(fluent in self.state.fluents for fluent in self.goal_fluents):
