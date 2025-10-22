@@ -8,19 +8,23 @@ from mrppddl.core import transition
 from mrppddl.core import OptCallable, Operator, Effect
 from mrppddl.helper import _make_callable, _invert_prob
 
-import threading
-import time
+from mrppddl.planner import MCTSPlanner
+from environments import BaseEnvironment
 
 from typing import Dict, Set, List, Tuple, Callable
 
+IDLE = -1
+MOVING = 0
+REACHED = 1
 
-class RealEnvironment(environments.BaseEnvironment):
+
+class RealEnvironment(BaseEnvironment):
     def __init__(self, client):
         super().__init__()
         self._get_locations_service = roslibpy.Service(client, '/get_locations', 'GetLocations')
         self._move_robot_service = roslibpy.Service(client, '/move_robot', 'MoveRobot')
         self._get_distance_service = roslibpy.Service(client, '/get_distance', 'GetDistance')
-
+        self._stop_robot_service = roslibpy.Service(client, '/stop_robot', 'StopRobot')
         self.locations = self._get_locations()
 
     def get_move_cost_fn(self):
@@ -53,83 +57,186 @@ class RealEnvironment(environments.BaseEnvironment):
         result = self._move_robot_service.call(request)
         return result['success']
 
+    def stop_robot(self, robot_name):
+        print("Stopping robot", robot_name)
+        request = roslibpy.ServiceRequest({'robot_name': robot_name})
+        result = self._stop_robot_service.call(request)
+        return result['success']
+
+
+class OngoingAction:
+    def __init__(self, time, action, environment=None):
+        self.time = time
+        self.name = action.name
+        self._start_time = time
+        self._action = action
+        self._upcoming_effects = sorted([
+            (time + eff.time, eff) for eff in action.effects
+        ], key=lambda el: el[0])
+        self.environment = environment
+
+    @property
+    def time_to_next_event(self):
+        if self._upcoming_effects:
+            return self._upcoming_effects[0][0]
+        else:
+            return float('inf')
+
+    @property
+    def is_done(self):
+        return not self.upcoming_effects
+
+    @property
+    def upcoming_effects(self):
+        # Return remaining upcoming events
+        return self._upcoming_effects
+
+    def advance(self, time):
+        # Update the internal time
+        self.time = time
+        # Pop and return all effects scheduled at or before the new time
+        new_effects = [effect for effect in self._upcoming_effects
+                       if effect[0] <= time + 1e-9]
+        # Remove the new_effects from upcoming_effects (effects are sorted)
+        self._upcoming_effects = self._upcoming_effects[len(new_effects):]
+        return new_effects
+
+class OngoingMoveAction(OngoingAction):
+    def __init__(self, time, action, environment=None):
+        super().__init__(time, action, environment)
+        # Keep track of initial start and end locations
+        _, self.robot, self.start, self.end = self.name.split()  # (e.g., move r1 locA locB)
+        self._action_status = IDLE
+        self._action_progress = 0.0
+
+    def advance(self, time):
+        self._action_status, self._action_progress = self.environment.move_robot(self.robot, self.end)
+        return super().advance(time)
+
+
+    @property
+    def time_to_next_event(self):
+        if self._action_status == IDLE:
+            return self.time
+        if self._action_status == MOVING:
+            return min(self._upcoming_effects[0][0], self._action_progress + self.time)
+        if self._action_status == REACHED:
+            return self._upcoming_effects[0][0]
+
+    def interrupt(self):
+        if self.time <= self._start_time:
+            return set() # Cannot interrupt before start time
+
+        # stop robot
+        self.environment.stop_robot(self.robot)
+        robot = self.robot
+        old_target = self.end
+        new_target = f"{robot}_loc"
+        new_fluents = set()
+
+        for _, eff in self._upcoming_effects:
+            if eff.is_probabilistic:
+                raise ValueError("Probabilistic effects cannot be interrupted.")
+            for fluent in eff.resulting_fluents:
+                new_fluents.add(
+                    F(" ".join(
+                        [fluent.name]
+                      + [fa if fa != old_target else new_target for fa in fluent.args]),
+                      negated=fluent.negated)
+                )
+        self._upcoming_effects = []
+        return new_fluents
+
 
 class PlanningLoop():
-    def __init__(self, initial_state, goal_fluents, environment, num_robots=1):
+    def __init__(
+            self,
+            initial_state: State,
+            objects_by_type: Dict[str, Set[str]],
+            operators: List[Operator],
+            environment: BaseEnvironment):
         self._state = initial_state
-        self.goal_fluents = goal_fluents
-        self.environment = environment
-        self.num_robots = num_robots
-        self.robot_assigned = [False] * self.num_robots
-        self.actions = []
-        self.upcoming_effects = {}
+        self.objects_by_type = {k: set(v) for k, v in objects_by_type.items()}
+        self.operators = operators
         self.ongoing_actions = []
+        self.environment = environment
 
-    # @property
-    # def state(self):
-    #     """The state is the internal state with future effects added."""
-    #     effects = self.upcoming_effects
-    #
+    @property
+    def time(self):
+        return self._state.time
+
+    @property
+    def state(self):
+        """The state is the internal state with future effects added."""
+        effects = []
+        for act in self.ongoing_actions:
+            effects += act.upcoming_effects
+        self.ongoing_actions = [
+            act for act in self.ongoing_actions
+            if not act.is_done
+        ]
+        return State(
+            self._state.time,
+            self._state.fluents,
+            sorted(self._state.upcoming_effects + effects,
+                   key=lambda el: el[0])
+        )
+
+    def get_actions(self) -> List:
+        """Instantiate an Operator under the *current* objects_by_type."""
+        objects_with_rloc = {k: set(v) for k, v in self.objects_by_type.items()}
+        objects_with_rloc["location"] |= set(
+            f"{rob}_loc"
+            for rob in self.objects_by_type["robot"]
+            if F(f"at {rob} {rob}_loc") in self._state.fluents
+            )
+        return list(itertools.chain.from_iterable(
+            operator.instantiate(objects_with_rloc)
+            for operator in self.operators
+    ))
+
 
     def advance(self, action):
+        action_name = action.name.split()[0]
+        if action_name == "move":
+            new_act = OngoingMoveAction(self._state.time, action, self.environment)
+
+        self.ongoing_actions.append(new_act)
+
         def _any_free_robots(state):
             return any(f.name == "free" for f in state.fluents)
-        any_robot_free = _any_free_robots(self.state)
-        if any_robot_free:
-            self.ongoing_actions.append(action)
-            # what are the upcoming effects for this action?
-            action_effects = action.effects
-            new_effects = [eff for eff in action_effects if eff[0] <= 0]
-            self.upcoming_effects[action] = action_effects[:len(new_effects)]
-        else:
-            threads = {}
-            for action in self.actions: # move r1 loc_from loc_to
-                _, r, _, to = action.name.split()
-                # t = threading.Thread(target=self.environment.move_robot, args=(r, to))
-                # t.start()
-                # threads[action] = t
-                # results = [#r-ongoing, #r-ongoing]
-                # results = [#r-success, #r-success]
 
+        robot_free = False
+        while not robot_free and self.ongoing_actions:
+            # if every action is done, break
+            if all(act.is_done for act in self.ongoing_actions):
+                break
 
-                robot_succeeded = []
+            if _any_free_robots(self._state):
+                adv_time = self.time
+            else:
+                adv_time = min(act.time_to_next_event for act in self.ongoing_actions)
 
-            # wait until any one robot finishes moving
-            robot_done = False
-            while not robot_done:
-                results = [self.environment.move_robot(r, to) for action in self.actions]
-                # robot_done is true when one of the results is success
-
-                # for action, t in threads.items():
-                #     if not t.is_alive():
-                #         robot_done = True
-                #         done_action = action
-                #         break
-                time.sleep(0.5)
-            # get the effects of the done action
-
-
-
-
-            new_effects = self.upcoming_effects[done_action]
-            self.ongoing_actions = [act for act, t in threads.items() if t.is_alive()]
-
-        # Add new effects to state
-        new_state =  State(
-                self._state.time,
-                self._state.fluents,
-                sorted(self._state.upcoming_effects + new_effects,
-                    key=lambda el: el[0])
-        )
-        self._state = self._get_new_state_by_intersection(transition(new_state, None))
+            new_effects = list(itertools.chain.from_iterable(
+                [act.advance(adv_time) for act in self.ongoing_actions])
+            )
+            new_state = State(adv_time,
+                            self._state.fluents,
+                            sorted(self._state.upcoming_effects + new_effects,
+                                   key=lambda el: el[0])
+            )
+            # Add new effects to state
+            self._state = self._get_new_state_by_intersection(transition(new_state, None))
 
         # interrupt ongoing actions if needed
         for act in self.ongoing_actions:
             new_fluents = act.interrupt()
             self._state.update_fluents(new_fluents)
 
-        # Remove done actions from ongoing actions
+        # Remove any actions that are now done
+        self.ongoing_actions = [act for act in self.ongoing_actions if not act.is_done]
 
+        return self.state
 
     def _get_new_state_by_intersection(self, states_and_probs):
         '''Determine new state by intersecting outcomes'''
@@ -142,16 +249,13 @@ class PlanningLoop():
         return new_state
 
 
-    def goal_reached(self):
-        if all(fluent in self.state.fluents for fluent in self.goal_fluents):
+    def goal_reached(self, goal_fluents):
+        if all(fluent in self.state.fluents for fluent in goal_fluents):
             return True
         return False
 
 
-
-
 if __name__ == '__main__':
-
     client = roslibpy.Ros(host='localhost', port=9090)
     client.run()
     env = RealEnvironment(client)
@@ -172,14 +276,22 @@ if __name__ == '__main__':
     )
 
     move_op = construct_move_visited_operator(move_time=env.get_move_cost_fn())
-    all_actions = move_op.instantiate(objects_by_type)
-
+    planning_loop = PlanningLoop(initial_state, objects_by_type, [move_op], env)
+    all_actions = planning_loop.get_actions()
     mcts = MCTSPlanner(all_actions)
-    goal_fluents = {F(f"found {env.target_object}")}
+    goal_fluents = {F("visited loc1"), F("visited loc2"), F("visited loc3")}
 
+    actions_taken = []
     for _ in range(5):
         action_name = mcts(initial_state, goal_fluents, max_iterations=1000, c=10)
         if action_name != 'NONE':
             action = get_action_by_name(all_actions, action_name)
+            planning_loop.advance(action)
+            print(action_name)
+            print(planning_loop.state.fluents)
+            actions_taken.append(action_name)
 
+        if planning_loop.goal_reached(goal_fluents):
+            print("Goal reached!")
+            break
     client.terminate()
