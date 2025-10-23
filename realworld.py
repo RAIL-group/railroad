@@ -73,7 +73,7 @@ class RealEnvironment(BaseEnvironment):
         return result['locations']
 
     def move_robot(self, robot_name, location):
-        # print("Moving robot", robot_name, "to", location)
+        print("Moving robot", robot_name, "to", location)
         request = roslibpy.ServiceRequest({'robot_name': robot_name, 'location': location})
         result = self._move_robot_service.call(request)
         return result['status']
@@ -145,29 +145,15 @@ class OngoingMoveAction(OngoingAction):
         return super().advance(time)
 
     @property
-    def is_done(self):
+    def move_complete(self):
         if self.move_called:
             action_status = self.environment.get_move_status(self.robot)
             if action_status == REACHED:
                 return True
         return False
 
-    # @property
-    # def time_to_next_event(self):
-    #     if self.move_called:
-    #         action_status = self.environment.get_move_status(self.robot)
-    #     else:
-    #         return self.time
-    #     if action_status == MOVING:
-    #         time = min(self._upcoming_effects[0][0], self.time)
-    #         return time
-    #     if action_status == REACHED:
-    #         print(f"Robot {self.robot} reached destination {self.end}")
-    #         return self._upcoming_effects[0][0]
-
     def interrupt(self):
         if self.time <= self._start_time:
-            print("Cannot interrupt before start time")
             return set()  # Cannot interrupt before start time
 
         # stop robot
@@ -251,12 +237,9 @@ class PlanningLoop():
             return any(f.name == "free" for f in state.fluents)
 
         robot_free = False
-        print_once = True
         while not robot_free and self.ongoing_actions:
             # if every action is done, break
             if all(act.is_done for act in self.ongoing_actions):
-                print("ongoing actions: ", [act.name for act in self.ongoing_actions])
-                print("All action is done! breaking")
                 break
 
             adv_time = self.get_advance_time()
@@ -272,12 +255,6 @@ class PlanningLoop():
             # Add new effects to state
             self._state = self._get_new_state_by_intersection(transition(new_state, None))
 
-            if print_once:
-                print(f'{self._state.time=} {self._state.fluents=}')
-                for act in self.ongoing_actions:
-                    print(f'{act.name=}, {act.upcoming_effects=}')
-                print_once = False
-                print("----")
             # Remove any actions that are now done
             self.ongoing_actions = [act for act in self.ongoing_actions if not act.is_done]
 
@@ -285,16 +262,10 @@ class PlanningLoop():
 
         # interrupt ongoing actions if needed
         for act in self.ongoing_actions:
-            print(f"Interrupting action: {act.name}")
             new_fluents = act.interrupt()
             self._state.update_fluents(new_fluents)
 
-        # Remove any actions that are now (interrupted and removed upcoming effects)
-        print("Len:", len(self.ongoing_actions))
-        for act in self.ongoing_actions:
-            print(f'{act.name=}, {act.upcoming_effects=}')
         self.ongoing_actions = [act for act in self.ongoing_actions if act.upcoming_effects]
-        print("Len:", len(self.ongoing_actions))
         return self.state
 
     def _get_new_state_by_intersection(self, states_and_probs):
@@ -310,7 +281,7 @@ class PlanningLoop():
     def get_advance_time(self):
         # if any robot is done moving, advancing to that time
         for act in self.ongoing_actions:
-            if act.is_done:
+            if act.move_complete:
                 return act.time_to_next_event
         return self.state.time
 
@@ -330,9 +301,8 @@ if __name__ == '__main__':
         "robot": {"r1", "r2"},
         "location": env.locations,
     }
-    print(objects_by_type)
     initial_state = State(
-        time=5,
+        time=0.0,
         fluents={
             F("at", "r1", "r1_loc"), F('visited', 'r1_loc'),
             F("at", "r2", "r2_loc"), F('visited', 'r2_loc'),
@@ -343,7 +313,7 @@ if __name__ == '__main__':
 
     move_op = construct_move_visited_operator(move_time=env.get_move_cost_fn())
     planning_loop = PlanningLoop(initial_state, objects_by_type, [move_op], env)
-    goal_fluents = {F("visited roomA"), F("visited roomB"), F("visited roomC")}
+    goal_fluents = {F("visited roomA"), F("visited roomB"), F("visited roomC"), F("visited roomD")}
 
     actions_taken = []
     for _ in range(1000):
