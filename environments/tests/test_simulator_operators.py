@@ -125,8 +125,8 @@ def test_pick_and_place_operator():
             fluents={
                 F("at", "r1", "roomA"), F("at", "objA", "roomA"), F("at", "objC", "roomA"),
                 F("at", "r2", "roomB"), F("at", "objB", "roomB"),
-                F("free", "r1"),
-                F("free", "r2"),
+                F("free", "r1"), F("free-arm", "r1"),
+                F("free", "r2"), F("free-arm", "r2"),
             },
     )
     pick_op = environments.actions.construct_pick_operator(pick_time=pick_time)
