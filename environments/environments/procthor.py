@@ -1,8 +1,11 @@
 import itertools
-import numpy as np
 from procthor import ThorInterface
 from . import utils
-from .environments import BaseEnvironment
+from .environments import BaseEnvironment, Robot
+
+IDLE = -1
+MOVING = 0
+REACHED = 1
 
 
 class ProcTHOREnvironment(BaseEnvironment):
@@ -11,6 +14,7 @@ class ProcTHOREnvironment(BaseEnvironment):
         self.args = args
         self.thor_interface = ThorInterface(self.args)
         self.known_graph, self.grid, self.robot_pose, self.target_object_info = self.thor_interface.gen_map_and_poses()
+        self.robots = {f'r{i + 1}': Robot(name=f'r{i + 1}', pose=self.robot_pose) for i in range(self.args.num_robots)}
         self.locations = self._get_location_to_coordinates_dict()
         self.all_objects = self._get_all_objects()
         self.target_object = f'{self.target_object_info['name']}_{self.target_object_info['idxs'][0]}'
@@ -73,9 +77,13 @@ class ProcTHOREnvironment(BaseEnvironment):
             return cost
         return move_cost_fn
 
-    def get_intermediate_coordinates(self, time, loc_from, loc_to):
-        loc_from_coords = self.locations[loc_from]
-        loc_to_coords = self.locations[loc_to]
+    def get_intermediate_coordinates(self, time, loc_from, loc_to, is_coords=False):
+        if not is_coords:
+            loc_from_coords = self.locations[loc_from]
+            loc_to_coords = self.locations[loc_to]
+        else:
+            loc_from_coords = loc_from
+            loc_to_coords = loc_to
         _, path = utils.get_cost_between_two_coords(self.grid, loc_from_coords, loc_to_coords, return_path=True)
         return utils.get_coordinates_at_time(path, time)
 
@@ -95,3 +103,33 @@ class ProcTHOREnvironment(BaseEnvironment):
         obj_node['object_name'] = obj
         new_obj_idx = self.partial_graph.add_node(obj_node)
         self.partial_graph.add_edge(location_node_idx, new_obj_idx)
+
+    def move_robot(self, robot_name, location):
+        target_coords = self.locations[location]
+        self.robots[robot_name].move(target_coords)
+
+    def get_move_status(self, robot_name):
+        all_robots_assigned = all(not r.is_free for r in self.robots.values())
+        if not all_robots_assigned:
+            return IDLE
+
+        time_to_target = [(n, utils.get_cost_between_two_coords(
+            self.grid, r.pose, r.target_pose)) for n, r in self.robots.items()]
+        min_robot, min_distance = min(time_to_target, key=lambda x: x[1])
+
+        if min_robot != robot_name:
+            return MOVING
+
+        # compute intermediate pose for all robots
+        for r_name in self.robots:
+            r_pose = self.get_intermediate_coordinates(
+                min_distance, self.robots[r_name].pose, self.robots[r_name].target_pose, is_coords=True)
+            self.robots[r_name].pose = r_pose
+            self.locations[f'{r_name}_loc'] = r_pose
+
+        # stop the robot that has reached its target
+        self.robots[robot_name].stop()
+        return REACHED
+
+    def stop_robot(self, robot_name):
+        self.robots[robot_name].stop()

@@ -3,7 +3,8 @@ import numpy as np
 from mrppddl.core import Fluent as F, State, get_action_by_name
 from mrppddl.planner import MCTSPlanner
 import environments
-from environments import Simulator
+from environments import BaseEnvironment, Robot
+from environments.core import EnvironmentInterface as Simulator
 
 
 LOCATIONS = {
@@ -20,18 +21,37 @@ OBJECTS_AT_LOCATIONS = {
     "roomC": {"object": {"objD"}},
 }
 
+IDLE = -1
+MOVING = 0
+REACHED = 1
 
-class TestEnvironment(environments.BaseEnvironment):
+SKILLS_TIME = {
+    'r1': {
+        'pick': 15,
+        'place': 15,
+        'search': 15},
+    'r2': {
+        'pick': 10,
+        'place': 10,
+        'search': 10}
+}
+
+
+class TestEnvironment(BaseEnvironment):
     __test__ = False
-
     '''This is how the environment wrapper should look like for any simulator.'''
-    def __init__(self, locations):
+    def __init__(self, locations, num_robots=2):
         super().__init__()
         self.locations = locations
         self._objects_at_locations = {loc: {"object": set()} for loc in locations}
+        self.robots = {
+            f"r{i + 1}": Robot(name=f"r{i + 1}",
+                               pose=locations["start"].copy(),
+                               skills_time=SKILLS_TIME[f'r{i + 1}']) for i in range(num_robots)
+        }
 
     def get_objects_at_location(self, location):
-        objects_found =  OBJECTS_AT_LOCATIONS.get(location, {})
+        objects_found = OBJECTS_AT_LOCATIONS.get(location, {})
         for obj in objects_found:
             # update internal state
             self.add_object_at_location(obj, location)
@@ -43,9 +63,13 @@ class TestEnvironment(environments.BaseEnvironment):
             return distance
         return get_move_time
 
-    def get_intermediate_coordinates(self, time, loc_from, loc_to):
-        coord_from = self.locations[loc_from]
-        coord_to = self.locations[loc_to]
+    def get_intermediate_coordinates(self, time, loc_from, loc_to, is_coords=False):
+        if not is_coords:
+            coord_from = self.locations[loc_from]
+            coord_to = self.locations[loc_to]
+        else:
+            coord_from = loc_from
+            coord_to = loc_to
         direction = (coord_to - coord_from) / np.linalg.norm(coord_to - coord_from)
         new_coord = coord_from + direction * time
         return new_coord
@@ -56,10 +80,71 @@ class TestEnvironment(environments.BaseEnvironment):
     def add_object_at_location(self, obj, location, object_type="object"):
         self._objects_at_locations[location][object_type].add(obj)
 
+    def move_robot(self, robot_name, location):
+        target_coords = self.locations[location]
+        self.robots[robot_name].move(target_coords, self.time)
+
+    def pick_robot(self, robot_name):
+        self.robots[robot_name].pick(self.time)
+
+    def place_robot(self, robot_name):
+        self.robots[robot_name].place(self.time)
+
+    def search_robot(self, robot_name):
+        self.robots[robot_name].search(self.time)
+
+    def _get_move_status(self, robot_name):
+        all_robots_assigned = all(not r.is_free for r in self.robots.values())
+        if not all_robots_assigned:
+            return IDLE
+        robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
+        time_to_target = [(n, np.linalg.norm(r.pose - r.target_pose)) for n, r in self.robots.items()]
+
+        remaining_times = [(n, t - p) for (n, t), p in zip(time_to_target, robots_progress)]
+        min_robot, min_distance = min(remaining_times, key=lambda x: x[1])
+
+        if min_robot != robot_name:
+            return MOVING
+
+        # compute intermediate pose for all robots
+        for r_name in self.robots:
+            r_pose = self.get_intermediate_coordinates(
+                min_distance, self.robots[r_name].pose, self.robots[r_name].target_pose, is_coords=True)
+            self.robots[r_name].pose = r_pose
+            self.locations[f'{r_name}_loc'] = r_pose
+
+        # stop the robot that has reached its target
+        self.robots[robot_name].stop()
+        return REACHED
+
+    def _get_pick_place_search_status(self, robot_name, action_name):
+        all_robots_assigned = all(not r.is_free for r in self.robots.values())
+        if not all_robots_assigned:
+            return IDLE
+        robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
+        time_to_action = [(n, r.skills_time[action_name]) for n, r in self.robots.items()]
+
+        remaining_times = [(n, t - p) for (n, t), p in zip(time_to_action, robots_progress)]
+        min_robot, _ = min(remaining_times, key=lambda x: x[1])
+
+        if min_robot != robot_name:
+            return MOVING
+
+        self.stop_robot(robot_name)
+        return REACHED
+
+    def get_action_status(self, robot_name, action_name):
+        if action_name == 'move':
+            return self._get_move_status(robot_name)
+        if action_name in ['pick', 'place', 'search']:
+            return self._get_pick_place_search_status(robot_name, action_name)
+        raise ValueError(f"Unknown action name: {action_name}")
+
+    def stop_robot(self, robot_name):
+        self.robots[robot_name].stop()
 
 
 def test_move_action():
-
     '''Test that move action is interrupted correctly.'''
     objects_by_type = {
         "robot": {"r1", "r2"},
@@ -67,16 +152,16 @@ def test_move_action():
     }
 
     initial_state = State(
-            time=0,
-            fluents={
-                F("at", "r1", "start"),
-                F("at", "r2", "start"),
-                F("free", "r1"),
-                F("free", "r2"),
-            },
+        time=0,
+        fluents={
+            F("at", "r1", "start"),
+            F("at", "r2", "start"),
+            F("free", "r1"),
+            F("free", "r2"),
+        },
     )
     env = TestEnvironment(locations=LOCATIONS)
-    move_op = environments.actions.construct_move_operator(move_time=env.get_move_cost_fn())
+    move_op = environments.operators.construct_move_operator(move_time=env.get_move_cost_fn())
 
     sim = Simulator(initial_state, objects_by_type, [move_op], env)
     actions = sim.get_actions()
@@ -105,21 +190,21 @@ def test_search_action():
         "object": {"objA", "objB"}
     }
 
-    search_time = lambda r, l: 10 if r == "r1" else 15
-    object_find_prob = lambda r, l, o: 0.8 if l == "roomA" else 0.2
+    search_time = lambda r, l: SKILLS_TIME[r]['search']  # noqa: E731, E741
+    object_find_prob = lambda r, l, o: 0.8 if l == "roomA" else 0.2  # noqa: E731, E741
 
     initial_state = State(
-            time=0,
-            fluents={
-                F("at", "r1", "roomA"),
-                F("at", "r2", "roomB"),
-                F("free", "r1"),
-                F("free", "r2"),
-            },
+        time=0,
+        fluents={
+            F("at", "r1", "roomA"),
+            F("at", "r2", "roomB"),
+            F("free", "r1"),
+            F("free", "r2"),
+        },
     )
     env = TestEnvironment(locations=LOCATIONS)
-    search_op = environments.actions.construct_search_operator(object_find_prob=object_find_prob,
-                                                               search_time=search_time)
+    search_op = environments.operators.construct_search_operator(object_find_prob=object_find_prob,
+                                                                 search_time=search_time)
 
     sim = Simulator(initial_state, objects_by_type, [search_op], env)
 
@@ -129,21 +214,22 @@ def test_search_action():
     a2 = get_action_by_name(actions, "search r2 roomB objB")
     sim.advance(a2)
 
-    assert F("free r1") in sim.state.fluents
+    assert F("free r1") not in sim.state.fluents
     assert F("at r1 roomA") in sim.state.fluents
-    assert F("searched roomA objA") in sim.state.fluents
-    assert F("revealed roomA") in sim.state.fluents
-    assert F("found objA") in sim.state.fluents
-    assert F("found objC") in sim.state.fluents
-    assert F("at objA roomA") in sim.state.fluents
-    assert F("at objC roomA") in sim.state.fluents
-    assert F("lock-search roomA") not in sim.state.fluents
+    assert F("searched roomA objA") not in sim.state.fluents
+    assert F("revealed roomA") not in sim.state.fluents
+    assert F("found objA") not in sim.state.fluents
+    assert F("found objC") not in sim.state.fluents
+    assert F("at objA roomA") not in sim.state.fluents
+    assert F("at objC roomA") not in sim.state.fluents
+    assert F("lock-search roomA") in sim.state.fluents
 
-    assert F("free r2") not in sim.state.fluents
+    assert F("free r2") in sim.state.fluents
     assert F("at r2 roomB") in sim.state.fluents
-    assert F("searched roomB objB") not in sim.state.fluents
-    assert F("found objB") not in sim.state.fluents
-    assert F("lock-search roomB") in sim.state.fluents
+    assert F("searched roomB objB") in sim.state.fluents
+    assert F("found objB") in sim.state.fluents
+    assert F("at objB roomB") in sim.state.fluents
+    assert F("lock-search roomB") not in sim.state.fluents
     assert sim.state.time == 10
 
     assert len(sim.ongoing_actions) == 1
@@ -156,73 +242,85 @@ def test_pick_and_place_action():
         "object": {"objA", "objB"}
     }
 
-    pick_time = lambda r, l, o: 10 if r == "r1" else 15
-    place_time = lambda r, l, o: 10 if r == "r1" else 15
+    pick_time = lambda r, l, o: SKILLS_TIME[r]['pick']  # noqa: E731, E741
+    place_time = lambda r, l, o: SKILLS_TIME[r]['place']  # noqa: E731, E741
 
     initial_state = State(
-            time=0,
-            fluents={
-                F("at", "r1", "roomA"), F("at", "objA", "roomA"), F("at", "objC", "roomA"),
-                F("at", "r2", "roomB"), F("at", "objB", "roomB"),
-                F("free", "r1"), F("free-arm", "r1"),
-                F("free", "r2"), F("free-arm", "r2"),
-            },
+        time=0,
+        fluents={
+            F("at", "r1", "roomA"), F("at", "objA",
+                                      "roomA"), F("at", "objC", "roomA"),
+            F("at", "r2", "roomB"), F("at", "objB", "roomB"),
+            F("free", "r1"), F("free-arm", "r1"),
+            F("free", "r2"), F("free-arm", "r2"),
+        },
     )
     env = TestEnvironment(locations=LOCATIONS)
-    pick_op = environments.actions.construct_pick_operator_nonblocking(pick_time=pick_time)
-    place_op = environments.actions.construct_place_operator_nonblocking(place_time=place_time)
+    pick_op = environments.operators.construct_pick_operator(pick_time=pick_time)
+    place_op = environments.operators.construct_place_operator(place_time=place_time)
 
     sim = Simulator(initial_state, objects_by_type, [pick_op, place_op], env)
 
     actions = sim.get_actions()
     a1 = get_action_by_name(actions, "pick r1 roomA objA")
     sim.advance(a1)
+
+    assert F("free r1") not in sim.state.fluents
+    assert F("free-arm r1") not in sim.state.fluents
+    assert F("free-arm r2") in sim.state.fluents
+    assert sim.state.time == 0
+    assert len(sim.ongoing_actions) == 1
+
     a2 = get_action_by_name(actions, "pick r2 roomB objB")
     sim.advance(a2)
 
-    # R1 finishes picking objA first
-    assert F("free r1") in sim.state.fluents
-    assert F("at r1 roomA") in sim.state.fluents
-    assert F("holding r1 objA") in sim.state.fluents
-    assert F("at objA roomA") not in sim.state.fluents
-    assert "objA" not in env._objects_at_locations["roomA"]["object"]
-    # R2 is still picking objB
-    assert F("free r2") not in sim.state.fluents
-    assert F("at r2 roomB") in sim.state.fluents
-    assert F("holding r2 objB") not in sim.state.fluents
-    assert F("at objB roomB") not in sim.state.fluents
-    assert sim.state.time == 10
-    assert len(sim.ongoing_actions) == 1
-
-    a3 = get_action_by_name(actions, "place r1 roomA objA")
-    sim.advance(a3)
-    # R2 finishes picking objB
+    # R2 finishes picking objB first
     assert F("free r2") in sim.state.fluents
+    assert F("free-arm r2") not in sim.state.fluents
     assert F("at r2 roomB") in sim.state.fluents
     assert F("holding r2 objB") in sim.state.fluents
     assert F("at objB roomB") not in sim.state.fluents
     assert "objB" not in env._objects_at_locations["roomB"]["object"]
-    # R1 is still placing objA
+    assert sim.state.time == 10
+    assert len(sim.ongoing_actions) == 1
+    # R1 is still picking objA
     assert F("free r1") not in sim.state.fluents
     assert F("at r1 roomA") in sim.state.fluents
     assert F("holding r1 objA") not in sim.state.fluents
     assert F("at objA roomA") not in sim.state.fluents
-    assert sim.state.time == 15
-    assert len(sim.ongoing_actions) == 1
 
-    a4 = get_action_by_name(actions, "place r2 roomB objB")
-    sim.advance(a4)
-    # R1 finishes placing objA
+    a3 = get_action_by_name(actions, "place r2 roomB objB")
+    sim.advance(a3)
+    # R1 finishes picking objA
     assert F("free r1") in sim.state.fluents
+    assert F("free-arm r1") not in sim.state.fluents
     assert F("at r1 roomA") in sim.state.fluents
-    assert F("holding r1 objA") not in sim.state.fluents
-    assert F("at objA roomA") in sim.state.fluents
-    assert "objA" in env._objects_at_locations["roomA"]["object"]
+    assert F("holding r1 objA") in sim.state.fluents
+    assert F("at objA roomA") not in sim.state.fluents
+    assert "objA" not in env._objects_at_locations["roomA"]["object"]
+
     # R2 is still placing objB
     assert F("free r2") not in sim.state.fluents
     assert F("at r2 roomB") in sim.state.fluents
-    assert F("holding r2 objB") not in sim.state.fluents
+    assert F("holding r2 objB") in sim.state.fluents
     assert F("at objB roomB") not in sim.state.fluents
+    assert sim.state.time == 15
+    assert len(sim.ongoing_actions) == 1
+
+    a4 = get_action_by_name(actions, "place r1 roomA objA")
+    sim.advance(a4)
+    # R2 finishes placing objB
+    assert F("free r2") in sim.state.fluents
+    assert F("free-arm r2") in sim.state.fluents
+    assert F("at r2 roomB") in sim.state.fluents
+    assert F("holding r2 objB") not in sim.state.fluents
+    assert F("at objB roomB") in sim.state.fluents
+    assert "objB" in env._objects_at_locations["roomB"]["object"]
+    # R1 is still placing objA
+    assert F("free r1") not in sim.state.fluents
+    assert F("at r1 roomA") in sim.state.fluents
+    assert F("holding r1 objA") in sim.state.fluents
+    assert F("at objA roomA") not in sim.state.fluents
     assert sim.state.time == 20
     assert len(sim.ongoing_actions) == 1
 

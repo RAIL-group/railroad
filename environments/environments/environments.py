@@ -1,10 +1,10 @@
 from typing import Dict, List, Tuple, Callable, Union
-import numpy as np
+
 
 class BaseEnvironment:
     '''Abstract class for all environments.'''
     def __init__(self):
-        pass
+        self.time = 0.0
 
     def get_move_cost_fn(self) -> Callable[[str, str, str], float]:
         raise NotImplementedError()
@@ -23,6 +23,14 @@ class BaseEnvironment:
     def add_object_at_location(self, obj, location):
         raise NotImplementedError()
 
+    def move_robot(self, robot_name: str, location: str):
+        raise NotImplementedError()
+
+    def get_move_status(self, robot_name: str) -> int:
+        raise NotImplementedError()
+
+    def stop_robot(self, robot_name: str):
+        raise NotImplementedError()
 
 class SimpleEnvironment(BaseEnvironment):
     """Simple household environment for testing multi-object manipulation."""
@@ -80,3 +88,38 @@ class SimpleEnvironment(BaseEnvironment):
         if object_type not in self._ground_truth[location]:
             self._ground_truth[location][object_type] = set()
         self._ground_truth[location][object_type].add(obj)
+
+
+class Robot:
+    def __init__(self, name: str, pose=None, skills_time: Dict[str, float] = None):
+        self.name = name
+        self.pose = pose
+        self.target_pose = None
+        self.is_free = True
+        self.skills_time = skills_time
+        self.start_time = None
+
+    def __repr__(self):
+        return f"Robot(name={self.name}, pose={self.pose})"
+
+    def move(self, new_pose, start_time):
+        self.is_free = False
+        self.start_time = start_time
+        self.target_pose = new_pose
+
+    def pick(self, start_time):
+        self.is_free = False
+        self.start_time = start_time
+
+    def place(self, start_time):
+        self.is_free = False
+        self.start_time = start_time
+
+    def search(self, start_time):
+        self.is_free = False
+        self.start_time = start_time
+
+    def stop(self):
+        self.is_free = True
+        self.target_pose = None
+        self.start_time = None

@@ -6,22 +6,23 @@ from mrppddl.core import (
 )
 import environments
 
+
 def test_move_operator():
     objects_by_type = {
         "robot": {"r1", "r2"},
         "location": {"start", "roomA", "roomB", "roomC"},
     }
-    move_time = lambda r, f, t: 10 if r == "r1" else 15
-    move_op = environments.actions.construct_move_operator_nonblocking(move_time=move_time)
+    move_time = lambda r, f, t: 10 if r == "r1" else 15  # noqa E731, E741
+    move_op = environments.operators.construct_move_operator(move_time=move_time)
 
     initial_state = State(
-            time=0,
-            fluents={
-                F("at", "r1", "start"),
-                F("at", "r2", "start"),
-                F("free", "r1"),
-                F("free", "r2"),
-            },
+        time=0,
+        fluents={
+            F("at", "r1", "start"),
+            F("at", "r2", "start"),
+            F("free", "r1"),
+            F("free", "r2"),
+        },
     )
     move_actions = move_op.instantiate(objects_by_type)
     a1 = get_action_by_name(move_actions, "move r1 start roomA")
@@ -59,24 +60,26 @@ def test_move_operator():
     assert F("at r1 roomC") not in state3.fluents
     assert state3.time == 15
 
+
 def test_search_operator():
     objects_by_type = {
         "robot": {"r1", "r2"},
         "location": {"roomA", "roomB"},
         "object": {"objA", "objB"}
     }
-    search_time = lambda r, l: 10 if r == "r1" else 15
-    object_find_prob = lambda r, l, o: 0.8 if l == "roomA" else 0.2
-    search_op = environments.actions.construct_search_operator(object_find_prob=object_find_prob, search_time=search_time)
+    search_time = lambda r, l: 10 if r == "r1" else 15  # noqa E731, E741
+    object_find_prob = lambda r, l, o: 0.8 if l == "roomA" else 0.2  # noqa E731, E741
+    search_op = environments.operators.construct_search_operator(
+        object_find_prob=object_find_prob, search_time=search_time)
 
     initial_state = State(
-            time=0,
-            fluents={
-                F("at", "r1", "roomA"),
-                F("at", "r2", "roomB"),
-                F("free", "r1"),
-                F("free", "r2"),
-            },
+        time=0,
+        fluents={
+            F("at", "r1", "roomA"),
+            F("at", "r2", "roomB"),
+            F("free", "r1"),
+            F("free", "r2"),
+        },
     )
     search_actions = search_op.instantiate(objects_by_type)
     a1 = get_action_by_name(search_actions, "search r1 roomA objA")
@@ -117,20 +120,21 @@ def test_pick_and_place_operator():
         "object": {"objA", "objB"}
     }
 
-    pick_time = lambda r, l, o: 10 if r == "r1" else 15
-    place_time = lambda r, l, o: 10 if r == "r1" else 15
+    pick_time = lambda r, l, o: 10 if r == "r1" else 15  # noqa E731, E741
+    place_time = lambda r, l, o: 10 if r == "r1" else 15  # noqa E731, E741
 
     initial_state = State(
-            time=0,
-            fluents={
-                F("at", "r1", "roomA"), F("at", "objA", "roomA"), F("at", "objC", "roomA"),
-                F("at", "r2", "roomB"), F("at", "objB", "roomB"),
-                F("free", "r1"), F("free-arm", "r1"),
-                F("free", "r2"), F("free-arm", "r2"),
-            },
+        time=0,
+        fluents={
+            F("at", "r1", "roomA"), F("at", "objA",
+                                      "roomA"), F("at", "objC", "roomA"),
+            F("at", "r2", "roomB"), F("at", "objB", "roomB"),
+            F("free", "r1"), F("free-arm", "r1"),
+            F("free", "r2"), F("free-arm", "r2"),
+        },
     )
-    pick_op = environments.actions.construct_pick_operator(pick_time=pick_time)
-    place_op = environments.actions.construct_place_operator_nonblocking(place_time=place_time)
+    pick_op = environments.operators.construct_pick_operator(pick_time=pick_time)
+    place_op = environments.operators.construct_place_operator(place_time=place_time)
 
     pick_actions = pick_op.instantiate(objects_by_type)
     place_actions = place_op.instantiate(objects_by_type)
@@ -183,7 +187,7 @@ def test_pick_and_place_operator():
     # r1 is still placing
     assert F("free r1") not in state.fluents
     assert F("at r1 roomA") in state.fluents
-    assert F("holding r1 objA") not in state.fluents
+    assert F("holding r1 objA") in state.fluents
     assert F("at objA roomA") not in state.fluents
 
     # assign r2 to place objB at roomB
@@ -200,5 +204,5 @@ def test_pick_and_place_operator():
     # r2 is still placing objB
     assert F("free r2") not in state.fluents
     assert F("at r2 roomB") in state.fluents
-    assert F("holding r2 objB") not in state.fluents
+    assert F("holding r2 objB") in state.fluents
     assert F("at objB roomB") not in state.fluents
