@@ -198,7 +198,6 @@ class OngoingAction:
     def is_done(self):
         return not self.upcoming_effects
 
-    '''TODO: change this name to is_action_complete'''
     @property
     def is_action_complete(self):
         if self.is_action_called:
