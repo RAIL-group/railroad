@@ -4,13 +4,8 @@ from copy import copy
 from mrppddl.core import Fluent as F, State
 from mrppddl.core import transition
 from mrppddl.core import Operator
-from .environments import BaseEnvironment
+from .environments import BaseEnvironment, ActionStatus
 from typing import Dict, Set, List
-
-
-IDLE = -1
-MOVING = 0
-REACHED = 1
 
 
 class EnvironmentInterface():
@@ -203,7 +198,7 @@ class OngoingAction:
         if self.is_action_called:
             action_name = self.name.split()[0]
             action_status = self.environment.get_action_status(self.robot, action_name)
-            if action_status == REACHED:
+            if action_status == ActionStatus.DONE:
                 return True
         return False
 

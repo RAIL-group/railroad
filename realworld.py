@@ -10,14 +10,14 @@ from typing import Dict, Set, List, Tuple, Callable
 
 from mrppddl.planner import MCTSPlanner
 import environments
-from environments.environments import BaseEnvironment
+from environments.environments import BaseEnvironment, ActionStatus
 from environments.operators import construct_move_visited_operator
 from environments.core import EnvironmentInterface as PlanningLoop
 
-IDLE = -1
-MOVING = 0
-REACHED = 1
-STATUS_MAP = {'moving': MOVING, 'reached': REACHED, 'stopped': IDLE}
+
+
+
+STATUS_MAP = {'moving': ActionStatus.RUNNING, 'reached': ActionStatus.DONE, 'stopped': ActionStatus.IDLE}
 
 
 class RealEnvironment(BaseEnvironment):
@@ -67,7 +67,7 @@ class RealEnvironment(BaseEnvironment):
         else:
             raise ValueError(result['message'])
 
-    def get_move_status(self, robot_name):
+    def _get_move_status(self, robot_name):
         request = roslibpy.ServiceRequest({'robot_id': robot_name})
         result = self._move_status_service.call(request)
         return STATUS_MAP.get(result['status'], None)
@@ -80,7 +80,7 @@ class RealEnvironment(BaseEnvironment):
 
     def get_action_status(self, robot_name, action_name: str) -> str:
         if action_name == 'move':
-            return self.get_move_status(robot_name)
+            return self._get_move_status(robot_name)
 
 
 if __name__ == '__main__':

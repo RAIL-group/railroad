@@ -1,4 +1,10 @@
 from typing import Dict, List, Tuple, Callable, Union
+from enum import IntEnum
+
+class ActionStatus(IntEnum):
+    IDLE = -1
+    RUNNING = 0
+    DONE = 1
 
 
 class BaseEnvironment:
@@ -26,10 +32,19 @@ class BaseEnvironment:
     def move_robot(self, robot_name: str, location: str):
         raise NotImplementedError()
 
-    def get_move_status(self, robot_name: str) -> int:
+    def pick_robot(self, robot_name: str):
+        raise NotImplementedError()
+
+    def place_robot(self, robot_name: str):
         raise NotImplementedError()
 
     def stop_robot(self, robot_name: str):
+        raise NotImplementedError()
+
+    def search_robot(self, robot_name: str):
+        raise NotImplementedError()
+
+    def get_action_status(self, robot_name: str, action_name: str) -> ActionStatus:
         raise NotImplementedError()
 
 class SimpleEnvironment(BaseEnvironment):
@@ -88,7 +103,6 @@ class SimpleEnvironment(BaseEnvironment):
         if object_type not in self._ground_truth[location]:
             self._ground_truth[location][object_type] = set()
         self._ground_truth[location][object_type].add(obj)
-
 
 class Robot:
     def __init__(self, name: str, pose=None, skills_time: Dict[str, float] = None):

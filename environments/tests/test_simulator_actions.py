@@ -3,7 +3,7 @@ import numpy as np
 from mrppddl.core import Fluent as F, State, get_action_by_name
 from mrppddl.planner import MCTSPlanner
 import environments
-from environments import BaseEnvironment, Robot
+from environments import BaseEnvironment, Robot, ActionStatus
 from environments.core import EnvironmentInterface as Simulator
 
 
@@ -20,10 +20,6 @@ OBJECTS_AT_LOCATIONS = {
     "roomB": {"object": {"objB"}},
     "roomC": {"object": {"objD"}},
 }
-
-IDLE = -1
-MOVING = 0
-REACHED = 1
 
 SKILLS_TIME = {
     'r1': {
@@ -96,7 +92,7 @@ class TestEnvironment(BaseEnvironment):
     def _get_move_status(self, robot_name):
         all_robots_assigned = all(not r.is_free for r in self.robots.values())
         if not all_robots_assigned:
-            return IDLE
+            return ActionStatus.IDLE
         robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
         time_to_target = [(n, np.linalg.norm(r.pose - r.target_pose)) for n, r in self.robots.items()]
 
@@ -104,7 +100,7 @@ class TestEnvironment(BaseEnvironment):
         min_robot, min_distance = min(remaining_times, key=lambda x: x[1])
 
         if min_robot != robot_name:
-            return MOVING
+            return ActionStatus.RUNNING
 
         # compute intermediate pose for all robots
         for r_name in self.robots:
@@ -115,12 +111,12 @@ class TestEnvironment(BaseEnvironment):
 
         # stop the robot that has reached its target
         self.robots[robot_name].stop()
-        return REACHED
+        return ActionStatus.DONE
 
     def _get_pick_place_search_status(self, robot_name, action_name):
         all_robots_assigned = all(not r.is_free for r in self.robots.values())
         if not all_robots_assigned:
-            return IDLE
+            return ActionStatus.IDLE
         robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
         time_to_action = [(n, r.skills_time[action_name]) for n, r in self.robots.items()]
 
@@ -128,10 +124,10 @@ class TestEnvironment(BaseEnvironment):
         min_robot, _ = min(remaining_times, key=lambda x: x[1])
 
         if min_robot != robot_name:
-            return MOVING
+            return ActionStatus.RUNNING
 
         self.stop_robot(robot_name)
-        return REACHED
+        return ActionStatus.DONE
 
     def get_action_status(self, robot_name, action_name):
         if action_name == 'move':
