@@ -4,7 +4,7 @@ from copy import copy
 from mrppddl.core import Fluent as F, State
 from mrppddl.core import transition
 from mrppddl.core import Operator
-from environments import BaseEnvironment
+from .environments import BaseEnvironment
 from typing import Dict, Set, List
 
 

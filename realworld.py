@@ -6,17 +6,18 @@ from mrppddl.core import transition
 
 from mrppddl.core import OptCallable, Operator, Effect
 from mrppddl.helper import _make_callable, _invert_prob
+from typing import Dict, Set, List, Tuple, Callable
 
 from mrppddl.planner import MCTSPlanner
-from environments import BaseEnvironment
-
-from typing import Dict, Set, List, Tuple, Callable
+import environments
+from environments.environments import BaseEnvironment
+from environments.operators import construct_move_visited_operator
+from environments.core import EnvironmentInterface as PlanningLoop
 
 IDLE = -1
 MOVING = 0
 REACHED = 1
 STATUS_MAP = {'moving': MOVING, 'reached': REACHED, 'stopped': IDLE}
-
 
 
 class RealEnvironment(BaseEnvironment):
@@ -46,12 +47,9 @@ class RealEnvironment(BaseEnvironment):
     def _get_distance(self, location1, location2):
         if location1 == 'r1_loc':
             location1, location2 = location2, location1
-        print("Getting distance between", location1, "and", location2)
-
         request = roslibpy.ServiceRequest({'to_name': location1, 'from_name': location2})
         result = self._get_distance_service.call(request)
         if result['ok']:
-            print("Distance:", result['distance'])
             return result['distance']
         else:
             raise ValueError(result['message'])
@@ -70,10 +68,8 @@ class RealEnvironment(BaseEnvironment):
             raise ValueError(result['message'])
 
     def get_move_status(self, robot_name):
-        # print("Getting move status for robot", robot_name)
         request = roslibpy.ServiceRequest({'robot_id': robot_name})
         result = self._move_status_service.call(request)
-        # print("Move status for robot", robot_name, "is", result['status'])
         return STATUS_MAP.get(result['status'], None)
 
     def stop_robot(self, robot_name):
@@ -82,6 +78,9 @@ class RealEnvironment(BaseEnvironment):
         result = self._stop_robot_service.call(request)
         return result['stopped']
 
+    def get_action_status(self, robot_name, action_name: str) -> str:
+        if action_name == 'move':
+            return self.get_move_status(robot_name)
 
 
 if __name__ == '__main__':
@@ -89,27 +88,27 @@ if __name__ == '__main__':
     host = '192.168.0.16'
     client = roslibpy.Ros(host=host, port=9090)
     client.run()
-    print(client.get_services())
     env = RealEnvironment(client)
 
     objects_by_type = {
-        # "robot": {"r1", "r2"},
-        "robot": {"r1"},
+        "robot": {"r1", "r2"},
+        # "robot": {"r1"},
         "location": env.locations,
     }
     initial_state = State(
         time=0.0,
         fluents={
             F("at", "r1", "r1_loc"), F('visited', 'r1_loc'),
-            # F("at", "r2", "r2_loc"), F('visited', 'r2_loc'),
+            F("at", "r2", "r2_loc"), F('visited', 'r2_loc'),
             F("free", "r1"),
-            # F("free", "r2"),
+            F("free", "r2"),
         },
     )
 
     move_op = construct_move_visited_operator(move_time=env.get_move_cost_fn())
     planning_loop = PlanningLoop(initial_state, objects_by_type, [move_op], env)
     goal_fluents = {F("visited t1"), F("visited t2"), F("visited t3")}
+    # goal_fluents = {F("visited roomA"), F("visited roomC"), F("visited roomE")}
 
     actions_taken = []
     for _ in range(1000):
