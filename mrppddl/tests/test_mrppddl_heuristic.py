@@ -6,10 +6,158 @@ from mrppddl.core import (
     State,
     transition,
     preprocess_actions_for_relaxed_planning,
+    extract_negative_preconditions,
+    create_positive_fluent_mapping,
+    convert_action_to_positive_preconditions,
+    convert_action_effects,
 )
-from mrppddl._bindings import ff_heuristic
+from mrppddl._bindings import ff_heuristic, Action, GroundedEffect
 
 F = Fluent
+
+
+# ============================================================================
+# Unit Tests for Preprocessing Functions
+# ============================================================================
+
+
+def test_convert_action_replaces_negative_precondition():
+    """Test that negative preconditions are replaced with positive 'not-' versions."""
+    # Manually create an action with a negative precondition
+    preconditions = {
+        F("at r1 location"),
+        F("free r1"),
+        ~F("hand_full r1"),  # Negative precondition
+    }
+    effects = [GroundedEffect(time=2.0, resulting_fluents={F("done")})]
+    action = Action(preconditions, effects, name="test_action")
+
+    # Verify the action has a negative precondition
+    assert len(action._neg_precond_flipped) == 1
+    assert F("hand_full r1") in action._neg_precond_flipped
+
+    # Extract negative preconditions using our function
+    neg_fluents = extract_negative_preconditions([action])
+    assert F("hand_full r1") in neg_fluents
+
+    # Create mapping for negative preconditions
+    mapping = create_positive_fluent_mapping(neg_fluents)
+    assert F("hand_full r1") in mapping
+
+    # Convert the action
+    converted_action = convert_action_to_positive_preconditions(action, mapping)
+
+    # Verify negative precondition was replaced with mapped positive version
+    assert len(converted_action._neg_precond_flipped) == 0
+    assert mapping[F("hand_full r1")] in converted_action.preconditions
+    assert ~F("hand_full r1") not in converted_action.preconditions
+
+    # Verify positive preconditions are preserved
+    assert F("at r1 location") in converted_action.preconditions
+    assert F("free r1") in converted_action.preconditions
+
+
+def test_effect_adds_positive_fluent():
+    """Test that when F("P") is in effects, ~F("not-P") is also added."""
+    # Create an action that adds F("P") in its effects
+    preconditions = {F("at r1 location")}
+    effects = [
+        GroundedEffect(time=2.0, resulting_fluents={F("P")})  # Adds P
+    ]
+    action = Action(preconditions, effects, name="test_action")
+
+    # Create mapping for P (simulate that ~F("P") appears as negative precondition somewhere)
+    mapping = create_positive_fluent_mapping({F("P")})
+
+    # Verify mapping was created correctly
+    assert F("P") in mapping
+    not_P = mapping[F("P")]  # This is F("not-P")
+
+    # Convert the action's effects
+    converted_action = convert_action_effects(action, mapping)
+
+    # Expected: effects should now include both F("P") and ~F("not-P")
+    # This maintains consistency: if P becomes true, not-P must become false
+    effect_fluents = converted_action.effects[0].resulting_fluents
+    assert F("P") in effect_fluents
+    assert ~not_P in effect_fluents  # Should have ~F("not-P")
+
+
+def test_effect_removes_positive_fluent():
+    """Test that when ~F("P") is in effects, F("not-P") is also added."""
+    # Create an action that removes F("P") (i.e., has ~F("P") in effects)
+    preconditions = {F("at r1 location")}
+    effects = [
+        GroundedEffect(time=2.0, resulting_fluents={~F("P")})  # Removes P
+    ]
+    action = Action(preconditions, effects, name="test_action")
+
+    # Create mapping for P
+    mapping = create_positive_fluent_mapping({F("P")})
+
+    # Verify mapping was created correctly
+    assert F("P") in mapping
+    not_P = mapping[F("P")]  # This is F("not-P")
+
+    # Convert the action's effects
+    converted_action = convert_action_effects(action, mapping)
+
+    # Expected: effects should now include both ~F("P") and F("not-P")
+    # This maintains consistency: if P becomes false, not-P must become true
+    effect_fluents = converted_action.effects[0].resulting_fluents
+    assert ~F("P") in effect_fluents
+    assert not_P in effect_fluents  # Should have F("not-P")
+
+
+def test_probabilistic_effect_conversion():
+    """Test that probabilistic effects are correctly converted."""
+    # Create an action with probabilistic effects (like a search action)
+    preconditions = {F("at r1 location"), ~F("found obj")}
+
+    # Create probabilistic effect: 60% chance of finding, 40% chance of not finding
+    prob_effects = [
+        (0.6, [  # Success branch
+            GroundedEffect(time=0.0, resulting_fluents={F("found obj")}),
+            GroundedEffect(time=2.0, resulting_fluents={F("holding r1 obj")})
+        ]),
+        (0.4, [  # Failure branch
+            GroundedEffect(time=0.0, resulting_fluents={F("searched location")})
+        ])
+    ]
+
+    effects = [
+        GroundedEffect(
+            time=5.0,
+            resulting_fluents={F("at r1 location")},
+            prob_effects=prob_effects
+        )
+    ]
+    action = Action(preconditions, effects, name="search")
+
+    # Create mapping for "found"
+    mapping = create_positive_fluent_mapping({F("found obj")})
+    not_found = mapping[F("found obj")]  # F("not-found obj")
+
+    # Convert the action's effects
+    converted_action = convert_action_effects(action, mapping)
+
+    # Verify the main effect is converted
+    main_effect = converted_action.effects[0]
+    assert F("at r1 location") in main_effect.resulting_fluents
+
+    # Verify probabilistic branches are preserved
+    assert main_effect.is_probabilistic
+    assert len(main_effect.prob_effects) == 2
+
+    # Check success branch - should have added ~F("not-found obj")
+    success_branch = main_effect.prob_effects[0]
+    assert success_branch.prob == 0.6
+    success_effects = success_branch.effects
+
+    # First effect in success branch adds "found obj", should also add ~F("not-found obj")
+    first_success_effect = success_effects[0]
+    assert F("found obj") in first_success_effect.resulting_fluents
+    assert ~not_found in first_success_effect.resulting_fluents  # Should have ~F("not-found obj")
 
 
 def construct_move_operator(move_cost: float = 5.0):
