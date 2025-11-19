@@ -259,6 +259,83 @@ inline void backpropagate(MCTSDecisionNode *leaf, double reward) {
   }
 }
 
+// Forward declaration if needed, or place it before the walker
+inline double get_h_value(const State& state, HeuristicFn& heuristic_fn) {
+    double h = heuristic_fn ? heuristic_fn(state) : 0.0;
+    if (h > 1e10) {
+        return HEURISTIC_CANNOT_FIND_GOAL_PENALTY;
+    }
+    return h;
+}
+
+
+void print_best_path(const MCTSDecisionNode* node, HeuristicFn& heuristic_fn, int max_print_depth, int current_depth = 0) {
+    if (!node || current_depth > max_print_depth) {
+        return;
+    }
+
+    // --- Print Info for the Current Node ---
+    double q_value = (node->visits > 0) ? node->value / static_cast<double>(node->visits) : 0.0;
+    double h_value = get_h_value(node->state, heuristic_fn);
+    double time_cost = node->state.time();
+
+    // Indent for readability
+    for (int i = 0; i < current_depth; ++i) std::cout << "  ";
+
+    std::cout << "[D:" << current_depth << "] "
+              << "visits=" << node->visits << ", "
+              << "Q_val=" << q_value << ", "
+              << "cost(g)=" << time_cost << ", "
+              << "heuristic(h)=" << h_value << ", "
+              << "g+h=" << time_cost + h_value
+              << std::endl;
+
+    if (node->children.empty()) {
+        for (int i = 0; i < current_depth; ++i) std::cout << "  ";
+        std::cout << "  (Leaf Node)" << std::endl;
+        return;
+    }
+
+    // --- Find the Best Child (Most Visited) to Traverse Next ---
+    const MCTSChanceNode* best_chance_node = nullptr;
+    int max_visits = -1;
+
+    for (const auto& [action, chance_node_ptr] : node->children) {
+        if (chance_node_ptr->visits > max_visits) {
+            max_visits = chance_node_ptr->visits;
+            best_chance_node = chance_node_ptr.get();
+        }
+    }
+
+    if (!best_chance_node) {
+        for (int i = 0; i < current_depth; ++i) std::cout << "  ";
+        std::cout << "  (No best child found)" << std::endl;
+        return;
+    }
+
+    // Print the action taken
+    for (int i = 0; i < current_depth; ++i) std::cout << "  ";
+    std::cout << "  └── Action: " << best_chance_node->action->name()
+              << " (visits=" << best_chance_node->visits << ")" << std::endl;
+
+
+    // In a probabilistic environment, a chance node can have multiple outcomes.
+    // For this diagnostic, let's just follow the most likely or most visited outcome.
+    if (!best_chance_node->children.empty()) {
+        const MCTSDecisionNode* next_decision_node = nullptr;
+        int max_outcome_visits = -1;
+        // Let's find the most visited successor state
+        for(const auto& child : best_chance_node->children) {
+            if (child->visits > max_outcome_visits) {
+                max_outcome_visits = child->visits;
+                next_decision_node = child.get();
+            }
+        }
+        print_best_path(next_decision_node, heuristic_fn, max_print_depth, current_depth + 1);
+    }
+}
+
+
 // ---------------------- MCTS core ----------------------
 
 inline std::string mcts(const State &root_state,
@@ -362,6 +439,11 @@ inline std::string mcts(const State &root_state,
     // ---------------- Backpropagation ----------------
     backpropagate(node, reward);
   }
+
+  // // ----> ADD THIS SECTION <----
+  // std::cout << "\n--- MCTS Tree Analysis (Most Visited Path) ---" << std::endl;
+  // print_best_path(root.get(), heuristic_fn, 20 /* max depth to print */);
+  // std::cout << "----------------------------------------------\n" << std::endl;
 
   // --------------- Extract a (very) shallow policy ---------------
   MCTSResult result;
