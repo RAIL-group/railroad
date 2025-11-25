@@ -89,7 +89,7 @@ class ThorInterface:
 
         self.known_cost = self.get_known_costs()
 
-    def load_scene(self, path='/resources/procthor-10k'):
+    def load_scene(self, path='./resources/procthor-10k'):
         with open(
             f'{path}/data.jsonl',
             "r",

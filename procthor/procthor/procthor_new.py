@@ -65,7 +65,7 @@ class ThorInterface:
         self.robot_pose = self.get_robot_pose()
         self.known_cost = self.get_known_costs()
 
-    def save_and_get_cache(self, path='/resources/procthor-10k/cache'):
+    def save_and_get_cache(self, path='./resources/procthor-10k/cache'):
         """Cache the scene data."""
         cache = {
             'reachable_positions': self.get_reachable_positions(),
@@ -78,7 +78,7 @@ class ThorInterface:
             pickle.dump(cache, f)
         return cache
 
-    def load_cache(self, path='/resources/procthor-10k/cache'):
+    def load_cache(self, path='./resources/procthor-10k/cache'):
         """Load the cached scene data."""
         cache_file = Path(path) / f'scene_{self.args.current_seed}.pkl'
         if not cache_file.exists():
@@ -95,7 +95,7 @@ class ThorInterface:
                 self.robot_pose,
                 self.target_objs_info)
 
-    def load_scene(self, path='/resources/procthor-10k'):
+    def load_scene(self, path='./resources/procthor-10k'):
         with open(
             f'{path}/data.jsonl',
             "r",
