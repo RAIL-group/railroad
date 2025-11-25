@@ -1,5 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help
+PYTEST_FILTER ?= test
 
 help:  ## Show this help message
 	@echo "Available targets:"
