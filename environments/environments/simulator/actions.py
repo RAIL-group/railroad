@@ -165,11 +165,11 @@ def construct_pick_operator(pick_time: OptCallable) -> Operator:
     return Operator(
         name="pick",
         parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
-        preconditions=[F("at ?r ?loc"), F("free ?r"), F("at ?obj ?loc"), F("free-arm ?r")],
+        preconditions=[F("at ?r ?loc"), F("free ?r"), F("at ?obj ?loc"), ~F("hand-full ?r")],
         effects=[
             Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?obj ?loc")}),
             Effect(time=(pick_time, ["?r", "?loc", "?obj"]),
-                   resulting_fluents={F("free ?r"), F("holding ?r ?obj"), F("not free-arm ?r")}),
+                   resulting_fluents={F("free ?r"), F("holding ?r ?obj"), F("hand-full ?r")}),
         ],
     )
 
@@ -178,10 +178,10 @@ def construct_place_operator(place_time: OptCallable) -> Operator:
     return Operator(
         name="place",
         parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
-        preconditions=[F("at ?r ?loc"), F("free ?r"), F("holding ?r ?obj"), F("not free-arm ?r")],
+        preconditions=[F("at ?r ?loc"), F("free ?r"), F("holding ?r ?obj"), F("hand-full ?r")],
         effects=[
             Effect(time=0, resulting_fluents={F("not free ?r"), F("not holding ?r ?obj")}),
             Effect(time=(place_time, ["?r", "?loc", "?obj"]),
-                   resulting_fluents={F("free ?r"), F("at ?obj ?loc"), F("free-arm ?r")}),
+                   resulting_fluents={F("free ?r"), F("at ?obj ?loc"), ~F("hand-full ?r")}),
         ],
     )
