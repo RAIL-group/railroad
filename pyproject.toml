@@ -13,6 +13,7 @@ dependencies = [
     "pyright",
     "pytest-html",
     "pytest-pyright",
+    "pytest-timeout",
     "mrppddl",
     "mrppddl-env",
     "rich",
