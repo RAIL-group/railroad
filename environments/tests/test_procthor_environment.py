@@ -17,7 +17,7 @@ def get_args():
     args.num_robots = 2
     args.current_seed = 4001
     args.resolution = 0.05
-    args.save_dir = '/data/test_logs'
+    args.save_dir = './data/test_logs'
     return args
 
 

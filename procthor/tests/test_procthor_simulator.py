@@ -9,7 +9,7 @@ from pathlib import Path
 
 def get_args():
     args = lambda key: None
-    args.save_dir = '/data/test_logs'
+    args.save_dir = './data/test_logs'
     args.current_seed = 0
     args.resolution = 0.05
     return args
