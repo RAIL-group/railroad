@@ -23,6 +23,6 @@ typecheck:  ## Runs the typechecker via pyright
 	@uv run pyright -w mrppddl/src/mrppddl mrppddl/tests
 
 test:
-	@uv run pytest -vsk $(PYTEST_FILTER) --disable-warnings
+	@uv run pytest -vsk $(PYTEST_FILTER)
 
 include procthor/Makefile.mk
