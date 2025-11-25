@@ -641,6 +641,18 @@ wheels = [
 ]
 
 [[package]]
+name = "pytest-timeout"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ac/82/4c9ecabab13363e72d880f2fb504c5f750433b2b6f16e99f4ec21ada284c/pytest_timeout-2.4.0.tar.gz", hash = "sha256:7e68e90b01f9eff71332b25001f85c75495fc4e3a836701876183c4bcfd0540a", size = 17973 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fa/b6/3127540ecdf1464a00e5a01ee60a1b09175f6913f0644ac748494d9c4b21/pytest_timeout-2.4.0-py3-none-any.whl", hash = "sha256:c42667e5cdadb151aeb5b26d114aff6bdf5a907f176a007a30b940d3d865b5c2", size = 14382 },
+]
+
+[[package]]
 name = "python-dateutil"
 version = "2.9.0.post0"
 source = { registry = "https://pypi.org/simple" }
@@ -666,6 +678,7 @@ dependencies = [
     { name = "pyright" },
     { name = "pytest-html" },
     { name = "pytest-pyright" },
+    { name = "pytest-timeout" },
     { name = "rich" },
     { name = "scipy" },
 ]
@@ -681,6 +694,7 @@ requires-dist = [
     { name = "pyright" },
     { name = "pytest-html" },
     { name = "pytest-pyright" },
+    { name = "pytest-timeout" },
     { name = "rich" },
     { name = "scipy" },
 ]
