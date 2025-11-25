@@ -1,11 +1,4 @@
-import sys
-import os
-# Remove the current directory from sys.path so it doesn't pick up
-# the local 'environments' folder.
-try:
-    sys.path.remove(os.getcwd())
-except ValueError:
-    pass
+import pytest
 import numpy as np
 import environments
 from environments import Simulator
@@ -65,7 +58,8 @@ class TestEnvironment(environments.BaseEnvironment):
         self._objects_at_locations[location][object_type].add(obj)
 
 
-def run():
+@pytest.mark.timeout(15)
+def test_more_heuristic():
     objects_by_type = {
         "robot": ["r1"],
         "location": ["start", "bed_2", "dresser_3", "desk_4", "garbagecan_5"],
@@ -86,8 +80,8 @@ def run():
     # Check3: goal function
     goal_fluents = {
         # F("at teddybear_6 garbagecan_5"),   # works
-        F("at pencil_17 garbagecan_5"),  # does not work
-        # F("at pencil_17 bed_2"),  # works
+        F("at pencil_17 garbagecan_5"),  # used to osccillate before fix
+        # F("at pencil_17 bed_2"),  # used to osccillate before fix
     }
 
     env = TestEnvironment(locations=LOCATIONS)
@@ -127,7 +121,4 @@ def run():
             break
 
     print(f"Actions taken: {actions_taken}")
-
-
-if __name__ == "__main__":
-    run()
+    assert sim.is_goal_reached(goal_fluents)
