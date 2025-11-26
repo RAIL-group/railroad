@@ -146,7 +146,9 @@ def test_procthor_move_and_search():
     plotting.plot_grid_with_robot_trajectory(ax, env.grid, robot_all_poses, trajectory, env.known_graph)
     plt.title(f"Cost: {cost:0.1f}")
 
-    plt.savefig(Path(args.save_dir) / f'object_search_optimistic_{args.current_seed}.png', dpi=1000)
+    figpath = Path(args.save_dir) / f'object_search_optimistic_{args.current_seed}.png'
+    figpath.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(figpath, dpi=1000)
 
 
 def test_procthor_move_search_pick_place():
@@ -242,4 +244,6 @@ def test_procthor_move_search_pick_place():
     plotting.plot_grid_with_robot_trajectory(ax, env.grid, robot_all_poses, trajectory, env.known_graph)
     plt.title(f"Cost: {cost:0.1f}")
 
-    plt.savefig(Path(args.save_dir) / f'object_search_optimistic_{args.current_seed}.png', dpi=1000)
+    figpath = Path(args.save_dir) / f'object_search_optimistic_{args.current_seed}.png'
+    figpath.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(figpath, dpi=1000)
