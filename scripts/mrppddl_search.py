@@ -35,23 +35,8 @@ initial_state = State(
 goal_fluents = {Fluent("found cup"), Fluent("found bowl")}
 all_actions = search_actions
 mcts = MCTSPlanner(all_actions)
-for _ in range(100):
+for _ in range(10):
     stime = time()
-    action = mcts(initial_state, goal_fluents, max_iterations=100, c=10)
-    print(f"MCTS (no mapping): {{Initial State: Best Action}}, time={time()-stime:.3f}")
-    print(action)
-
-
-from mrppddl.core import preprocess_actions_for_relaxed_planning
-goal_fluents = {Fluent("found cup"), Fluent("found bowl")}
-all_actions = search_actions
-converted_actions, converted_state, mapping = preprocess_actions_for_relaxed_planning(
-      all_actions,
-      initial_state
-  )
-mcts = MCTSPlanner(converted_actions)
-for _ in range(100):
-    stime = time()
-    action = mcts(converted_state, goal_fluents, max_iterations=100, c=10)
-    print(f"MCTS (with mapping): {{Initial State: Best Action}}, time={time()-stime:.3f}")
+    action = mcts(initial_state, goal_fluents, max_iterations=50000, c=1000)
+    print(f"MCTS: {{Initial State: Best Action}}, time={time()-stime:.3f}")
     print(action)
