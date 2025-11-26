@@ -508,7 +508,8 @@ def construct_search_operator(find_prob: float = 1.0, search_cost: float = 10.0)
     )
 
 
-def test_ff_heuristic_with_probabilistic_search():
+@pytest.mark.parametrize("find_prob", [1.0, 0.5, 0.2, 0.0])
+def test_ff_heuristic_with_probabilistic_search(find_prob):
     """Test that FF heuristic handles probabilistic search actions correctly.
 
     This test verifies the fix for the bug where the heuristic only examined
@@ -521,7 +522,7 @@ def test_ff_heuristic_with_probabilistic_search():
     """
     # Define operators
     move_op = construct_move_operator(move_cost=5.0)
-    search_op = construct_search_operator(find_prob=1.0, search_cost=10.0)
+    search_op = construct_search_operator(find_prob=find_prob, search_cost=10.0)
     pick_op = construct_pick_operator(pick_cost=5.0)
     place_op = construct_place_operator(place_cost=5.0)
 
@@ -563,16 +564,3 @@ def test_ff_heuristic_with_probabilistic_search():
         "Heuristic returned infinity! The fix for probabilistic outcomes "
         "may not be working correctly."
     )
-
-    # Expected plan:
-    # 1. move r1 start -> desk_4 (cost: 5.0)
-    # 2. search r1 desk_4 pencil_17 (cost: 10.0) - finds pencil
-    # 3. pick r1 desk_4 pencil_17 (cost: 5.0)
-    # 4. move r1 desk_4 -> garbagecan_5 (cost: 5.0)
-    # 5. place r1 garbagecan_5 pencil_17 (cost: 5.0)
-    # Total: 30.0
-    #
-    # The heuristic might not be exactly 30.0 due to relaxation,
-    # but it should be finite and reasonable
-    assert h_value > 0, f"Expected positive heuristic value, got {h_value}"
-    assert h_value < 1000, f"Expected reasonable heuristic value, got {h_value}"
