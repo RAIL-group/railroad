@@ -14,14 +14,31 @@ dependencies = [
     "pytest-html",
     "pytest-pyright",
     "pytest-timeout",
+    "rich",
     "mrppddl",
     "mrppddl-env",
-    "rich",
+    "procthor",
+    "common",
+    "gridmap",
+    "environments",
+    "prior>=1.0.3",
+    "ai2thor>=5.0.0",
+    "sentence-transformers>=5.1.2",
+    "scikit-image>=0.25.2",
+    "shapely>=2.1.2",
+    "google-generativeai>=0.8.5",
+    "openai>=2.8.1",
+    "python-dotenv>=1.2.1",
+    "pandas>=2.3.3",
 ]
 
 [tool.uv.sources]
-mrppddl = { path = "./mrppddl" }
-mrppddl-env = { path = "./mrppddl_env" }
+mrppddl-env = { path = "mrppddl_env", editable = true }
+mrppddl = { path = "mrppddl", editable = true }
+common = { path = "common", editable = true }
+gridmap = { path = "gridmap", editable = true }
+environments = { path = "environments", editable = true }
+procthor = { path = "procthor", editable = true }
 
 [tool.pytest.ini_options]
 filterwarnings = [

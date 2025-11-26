@@ -1,3 +1,16 @@
 [build-system]
-requires = ["setuptools", "wheel", "pybind11"]
+requires = ["setuptools>=64", "wheel", "pybind11"]
 build-backend = "setuptools.build_meta"
+
+[tool.uv]
+cache-keys = [
+  { file = "pyproject.toml" },
+  { file = "setup.py" },
+
+  # Changing the bindings will trigger a rebuild
+  { file = "src/mrppddl/*.cpp" },
+
+  # Changes to headers will trigger a rebuild
+  { file = "include/**/*.hpp" },
+  { file = "include/**/*.h" },
+]

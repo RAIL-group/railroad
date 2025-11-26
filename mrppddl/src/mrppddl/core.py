@@ -2,6 +2,16 @@
 from typing import Callable, List, Tuple, Dict, Set, Union, Sequence
 import itertools
 
+try:
+    from mrppddl import _bindings  # noqa: F401
+except ImportError as e:
+    raise ImportError(
+        "mrppddl's native extension (_bindings) is missing.\n"
+        "Try rebuilding the package, e.g.:\n"
+        "    uv sync --reinstall-package mrppddl\n"
+        "or remove .venv and run `uv sync`."
+    ) from e
+
 from mrppddl._bindings import GroundedEffect, Fluent, Action, State
 from mrppddl._bindings import transition  # noqa: F401
 
