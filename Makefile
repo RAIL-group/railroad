@@ -7,23 +7,26 @@ help:  ## Show this help message
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 .PHONY: build
-build:  ## Build the environment
+build:  clean-cpp ## Build the environment
 	@uv sync
 	@uv pip install -r requirements.txt
-	@uv pip install -e "mrppddl @ ./mrppddl" "mrppddl_env @ ./mrppddl_env"
-	@uv pip install -e ./procthor -e ./common -e ./gridmap -e ./environments
+	@uv pip install --force-reinstall ./mrppddl ./mrppddl_env ./procthor ./common ./gridmap ./environments
 
-build-cpp:  ## Specifically build the C++ code
-	@uv sync
-	@rm -rf ./mrppddl/build && uv pip install --force-reinstall ./mrppddl
 
-clean:  ## Remove build artifacts and the venv
-	@rm -rf .venv mrppddl/build mrppddl/src/mrppddl/*cpython*
+.PHONY: clean clean-cpp clean-venv
+clean-cpp:  ## Remove C++-specific build artifacts
+	@rm -rf mrppddl/build mrppddl/src/mrppddl/*cpython*
 
+clean-venv:  ## Remove virtualenv directory 'venv'
+	@rm -rf .venv
+
+clean: clean-cpp clean-venv  ## Remove build artifacts and the venv
+
+.PHONY: typecheck test
 typecheck:  ## Runs the typechecker via pyright
 	@uv run pyright -w mrppddl/src/mrppddl mrppddl/tests
 
-test:
+test: build download-procthor-all  ## Runs tests (limit scope via PYTEST_FILTER=filter)
 	@uv run pytest -vk $(PYTEST_FILTER)
 
 include procthor/Makefile.mk

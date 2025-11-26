@@ -24,7 +24,7 @@ $(RESOURCES_BASE_DIR)/$(PROCTHOR_DATA_DIR)/download_complete.tmp:
 download-ai2thor-simulator: $(RESOURCES_BASE_DIR)/$(AI2THOR_SIM_DIR)/download_complete.tmp
 $(RESOURCES_BASE_DIR)/$(AI2THOR_SIM_DIR)/download_complete.tmp:
 	@mkdir -p $(RESOURCES_BASE_DIR)/$(AI2THOR_SIM_DIR)
-	@$(DOCKER_PYTHON) -m procthor.scripts.download_simulator
+	@$(DOCKER_PYTHON) -m procthor.scripts.download_simulator \
 		--save_dir $(RESOURCES_BASE_DIR)/$(AI2THOR_SIM_DIR)
 	@touch $(RESOURCES_BASE_DIR)/$(AI2THOR_SIM_DIR)/download_complete.tmp
 
