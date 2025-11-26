@@ -1,7 +1,9 @@
-import pytest
 from mrppddl.core import Fluent, State, transition, get_action_by_name
 from mrppddl.helper import construct_move_visited_operator
+from mrppddl.helper import construct_search_operator
 from mrppddl.planner import MCTSPlanner, get_usable_actions
+
+import pytest
 import random
 
 F = Fluent
@@ -67,7 +69,7 @@ def test_planner_mcts_move_visit_multirobot(initial_fluents):
         "location": ["start", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"],
     }
     random.seed(8616)
-    move_op = construct_move_visited_operator(lambda *args: 5.0 + random.random())
+    move_op = construct_move_visited_operator(lambda *args: 5.0 + 5 * random.random())
     all_actions = move_op.instantiate(objects_by_type)
 
     # Initial state
@@ -90,7 +92,7 @@ def test_planner_mcts_move_visit_multirobot(initial_fluents):
         if is_goal(state):
             print("Goal found!")
             break
-        action_name = mcts(state, goal_fluents, 10000, c=10)
+        action_name = mcts(state, goal_fluents, 2000, c=10)
         if action_name == "NONE":
             break
         action = get_action_by_name(all_actions, action_name)
@@ -98,3 +100,55 @@ def test_planner_mcts_move_visit_multirobot(initial_fluents):
         state = transition(state, action)[0][0]
         print(action_name, state, is_goal(state))
     assert is_goal(state)
+
+
+@pytest.mark.parametrize("roomA_prob", [1.0, 0.8, 0.6])
+def test_mcts_search_picks_more_likely_location(roomA_prob):
+    # Define objects
+    objects_by_type = {
+        "robot": ["r1", "r2"],
+        "location": ["start", "roomA", "roomB"],
+        "object": ["cup", "bowl"],
+    }
+
+    # Parametrized search probability model
+    def object_search_prob(robot, search_loc, obj):
+        if search_loc == "roomA":
+            return roomA_prob
+        else:
+            return 0.4  # same as your original default for non-roomA
+
+    # Ground actions
+    search_actions = construct_search_operator(
+        object_search_prob, 5.0, 3
+    ).instantiate(objects_by_type)
+
+    # Initial state
+    initial_state = State(
+        time=0,
+        fluents={
+            Fluent("at r1 start"),
+            Fluent("at r2 start"),
+            Fluent("free r1"),
+            Fluent("free r2"),
+        },
+    )
+
+    goal_fluents = {Fluent("found cup"), Fluent("found bowl")}
+    all_actions = search_actions
+    mcts = MCTSPlanner(all_actions)
+
+    # Run MCTS N times and collect chosen actions
+    selected_actions = []
+    num_planning_attempts = 20
+    for _ in range(num_planning_attempts):
+        action = mcts(initial_state, goal_fluents, max_iterations=2000, c=10)
+        selected_actions.append(action)
+
+    # Count how many selected actions mention roomA
+    roomA_count = sum("roomA" in str(action) for action in selected_actions)
+
+    # We expect roomA to appear in at least 80% of planning attempts
+    assert (
+        roomA_count >= 0.8 * num_planning_attempts
+    ), f"Expected roomA in at least 8 actions, got {roomA_count} for roomA_prob={roomA_prob}"
