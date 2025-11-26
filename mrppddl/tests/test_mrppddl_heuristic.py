@@ -476,3 +476,103 @@ def test_place_then_pick_execution():
 
     # Verify goal is satisfied
     assert is_goal(state)
+
+
+def construct_search_operator(find_prob: float = 1.0, search_cost: float = 10.0):
+    """Construct a search operator with probabilistic effects."""
+    return Operator(
+        name="search",
+        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
+        preconditions=[
+            F("at ?r ?loc"),
+            F("free ?r"),
+            ~F("revealed ?loc"),
+            ~F("searched ?loc ?obj"),
+            ~F("found ?obj")
+        ],
+        effects=[
+            Effect(time=0, resulting_fluents={~F("free ?r"), F("lock-search ?loc")}),
+            Effect(
+                time=search_cost,
+                resulting_fluents={
+                    F("free ?r"),
+                    F("searched ?loc ?obj"),
+                    ~F("lock-search ?loc")
+                },
+                prob_effects=[
+                    (find_prob, [Effect(time=0, resulting_fluents={F("found ?obj"), F("at ?obj ?loc")})]),
+                    (1.0 - find_prob, [])
+                ]
+            )
+        ]
+    )
+
+
+def test_ff_heuristic_with_probabilistic_search():
+    """Test that FF heuristic handles probabilistic search actions correctly.
+
+    This test verifies the fix for the bug where the heuristic only examined
+    the first outcome of probabilistic actions, potentially missing the success
+    case where an object is found. The heuristic should consider ALL possible
+    outcomes in relaxed planning.
+
+    Regression test for: heuristic returning infinity when goal requires
+    finding an object via probabilistic search action.
+    """
+    # Define operators
+    move_op = construct_move_operator(move_cost=5.0)
+    search_op = construct_search_operator(find_prob=1.0, search_cost=10.0)
+    pick_op = construct_pick_operator(pick_cost=5.0)
+    place_op = construct_place_operator(place_cost=5.0)
+
+    # Define objects
+    objects_by_type = {
+        "robot": ["r1"],
+        "location": ["start", "desk_4", "garbagecan_5"],
+        "object": ["pencil_17"],
+    }
+
+    # Instantiate all actions
+    all_actions = []
+    all_actions.extend(move_op.instantiate(objects_by_type))
+    all_actions.extend(search_op.instantiate(objects_by_type))
+    all_actions.extend(pick_op.instantiate(objects_by_type))
+    all_actions.extend(place_op.instantiate(objects_by_type))
+
+    # Initial state: robot at start, object location unknown
+    initial_state = State(
+        time=0,
+        fluents={
+            F("at r1 start"),
+            F("free r1"),
+            # Note: revealed start means we can't search there
+            # pencil_17 location is unknown - must search to find it
+        }
+    )
+
+    # Goal: pencil at garbagecan_5
+    goal_fluents = {F("at pencil_17 garbagecan_5")}
+
+    # Compute FF heuristic
+    h_value = ff_heuristic(initial_state, goal_fluents, all_actions)
+
+    # The heuristic should return a finite value, not infinity
+    # Before the fix, this would return inf because the heuristic only
+    # looked at succs[0], which could be the failure branch of the search
+    assert h_value != float('inf'), (
+        "Heuristic returned infinity! The fix for probabilistic outcomes "
+        "may not be working correctly."
+    )
+
+    # Expected plan:
+    # 1. move r1 start -> desk_4 (cost: 5.0)
+    # 2. search r1 desk_4 pencil_17 (cost: 10.0) - finds pencil
+    # 3. pick r1 desk_4 pencil_17 (cost: 5.0)
+    # 4. move r1 desk_4 -> garbagecan_5 (cost: 5.0)
+    # 5. place r1 garbagecan_5 pencil_17 (cost: 5.0)
+    # Total: 30.0
+    #
+    # The heuristic might not be exactly 30.0 due to relaxation,
+    # but it should be finite and reasonable
+    assert h_value > 0, f"Expected positive heuristic value, got {h_value}"
+    assert h_value < 1000, f"Expected reasonable heuristic value, got {h_value}"
