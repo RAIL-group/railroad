@@ -29,12 +29,10 @@ clean-venv:  ## Remove virtualenv directory 'venv'
 clean: clean-cpp clean-venv  ## Remove build artifacts and the venv
 	@rm -rf uv.lock
 
-include procthor/Makefile.mk
-
 .PHONY: typecheck test
 typecheck:  ## Runs the typechecker via pyright
 	@uv run pyright -w mrppddl/src/mrppddl mrppddl/tests
 
-test: download-procthor-all  ## Runs tests (limit scope via PYTEST_FILTER=filter)
+test:  ## Runs tests (limit scope via PYTEST_FILTER=filter)
 	@uv run pytest -vk $(PYTEST_FILTER)
 
