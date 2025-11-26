@@ -22,3 +22,8 @@ dependencies = [
 [tool.uv.sources]
 mrppddl = { path = "./mrppddl" }
 mrppddl-env = { path = "./mrppddl_env" }
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore:invalid escape sequence:SyntaxWarning"
+]

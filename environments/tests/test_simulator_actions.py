@@ -22,6 +22,8 @@ OBJECTS_AT_LOCATIONS = {
 
 
 class TestEnvironment(environments.BaseEnvironment):
+    __test__ = False
+
     '''This is how the environment wrapper should look like for any simulator.'''
     def __init__(self, locations):
         super().__init__()
