@@ -7,9 +7,9 @@ from . import procthor  # noqa: F401
 
 import os
 
-from .resources import ensure_procthor_10k 
+from .resources import ensure_all_resources
 
-# Allow opt-out, e.g. for docs builds or constrained CI:
-#   PROCTHOR_AUTO_DOWNLOAD=0  → skip automatic downloads.
 if os.environ.get("PROCTHOR_AUTO_DOWNLOAD", "1") != "0":
-    ensure_procthor_10k()
+    ensure_all_resources()
+
+del ensure_all_resources
