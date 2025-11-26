@@ -65,11 +65,14 @@ double ff_heuristic(const State &input_state, const GoalFn &is_goal_fn,
       double duration = succs[0].first.time() - temp.time();
       action_to_duration[a] = duration;
 
-      for (const auto &f : succs[0].first.fluents()) {
-        if (!known_fluents.count(f)) {
-          known_fluents.insert(f);
-          next_new.insert(f);
-          fact_to_action[f] = a;
+      // In relaxed planning, consider fluents from ALL probabilistic outcomes
+      for (const auto &[succ_state, succ_prob] : succs) {
+        for (const auto &f : succ_state.fluents()) {
+          if (!known_fluents.count(f)) {
+            known_fluents.insert(f);
+            next_new.insert(f);
+            fact_to_action[f] = a;
+          }
         }
       }
     }
@@ -189,11 +192,14 @@ const std::vector<Action> get_usable_actions(const State &input_state,
       double duration = succs[0].first.time() - temp.time();
       action_to_duration[a] = duration;
 
-      for (const auto &f : succs[0].first.fluents()) {
-        if (!known_fluents.count(f)) {
-          known_fluents.insert(f);
-          next_new.insert(f);
-          fact_to_action[f] = a;
+      // In relaxed planning, consider fluents from ALL probabilistic outcomes
+      for (const auto &[succ_state, succ_prob] : succs) {
+        for (const auto &f : succ_state.fluents()) {
+          if (!known_fluents.count(f)) {
+            known_fluents.insert(f);
+            next_new.insert(f);
+            fact_to_action[f] = a;
+          }
         }
       }
     }
