@@ -7,9 +7,9 @@ try:
 except ImportError as e:
     raise ImportError(
         "mrppddl's native extension (_bindings) is missing.\n"
-        "Try rebuilding the package, e.g.:\n"
+        "To rebuild the package, run:\n"
         "    uv sync --reinstall-package mrppddl\n"
-        "or remove .venv and run `uv sync`."
+        "or 'make rebuild-cpp'\n"
     ) from e
 
 from mrppddl._bindings import GroundedEffect, Fluent, Action, State
