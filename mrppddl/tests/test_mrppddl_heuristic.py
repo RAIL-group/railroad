@@ -560,7 +560,12 @@ def test_ff_heuristic_with_probabilistic_search(find_prob):
     # The heuristic should return a finite value, not infinity
     # Before the fix, this would return inf because the heuristic only
     # looked at succs[0], which could be the failure branch of the search
-    assert h_value != float('inf'), (
-        "Heuristic returned infinity! The fix for probabilistic outcomes "
-        "may not be working correctly."
-    )
+    if find_prob > 0:
+        assert h_value != float('inf'), (
+            "Heuristic returned infinity! The fix for probabilistic outcomes "
+            "may not be working correctly."
+        )
+    else:
+        assert h_value == float('inf'), (
+            "Heuristic should be infinite, since there is no solution"
+        )

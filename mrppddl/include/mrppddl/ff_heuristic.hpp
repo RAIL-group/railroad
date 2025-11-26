@@ -67,6 +67,9 @@ double ff_heuristic(const State &input_state, const GoalFn &is_goal_fn,
 
       // In relaxed planning, consider fluents from ALL probabilistic outcomes
       for (const auto &[succ_state, succ_prob] : succs) {
+	if (succ_prob <= 0.0) {
+	  continue;
+	}
         for (const auto &f : succ_state.fluents()) {
           if (!known_fluents.count(f)) {
             known_fluents.insert(f);
