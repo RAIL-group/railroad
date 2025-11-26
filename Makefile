@@ -21,12 +21,15 @@ rebuild-cpp: clean-cpp  ## Rebuild C++ Modules
 .PHONY: clean clean-cpp clean-venv
 clean-cpp:  ## Remove C++-specific build artifacts
 	@rm -rf mrppddl/build mrppddl/src/mrppddl/*cpython*
+	@touch mrppddl/src/mrppddl/_bindings.cpp  # Trigger rebuild when needed
 
 clean-venv:  ## Remove virtualenv directory 'venv'
 	@rm -rf .venv
 
 clean: clean-cpp clean-venv  ## Remove build artifacts and the venv
 	@rm -rf uv.lock
+
+include procthor/Makefile.mk
 
 .PHONY: typecheck test
 typecheck:  ## Runs the typechecker via pyright
@@ -35,4 +38,3 @@ typecheck:  ## Runs the typechecker via pyright
 test: download-procthor-all  ## Runs tests (limit scope via PYTEST_FILTER=filter)
 	@uv run pytest -vk $(PYTEST_FILTER)
 
-include procthor/Makefile.mk
