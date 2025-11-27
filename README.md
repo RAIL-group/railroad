@@ -59,9 +59,9 @@ objects_by_type = {
 # Create operators and instantiate actions
 move_op = construct_move_operator(move_time=lambda r, from_loc, to_loc: 5.0)
 search_op = construct_search_operator(
-    likelihood_fn=lambda r, loc, obj: 0.8,  # 80% chance of finding object
-    move_cost_fn=lambda r, from_loc, to_loc: 5.0,
-    search_time=3.0
+    object_find_prob=lambda r, loc, obj: 0.8,  # 80% chance of finding object
+    move_time=lambda r, from_loc, to_loc: 5.0,
+    pick_time=3.0
 )
 
 actions = move_op.instantiate(objects_by_type) + search_op.instantiate(objects_by_type)
@@ -72,6 +72,9 @@ next_action_name = planner(initial_state, goal_fluents, max_iterations=10000, c=
 
 print(f"Next action to execute: {next_action_name}")
 ```
+This will yield:
+> Next action to execute: search robot1 bedroom living_room Notebook
+
 
 ### Using with ProcTHOR Simulation
 
@@ -82,6 +85,8 @@ See `scripts/obf_door_example.py` for a complete example of planning and executi
 - Object search tasks
 
 ### Example: Multi-Robot Search Task
+
+[TODO: Add the Multi-Robot Search Example.]
 
 ```python
 from environments import Map, Location, SymbolicToRealSimulator, Robot
