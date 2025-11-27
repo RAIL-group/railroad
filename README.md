@@ -88,57 +88,6 @@ See `scripts/obf_door_example.py` for a complete example of planning and executi
 
 [TODO: Add the Multi-Robot Search Example.]
 
-```python
-from environments import Map, Location, SymbolicToRealSimulator, Robot
-from mrppddl.helper import construct_search_operator
-from mrppddl.core import Fluent, get_action_by_name
-from mrppddl.planner import MCTSPlanner
-
-# Initialize a random environment with 2 robots and 3 locations
-map = Map(n_robots=2, max_locations=3, seed=1015)
-
-# Create robots at starting positions
-r1 = Robot(name='r1', start=map.robot_poses[0])
-r2 = Robot(name='r2', start=map.robot_poses[1])
-robots = [r1, r2]
-
-# Define search goal
-goal_fluents = {
-    Fluent("found Knife"),
-    Fluent("found Notebook"),
-    Fluent("found Clock")
-}
-
-# Create simulator
-simulator = SymbolicToRealSimulator(map, robots, goal_fluents)
-
-# Plan and execute until goal is reached
-while not simulator.is_goal():
-    # Get available actions
-    objects_by_type = {
-        "robot": [r.name for r in simulator.robots],
-        "location": [loc.name for loc in simulator.locations
-                     if loc.name not in simulator.visited_locations],
-        "object": simulator.object_of_interest,
-    }
-
-    search_actions = construct_search_operator(
-        simulator.get_likelihood_of_object,
-        simulator.get_move_cost,
-        search_time=3
-    ).instantiate(objects_by_type)
-
-    # Plan next action
-    mcts = MCTSPlanner(search_actions)
-    action_name = mcts(simulator.state, goal_fluents, max_iterations=10000, c=10)
-    action = get_action_by_name(search_actions, action_name)
-
-    # Execute in simulator
-    simulator.execute_action(action)
-    print(f"Executed: {action.name}")
-    print(f"Current state: {simulator.state}")
-```
-
 ## Project Structure
 
 The repository is organized as a monorepo with multiple packages:
