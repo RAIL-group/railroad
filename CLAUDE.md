@@ -53,10 +53,6 @@ The repository is organized as a monorepo with several interdependent packages:
   - Mapping between symbolic locations and simulator coordinates
   - Provides cost functions and perception interfaces
 
-- **`mrppddl_env/`**: MRPPDDL-specific environment implementations
-  - `Robot`, `Simulator`, `Environment` classes
-  - Bridges symbolic PDDL planning with real/simulated environments
-
 #### Utilities
 - **`gridmap/`**: Occupancy grid mapping and planning
   - `laser.py`: Laser scan representation and ray casting

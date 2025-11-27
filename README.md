@@ -141,7 +141,6 @@ The repository is organized as a monorepo with multiple packages:
 - **`mrppddl/`** - Core PDDL planning engine (C++ with Python bindings)
 - **`procthor/`** - ProcTHOR simulator interface and utilities
 - **`environments/`** - Environment abstractions and implementations
-- **`mrppddl_env/`** - MRPPDDL-specific environment wrappers
 - **`gridmap/`** - Occupancy grid mapping and planning utilities
 - **`common/`** - Shared utilities (Pose class, etc.)
 - **`scripts/`** - Example scripts and demonstrations

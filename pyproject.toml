@@ -16,7 +16,6 @@ dependencies = [
     "pytest-timeout",
     "rich",
     "mrppddl",
-    "mrppddl-env",
     "procthor",
     "common",
     "gridmap",
@@ -33,7 +32,6 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-mrppddl-env = { path = "mrppddl_env", editable = true }
 mrppddl = { path = "mrppddl", editable = true }
 common = { path = "common", editable = true }
 gridmap = { path = "gridmap", editable = true }
