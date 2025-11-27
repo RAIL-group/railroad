@@ -13,8 +13,9 @@ This project uses `uv` as the package manager and build tool. The build system a
 ### Key Commands
 
 - **Setup**: `uv sync` - Install all dependencies and build C++ extensions
-- **Run tests**: `uv run pytest -vk <filter>` - Run tests matching filter pattern
-- **Run specific test**: `uv run pytest -vk test_name` - Run a single test
+- **Run all tests**: `uv run pytest` or `make test`
+- **Run tests matching filter**: `uv run pytest -vk <filter>` or `PYTEST_FILTER=pattern make test`
+- **Run specific test**: `uv run pytest -vk test_name`
 - **Type checking**: `uv run pyright -w mrppddl/src/mrppddl mrppddl/tests`
 - **Rebuild C++**: `make rebuild-cpp` - Force rebuild of C++ modules (rarely needed)
 - **Clean**: `make clean-cpp` - Remove C++ build artifacts only
@@ -39,7 +40,7 @@ The repository is organized as a monorepo with several interdependent packages:
 - **Python Layer**: Python wrapper and utilities (`src/mrppddl/`)
   - `core.py`: Effect, Operator, Action, State, Fluent classes
   - `planner.py`: MCTSPlanner wrapper with automatic negative precondition handling
-  - `helper.py`: Helper functions to construct common operators (move, search, pick, place)
+  - `helper.py`: Helper functions to construct common operators (move, search, pick, place, wait)
 - **Testing**: Comprehensive tests in `tests/` including unit tests and integration tests
 
 #### Environment Support
@@ -48,8 +49,10 @@ The repository is organized as a monorepo with several interdependent packages:
   - Scene graph construction, occupancy grids, caching
   - Automatic resource downloading on import (disable with `PROCTHOR_AUTO_DOWNLOAD=0`)
 
-- **`environments/`**: Environment abstractions
+- **`environments/`**: Environment abstractions and execution
   - `BaseEnvironment`: Abstract interface for all environments
+  - `Simulator` (in `environments/simulator/`): Execution wrapper that applies PDDL actions and deterministically reveals search outcomes
+  - `OngoingAction` classes: Track action execution progress (move, search, pick, place)
   - Mapping between symbolic locations and simulator coordinates
   - Provides cost functions and perception interfaces
 
@@ -115,17 +118,16 @@ uv run pytest -vk test_mrppddl  # Verify changes work
 ```
 
 ### Creating a New PDDL Problem
-See `environment_wrapper.py` for a complete example. The typical flow:
+See README.md "Quick Start" section and test files (e.g., `test_mrppddl_wait.py`) for examples. The typical flow:
 1. Define environment with locations and objects
 2. Create operators using helpers from `mrppddl.helper`
-3. Instantiate actions from operators
+3. Instantiate actions from operators with `operator.instantiate(objects_by_type)`
 4. Run planner with initial state and goal fluents
-5. Execute actions in simulator
+5. Execute actions in simulator (see `environments.Simulator` for execution wrapper)
 
 ## Common Gotchas
 
 - **Import Errors**: If you see "_bindings is missing", run `uv sync --reinstall-package mrppddl`
 - **Negative Preconditions**: MCTSPlanner automatically converts them - no manual handling needed
 - **Resource Downloads**: ProcTHOR auto-downloads resources on first import. Large downloads may take time
-- **Test Filters**: Use `PYTEST_FILTER=pattern make test` or `uv run pytest -vk pattern`
 - **Cache**: ProcTHOR caches scenes in `resources/procthor-10k/cache/` for faster loading
