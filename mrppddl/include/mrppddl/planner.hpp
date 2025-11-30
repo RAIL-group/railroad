@@ -465,7 +465,6 @@ inline std::string mcts(const State &root_state,
     }
 
     if (best_action) {
-      std::cout << best_q << std::endl;
       return best_action->name();
       result.policy.emplace(result.root->state.hash(), best_action);
     }
