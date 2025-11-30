@@ -452,15 +452,15 @@ inline std::string mcts(const State &root_state,
   if (!result.root->children.empty()) {
     const Action *best_action = nullptr;
     double best_q = -std::numeric_limits<double>::infinity();
+    int most_visits = 0;
 
     for (auto &kv : result.root->children) {
       MCTSChanceNode *cn = kv.second.get();
       if (cn->visits == 0)
         continue;
-      double q = cn->value / static_cast<double>(cn->visits);
-      if (q > best_q) {
-        best_q = q;
-        best_action = kv.first;
+      if (cn->visits > most_visits) {
+	most_visits = cn->visits;
+	best_action = kv.first;
       }
     }
 
