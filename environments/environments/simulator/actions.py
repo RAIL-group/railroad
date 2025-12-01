@@ -59,8 +59,10 @@ class OngoingMoveAction(OngoingAction):
 
     def advance(self, time):
         new_effects = super().advance(time)
-        intermediate_coords = self.environment.get_intermediate_coordinates(time, self.start, self.end)
+        delta_time = self.time - self._start_time
+        intermediate_coords = self.environment.get_intermediate_coordinates(delta_time, self.start, self.end)
         self.environment.locations[f"{self.robot}_loc"] = intermediate_coords
+        print(self.environment.locations)
         return new_effects
 
     def interrupt(self):
@@ -144,7 +146,7 @@ def construct_search_operator(object_find_prob: OptCallable, search_time: OptCal
     return Operator(
         name="search",
         parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
-        preconditions=[F("at ?r ?loc"), F("free ?r"), F("not revealed ?loc"), F("not searched ?loc ?obj"), F("not found ?obj")],
+        preconditions=[F("at ?r ?loc"), F("free ?r"), F("not revealed ?loc"), F("not searched ?loc ?obj"), F("not found ?obj"), F("not lock-search ?loc")],
         effects=[
             Effect(time=0, resulting_fluents={F("not free ?r"), F("lock-search ?loc")}),
             Effect(time=(search_time, ["?r", "?loc"]),
