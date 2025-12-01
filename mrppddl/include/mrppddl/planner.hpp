@@ -436,13 +436,15 @@ inline std::string mcts(const State &root_state,
     // ---------------- Simulation / Evaluation ----------------
     // Your Python code uses: reward = -time - heuristic (bounded).
     double reward;
+    double h = 0.0;
     if (is_goal_fn(node->state.fluents())) {
-      reward = -node->state.time();
+      reward = -node->state.time() + SUCCESS_REWARD;
     } else {
-      double h = heuristic_fn ? heuristic_fn(node->state) : 0.0;
-      // double h = 0;
+      h = heuristic_fn ? heuristic_fn(node->state) : 0.0;
       if (h > 1e10) {
         h = HEURISTIC_CANNOT_FIND_GOAL_PENALTY;
+      } else {
+	h = h;
       }
       reward = -node->state.time() - h;
     }
