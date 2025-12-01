@@ -29,6 +29,7 @@ dependencies = [
     "openai>=2.8.1",
     "python-dotenv>=1.2.1",
     "pandas>=2.3.3",
+    "pytest-xdist>=3.8.0",
 ]
 
 [tool.uv.sources]
@@ -42,3 +43,4 @@ procthor = { path = "procthor", editable = true }
 filterwarnings = [
     "ignore:invalid escape sequence:SyntaxWarning"
 ]
+addopts = "-v -n auto --html=data/test_logs/test_report.html --self-contained-html"
