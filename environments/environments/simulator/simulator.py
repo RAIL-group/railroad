@@ -65,10 +65,30 @@ class Simulator:
             for rob in self.objects_by_type["robot"]
             if F(f"at {rob} {rob}_loc") in self._state.fluents
             )
-        return list(itertools.chain.from_iterable(
+        all_actions = list(itertools.chain.from_iterable(
             operator.instantiate(objects_with_rloc)
             for operator in self.operators
         ))
+
+        def filter_fn(action):
+            ans = action.name.split()
+            if ans[0] == 'move' and '_loc' in ans[3]:
+                # (move robot1 robot1_loc other_loc)
+                return False
+            if ans[0] == 'place' and '_loc' in ans[2]:
+                # (place robot1 robot1_loc Pillow)
+                return False
+            if ans[0] == 'search' and '_loc' in ans[2]:
+                # (search robot1 robot1_loc Pillow)
+                return False
+
+            return True
+
+        filtered_actions = [a for a in all_actions if filter_fn(a)]
+
+        print(f"Filtering actions: {len(filtered_actions)}/{len(all_actions)}")
+
+        return filtered_actions
 
     def advance(self, action, do_interrupt=True) -> State:
         if not self.state.satisfies_precondition(action):
