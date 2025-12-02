@@ -453,10 +453,10 @@ inline std::string mcts(const State &root_state,
     backpropagate(node, reward);
   }
 
-  // // ----> ADD THIS SECTION <----
-  // std::cout << "\n--- MCTS Tree Analysis (Most Visited Path) ---" << std::endl;
-  // print_best_path(root.get(), heuristic_fn, 20 /* max depth to print */);
-  // std::cout << "----------------------------------------------\n" << std::endl;
+  // ----> ADD THIS SECTION <----
+  std::cout << "\n--- MCTS Tree Analysis (Most Visited Path) ---" << std::endl;
+  print_best_path(root.get(), heuristic_fn, 20 /* max depth to print */);
+  std::cout << "----------------------------------------------\n" << std::endl;
 
   // --------------- Extract a (very) shallow policy ---------------
   MCTSResult result;
