@@ -156,8 +156,8 @@ def main():
 
     # Search operator with 80% success rate when object is actually present
     search_op = environments.actions.construct_search_operator(
-        object_find_prob=lambda r, l, o: 0.8 if 'kitchen' in 'l' else 0.5,
-        search_time=lambda r, l: 1.0
+        object_find_prob=lambda r, l, o: 0.8 if 'kitchen' in l else 0.1,
+        search_time=lambda r, l: 10.0
     )
 
     pick_op = environments.actions.construct_pick_operator(
@@ -195,7 +195,7 @@ def main():
 
         # Plan next action
         mcts = MCTSPlanner(all_actions)
-        action_name = mcts(sim.state, goal_fluents, max_iterations=1000, c=1.414, max_depth=10)
+        action_name = mcts(sim.state, goal_fluents, max_iterations=100000, c=50, max_depth=10)
 
         if action_name == 'NONE':
             print("\n" + "=" * 70)
