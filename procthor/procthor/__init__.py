@@ -11,5 +11,3 @@ from .resources import ensure_all_resources
 
 if os.environ.get("PROCTHOR_AUTO_DOWNLOAD", "1") != "0":
     ensure_all_resources()
-
-del ensure_all_resources
