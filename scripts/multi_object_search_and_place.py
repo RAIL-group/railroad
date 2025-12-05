@@ -129,17 +129,22 @@ def main():
             F("revealed", "robot_crate"),
             F("revealed", "robot1_loc"),
             F("revealed", "robot2_loc"),
+            # F("revealed bedroom"),
+            # F("revealed kitchen"),
+            # F("found Mug"), F("at Mug kitchen"),
+            # F("found Knife"), F("at Knife bedroom"),
+            # F("found Clock"), F("at Clock kitchen"),
         },
     )
 
     # Define goal: all items at their proper locations
     goal_fluents = {
-        F("found Mug"),
-        # F("at", "Knife", "kitchen"),
-        # F("at", "Mug", "kitchen"),
-        # F("at", "Clock", "bedroom"),
-        # F("at", "Pillow", "bedroom"),
-        # F("at", "Notebook", "office"),
+        # F("found Mug"),
+        F("at", "Knife", "kitchen"),
+        F("at", "Mug", "kitchen"),
+        F("at", "Clock", "bedroom"),
+        F("at", "Pillow", "bedroom"),
+        F("at", "Notebook", "office"),
     }
 
     # Initial objects by type (robot only knows about some objects initially)
@@ -156,16 +161,16 @@ def main():
 
     # Search operator with 80% success rate when object is actually present
     search_op = environments.actions.construct_search_operator(
-        object_find_prob=lambda r, l, o: 0.8 if 'kitchen' in l else 0.1,
-        search_time=lambda r, l: 10.0
+        object_find_prob=lambda r, l, o: 0.6 if 'kitchen' in l else 0.4,
+        search_time=lambda r, l: 5.0
     )
 
     pick_op = environments.actions.construct_pick_operator(
-        pick_time=lambda r, l, o: 10.0
+        pick_time=lambda r, l, o: 5.0
     )
 
     place_op = environments.actions.construct_place_operator(
-        place_time=lambda r, l, o: 10.0
+        place_time=lambda r, l, o: 5.0
     )
 
     # Create simulator
@@ -195,7 +200,7 @@ def main():
 
         # Plan next action
         mcts = MCTSPlanner(all_actions)
-        action_name = mcts(sim.state, goal_fluents, max_iterations=100000, c=50, max_depth=10)
+        action_name = mcts(sim.state, goal_fluents, max_iterations=5000, c=1.414, max_depth=20)
 
         if action_name == 'NONE':
             print("\n" + "=" * 70)
