@@ -1,11 +1,22 @@
+import numpy as np
 import itertools
 from procthor import ThorInterface
 from . import utils
-from .environments import BaseEnvironment, Robot
+from .environments import BaseEnvironment, Robot, ActionStatus
 
-IDLE = -1
-MOVING = 0
-REACHED = 1
+
+
+SKILLS_TIME = {
+    'r1': {
+        'pick': 15,
+        'place': 15,
+        'search': 15},
+    'r2': {
+        'pick': 10,
+        'place': 10,
+        'search': 10}
+}
+
 
 
 class ProcTHOREnvironment(BaseEnvironment):
@@ -14,7 +25,12 @@ class ProcTHOREnvironment(BaseEnvironment):
         self.args = args
         self.thor_interface = ThorInterface(self.args)
         self.known_graph, self.grid, self.robot_pose, self.target_object_info = self.thor_interface.gen_map_and_poses()
-        self.robots = {f'r{i + 1}': Robot(name=f'r{i + 1}', pose=self.robot_pose) for i in range(self.args.num_robots)}
+        self.start_coords = (self.robot_pose.x, self.robot_pose.y)
+        self.robots = {
+            f"r{i + 1}": Robot(name=f"r{i + 1}",
+                               pose=self.start_coords,
+                               skills_time=SKILLS_TIME[f'r{i + 1}']) for i in range(args.num_robots)
+        }
         self.locations = self._get_location_to_coordinates_dict()
         self.all_objects = self._get_all_objects()
         self.target_object = f'{self.target_object_info['name']}_{self.target_object_info['idxs'][0]}'
@@ -51,7 +67,7 @@ class ProcTHOREnvironment(BaseEnvironment):
         return {'object': object_names}
 
     def _get_location_to_coordinates_dict(self):
-        loc_to_coords = {'start': (self.robot_pose.x, self.robot_pose.y, self.robot_pose.yaw)}
+        loc_to_coords = {'start': self.start_coords}
         for container_idx in self.known_graph.container_indices:
             loc_name = self.known_graph.get_node_name_by_idx(container_idx)
             coords = self.known_graph.get_node_position_by_idx(container_idx)
@@ -106,22 +122,58 @@ class ProcTHOREnvironment(BaseEnvironment):
 
     def move_robot(self, robot_name, location):
         target_coords = self.locations[location]
-        self.robots[robot_name].move(target_coords)
+        self.robots[robot_name].move(target_coords, self.time)
 
-    def get_move_status(self, robot_name):
+    def search_robot(self, robot_name):
+        self.robots[robot_name].search(self.time)
+
+    def pick_robot(self, robot_name):
+        self.robots[robot_name].pick(self.time)
+
+    def place_robot(self, robot_name):
+        self.robots[robot_name].place(self.time)
+
+    def stop_robot(self, robot_name):
+        self.robots[robot_name].stop()
+
+    def get_action_status(self, robot_name, action_name):
+        if action_name == 'move':
+            return self._get_move_status(robot_name)
+        if action_name in ['pick', 'place', 'search']:
+            return self._get_pick_place_search_status(robot_name, action_name)
+        raise ValueError(f"Unknown action name: {action_name}")
+
+    def _get_pick_place_search_status(self, robot_name, action_name):
         all_robots_assigned = all(not r.is_free for r in self.robots.values())
         if not all_robots_assigned:
-            return IDLE
+            return ActionStatus.IDLE
+        robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
+        time_to_action = [(n, r.skills_time[action_name]) for n, r in self.robots.items()]
+
+        remaining_times = [(n, t - p) for (n, t), p in zip(time_to_action, robots_progress)]
+        min_robot, _ = min(remaining_times, key=lambda x: x[1])
+
+        if min_robot != robot_name:
+            return ActionStatus.RUNNING
+
+        self.stop_robot(robot_name)
+        return ActionStatus.DONE
+
+    def _get_move_status(self, robot_name):
+        all_robots_assigned = all(not r.is_free for r in self.robots.values())
+        if not all_robots_assigned:
+            return ActionStatus.IDLE
 
         time_to_target = [(n, utils.get_cost_between_two_coords(
             self.grid, r.pose, r.target_pose)) for n, r in self.robots.items()]
         min_robot, min_distance = min(time_to_target, key=lambda x: x[1])
 
         if min_robot != robot_name:
-            return MOVING
+            return ActionStatus.RUNNING
 
         # compute intermediate pose for all robots
         for r_name in self.robots:
+            # start_pose = (self.robots[r_name].pose.x, self.robots[r_name].pose.y)
             r_pose = self.get_intermediate_coordinates(
                 min_distance, self.robots[r_name].pose, self.robots[r_name].target_pose, is_coords=True)
             self.robots[r_name].pose = r_pose
@@ -129,7 +181,4 @@ class ProcTHOREnvironment(BaseEnvironment):
 
         # stop the robot that has reached its target
         self.robots[robot_name].stop()
-        return REACHED
-
-    def stop_robot(self, robot_name):
-        self.robots[robot_name].stop()
+        return ActionStatus.DONE
