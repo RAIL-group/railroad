@@ -356,6 +356,8 @@ inline std::string mcts(const State &root_state,
   root->untried_actions = get_next_actions(root_state, all_actions);
   auto heuristic_fn = make_ff_heuristic(is_goal_fn, all_actions, ff_memory);
 
+  bool is_node_goal = false;
+  bool is_node_unsolvable = false;
   for (int it = 0; it < max_iterations; ++it) {
     #ifdef MRPPDDL_USE_PYBIND
     // Only used when building the Python extension
@@ -372,8 +374,14 @@ inline std::string mcts(const State &root_state,
         break;
       if (node->children.empty())
         break;
-      if (is_goal_fn(node->state.fluents()))
+      if (is_goal_fn(node->state.fluents())) {
+	is_node_goal = true;
         break;
+      }
+      if (heuristic_fn && heuristic_fn(node->state) > 1e10) {
+	is_node_unsolvable = true;
+        break;
+      }
 
       // choose action / chance node with best UCB
       MCTSChanceNode *best_chance = nullptr;
@@ -398,7 +406,7 @@ inline std::string mcts(const State &root_state,
     }
 
     // ---------------- Expansion ----------------
-    if (!node->untried_actions.empty()) {
+    if (!node->untried_actions.empty() && !is_node_goal && !is_node_unsolvable) {
       const Action *action = node->untried_actions.back();
       node->untried_actions.pop_back();
 
