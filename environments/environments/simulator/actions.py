@@ -62,7 +62,6 @@ class OngoingMoveAction(OngoingAction):
         delta_time = self.time - self._start_time
         intermediate_coords = self.environment.get_intermediate_coordinates(delta_time, self.start, self.end)
         self.environment.locations[f"{self.robot}_loc"] = intermediate_coords
-        print(self.environment.locations)
         return new_effects
 
     def interrupt(self):

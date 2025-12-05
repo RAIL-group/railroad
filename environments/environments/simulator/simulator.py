@@ -84,10 +84,8 @@ class Simulator:
 
             return True
 
+        # Filter out actions that should not be allowed.
         filtered_actions = [a for a in all_actions if filter_fn(a)]
-
-        print(f"Filtering actions: {len(filtered_actions)}/{len(all_actions)}")
-
         return filtered_actions
 
     def advance(self, action, do_interrupt=True) -> State:
