@@ -125,7 +125,7 @@ def main():
             F("at", "robot1", "start_loc"),
             F("at", "robot2", "start_loc"),
             F("free", "robot1"),
-            F("free", "robot2"),
+            # F("free", "robot2"),
         },
     )
 
