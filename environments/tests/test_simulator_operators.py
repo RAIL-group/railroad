@@ -126,11 +126,10 @@ def test_pick_and_place_operator():
     initial_state = State(
         time=0,
         fluents={
-            F("at", "r1", "roomA"), F("at", "objA",
-                                      "roomA"), F("at", "objC", "roomA"),
+            F("at", "r1", "roomA"), F("at", "objA", "roomA"), F("at", "objC", "roomA"),
             F("at", "r2", "roomB"), F("at", "objB", "roomB"),
-            F("free", "r1"), F("free-arm", "r1"),
-            F("free", "r2"), F("free-arm", "r2"),
+            F("free", "r1"),
+            F("free", "r2"),
         },
     )
     pick_op = environments.operators.construct_pick_operator(pick_time=pick_time)
@@ -187,7 +186,7 @@ def test_pick_and_place_operator():
     # r1 is still placing
     assert F("free r1") not in state.fluents
     assert F("at r1 roomA") in state.fluents
-    assert F("holding r1 objA") in state.fluents
+    assert F("holding r1 objA") not in state.fluents
     assert F("at objA roomA") not in state.fluents
 
     # assign r2 to place objB at roomB
@@ -204,5 +203,5 @@ def test_pick_and_place_operator():
     # r2 is still placing objB
     assert F("free r2") not in state.fluents
     assert F("at r2 roomB") in state.fluents
-    assert F("holding r2 objB") in state.fluents
+    assert F("holding r2 objB") not in state.fluents
     assert F("at objB roomB") not in state.fluents
