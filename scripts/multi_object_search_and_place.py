@@ -21,7 +21,7 @@ from environments import Simulator
 
 # Define locations with coordinates (for move cost calculation)
 LOCATIONS = {
-    "robot_crate": np.array([-5, -5]),
+    "start_loc": np.array([-5, -5]),
     "living_room": np.array([0, 0]),
     "kitchen": np.array([10, 0]),
     "bedroom": np.array([0, 12]),
@@ -35,7 +35,7 @@ OBJECTS_AT_LOCATIONS = {
     "kitchen": {"object": {"Clock", "Mug"}},
     "bedroom": {"object": {"Knife"}},
     "office": {"object": set()},  # Empty
-    "robot_crate": {"object": set()},  # Empty
+    "start_loc": {"object": set()},  # Empty
 }
 
 
@@ -122,24 +122,15 @@ def main():
         time=0,
         fluents={
             # Robot starts in living room
-            F("at", "robot1", "robot_crate"),
-            F("at", "robot2", "robot_crate"),
+            F("at", "robot1", "start_loc"),
+            F("at", "robot2", "start_loc"),
             F("free", "robot1"),
-            # F("free", "robot2"),
-            F("revealed", "robot_crate"),
-            F("revealed", "robot1_loc"),
-            F("revealed", "robot2_loc"),
-            # F("revealed bedroom"),
-            # F("revealed kitchen"),
-            # F("found Mug"), F("at Mug kitchen"),
-            # F("found Knife"), F("at Knife bedroom"),
-            # F("found Clock"), F("at Clock kitchen"),
+            F("free", "robot2"),
         },
     )
 
     # Define goal: all items at their proper locations
     goal_fluents = {
-        # F("found Mug"),
         F("at", "Knife", "kitchen"),
         F("at", "Mug", "kitchen"),
         F("at", "Clock", "bedroom"),
