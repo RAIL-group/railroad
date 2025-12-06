@@ -1,5 +1,10 @@
 #pragma once
 
+#ifdef MRPPDDL_USE_PYBIND
+#include <pybind11/pybind11.h>
+#include <Python.h>
+#endif
+
 #include "mrppddl/core.hpp"
 #include "mrppddl/ff_heuristic.hpp"
 #include "mrppddl/state.hpp"
@@ -352,6 +357,12 @@ inline std::string mcts(const State &root_state,
   auto heuristic_fn = make_ff_heuristic(is_goal_fn, all_actions, ff_memory);
 
   for (int it = 0; it < max_iterations; ++it) {
+    #ifdef MRPPDDL_USE_PYBIND
+    // Only used when building the Python extension
+    if (PyErr_CheckSignals() != 0) {
+	throw pybind11::error_already_set();
+    }
+    #endif
     MCTSDecisionNode *node = root.get();
     int depth = 0;
 

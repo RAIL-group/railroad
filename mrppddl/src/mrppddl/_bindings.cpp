@@ -1,3 +1,4 @@
+#define MRPPDDL_USE_PYBIND
 #include "mrppddl/core.hpp"
 #include "mrppddl/ff_heuristic.hpp"
 #include "mrppddl/planner.hpp"
