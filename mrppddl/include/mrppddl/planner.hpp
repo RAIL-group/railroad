@@ -264,15 +264,6 @@ inline void backpropagate(MCTSDecisionNode *leaf, double reward) {
   }
 }
 
-// Forward declaration if needed, or place it before the walker
-inline double get_h_value(const State& state, HeuristicFn& heuristic_fn) {
-    double h = heuristic_fn ? heuristic_fn(state) : 0.0;
-    if (h > 1e10) {
-        return HEURISTIC_CANNOT_FIND_GOAL_PENALTY;
-    }
-    return h;
-}
-
 
 void print_best_path(const MCTSDecisionNode* node, HeuristicFn& heuristic_fn, int max_print_depth, int current_depth = 0) {
     if (!node || current_depth > max_print_depth) {
@@ -281,7 +272,7 @@ void print_best_path(const MCTSDecisionNode* node, HeuristicFn& heuristic_fn, in
 
     // --- Print Info for the Current Node ---
     double q_value = (node->visits > 0) ? node->value / static_cast<double>(node->visits) : 0.0;
-    double h_value = get_h_value(node->state, heuristic_fn);
+    double h_value = heuristic_fn ? heuristic_fn(node->state) : 0.0;
     double time_cost = node->state.time();
 
     // Indent for readability
@@ -294,6 +285,8 @@ void print_best_path(const MCTSDecisionNode* node, HeuristicFn& heuristic_fn, in
               << "heuristic(h)=" << h_value << ", "
               << "g+h=" << time_cost + h_value
               << std::endl;
+
+    std::cout << node->state.str() << std::endl;
 
     if (node->children.empty()) {
         for (int i = 0; i < current_depth; ++i) std::cout << "  ";
@@ -454,7 +447,7 @@ inline std::string mcts(const State &root_state,
       } else {
 	h = h;
       }
-      reward = -node->state.time() - h;
+      reward = -node->state.time() - h * (2 - it / max_iterations);
     }
 
     // ---------------- Backpropagation ----------------

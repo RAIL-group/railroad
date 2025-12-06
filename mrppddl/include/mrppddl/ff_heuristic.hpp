@@ -40,6 +40,8 @@ double ff_heuristic(const State &input_state, const GoalFn &is_goal_fn,
   std::unordered_set<Fluent> newly_added = known_fluents;
   std::unordered_map<Fluent, const Action *> fact_to_action;
   std::unordered_map<const Action *, double> action_to_duration;
+  // NEW: Track the probability of achieving each fluent
+  std::unordered_map<Fluent, double> fact_to_probability;
   std::unordered_set<const Action *> visited_actions;
   std::unordered_set<const Action *> all_actions_set;
   for (const auto &a : all_actions) {
@@ -66,6 +68,7 @@ double ff_heuristic(const State &input_state, const GoalFn &is_goal_fn,
       action_to_duration[a] = duration;
 
       // In relaxed planning, consider fluents from ALL probabilistic outcomes
+      // NEW: But now track the maximum probability of achieving each fluent
       for (const auto &[succ_state, succ_prob] : succs) {
 	if (succ_prob <= 0.0) {
 	  continue;
@@ -75,6 +78,11 @@ double ff_heuristic(const State &input_state, const GoalFn &is_goal_fn,
             known_fluents.insert(f);
             next_new.insert(f);
             fact_to_action[f] = a;
+            // NEW: Record the probability of achieving this fluent
+            fact_to_probability[f] = succ_prob;
+          } else if (fact_to_action.count(f) && fact_to_action[f] == a) {
+            // NEW: If this fluent can be achieved by the same action with higher probability, update
+            fact_to_probability[f] = std::max(fact_to_probability.at(f), succ_prob);
           }
         }
       }
@@ -103,6 +111,8 @@ double ff_heuristic(const State &input_state, const GoalFn &is_goal_fn,
   // Step 3: Backward relaxed plan
   std::unordered_set<Fluent> needed = required_fluents;
   std::unordered_set<const Action *> used_actions;
+  // NEW: Track which fluents are needed from each action for probability scaling
+  std::unordered_map<const Action *, std::vector<Fluent>> action_to_needed_fluents;
   double total_duration = 0.0;
 
   while (!needed.empty()) {
@@ -116,11 +126,29 @@ double ff_heuristic(const State &input_state, const GoalFn &is_goal_fn,
     if (it == fact_to_action.end())
       continue;
     const Action *a = it->second;
-    if (used_actions.count(a))
+
+    // NEW: Track which fluent(s) this action is being used for
+    action_to_needed_fluents[a].push_back(f);
+
+    if (used_actions.count(a)) {
       continue;
+    }
 
     used_actions.insert(a);
-    total_duration += action_to_duration[a];
+
+    // NEW: Scale duration by probability of achieving needed fluent
+    double base_duration = action_to_duration[a];
+    double prob = fact_to_probability.count(f) ? fact_to_probability[f] : 1.0;
+
+    // Cap the probability scaling to avoid extreme values
+    // If prob < 0.01, treat as if prob = 0.01 (max 100x scaling)
+    const double MIN_PROB = 0.01;
+    prob = std::max(prob, MIN_PROB);
+
+    // Expected attempts = 1 / probability
+    double expected_duration = base_duration / prob;
+    total_duration += expected_duration;
+
     for (const Fluent &p : a->pos_preconditions()) {
       if (!initial_fluents.count(p)) {
         needed.insert(p);
