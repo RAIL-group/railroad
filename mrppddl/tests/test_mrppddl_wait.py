@@ -78,7 +78,8 @@ def test_wait_for_transition():
 def test_planner_mcts_move_visit_wait_multirobot(initial_fluents):
     # Get all actions
     objects_by_type = {
-        "robot": ["r1", "r2", "r3"],
+       "robot": [f.args[0] for f in initial_fluents
+                 if f.name.split()[0] == 'free'],
         "location": ["start", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"],
     }
     random.seed(8616)

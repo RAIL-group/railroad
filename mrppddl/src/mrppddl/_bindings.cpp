@@ -310,7 +310,7 @@ PYBIND11_MODULE(_bindings, m) {
         [](const State &state, const std::unordered_set<Fluent> &goal_fluents,
            const std::vector<Action> &all_actions) {
 	  auto goal_fn = make_goal_fn(goal_fluents);
-          return ff_heuristic(state, goal_fn, all_actions);
+          return ff_heuristic(state, &goal_fn, all_actions);
         },
         "Compute FF heuristic value for a state",
         py::arg("state"), py::arg("goal_fluents"), py::arg("all_actions"));

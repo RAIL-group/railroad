@@ -15,9 +15,10 @@ using HeuristicFn = std::function<double(const State &)>;
 using GoalFn = std::function<bool(const std::unordered_set<Fluent> &)>;
 using FFMemory = std::unordered_map<std::size_t, double>;
 
-double ff_heuristic(const State &input_state, const GoalFn &is_goal_fn,
+double ff_heuristic(const State &input_state, const GoalFn *is_goal_fn,
                     const std::vector<Action> &all_actions,
-                    FFMemory *ff_memory = nullptr) {
+                    FFMemory *ff_memory = nullptr,
+                    std::unordered_set<const Action *> *output_visited_actions = nullptr) {
 
   const double t0 = input_state.time();
   // Step 1: Relaxed transition
@@ -31,9 +32,9 @@ double ff_heuristic(const State &input_state, const GoalFn &is_goal_fn,
   std::unordered_set<Fluent> known_fluents(initial_fluents.begin(),
                                            initial_fluents.end());
 
-  // Memoization check
+  // Memoization check (only if goal function provided)
   relaxed.set_time(0);
-  if (ff_memory && ff_memory->count(relaxed.hash())) {
+  if (is_goal_fn && ff_memory && ff_memory->count(relaxed.hash())) {
     return dtime + ff_memory->at(relaxed.hash());
   }
 
@@ -100,7 +101,17 @@ double ff_heuristic(const State &input_state, const GoalFn &is_goal_fn,
     }
   }
 
-  if (!is_goal_fn(known_fluents)) {
+  // If output_visited_actions requested, populate it
+  if (output_visited_actions) {
+    *output_visited_actions = visited_actions;
+  }
+
+  // If no goal function provided, skip backward planning and return 0
+  if (!is_goal_fn) {
+    return 0.0;
+  }
+
+  if (!(*is_goal_fn)(known_fluents)) {
     return std::numeric_limits<double>::infinity(); // unreachable goal
   }
 
@@ -109,7 +120,7 @@ double ff_heuristic(const State &input_state, const GoalFn &is_goal_fn,
   for (const auto &f : known_fluents) {
     std::unordered_set<Fluent> test_set(known_fluents);
     test_set.erase(f);
-    if (!is_goal_fn(test_set)) {
+    if (!(*is_goal_fn)(test_set)) {
       required_fluents.insert(f);
     }
   }
@@ -174,7 +185,7 @@ HeuristicFn make_ff_heuristic(GoalFn is_goal_fn,
                               std::vector<Action> all_actions,
                               FFMemory *memory = nullptr) {
   return [=](const State &s) -> double {
-    return ff_heuristic(s, is_goal_fn, all_actions, memory);
+    return ff_heuristic(s, &is_goal_fn, all_actions, memory);
   };
 }
 
@@ -189,70 +200,15 @@ inline GoalFn make_goal_fn(const std::unordered_set<Fluent> &goal_fluents) {
 }
 
 const std::vector<Action> get_usable_actions(const State &input_state,
-					     const GoalFn &is_goal_fn,
 					     const std::vector<Action> &all_actions) {
-  auto relaxed_result = transition(input_state, nullptr, true);
-  if (relaxed_result.empty())
-    return std::vector<Action>();
-  State relaxed = relaxed_result[0].first;
-
-  const auto &initial_fluents = relaxed.fluents();
-  std::unordered_set<Fluent> known_fluents(initial_fluents.begin(),
-                                           initial_fluents.end());
-
-  std::unordered_set<Fluent> newly_added = known_fluents;
-  std::unordered_map<Fluent, const Action *> fact_to_action;
-  std::unordered_map<const Action *, double> action_to_duration;
+  // Use ff_heuristic with nullptr goal function to get visited actions
   std::unordered_set<const Action *> visited_actions;
-  std::unordered_set<const Action *> all_actions_set;
-  for (const auto &a : all_actions) {
-    all_actions_set.insert(&a);
-  }
+  ff_heuristic(input_state, nullptr, all_actions, nullptr, &visited_actions);
 
-  // Step 1: Forward relaxed reachability
-  while (!newly_added.empty()) {
-    std::unordered_set<Fluent> next_new;
-    State temp(0.0, known_fluents); // dummy state to test preconditions
-
-    for (const Action *a : all_actions_set) {
-      if (!temp.satisfies_precondition(*a, /*relax=*/true))
-        continue;
-
-      const auto& succs = a->get_relaxed_successors();
-      if (succs.empty())
-        continue;
-
-      visited_actions.insert(a);
-      double duration = succs[0].first.time();
-      action_to_duration[a] = duration;
-
-      // In relaxed planning, consider fluents from ALL probabilistic outcomes
-      for (const auto &[succ_state, succ_prob] : succs) {
-        for (const auto &f : succ_state.fluents()) {
-          if (!known_fluents.count(f)) {
-            known_fluents.insert(f);
-            next_new.insert(f);
-            fact_to_action[f] = a;
-          }
-        }
-      }
-    }
-
-    newly_added = std::move(next_new);
-    for (const Action *a : visited_actions) {
-      all_actions_set.erase(a);
-    }
-  }
-
-  // if (!is_goal_fn(known_fluents)) {
-  //   throw std::runtime_error("Goal cannot be met.");
-  // }
-
-
-  // Return the set of executable actions
+  // Convert set of action pointers to vector of actions
   std::vector<Action> feasible_actions;
   feasible_actions.reserve(visited_actions.size());
-  for (auto action_ptr : visited_actions) {
+  for (const Action *action_ptr : visited_actions) {
     feasible_actions.push_back(*action_ptr);
   }
 
@@ -262,8 +218,7 @@ const std::vector<Action> get_usable_actions(const State &input_state,
 const std::vector<Action> get_usable_actions_fluent_list(const State &input_state,
 					     const std::unordered_set<Fluent> &goal_fluents,
 					     const std::vector<Action> &all_actions) {
- auto is_goal_fn = make_goal_fn(goal_fluents);
- return get_usable_actions(input_state, is_goal_fn, all_actions);
+ return get_usable_actions(input_state, all_actions);
 }
 
 

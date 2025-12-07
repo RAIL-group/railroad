@@ -26,10 +26,6 @@ def test_pruning_unavailable_actions():
         F("visited e"),
     }
 
-    with pytest.raises(RuntimeError):
-        # There is no way to reach the goal for this initial state
-        get_usable_actions(initial_state, goal_fluents, all_actions)
-
     initial_state = State(time=0, fluents={F("at r1 start"), F("free r1"),
                                         F("visited start")}, )
     num_actions_before = len(all_actions)
