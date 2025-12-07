@@ -51,42 +51,49 @@ double ff_heuristic(const State &input_state, const GoalFn &is_goal_fn,
   // Step 1: Forward relaxed reachability
   while (!newly_added.empty()) {
     std::unordered_set<Fluent> next_new;
-    State temp(0.0, known_fluents); // dummy state to test preconditions
+    State state_all_known(0.0, known_fluents); // dummy state to test preconditions
+    State state_empty;
 
     for (const Action *a : all_actions_set) {
       if (visited_actions.count(a))
         continue;
-      if (!temp.satisfies_precondition(*a, /*relax=*/true))
+      if (!state_all_known.satisfies_precondition(*a, /*relax=*/true))
         continue;
 
-      auto succs = transition(temp, a, true);
+      auto succs = transition(state_empty, a, true);
+      visited_actions.insert(a);
       if (succs.empty())
         continue;
 
-      visited_actions.insert(a);
-      double duration = succs[0].first.time() - temp.time();
-      action_to_duration[a] = duration;
+      double duration = 0;
 
       // In relaxed planning, consider fluents from ALL probabilistic outcomes
       // NEW: But now track the maximum probability of achieving each fluent
       for (const auto &[succ_state, succ_prob] : succs) {
+	duration = std::max(succ_state.time(), duration);
 	if (succ_prob <= 0.0) {
 	  continue;
 	}
         for (const auto &f : succ_state.fluents()) {
-          if (!known_fluents.count(f)) {
+          if (!known_fluents.count(f)) {  // If 'f' not in known_fluents
             known_fluents.insert(f);
             next_new.insert(f);
             fact_to_action[f] = a;
             // NEW: Record the probability of achieving this fluent
             fact_to_probability[f] = succ_prob;
-          } else if (fact_to_action.count(f) && fact_to_action[f] == a) {
-            // NEW: If this fluent can be achieved by the same action with higher probability, update
-            fact_to_probability[f] = std::max(fact_to_probability.at(f), succ_prob);
-          }
+          } else {  // If we've seen 'f' before
+	    // FIXME: I don't think this will actually work...
+            fact_to_probability[f] = std::max(fact_to_probability[f], succ_prob);
+
+	    // Count the minimum time to reach a place
+	    if (duration < action_to_duration[fact_to_action[f]]) {
+	      fact_to_action[f] = a;
+	    }
+	  }
         }
-      }
-    }
+      } // for over successor states
+      action_to_duration[a] = duration;
+    }  // for over actions
 
     newly_added = std::move(next_new);
     for (const Action *a : visited_actions) {
@@ -148,6 +155,7 @@ double ff_heuristic(const State &input_state, const GoalFn &is_goal_fn,
     // Expected attempts = 1 / probability
     double expected_duration = base_duration / prob;
     total_duration += expected_duration;
+    // total_duration += base_duration;
 
     for (const Fluent &p : a->pos_preconditions()) {
       if (!initial_fluents.count(p)) {
@@ -208,8 +216,6 @@ const std::vector<Action> get_usable_actions(const State &input_state,
     State temp(0.0, known_fluents); // dummy state to test preconditions
 
     for (const Action *a : all_actions_set) {
-      if (visited_actions.count(a))
-        continue;
       if (!temp.satisfies_precondition(*a, /*relax=*/true))
         continue;
 

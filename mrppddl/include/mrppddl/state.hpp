@@ -232,7 +232,7 @@ inline void advance_to_terminal(State state, double prob,
 
 inline std::vector<std::pair<State, double>>
 transition(const State &state, const Action *action, bool relax = false) {
-  if (action && !state.satisfies_precondition(*action, relax)) {
+  if (action && !relax && !state.satisfies_precondition(*action, relax)) {
     throw std::runtime_error("Precondition not satisfied for applying action");
   }
 
