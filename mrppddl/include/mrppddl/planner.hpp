@@ -337,12 +337,14 @@ void print_best_path(const MCTSDecisionNode* node, HeuristicFn& heuristic_fn, in
 // ---------------------- MCTS core ----------------------
 
 inline std::string mcts(const State &root_state,
-                        const std::vector<Action> &all_actions,
+                        const std::vector<Action> &all_actions_base,
                         const GoalFn &is_goal_fn, FFMemory *ff_memory,
                         int max_iterations = 1000, int max_depth = 20,
                         double c = std::sqrt(2.0)) {
   // RNG (thread_local is convenient if you run this in parallel later)
   static thread_local std::mt19937 rng{std::random_device{}()};
+
+  auto all_actions = get_usable_actions(root_state, is_goal_fn, all_actions_base);
 
   // Root node
   auto root = std::make_unique<MCTSDecisionNode>(root_state);
@@ -447,7 +449,7 @@ inline std::string mcts(const State &root_state,
       } else {
 	h = h;
       }
-      reward = -node->state.time() - h * (2 - it / max_iterations);
+      reward = -node->state.time() - h * HEURISTIC_MULTIPLIER;
     }
 
     // ---------------- Backpropagation ----------------

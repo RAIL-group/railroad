@@ -181,11 +181,9 @@ inline GoalFn make_goal_fn(const std::unordered_set<Fluent> &goal_fluents) {
   };
 }
 
-
-const std::vector<Action> get_usable_actions(const State &input_state, 
-					     const std::unordered_set<Fluent> &goal_fluents,
+const std::vector<Action> get_usable_actions(const State &input_state,
+					     const GoalFn &is_goal_fn,
 					     const std::vector<Action> &all_actions) {
-  auto is_goal_fn = make_goal_fn(goal_fluents);
   auto relaxed_result = transition(input_state, nullptr, true);
   if (relaxed_result.empty())
     return std::vector<Action>();
@@ -255,5 +253,13 @@ const std::vector<Action> get_usable_actions(const State &input_state,
 
   return feasible_actions;
 }
+
+const std::vector<Action> get_usable_actions_fluent_list(const State &input_state,
+					     const std::unordered_set<Fluent> &goal_fluents,
+					     const std::vector<Action> &all_actions) {
+ auto is_goal_fn = make_goal_fn(goal_fluents);
+ return get_usable_actions(input_state, is_goal_fn, all_actions);
+}
+
 
 } // namespace mrppddl
