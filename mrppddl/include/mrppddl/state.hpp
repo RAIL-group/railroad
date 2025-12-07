@@ -298,4 +298,14 @@ transition(const State &state, const Action *action, bool relax = false) {
   return {vec_outcomes.begin(), vec_outcomes.end()};
 }
 
+// Implementation of Action::get_relaxed_successors()
+// Must be defined here after State and transition are fully defined
+inline const std::vector<std::pair<State, double>>& Action::get_relaxed_successors() const {
+  if (!relaxed_successors_cache_) {
+    State empty_state;
+    relaxed_successors_cache_ = transition(empty_state, this, true);
+  }
+  return *relaxed_successors_cache_;
+}
+
 } // namespace mrppddl

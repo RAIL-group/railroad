@@ -52,7 +52,6 @@ double ff_heuristic(const State &input_state, const GoalFn &is_goal_fn,
   while (!newly_added.empty()) {
     std::unordered_set<Fluent> next_new;
     State state_all_known(0.0, known_fluents); // dummy state to test preconditions
-    State state_empty;
 
     for (const Action *a : all_actions_set) {
       if (visited_actions.count(a))
@@ -60,7 +59,7 @@ double ff_heuristic(const State &input_state, const GoalFn &is_goal_fn,
       if (!state_all_known.satisfies_precondition(*a, /*relax=*/true))
         continue;
 
-      auto succs = transition(state_empty, a, true);
+      const auto& succs = a->get_relaxed_successors();
       visited_actions.insert(a);
       if (succs.empty())
         continue;
@@ -219,12 +218,12 @@ const std::vector<Action> get_usable_actions(const State &input_state,
       if (!temp.satisfies_precondition(*a, /*relax=*/true))
         continue;
 
-      auto succs = transition(temp, a, true);
+      const auto& succs = a->get_relaxed_successors();
       if (succs.empty())
         continue;
 
       visited_actions.insert(a);
-      double duration = succs[0].first.time() - temp.time();
+      double duration = succs[0].first.time();
       action_to_duration[a] = duration;
 
       // In relaxed planning, consider fluents from ALL probabilistic outcomes

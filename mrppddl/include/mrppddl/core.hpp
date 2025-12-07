@@ -262,6 +262,9 @@ template <> struct hash<mrppddl::GroundedEffect> {
 
 namespace mrppddl {
 
+// Forward declaration for lazy computation of relaxed successors
+class State;
+
 class Action {
 public:
   Action(std::unordered_set<Fluent> preconditions,
@@ -296,6 +299,9 @@ public:
   const std::unordered_set<Fluent> &neg_precond_flipped() const {
     return neg_precond_flipped_;
   }
+
+  // Get precomputed relaxed successors (computed lazily on first call)
+  const std::vector<std::pair<State, double>>& get_relaxed_successors() const;
 
   std::string str() const {
     std::ostringstream out;
@@ -359,6 +365,9 @@ private:
   std::string name_;
   std::unordered_set<Fluent> pos_precond_;
   std::unordered_set<Fluent> neg_precond_flipped_;
+
+  // Cache for lazily computed relaxed successors
+  mutable std::optional<std::vector<std::pair<State, double>>> relaxed_successors_cache_;
 };
 
 } // namespace mrppddl
