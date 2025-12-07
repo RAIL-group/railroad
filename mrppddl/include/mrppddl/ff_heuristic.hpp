@@ -244,9 +244,9 @@ const std::vector<Action> get_usable_actions(const State &input_state,
     }
   }
 
-  if (!is_goal_fn(known_fluents)) {
-    throw std::runtime_error("Goal cannot be met.");
-  }
+  // if (!is_goal_fn(known_fluents)) {
+  //   throw std::runtime_error("Goal cannot be met.");
+  // }
 
 
   // Return the set of executable actions
