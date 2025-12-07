@@ -286,7 +286,7 @@ void print_best_path(const MCTSDecisionNode* node, HeuristicFn& heuristic_fn, in
               << "g+h=" << time_cost + h_value
               << std::endl;
 
-    std::cout << node->state.str() << std::endl;
+    // std::cout << node->state.str() << std::endl;
 
     if (node->children.empty()) {
         for (int i = 0; i < current_depth; ++i) std::cout << "  ";
