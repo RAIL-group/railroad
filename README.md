@@ -194,3 +194,13 @@ If you use this code in your research, please cite:
 ```
 [Add citation information here]
 ```
+
+
+## TODO Items
+
+**FF Heuristic & Action Filtering**
+- [ ] *Combine `get_usable_actions` with `ff_heuristic`* There is considerable duplicated code here and they really have the same functionality under the hood. Can I try passing a pointer for `visited_actions` to `ff_heuristic` and use that to return values if desired? Then the `get_usable_actions` function could just be a wrapper around it. Also, I can have `ff_heuristic` only optionally take in a goal function, since it isn't needed for determining which actions are reachable from some initial state.
+- [ ] *Handle 'fluent outcome likelihood' correctly within the `ff_heuristic`.* Currently, the maximum probability of a fluent within `ff_heuristic.hpp` keeps only the most likley *per successor/outcome*. Instead, they should be aggregated on a per-action basis, to keep around the total probability of making that fluent true. (If one outcome is 60% likely and another is 40% likely but both have a fluent 'F' in their outcomes, it should register as 100% for that fluent.)
+- [ ] *Keep only K-most-likely actions.* In previous work dealing with probabilistic outcomes, I would keep around only the K actions most likely to make that fluent true. To implement a similar functionality we can use the following steps: (1) determine which fluents are probabilistic and (2) for each fluent, determine which actions may result in that fluent as an outcome and then sort those and select the top-K of those, and (3) aggregate all of those actions in addition to all the deterministic actions. I will also write some tests for this purpose, to confirm that only probabilistic actions are limited.
+- [ ] *Select the K-most-likely actions and the K-least-expensive-ways-to-get-a-fluent*. Let's say I have a fluent 'F'. I think we can use the heuristic calculation on a goal function that includes all the positive conditions for any action that has some probability of resulting in 'F' being true. We could use the result as an estimate of how much time it would take to complete that action. Then we could use both (1) cost-to-action + action-cost (a measure of how long it will then take to accomplish a particular fluent) and (2) the probability of making a particular fluent true. 
+

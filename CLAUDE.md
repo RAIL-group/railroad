@@ -8,23 +8,17 @@ RAIL_mrppddl_dev is a research repository for Multi-Robot Probabilistic Planning
 
 ## Build System
 
-This project uses `uv` as the package manager and build tool. The build system automatically handles C++ compilation when needed.
+This project uses `uv` as the package manager and build tool. The build system automatically handles C++ compilation when needed. `uv run` handles all building and rebuliding any time the code is changed.
 
 ### Key Commands
 
-- **Setup**: `uv sync` - Install all dependencies and build C++ extensions
-- **Run all tests**: `uv run pytest` or `make test`
-- **Run tests matching filter**: `uv run pytest -vk <filter>` or `PYTEST_FILTER=pattern make test`
-- **Run specific test**: `uv run pytest -vk test_name`
-- **Type checking**: `uv run pyright -w mrppddl/src/mrppddl mrppddl/tests`
-- **Rebuild C++**: `make rebuild-cpp` - Force rebuild of C++ modules (rarely needed)
-- **Clean**: `make clean-cpp` - Remove C++ build artifacts only
+- **Run all tests**: `uv run pytest`
+- **Run tests matching filter**: `uv run pytest -vk <filter>`
+- **Type checking**: `uv run pyright -w mrppddl/src/mrppddl mrppddl/tests` (currently not working)
 
 ### Important Build Notes
 
-- Build is now automatic via `uv sync` or `uv run ...`
-- C++ modules only need manual rebuild after `make clean-cpp` or changes to `.cpp`/`.hpp` files
-- If C++ bindings are missing, the system will prompt with: "To rebuild the package, run: `uv sync --reinstall-package mrppddl`"
+- Build is automatic via `uv run`, which will automatically detect changes to code (including the C++ code) and rebuild as necessary. Do not run `uv sync`, as it is not needed.
 
 ## Architecture
 
@@ -106,19 +100,8 @@ Key test patterns:
 uv run pytest -vk test_fluent_equality
 ```
 
-### Type Checking Before Commit
-```bash
-uv run pyright -w mrppddl/src/mrppddl mrppddl/tests
-```
-
-### After Modifying C++ Code
-```bash
-make rebuild-cpp  # Or just: uv sync --reinstall-package mrppddl
-uv run pytest -vk test_mrppddl  # Verify changes work
-```
-
 ### Creating a New PDDL Problem
-See README.md "Quick Start" section and test files (e.g., `test_mrppddl_wait.py`) for examples. The typical flow:
+The typical flow:
 1. Define environment with locations and objects
 2. Create operators using helpers from `mrppddl.helper`
 3. Instantiate actions from operators with `operator.instantiate(objects_by_type)`
@@ -127,7 +110,6 @@ See README.md "Quick Start" section and test files (e.g., `test_mrppddl_wait.py`
 
 ## Common Gotchas
 
-- **Import Errors**: If you see "_bindings is missing", run `uv sync --reinstall-package mrppddl`
 - **Negative Preconditions**: MCTSPlanner automatically converts them - no manual handling needed
 - **Resource Downloads**: ProcTHOR auto-downloads resources on first import. Large downloads may take time
 - **Cache**: ProcTHOR caches scenes in `resources/procthor-10k/cache/` for faster loading
