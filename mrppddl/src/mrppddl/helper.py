@@ -116,6 +116,6 @@ def construct_wait_operator():
     return Operator(
         name="wait",
         parameters=[("?r1", "robot"), ("?r2", "robot")],
-        preconditions=[F("free ?r1"), F("not free ?r2")],
+        preconditions=[F("free ?r1"), ~F("free ?r2"), ~F("waiting ?r2 ?r1")],
         effects=[Effect(time=0, resulting_fluents={F("not free ?r1"), F("waiting ?r1 ?r2")})],
     )
