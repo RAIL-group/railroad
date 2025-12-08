@@ -164,8 +164,8 @@ double ff_heuristic(const State &input_state, const GoalFn *is_goal_fn,
 
     // Expected attempts = 1 / probability
     double expected_duration = base_duration / prob;
-    total_duration += expected_duration;
-    // total_duration += base_duration;
+    // total_duration += expected_duration;
+    total_duration += base_duration;
 
     for (const Fluent &p : a->pos_preconditions()) {
       if (!initial_fluents.count(p)) {

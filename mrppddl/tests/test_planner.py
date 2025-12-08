@@ -98,8 +98,15 @@ def test_planner_mcts_move_visit_multirobot(initial_fluents):
     assert is_goal(state)
 
 
-@pytest.mark.parametrize("roomA_prob", [1.0, 0.8, 0.6])
-def test_mcts_search_picks_more_likely_location(roomA_prob):
+@pytest.mark.parametrize(("roomA_prob", "num_robots"), [
+    (1.0, 1),
+    (0.8, 1),
+    (0.6, 1),
+    (1.0, 2),
+    (0.8, 2),
+    (0.6, 2),
+])
+def test_mcts_search_picks_more_likely_location(roomA_prob, num_robots):
     # Define objects
     objects_by_type = {
         "robot": ["r1", "r2"],
@@ -120,17 +127,24 @@ def test_mcts_search_picks_more_likely_location(roomA_prob):
     ).instantiate(objects_by_type)
 
     # Initial state
-    initial_state = State(
-        time=0,
-        fluents={
-            Fluent("at r1 start"),
-            Fluent("at r2 start"),
-            Fluent("free r1"),
-            Fluent("free r2"),
-        },
-    )
 
-    goal_fluents = {Fluent("found cup"), Fluent("found bowl")}
+    if num_robots == 1:
+        initial_state = State(
+            time=0,
+            fluents={Fluent("at r1 start"), Fluent("free r1"),})
+        goal_fluents = {Fluent("found bowl")}
+    elif num_robots == 2:
+        initial_state = State(
+            time=0,
+            fluents={
+                Fluent("at r1 start"),
+                Fluent("at r2 start"),
+                Fluent("free r1"),
+                Fluent("free r2"),
+            })
+        goal_fluents = {Fluent("found cup"), Fluent("found bowl")}
+    else:
+        raise ValueError(f"num_robots {num_robots} unsupported.")
     all_actions = search_actions
     mcts = MCTSPlanner(all_actions)
 
@@ -138,7 +152,7 @@ def test_mcts_search_picks_more_likely_location(roomA_prob):
     selected_actions = []
     num_planning_attempts = 20
     for _ in range(num_planning_attempts):
-        action = mcts(initial_state, goal_fluents, max_iterations=2000, c=10)
+        action = mcts(initial_state, goal_fluents, max_iterations=10000, c=1.414)
         selected_actions.append(action)
 
     # Count how many selected actions mention roomA
@@ -147,4 +161,4 @@ def test_mcts_search_picks_more_likely_location(roomA_prob):
     # We expect roomA to appear in at least 80% of planning attempts
     assert (
         roomA_count >= 0.8 * num_planning_attempts
-    ), f"Expected roomA in at least 8 actions, got {roomA_count} for roomA_prob={roomA_prob}"
+    ), f"Expected roomA in at least 80% actions, got {roomA_count}/{num_planning_attempts} for roomA_prob={roomA_prob}"

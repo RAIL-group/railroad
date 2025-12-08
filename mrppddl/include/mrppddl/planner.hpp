@@ -337,23 +337,32 @@ void print_best_path(const MCTSDecisionNode* node, HeuristicFn& heuristic_fn, in
 // ---------------------- MCTS core ----------------------
 
 inline std::string mcts(const State &root_state,
-                        const std::vector<Action> &all_actions,
+                        const std::vector<Action> &all_actions_base,
                         const GoalFn &is_goal_fn, FFMemory *ff_memory,
                         int max_iterations = 1000, int max_depth = 20,
-                        double c = std::sqrt(2.0)) {
+                        double c_base = std::sqrt(2.0)) {
   // RNG (thread_local is convenient if you run this in parallel later)
   static thread_local std::mt19937 rng{std::random_device{}()};
 
-  // auto all_actions = get_usable_actions(root_state, all_actions_base);
+  auto all_actions = get_usable_actions(root_state, all_actions_base);
 
   // Root node
   auto root = std::make_unique<MCTSDecisionNode>(root_state);
   root->untried_actions = get_next_actions(root_state, all_actions);
   auto heuristic_fn = make_ff_heuristic(is_goal_fn, all_actions, ff_memory);
+  std::bernoulli_distribution do_extra_exploration(PROB_EXTRA_EXPLORE);
 
   bool is_node_goal = false;
   bool is_node_unsolvable = false;
   for (int it = 0; it < max_iterations; ++it) {
+    double c;
+    if (it < SEARCH_PHASE_RATIO * max_iterations) {
+      c = c_base * 100;
+    } else {
+      c = c_base * (100 * do_extra_exploration(rng) + 1);
+    }
+    
+
     #ifdef MRPPDDL_USE_PYBIND
     // Only used when building the Python extension
     if (PyErr_CheckSignals() != 0) {
