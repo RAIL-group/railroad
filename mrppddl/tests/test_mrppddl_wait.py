@@ -111,12 +111,13 @@ def test_planner_mcts_move_visit_wait_multirobot(initial_fluents):
         if is_goal(state):
             print("Goal found!")
             break
-        action_name = mcts(state, goal_fluents, 10000, c=1.414)
+        action_name = mcts(state, goal_fluents, 10000, c=5)
         if action_name == "NONE":
             break
         action = get_action_by_name(all_actions, action_name)
 
         state = transition(state, action)[0][0]
+            
         print(action_name, state, is_goal(state))
     assert is_goal(state)
 
