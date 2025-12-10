@@ -55,7 +55,7 @@ def main():
         fluents={
             # Robots free and start in (revealed) living room
             F("free robot1"),
-            F("free robot2"),
+            # F("free robot2"),
             F("at robot1 living_room"),
             F("at robot2 living_room"),
             F("revealed living_room"),
@@ -125,7 +125,7 @@ def main():
 
         # Plan next action
         mcts = MCTSPlanner(all_actions)
-        action_name = mcts(sim.state, goal_fluents, max_iterations=5000, c=1.414, max_depth=20)
+        action_name = mcts(sim.state, goal_fluents, max_iterations=50000, c=3.414, max_depth=20)
 
         if action_name == 'NONE':
             print("\n" + "=" * 70)

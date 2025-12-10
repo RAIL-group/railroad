@@ -161,7 +161,7 @@ public:
     }
     out << "}, upcoming_effects=[";
     for (size_t i = 0; i < upcoming_effects_.size(); ++i) {
-      out << "(" << upcoming_effects_[i].first << ", ...)";
+      out << "(" << upcoming_effects_[i].first << ", " << upcoming_effects_[i].second->str() << ")";
       if (i + 1 < upcoming_effects_.size())
         out << ", ";
     }
