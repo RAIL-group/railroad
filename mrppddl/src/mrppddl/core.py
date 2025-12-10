@@ -193,17 +193,21 @@ def convert_state_to_positive_preconditions(
     """Convert state to use positive versions of negative preconditions.
 
     For each negative precondition that could exist, adds the corresponding
-    positive "not-" fluent if the original fluent is absent.
+    positive "not-" fluent if the original fluent is absent. Also converts
+    upcoming effects to maintain consistency with the mapping.
 
     Args:
         state: Original state
         neg_to_pos_mapping: Mapping from fluents to their "not-" versions
 
     Returns:
-        New State with additional positive fluents representing absence.
+        New State with additional positive fluents representing absence
+        and converted upcoming effects.
         For example, if F("hand_full r1") is not in state.fluents,
         adds F("not-hand_full r1") to indicate hand is not full.
     """
+    from mrppddl._bindings import GroundedEffect
+
     new_fluents = set(state.fluents)
 
     for original_fluent, not_fluent in neg_to_pos_mapping.items():
@@ -211,7 +215,57 @@ def convert_state_to_positive_preconditions(
         if original_fluent not in state.fluents:
             new_fluents.add(not_fluent)
 
-    return State(time=state.time, fluents=new_fluents, upcoming_effects=state.upcoming_effects)
+    # Convert upcoming effects using the same logic as convert_action_effects
+    def augment_fluents(fluents: Set[Fluent]) -> Set[Fluent]:
+        """Augment a set of fluents with consistency fluents."""
+        augmented = set(fluents)
+        for fluent in fluents:
+            if fluent.negated:
+                # Fluent is ~F("P") - removing P
+                # Check if F("P") (the positive version) is in mapping
+                positive_fluent = ~fluent  # Invert to get F("P")
+                if positive_fluent in neg_to_pos_mapping:
+                    # Add F("not-P") since P is being removed
+                    augmented.add(neg_to_pos_mapping[positive_fluent])
+            else:
+                # Fluent is F("P") - adding P
+                # Check if this P is in the mapping
+                if fluent in neg_to_pos_mapping:
+                    # Add ~F("not-P") since P is being added
+                    augmented.add(~neg_to_pos_mapping[fluent])
+        return augmented
+
+    def convert_grounded_effect(effect: GroundedEffect) -> GroundedEffect:
+        """Recursively convert a GroundedEffect and its probabilistic branches."""
+        # Augment the immediate resulting fluents
+        augmented_fluents = augment_fluents(effect.resulting_fluents)
+
+        # Recursively convert probabilistic effects
+        if effect.is_probabilistic:
+            converted_prob_effects = []
+            for prob_branch in effect.prob_effects:
+                prob = prob_branch.prob
+                converted_branch_effects = [
+                    convert_grounded_effect(branch_eff)
+                    for branch_eff in prob_branch.effects
+                ]
+                converted_prob_effects.append((prob, converted_branch_effects))
+
+            return GroundedEffect(
+                time=effect.time,
+                resulting_fluents=augmented_fluents,
+                prob_effects=converted_prob_effects
+            )
+        else:
+            return GroundedEffect(
+                time=effect.time,
+                resulting_fluents=augmented_fluents
+            )
+
+    # Convert all upcoming effects (which are tuples of (time, effect))
+    converted_effects = [(time, convert_grounded_effect(eff)) for time, eff in state.upcoming_effects]
+
+    return State(time=state.time, fluents=new_fluents, upcoming_effects=converted_effects)
 
 
 def convert_action_to_positive_preconditions(

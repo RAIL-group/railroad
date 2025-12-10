@@ -569,3 +569,67 @@ def test_ff_heuristic_with_probabilistic_search(find_prob):
         assert h_value == float('inf'), (
             "Heuristic should be infinite, since there is no solution"
         )
+
+
+def test_convert_state_with_upcoming_effects():
+    """Test that convert_state_to_positive_preconditions handles upcoming effects.
+
+    This test verifies that when a state has upcoming effects, those effects
+    are properly converted to maintain consistency with the negative-to-positive
+    precondition mapping.
+    """
+    from mrppddl.core import convert_state_to_positive_preconditions
+
+    # Hand-code a simple mapping
+    neg_to_pos_mapping = {
+        F("hand_full r1"): F("not-hand_full r1"),
+        F("found obj"): F("not-found obj")
+    }
+
+    # Create a state with upcoming effects that include fluents in the mapping
+    # Deterministic effect: adds hand_full (should also add ~not-hand_full)
+    det_effect = GroundedEffect(
+        time=2.0,
+        resulting_fluents={F("hand_full r1"), F("holding r1 obj")}
+    )
+
+    # Probabilistic effect: branches that add/remove mapped fluents
+    prob_effect = GroundedEffect(
+        time=5.0,
+        resulting_fluents={F("searched location")},
+        prob_effects=[
+            (0.6, [GroundedEffect(time=0.0, resulting_fluents={F("found obj")})]),
+            (0.4, [GroundedEffect(time=0.0, resulting_fluents={F("nothing")})])
+        ]
+    )
+
+    initial_state = State(
+        time=0,
+        fluents={F("at r1 start"), F("free r1")},
+        upcoming_effects=[(2.0, det_effect), (5.0, prob_effect)]
+    )
+
+    # Convert the state
+    converted_state = convert_state_to_positive_preconditions(initial_state, neg_to_pos_mapping)
+
+    # Check that upcoming effects are converted
+    assert len(converted_state.upcoming_effects) == 2
+
+    # Check deterministic effect: should have ~F("not-hand_full r1") added
+    det_time, det_converted = converted_state.upcoming_effects[0]
+    assert det_time == 2.0
+    assert F("hand_full r1") in det_converted.resulting_fluents
+    assert ~F("not-hand_full r1") in det_converted.resulting_fluents
+    assert F("holding r1 obj") in det_converted.resulting_fluents
+
+    # Check probabilistic effect: should have ~F("not-found obj") in success branch
+    prob_time, prob_converted = converted_state.upcoming_effects[1]
+    assert prob_time == 5.0
+    assert F("searched location") in prob_converted.resulting_fluents
+    assert prob_converted.is_probabilistic
+
+    success_branch = prob_converted.prob_effects[0]
+    assert success_branch.prob == 0.6
+    success_effect = success_branch.effects[0]
+    assert F("found obj") in success_effect.resulting_fluents
+    assert ~F("not-found obj") in success_effect.resulting_fluents
