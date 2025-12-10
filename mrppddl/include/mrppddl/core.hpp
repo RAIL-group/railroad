@@ -43,7 +43,7 @@ public:
         negated_ = true;
         tokens.erase(tokens.begin());
       } else {
-        negated_ = false;
+        negated_ = negated;
       }
 
       if (tokens.empty()) {

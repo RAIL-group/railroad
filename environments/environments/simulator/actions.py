@@ -88,6 +88,8 @@ class OngoingMoveAction(OngoingAction):
             if eff.is_probabilistic:
                 raise ValueError("Probabilistic effects cannot be interrupted.")
             for fluent in eff.resulting_fluents:
+                if (~fluent) in new_fluents:
+                    new_fluents.remove(~fluent)
                 new_fluents.add(
                     F(" ".join(
                         [fluent.name]
