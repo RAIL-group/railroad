@@ -7,10 +7,53 @@ from rich.table import Table
 from rich.text import Text
 from rich.pretty import Pretty
 from rich.syntax import Syntax
+from time import sleep
+
+import re
+from typing import List, Dict
 
 from mrppddl._bindings import ff_heuristic
 
 console = Console()
+
+def split_markdown_flat(text: str) -> List[Dict[str, str]]:
+    """
+    Split markdown into a flat list of items:
+    - {'type': 'h1', 'text': 'Heading 1'}
+    - {'type': 'h2', 'text': 'Heading 2'}
+    - {'type': 'text', 'text': 'multi-line text block'}
+
+    Only first- and second-level headings (#, ##) are treated specially.
+    Everything else is captured as text blocks between headings, preserving order.
+    """
+    pattern = re.compile(r'^(#{1,2})\s+(.*)$', re.MULTILINE)
+    items: List[Dict[str, str]] = []
+
+    last_pos = 0
+    for m in pattern.finditer(text):
+        # Text block before this heading
+        if m.start() > last_pos:
+            block = text[last_pos:m.start()].strip("\n")
+            if block.strip():
+                items.append(["text", block])
+
+        hashes, heading_text = m.group(1), m.group(2).strip()
+        level = len(hashes)
+
+        if level == 1:
+            items.append(["h1", heading_text])
+        elif level == 2:
+            items.append(["h2", heading_text])
+
+        last_pos = m.end()
+
+    # Trailing text after the last heading
+    if last_pos < len(text):
+        block = text[last_pos:].strip("\n")
+        if block.strip():
+            items.append(["text", block])
+
+    return items
 
 
 class PlannerDashboard:
@@ -25,11 +68,16 @@ class PlannerDashboard:
       └──────────────────────────┴───────────────┘
     """
 
-    def __init__(self, goal_fluents, initial_heuristic=None):
+    def __init__(self, goal_fluents, initial_heuristic=None, console=None):
+        if console:
+            self.console = console
+        else:
+            self.console = Console()
         self.goal_fluents = list(goal_fluents)
         self.num_goals = len(self.goal_fluents)
         self.initial_heuristic = initial_heuristic
 
+        self.history: list[dict] = []
         # Root layout
         self.layout = self._make_layout()
 
@@ -97,7 +145,7 @@ class PlannerDashboard:
     ) -> Panel:
         # Top metadata table (step, time, last action)
         meta = Table.grid(padding=(0, 1))
-        meta.add_row("Time", f"{sim_state.time:.1f} s")
+        meta.add_row("Cost", f"{sim_state.time:.1f}")
         meta.add_row(
             "Goals reached",
             f"{self._count_achieved_goals(sim_state)}/{self.num_goals}",
@@ -200,6 +248,97 @@ class PlannerDashboard:
             extra=f"h={h_now:.2f} Δh={improvement:.2f}",
         )
 
+    def _record_history_entry(
+        self,
+        sim_state,
+        relevant_fluents,
+        tree_trace: str,
+        step_index: int | None,
+        last_action_name: str | None,
+        heuristic_value: float | None,
+    ):
+        # Store a lightweight, serializable snapshot
+        entry = {
+            "step": step_index,
+            "time": float(sim_state.time),
+            "last_action": last_action_name,
+            "heuristic": float(heuristic_value) if heuristic_value is not None else None,
+            "relevant_fluents": [str(f) for f in sorted(relevant_fluents, key=lambda x: x.name)],
+            "goals": {
+                str(g): bool(g in sim_state.fluents) for g in self.goal_fluents
+            },
+            "tree_trace": tree_trace,
+        }
+        self.history.append(entry)
+
+    def format_history_as_text(self) -> str:
+        """Return the full dashboard history as a multi-line string."""
+        lines: list[str] = []
+        for entry in self.history:
+            step = entry["step"]
+            t = entry["time"]
+            action = entry["last_action"]
+            h = entry["heuristic"]
+
+            lines.append(f"# Step {step} | t = {t:.2f}s | action = {action}")
+            lines.append(f"Selected Action: {action}\n")
+            if entry["tree_trace"]:
+                lines.append("\n## MCTS Tree Trace:")
+                # indent the trace for readability
+                for line in entry["tree_trace"].splitlines():
+                    lines.append(f"    {line}")
+            lines.append("\n## Selected Active Fluents:")
+            for f in entry["relevant_fluents"]:
+                lines.append(f"    {f}")
+            lines.append("## Goal Fluents:")
+            for g, ok in entry["goals"].items():
+                mark = "✓" if ok else "✗"
+                lines.append(f"   {mark} {g}")
+            lines.append("\n")  # blank line between steps
+        
+        return "\n".join(lines)
+
+    def print_history(self, final_state, actions_taken):
+        """Pretty-print the full history using Rich."""
+        local_console = self.console
+
+        if not self.history:
+            local_console.print("[yellow]No history recorded.[/yellow]")
+            return
+
+        split_text = split_markdown_flat(self.format_history_as_text())
+        for text_type, text in split_text:
+            if text_type == 'text':
+                local_console.print(text)
+            elif text_type == 'h1':
+                local_console.print()
+                local_console.rule(text)
+            elif text_type == 'h2':
+                local_console.print(f"[bold red]{text}[/]")
+
+        if final_state and actions_taken:
+            if len(set(self.goal_fluents) - set(final_state.fluents)):
+                local_console.rule("[bold red]Task Not Completed :: Execution Summary[/]")
+            else:
+                local_console.rule("[bold green]Success!! :: Execution Summary[/]")
+                
+            local_console.print(f"[bold red]Actions Taken (Num Actions: {len(actions_taken)})[/]", highlight=True)
+            for i, action in enumerate(actions_taken, 1):
+                local_console.print(f"  {i}. {action}", highlight=True)
+            # Check which goals were achieved
+            local_console.print("\n[bold red]Goal status:[/]")
+            for goal in self.goal_fluents:
+                achieved = goal in final_state.fluents
+                status = "✓" if achieved else "✗"
+                local_console.print(f"  {status} {goal}")
+            local_console.print(f"\n[bold red]Total cost (time): {final_state.time:.1f} seconds [/]")
+                
+
+    def save_history(self, path: str):
+        """Save the history to a plain-text log file."""
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(self.format_history_as_text())
+
     def update(
         self,
         sim_state,
@@ -238,5 +377,13 @@ class PlannerDashboard:
         if tree_trace:
             self.layout["debug"].update(self._build_trace_panel(tree_trace))
 
-        from time import sleep
         sleep(0.01)
+
+        self._record_history_entry(
+            sim_state=sim_state,
+            relevant_fluents=relevant_fluents,
+            tree_trace=tree_trace,
+            step_index=step_index,
+            last_action_name=last_action_name,
+            heuristic_value=heuristic_value,
+        )

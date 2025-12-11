@@ -340,7 +340,7 @@ inline std::string mcts(const State &root_state,
   auto all_actions = get_usable_actions(root_state, all_actions_base);
 
   // Root node
-  auto root = std::make_unique<MCTSDecisionNode>(root_state);
+  auto root = std::make_unique<MCTSDecisionNode>(root_state.copy_and_zero_out_time());
   root->untried_actions = get_next_actions(root_state, all_actions);
   auto heuristic_fn = make_ff_heuristic(is_goal_fn, all_actions, ff_memory);
   std::bernoulli_distribution do_extra_exploration(PROB_EXTRA_EXPLORE);
@@ -445,8 +445,9 @@ inline std::string mcts(const State &root_state,
     // Your Python code uses: reward = -time - heuristic (bounded).
     double reward;
     double h = 0.0;
+    int goal_count = is_goal_fn.goal_count(node->state.fluents());
     if (is_goal_fn(node->state.fluents())) {
-      reward = -node->state.time() + SUCCESS_REWARD;
+      reward = -node->state.time() + SUCCESS_REWARD + 0 * goal_count;
     } else {
       h = heuristic_fn ? heuristic_fn(node->state) : 0.0;
       if (h > 1e10) {
@@ -457,7 +458,7 @@ inline std::string mcts(const State &root_state,
       if (did_need_relaxed_transition)
 	h += 100;
 
-      reward = -node->state.time() - h * HEURISTIC_MULTIPLIER;
+      reward = -node->state.time() - h * HEURISTIC_MULTIPLIER + 0 * goal_count;
     }
 
     // ---------------- Backpropagation ----------------

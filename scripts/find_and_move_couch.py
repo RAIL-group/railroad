@@ -43,8 +43,6 @@ OBJECTS_AT_LOCATIONS = {
 }
 
 
-
-
 def main():
 
     # Initialize environment
@@ -122,7 +120,6 @@ def main():
     )
 
     # Planning loop
-    print("Starting planning and execution...\n")
     actions_taken = []
     max_iterations = 60  # Limit iterations to avoid infinite loops
 
@@ -160,7 +157,7 @@ def main():
 
             # Plan next action
             mcts = MCTSPlanner(all_actions)
-            action_name = mcts(sim.state, goal_fluents, max_iterations=2000, c=1000, max_depth=40)
+            action_name = mcts(sim.state, goal_fluents, max_iterations=10000, c=100, max_depth=20)
             tree_trace = mcts.get_trace_from_last_mcts_tree()
 
             if action_name == 'NONE':
@@ -190,27 +187,8 @@ def main():
                 heuristic_value=h_value,
             )
 
-    # Summary
-    print("\n" + "=" * 70)
-    print("EXECUTION SUMMARY")
-    print("=" * 70)
-    print(f"Total actions executed: {len(actions_taken)}")
-    print(f"Total time: {sim.state.time:.1f} seconds")
-    print()
-    print("Actions taken:")
-    for i, action in enumerate(actions_taken, 1):
-        print(f"  {i}. {action}")
-    print()
-
-    # Check which goals were achieved
-    print("Goal status:")
-    for goal in goal_fluents:
-        achieved = goal in sim.state.fluents
-        status = "✓" if achieved else "✗"
-        print(f"  {status} {goal}")
-    print()
-
-    print("=" * 70)
+    # Print the full dashboard history to the console (optional)
+    dashboard.print_history(sim.state, actions_taken)
 
 
 if __name__ == "__main__":
