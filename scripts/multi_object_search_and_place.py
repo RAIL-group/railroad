@@ -216,7 +216,7 @@ def main():
         print(f"[Step {iteration + 1}] Executing: {action_name}")
 
         try:
-            sim.advance(action)
+            sim.advance(action, do_interrupt=False)
             actions_taken.append(action_name)
 
             # Print relevant state information

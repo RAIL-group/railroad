@@ -169,8 +169,8 @@ def test_pick_and_place_action():
             },
     )
     env = TestEnvironment(locations=LOCATIONS)
-    pick_op = environments.actions.construct_pick_operator(pick_time=pick_time)
-    place_op = environments.actions.construct_place_operator(place_time=place_time)
+    pick_op = environments.actions.construct_pick_operator_nonblocking(pick_time=pick_time)
+    place_op = environments.actions.construct_place_operator_nonblocking(place_time=place_time)
 
     sim = Simulator(initial_state, objects_by_type, [pick_op, place_op], env)
 

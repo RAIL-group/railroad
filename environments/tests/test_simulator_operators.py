@@ -12,7 +12,7 @@ def test_move_operator():
         "location": {"start", "roomA", "roomB", "roomC"},
     }
     move_time = lambda r, f, t: 10 if r == "r1" else 15
-    move_op = environments.actions.construct_move_operator(move_time=move_time)
+    move_op = environments.actions.construct_move_operator_nonblocking(move_time=move_time)
 
     initial_state = State(
             time=0,
@@ -130,7 +130,7 @@ def test_pick_and_place_operator():
             },
     )
     pick_op = environments.actions.construct_pick_operator(pick_time=pick_time)
-    place_op = environments.actions.construct_place_operator(place_time=place_time)
+    place_op = environments.actions.construct_place_operator_nonblocking(place_time=place_time)
 
     pick_actions = pick_op.instantiate(objects_by_type)
     place_actions = place_op.instantiate(objects_by_type)

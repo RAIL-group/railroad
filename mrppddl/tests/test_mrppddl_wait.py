@@ -582,7 +582,7 @@ def test_couch_carry_with_operators_and_planner():
             goal_fluents,
             max_iterations=5000,
             max_depth=20,
-            c=1.414
+            c=100
         )
 
         if action_name == "NONE":

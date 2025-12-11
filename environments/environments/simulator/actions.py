@@ -123,6 +123,21 @@ class OngoingPlaceAction(OngoingAction):
             self.environment.add_object_at_location(obj, loc)
         return new_effects
 
+def construct_move_operator_nonblocking(move_time: OptCallable):
+    move_time = _make_callable(move_time)
+    return Operator(
+        name="move",
+        parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F("at ?r ?from"), F("free ?r")],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?r ?from")}),
+            Effect(
+                time=(move_time, ["?r", "?from", "?to"]),
+                resulting_fluents={F("free ?r"), F("at ?r ?to")},
+            ),
+        ],
+    )
+
 
 def construct_move_operator(move_time: OptCallable):
     move_time = _make_callable(move_time)
@@ -168,6 +183,20 @@ def construct_search_operator(object_find_prob: OptCallable, search_time: OptCal
         ]
     )
 
+def construct_pick_operator_nonblocking(pick_time: OptCallable) -> Operator:
+    pick_time = _make_callable(pick_time)
+    return Operator(
+        name="pick",
+        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
+        preconditions=[F("at ?r ?loc"), F("free ?r"), F("at ?obj ?loc"), ~F("hand-full ?r")],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?obj ?loc")}),
+            Effect(time=(pick_time, ["?r", "?loc", "?obj"]),
+                   resulting_fluents={F("free ?r"), F("holding ?r ?obj"), F("hand-full ?r")}),
+        ],
+    )
+
+
 def construct_pick_operator(pick_time: OptCallable) -> Operator:
     pick_time = _make_callable(pick_time)
     pick_time_plus_eps = lambda *args: pick_time(*args) + 0.1
@@ -181,6 +210,19 @@ def construct_pick_operator(pick_time: OptCallable) -> Operator:
                    resulting_fluents={F("free ?r"), F("holding ?r ?obj"), F("hand-full ?r"), F("just-picked ?r ?obj")}),
             Effect(time=(pick_time_plus_eps, ["?r", "?loc", "?obj"]),
                    resulting_fluents={~F("just-picked ?r ?obj")}),
+        ],
+    )
+
+def construct_place_operator_nonblocking(place_time: OptCallable) -> Operator:
+    place_time = _make_callable(place_time)
+    return Operator(
+        name="place",
+        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
+        preconditions=[F("at ?r ?loc"), F("free ?r"), F("holding ?r ?obj"), F("hand-full ?r")],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free ?r"), F("not holding ?r ?obj")}),
+            Effect(time=(place_time, ["?r", "?loc", "?obj"]),
+                   resulting_fluents={F("free ?r"), F("at ?obj ?loc"), ~F("hand-full ?r")}),
         ],
     )
 
