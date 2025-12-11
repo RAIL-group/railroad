@@ -13,10 +13,12 @@
 #include <algorithm>
 #include <functional>
 #include <iostream>
+#include <iomanip>
 #include <optional>
 #include <queue>
 #include <random>
 #include <set>
+#include <sstream>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
@@ -133,17 +135,9 @@ astar(const State &start_state, const std::vector<Action> &all_actions,
   std::unordered_map<std::size_t, std::pair<std::size_t, const Action *>>
       came_from;
 
-  auto is_goal_fn = make_goal_fn(goal_fluents);
+  auto is_goal_fn = GoalFn(goal_fluents);
   FFMemory ff_memory;
   heuristic_fn = make_ff_heuristic(is_goal_fn, all_actions, &ff_memory);
-
-  // std::unordered_set<Fluent> goal_fluents;
-  // goal_fluents.emplace(Fluent("at r1 a"));
-  // goal_fluents.emplace(Fluent("visited a"));
-  // goal_fluents.emplace(Fluent("visited b"));
-  // goal_fluents.emplace(Fluent("visited c"));
-  // goal_fluents.emplace(Fluent("visited d"));
-  // goal_fluents.emplace(Fluent("visited e"));
 
   int counter = 0;
   open_heap.emplace(0.0, start_state);
@@ -265,7 +259,7 @@ inline void backpropagate(MCTSDecisionNode *leaf, double reward) {
 }
 
 
-void print_best_path(const MCTSDecisionNode* node, HeuristicFn& heuristic_fn, int max_print_depth, int current_depth = 0) {
+void print_best_path(std::ostream& os, const MCTSDecisionNode* node, HeuristicFn& heuristic_fn, int max_print_depth, int current_depth = 0) {
     if (!node || current_depth > max_print_depth) {
         return;
     }
@@ -276,21 +270,19 @@ void print_best_path(const MCTSDecisionNode* node, HeuristicFn& heuristic_fn, in
     double time_cost = node->state.time();
 
     // Indent for readability
-    for (int i = 0; i < current_depth; ++i) std::cout << "  ";
+    for (int i = 0; i < current_depth; ++i) os << "  ";
 
-    std::cout << "[D:" << current_depth << "] "
-              << "visits=" << node->visits << ", "
-              << "Q_val=" << q_value << ", "
-              << "cost(g)=" << time_cost << ", "
-              << "heuristic(h)=" << h_value << ", "
-              << "g+h=" << time_cost + h_value
-              << std::endl;
-
-    // std::cout << node->state.str() << std::endl;
+    os << "[D:" << current_depth << "] "
+       << "visits=" << node->visits << ", "
+       << "Q=" << q_value << ", "
+       << "g=" << time_cost << ", "
+       << "h=" << h_value << ", "
+       << "g+h=" << time_cost + h_value
+       << std::endl;
 
     if (node->children.empty()) {
-        for (int i = 0; i < current_depth; ++i) std::cout << "  ";
-        std::cout << "  (Leaf Node)" << std::endl;
+        for (int i = 0; i < current_depth; ++i) os << "  ";
+        os << "  (Leaf Node)" << std::endl;
         return;
     }
 
@@ -306,15 +298,15 @@ void print_best_path(const MCTSDecisionNode* node, HeuristicFn& heuristic_fn, in
     }
 
     if (!best_chance_node) {
-        for (int i = 0; i < current_depth; ++i) std::cout << "  ";
-        std::cout << "  (No best child found)" << std::endl;
+        for (int i = 0; i < current_depth; ++i) os << "  ";
+        os << "  (No best child found)" << std::endl;
         return;
     }
 
     // Print the action taken
-    for (int i = 0; i < current_depth; ++i) std::cout << "  ";
-    std::cout << "  └── Action: " << best_chance_node->action->name()
-              << " (visits=" << best_chance_node->visits << ")" << std::endl;
+    for (int i = 0; i < current_depth; ++i) os << "  ";
+    os << "  └── Action: " << best_chance_node->action->name()
+       << " (visits=" << best_chance_node->visits << ")" << std::endl;
 
 
     // In a probabilistic environment, a chance node can have multiple outcomes.
@@ -329,7 +321,7 @@ void print_best_path(const MCTSDecisionNode* node, HeuristicFn& heuristic_fn, in
                 next_decision_node = child.get();
             }
         }
-        print_best_path(next_decision_node, heuristic_fn, max_print_depth, current_depth + 1);
+        print_best_path(os, next_decision_node, heuristic_fn, max_print_depth, current_depth + 1);
     }
 }
 
@@ -340,7 +332,8 @@ inline std::string mcts(const State &root_state,
                         const std::vector<Action> &all_actions_base,
                         const GoalFn &is_goal_fn, FFMemory *ff_memory,
                         int max_iterations = 1000, int max_depth = 20,
-                        double c = std::sqrt(2.0)) {
+                        double c = std::sqrt(2.0),
+                        std::string* out_tree_trace = nullptr) {
   // RNG (thread_local is convenient if you run this in parallel later)
   static thread_local std::mt19937 rng{std::random_device{}()};
 
@@ -471,10 +464,14 @@ inline std::string mcts(const State &root_state,
     backpropagate(node, reward);
   }
 
-  // ----> ADD THIS SECTION <----
-  std::cout << "\n--- MCTS Tree Analysis (Most Visited Path) ---" << std::endl;
-  print_best_path(root.get(), heuristic_fn, 20 /* max depth to print */);
-  std::cout << "----------------------------------------------\n" << std::endl;
+  // ----> Generate tree trace <----
+  std::ostringstream tree_trace_stream;
+  tree_trace_stream << std::fixed << std::setprecision(2);
+  print_best_path(tree_trace_stream, root.get(), heuristic_fn, 20 /* max depth to print */);
+
+  if (out_tree_trace) {
+    *out_tree_trace = tree_trace_stream.str();
+  }
 
   // --------------- Extract a (very) shallow policy ---------------
   MCTSResult result;
@@ -517,20 +514,25 @@ public:
   std::string operator()(const State &root_state,
                          const std::unordered_set<Fluent> &goal_fluents,
                          int max_iterations, int max_depth, double c) {
-    auto is_goal_fn = make_goal_fn(goal_fluents);
+    auto is_goal_fn = GoalFn(goal_fluents);
     return mcts(root_state, all_actions_, is_goal_fn, &ff_memory_,
-                max_iterations, max_depth, c);
+                max_iterations, max_depth, c, &last_mcts_tree_trace_);
   }
 
   std::string operator()(const State &root_state,
                          const std::unordered_set<Fluent> &goal_fluents) {
-    auto is_goal_fn = make_goal_fn(goal_fluents);
+    auto is_goal_fn = GoalFn(goal_fluents);
     return mcts(root_state, all_actions_, is_goal_fn, &ff_memory_,
-                max_iterations, max_depth, c);
+                max_iterations, max_depth, c, &last_mcts_tree_trace_);
   }
 
   void clear_cache() { ff_memory_.clear(); }
   std::size_t cache_size() const { return ff_memory_.size(); }
+
+  // Get the tree trace from the most recent MCTS planning call
+  const std::string& get_trace_from_last_mcts_tree() const {
+    return last_mcts_tree_trace_;
+  }
 
   // Public configuration parameters
   int max_iterations = 1000;
@@ -540,6 +542,7 @@ public:
 private:
   std::vector<Action> all_actions_;
   FFMemory ff_memory_;
+  std::string last_mcts_tree_trace_;
 };
 
 } // namespace mrppddl

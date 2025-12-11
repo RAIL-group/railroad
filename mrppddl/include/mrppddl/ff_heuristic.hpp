@@ -12,8 +12,37 @@
 namespace mrppddl {
 
 using HeuristicFn = std::function<double(const State &)>;
-using GoalFn = std::function<bool(const std::unordered_set<Fluent> &)>;
 using FFMemory = std::unordered_map<std::size_t, double>;
+
+class GoalFn {
+private:
+    std::unordered_set<Fluent> goal_fluents_;
+
+public:
+    // Constructor - replaces make_goal_fn
+    GoalFn(const std::unordered_set<Fluent> &goal_fluents)
+        : goal_fluents_(goal_fluents) {}
+
+    // Make it callable - checks if all goal fluents are present
+    bool operator()(const std::unordered_set<Fluent> &fluents) const {
+        for (const auto &gf : goal_fluents_) {
+            if (!fluents.count(gf))
+                return false;
+        }
+        return true;
+    }
+
+    // Count how many goal fluents are present in the active set
+    int goal_count(const std::unordered_set<Fluent> &active_fluents) const {
+        int count = 0;
+        for (const auto &gf : goal_fluents_) {
+            if (active_fluents.count(gf)) {
+                count++;
+            }
+        }
+        return count;
+    }
+};
 
 double ff_heuristic(const State &input_state, const GoalFn *is_goal_fn,
                     const std::vector<Action> &all_actions,
@@ -186,16 +215,6 @@ HeuristicFn make_ff_heuristic(GoalFn is_goal_fn,
                               FFMemory *memory = nullptr) {
   return [=](const State &s) -> double {
     return ff_heuristic(s, &is_goal_fn, all_actions, memory);
-  };
-}
-
-inline GoalFn make_goal_fn(const std::unordered_set<Fluent> &goal_fluents) {
-  return [goal_fluents](const std::unordered_set<Fluent> &fluents) -> bool {
-    for (const auto &gf : goal_fluents) {
-      if (!fluents.count(gf))
-        return false;
-    }
-    return true;
   };
 }
 

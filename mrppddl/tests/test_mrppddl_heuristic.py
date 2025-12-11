@@ -11,7 +11,7 @@ from mrppddl.core import (
     convert_action_to_positive_preconditions,
     convert_action_effects,
 )
-from mrppddl._bindings import ff_heuristic, Action, GroundedEffect
+from mrppddl._bindings import ff_heuristic, Action, GroundedEffect, GoalFn
 
 F = Fluent
 
@@ -633,3 +633,46 @@ def test_convert_state_with_upcoming_effects():
     success_effect = success_branch.effects[0]
     assert F("found obj") in success_effect.resulting_fluents
     assert ~F("not-found obj") in success_effect.resulting_fluents
+
+
+def test_goal_fn_goal_count():
+    """Test GoalFn's goal_count method counts how many goal fluents are achieved."""
+    # Create a goal function with 3 goal fluents
+    goal_fluents = {
+        F("at robot kitchen"),
+        F("holding robot cup"),
+        F("clean cup")
+    }
+
+    goal_fn = GoalFn(goal_fluents)
+
+    # Test case 1: No goals achieved
+    active_fluents_0 = {F("at robot bedroom"), F("free robot")}
+    assert goal_fn.goal_count(active_fluents_0) == 0
+    assert not goal_fn(active_fluents_0)
+
+    # Test case 2: 1 goal achieved
+    active_fluents_1 = {F("at robot kitchen"), F("free robot")}
+    assert goal_fn.goal_count(active_fluents_1) == 1
+    assert not goal_fn(active_fluents_1)
+
+    # Test case 3: 2 goals achieved
+    active_fluents_2 = {F("at robot kitchen"), F("holding robot cup"), F("dirty cup")}
+    assert goal_fn.goal_count(active_fluents_2) == 2
+    assert not goal_fn(active_fluents_2)
+
+    # Test case 4: All 3 goals achieved
+    active_fluents_3 = {F("at robot kitchen"), F("holding robot cup"), F("clean cup")}
+    assert goal_fn.goal_count(active_fluents_3) == 3
+    assert goal_fn(active_fluents_3)
+
+    # Test case 5: All goals achieved plus extra fluents
+    active_fluents_4 = {
+        F("at robot kitchen"),
+        F("holding robot cup"),
+        F("clean cup"),
+        F("visited bedroom"),
+        F("searched drawer")
+    }
+    assert goal_fn.goal_count(active_fluents_4) == 3
+    assert goal_fn(active_fluents_4)

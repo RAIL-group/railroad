@@ -294,6 +294,18 @@ PYBIND11_MODULE(_bindings, m) {
   m.def("astar", &astar, py::arg("start_state"), py::arg("all_actions"),
         py::arg("is_goal_state"), py::arg("heuristic_fn") = nullptr,
         "Run A* search and return the action path");
+
+  py::class_<GoalFn>(m, "GoalFn")
+      .def(py::init<const std::unordered_set<Fluent> &>(),
+           py::arg("goal_fluents"),
+           "Create a goal function from a set of goal fluents")
+      .def("__call__", &GoalFn::operator(),
+           py::arg("fluents"),
+           "Check if all goal fluents are present in the given set")
+      .def("goal_count", &GoalFn::goal_count,
+           py::arg("active_fluents"),
+           "Count how many goal fluents are present in the active set");
+
   py::class_<MCTSPlanner>(m, "MCTSPlanner")
       .def(py::init<std::vector<Action>>(), py::arg("all_actions"))
       .def(
@@ -305,11 +317,13 @@ PYBIND11_MODULE(_bindings, m) {
           },
           py::arg("state"), py::arg("goal_fluents"),
           py::arg("max_iterations") = 1000, py::arg("max_depth") = 20,
-          py::arg("c") = 1.414);
+          py::arg("c") = 1.414)
+      .def("get_trace_from_last_mcts_tree", &MCTSPlanner::get_trace_from_last_mcts_tree,
+           "Get the tree trace from the most recent MCTS planning call");
   m.def("ff_heuristic",
         [](const State &state, const std::unordered_set<Fluent> &goal_fluents,
            const std::vector<Action> &all_actions) {
-	  auto goal_fn = make_goal_fn(goal_fluents);
+	  auto goal_fn = GoalFn(goal_fluents);
           return ff_heuristic(state, &goal_fn, all_actions);
         },
         "Compute FF heuristic value for a state",
