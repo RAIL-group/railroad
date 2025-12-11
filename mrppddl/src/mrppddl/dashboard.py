@@ -34,31 +34,28 @@ class PlannerDashboard:
         self.layout = self._make_layout()
 
         # Goal progress bar
-        self.goal_progress = Progress(
-            TextColumn("[progress.description]{task.description}"),
+        self.progress = Progress(
+            TextColumn("[bold blue]{task.description:<10}"),
             BarColumn(),
-            TextColumn("{task.completed}/{task.total} goals"),
-            TextColumn("({task.percentage:>3.0f}%)"),
+            TextColumn("{task.completed:.2f}/{task.total:.2f}", justify="right"),
+            TextColumn("{task.fields[extra]:>15}", justify="right"),
             expand=True,
         )
-        self.progress_task_id = self.goal_progress.add_task(
-            "Goal completion", total=self.num_goals
+        self.goal_task_id = self.progress.add_task(
+            "Goals",
+            total=float(self.num_goals),
+            completed=0.0,
+            extra="",  # no extra text initially
         )
 
-        # Optional heuristic progress bar
-        self.heuristic_progress = None
+        # Optional heuristic task
         self.heuristic_task_id = None
         if self.initial_heuristic is not None:
-            # We treat progress as "improvement": initial_h - current_h
-            self.heuristic_progress = Progress(
-                TextColumn("[progress.description]{task.description}"),
-                BarColumn(),
-                TextColumn("h={task.fields[h_val]:.2f}"),
-                TextColumn("Δh={task.completed:.2f}/{task.total:.2f}"),
-                expand=True,
-            )
-            self.heuristic_task_id = self.heuristic_progress.add_task(
-                "Heuristic", total=self.initial_heuristic, h_val=self.initial_heuristic
+            self.heuristic_task_id = self.progress.add_task(
+                "Heuristic",
+                total=self.initial_heuristic,   # treat "total" as initial value
+                completed=0.0,                 # improvement from initial
+                extra=f"h={self.initial_heuristic:.2f}",
             )
 
         # Initial panels
@@ -164,16 +161,19 @@ class PlannerDashboard:
         )
 
     def _build_progress_panel(self) -> Panel:
-    # Stack one or two Progress bars in a small grid
-        grid = Table.grid(expand=True)
-        grid.add_row(self.goal_progress)
-        if self.heuristic_progress is not None:
-            grid.add_row(self.heuristic_progress)
-        return Panel(
-            grid,
-            title="Planner Progress",
-            border_style="cyan",
-        )
+        # Just the single shared Progress instance
+        return Panel(self.progress, title="Planner Progress", border_style="cyan")
+
+    # # Stack one or two Progress bars in a small grid
+    #     grid = Table.grid(expand=True)
+    #     grid.add_row(self.goal_progress)
+    #     if self.heuristic_progress is not None:
+    #         grid.add_row(self.heuristic_progress)
+    #     return Panel(
+    #         grid,
+    #         title="Planner Progress",
+    #         border_style="cyan",
+    #     )
 
     @property
     def renderable(self):
@@ -184,25 +184,21 @@ class PlannerDashboard:
         return sum(1 for g in self.goal_fluents if g in sim_state.fluents)
 
     def _update_heuristic(self, heuristic_value: float | None):
-        """Update the heuristic progress bar if configured and value provided.
-
-        Assumption: heuristic is a positive cost-to-go estimate and lower is better.
-        Progress = initial_heuristic - current_heuristic, clamped to [0, initial].
-        """
-        if self.heuristic_progress is None:
+        if self.heuristic_task_id is None:
             return
         if heuristic_value is None:
             return
 
+        h0 = self.initial_heuristic
         h_now = max(0.0, float(heuristic_value))
-        # improvement from initial
-        improvement = max(0.0, min(self.initial_heuristic, self.initial_heuristic - h_now))
-        self.heuristic_progress.update(
+        # improvement is initial - current; clamp to [0, h0]
+        improvement = max(0.0, min(h0, h0 - h_now))
+
+        self.progress.update(
             self.heuristic_task_id,
             completed=improvement,
-            h_val=h_now,
+            extra=f"h={h_now:.2f} Δh={improvement:.2f}",
         )
-
 
     def update(
         self,
@@ -221,7 +217,13 @@ class PlannerDashboard:
         - right panel: MCTS trace
         """
         achieved = self._count_achieved_goals(sim_state)
-        self.goal_progress.update(self.progress_task_id, completed=achieved)
+        self.progress.update(
+            self.goal_task_id,
+            completed=achieved,
+            extra=f"{int(achieved)}/{self.num_goals} goals",
+        )
+
+        # Heuristic (optional)
         self._update_heuristic(heuristic_value)
 
         self.layout["progress"].update(self._build_progress_panel())
