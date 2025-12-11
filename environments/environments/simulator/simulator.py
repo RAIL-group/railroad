@@ -11,7 +11,7 @@ from mrppddl.helper import _make_callable, _invert_prob
 
 from typing import Dict, Set, List, Tuple, Callable
 import itertools
-from .actions import OngoingMoveAction, OngoingSearchAction, OngoingPickAction, OngoingPlaceAction
+from .actions import OngoingAction, OngoingMoveAction, OngoingSearchAction, OngoingPickAction, OngoingPlaceAction
 
 F = Fluent
 
@@ -95,8 +95,6 @@ class Simulator:
         """Add a new action and then advance as much as possible using both `transition` and
         also `_reveal` as needed once areas are searched."""
         action_name = action.name.split()[0]
-        if action_name not in {"move", "pick", "place", "search"}:
-            raise ValueError(f"Action {action.name} not supported in simulator.")
         if action_name == "move":
             new_act = OngoingMoveAction(self._state.time, action, self.environment)
         elif action_name == "search":
@@ -105,6 +103,10 @@ class Simulator:
             new_act = OngoingPickAction(self._state.time, action, self.environment)
         elif action_name == "place":
             new_act = OngoingPlaceAction(self._state.time, action, self.environment)
+        elif action_name == "no-op":
+            new_act = OngoingAction(self._state.time, action, self.environment)
+        else:
+            raise ValueError(f"Action {action.name} not supported in simulator.")
 
         self.ongoing_actions.append(new_act)
 
@@ -151,9 +153,10 @@ class Simulator:
         # Interrupt actions as needed
         # - if any action can be interrupted, interrupt it, getting the
         # Example: for the move action, interrupting it
-        for act in self.ongoing_actions:
-            new_fluents = act.interrupt()
-            self._state.update_fluents(new_fluents)
+        if do_interrupt:
+            for act in self.ongoing_actions:
+                new_fluents = act.interrupt()
+                self._state.update_fluents(new_fluents)
 
         # Remove any actions that are now done
         self.ongoing_actions = [act for act in self.ongoing_actions if not act.is_done]
