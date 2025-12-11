@@ -15,8 +15,12 @@ import numpy as np
 from rich import print
 from mrppddl.core import Fluent as F, State, get_action_by_name
 from mrppddl.planner import MCTSPlanner
+from mrppddl.dashboard import PlannerDashboard
 import environments
 from environments import Simulator, SimpleEnvironment
+
+from rich.traceback import install
+install(show_locals=True)
 
 
 # Define locations with coordinates (for move cost calculation)
@@ -72,6 +76,7 @@ def main():
         F("at Couch den"),
     }
 
+
     # Initial objects by type (robot only knows about some objects initially)
     objects_by_type = {
         "robot": ["robot1", "robot2"],
@@ -97,7 +102,7 @@ def main():
         preconditions=[F("free ?r")],
         effects=[
             Effect(time=0, resulting_fluents={F("not free ?r")}),
-            Effect(time=1000, resulting_fluents={F("free ?r")}),
+            Effect(time=100, resulting_fluents={F("free ?r")}),
         ],
     )
     pick_op = environments.actions.construct_pick_operator(
@@ -121,52 +126,69 @@ def main():
     actions_taken = []
     max_iterations = 60  # Limit iterations to avoid infinite loops
 
-    for iteration in range(max_iterations):
-        # Check if goal is reached
-        if sim.is_goal_reached(goal_fluents):
-            print("\n" + "=" * 70)
-            print("GOAL REACHED!")
-            print("=" * 70)
-            break
+    # Dashboard
+    from rich.live import Live
+    from rich.console import Console
+    console = Console()
+    from mrppddl._bindings import ff_heuristic
+    h_value = ff_heuristic(initial_state, goal_fluents, sim.get_actions())
+    dashboard = PlannerDashboard(goal_fluents, initial_heuristic=h_value)
 
-        # Get available actions
-        all_actions = sim.get_actions()
-        print(sim.state)
+    with Live(dashboard.renderable, refresh_per_second=100, screen=True):
+        relevant_fluents = {
+            f for f in sim.state.fluents
+                if any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
+        }
 
-        # Plan next action
-        mcts = MCTSPlanner(all_actions)
-        action_name = mcts(sim.state, goal_fluents, max_iterations=10000, c=100, max_depth=40)
+        dashboard.update(
+            sim_state=sim.state,
+            relevant_fluents=set(),
+            step_index="---",
+            last_action_name="---"
+        )
 
-        if action_name == 'NONE':
-            print("\n" + "=" * 70)
-            print("No more actions available. Goal may not be achievable.")
-            print("(This could be because some objects are missing!)")
-            print("=" * 70)
-            break
+        for iteration in range(max_iterations):
+            # Check if goal is reached
+            if sim.is_goal_reached(goal_fluents):
+                console.print("\n" + "=" * 70)
+                console.print("GOAL REACHED!")
+                console.print("=" * 70)
+                break
 
-        # Execute action
-        action = get_action_by_name(all_actions, action_name)
-        print(f"[Step {iteration + 1}] Executing: {action_name}")
+            # Get available actions
+            all_actions = sim.get_actions()
 
-        try:
-            sim.advance(action, do_interrupt=False)
-            actions_taken.append(action_name)
+            # Plan next action
+            mcts = MCTSPlanner(all_actions)
+            action_name = mcts(sim.state, goal_fluents, max_iterations=2000, c=1000, max_depth=40)
+            tree_trace = mcts.get_trace_from_last_mcts_tree()
 
-            # Print relevant state information
+            if action_name == 'NONE':
+                console.print("No more actions available. Goal may not be achievable.")
+                break
+
+            try:
+                # Execute action
+                action = get_action_by_name(all_actions, action_name)
+                sim.advance(action, do_interrupt=False)
+                actions_taken.append(action_name)
+            except ValueError as e:
+                print(f"  ERROR: {e}")
+                break
+
+            h_value = ff_heuristic(sim.state, goal_fluents, sim.get_actions())
             relevant_fluents = {
                 f for f in sim.state.fluents
                 if any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
             }
-            print(f"  Time: {sim.state.time:.1f}s")
-            print(f"  Relevant state changes:")
-            for f in sorted(relevant_fluents, key=lambda x: x.name):
-                if "robot1" not in f.name or "at robot1" in f.name or "holding" in f.name:
-                    print(f"    {f}")
-            print()
-
-        except ValueError as e:
-            print(f"  ERROR: {e}")
-            break
+            dashboard.update(
+                sim_state=sim.state,
+                relevant_fluents=relevant_fluents,
+                tree_trace=tree_trace,
+                step_index=iteration,
+                last_action_name=action_name,
+                heuristic_value=h_value,
+            )
 
     # Summary
     print("\n" + "=" * 70)
