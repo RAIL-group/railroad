@@ -59,7 +59,6 @@ class SimpleEnvironment(BaseEnvironment):
         if dist < 0.01:
             return coord_to
         elif time > dist:
-            print("time dist", time, dist)
             return coord_to
         direction = (coord_to - coord_from) / dist
         new_coord = coord_from + direction * time
