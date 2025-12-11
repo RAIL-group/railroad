@@ -55,7 +55,7 @@ def main():
         fluents={
             # Robots free and start in (revealed) living room
             F("free robot1"),
-            # F("free robot2"),
+            F("free robot2"),
             F("at robot1 living_room"),
             F("at robot2 living_room"),
             F("revealed living_room"),
@@ -149,7 +149,7 @@ def main():
         print(f"[Step {iteration + 1}] Executing: {action_name}")
 
         try:
-            sim.advance(action)
+            sim.advance(action, do_interrupt=False)
             actions_taken.append(action_name)
 
             # Print relevant state information
