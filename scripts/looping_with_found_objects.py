@@ -62,13 +62,23 @@ def mcts_looping_with_found_objects():
     }
 
     # Create operators
+    from mrppddl.core import Operator, Effect
+    no_op = Operator(
+        name="no-op",
+        parameters=[("?r", "robot")],
+        preconditions=[F("free ?r")],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free ?r")}),
+            Effect(time=200, resulting_fluents={F("free ?r")}),
+        ],
+    )
     move_op = construct_move_operator(move_time=get_move_time)
     pick_op = construct_pick_operator(pick_time=3.0)
     place_op = construct_place_operator(place_time=3.0)
 
     # Ground all actions
     all_actions = []
-    for op in [move_op, pick_op, place_op]:
+    for op in [no_op, move_op, pick_op, place_op]:
         all_actions.extend(op.instantiate(objects_by_type))
 
     # Create planner
@@ -77,7 +87,7 @@ def mcts_looping_with_found_objects():
     # Simulate execution
     current_state = initial_state
     actions_taken = []
-    max_iterations = 20
+    max_iterations = 30
 
     print(f"\nRunning MCTS planner...")
     for iteration in range(max_iterations):
@@ -92,7 +102,7 @@ def mcts_looping_with_found_objects():
 
         # Plan next action
         action_name = planner(current_state, goal_fluents,
-                              max_iterations=10000, max_depth=20, c=1.414)
+                              max_iterations=40000, max_depth=20, c=1000)
 
         if action_name == 'NONE':
             print("\nNo action returned by planner.")

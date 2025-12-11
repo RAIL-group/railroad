@@ -125,7 +125,7 @@ def main():
             F("at", "robot1", "start_loc"),
             F("at", "robot2", "start_loc"),
             F("free", "robot1"),
-            # F("free", "robot2"),
+            F("free", "robot2"),
         },
     )
 
@@ -164,11 +164,22 @@ def main():
         place_time=lambda r, l, o: 5.0
     )
 
+    from mrppddl.core import Operator, Effect
+    no_op = Operator(
+        name="no-op",
+        parameters=[("?r", "robot")],
+        preconditions=[F("free ?r")],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free ?r")}),
+            Effect(time=100, resulting_fluents={F("free ?r")}),
+        ],
+    )
+
     # Create simulator
     sim = Simulator(
         initial_state,
         objects_by_type,
-        [move_op, search_op, pick_op, place_op],
+        [move_op, search_op, pick_op, place_op, no_op],
         env
     )
 
@@ -191,7 +202,7 @@ def main():
 
         # Plan next action
         mcts = MCTSPlanner(all_actions)
-        action_name = mcts(sim.state, goal_fluents, max_iterations=5000, c=1.414, max_depth=20)
+        action_name = mcts(sim.state, goal_fluents, max_iterations=10000, c=1000, max_depth=40)
 
         if action_name == 'NONE':
             print("\n" + "=" * 70)

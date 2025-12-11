@@ -90,6 +90,16 @@ def main():
         search_time=lambda r, l: 5.0
     )
 
+    from mrppddl.core import Operator, Effect
+    no_op = Operator(
+        name="no-op",
+        parameters=[("?r", "robot")],
+        preconditions=[F("free ?r")],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free ?r")}),
+            Effect(time=1000, resulting_fluents={F("free ?r")}),
+        ],
+    )
     pick_op = environments.actions.construct_pick_operator(
         pick_time=lambda r, l, o: 5.0
     )
@@ -102,7 +112,7 @@ def main():
     sim = Simulator(
         initial_state,
         objects_by_type,
-        [move_op, search_op, pick_op, place_op],
+        [no_op, pick_op, place_op, move_op, search_op],
         env
     )
 
@@ -125,7 +135,7 @@ def main():
 
         # Plan next action
         mcts = MCTSPlanner(all_actions)
-        action_name = mcts(sim.state, goal_fluents, max_iterations=50000, c=3.414, max_depth=20)
+        action_name = mcts(sim.state, goal_fluents, max_iterations=10000, c=100, max_depth=40)
 
         if action_name == 'NONE':
             print("\n" + "=" * 70)

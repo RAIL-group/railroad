@@ -340,7 +340,7 @@ inline std::string mcts(const State &root_state,
                         const std::vector<Action> &all_actions_base,
                         const GoalFn &is_goal_fn, FFMemory *ff_memory,
                         int max_iterations = 1000, int max_depth = 20,
-                        double c_base = std::sqrt(2.0)) {
+                        double c = std::sqrt(2.0)) {
   // RNG (thread_local is convenient if you run this in parallel later)
   static thread_local std::mt19937 rng{std::random_device{}()};
 
@@ -354,14 +354,8 @@ inline std::string mcts(const State &root_state,
 
   bool is_node_goal = false;
   bool is_node_unsolvable = false;
+  bool did_need_relaxed_transition = false;
   for (int it = 0; it < max_iterations; ++it) {
-    double c;
-    if (it < SEARCH_PHASE_RATIO * max_iterations) {
-      c = c_base * 100;
-    } else {
-      c = c_base * (100 * do_extra_exploration(rng) + 1);
-    }
-    
 
     #ifdef MRPPDDL_USE_PYBIND
     // Only used when building the Python extension
@@ -374,16 +368,25 @@ inline std::string mcts(const State &root_state,
 
     // ---------------- Selection ----------------
     while (depth < max_depth) {
+      if (heuristic_fn && heuristic_fn(node->state) > 1e10) {
+	is_node_unsolvable = true;
+        break;
+      }
+      if (node->children.size() + node->untried_actions.size() == 0) {
+	if (node->state.upcoming_effects().size()) {
+	  node->state = transition(node->state, nullptr, true)[0].second;
+	  did_need_relaxed_transition = true;
+	} else {
+	  is_node_unsolvable = true;
+	  break;
+	}
+      }
       if (!node->untried_actions.empty())
         break;
       if (node->children.empty())
         break;
       if (is_goal_fn(node->state.fluents())) {
 	is_node_goal = true;
-        break;
-      }
-      if (heuristic_fn && heuristic_fn(node->state) > 1e10) {
-	is_node_unsolvable = true;
         break;
       }
 
@@ -458,6 +461,9 @@ inline std::string mcts(const State &root_state,
       } else {
 	h = h;
       }
+      if (did_need_relaxed_transition)
+	h += 100;
+
       reward = -node->state.time() - h * HEURISTIC_MULTIPLIER;
     }
 
