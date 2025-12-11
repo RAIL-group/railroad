@@ -136,10 +136,12 @@ PYBIND11_MODULE(_bindings, m) {
   py::class_<Action>(m, "Action")
       .def(py::init<std::unordered_set<Fluent>,
                     std::vector<std::shared_ptr<const GroundedEffect>>,
-                    std::string>(),
+                    std::string,
+                    double>(),
            py::arg("preconditions"), py::arg("effects"),
-           py::arg("name") = "anonymous")
+           py::arg("name") = "anonymous", py::arg("extra_cost") = 0.0)
       .def_property_readonly("name", &Action::name)
+      .def_property_readonly("extra_cost", &Action::extra_cost)
       .def_property_readonly("preconditions", &Action::preconditions)
       .def_property_readonly("effects", &Action::effects)
       .def_property_readonly("_pos_precond", &Action::pos_preconditions)
@@ -151,20 +153,22 @@ PYBIND11_MODULE(_bindings, m) {
             return py::make_tuple(
                 py::cast(a.preconditions()), // unordered_set<Fluent>
                 py::cast(a.effects()), // vector<shared_ptr<GroundedEffect>>
-                py::cast(a.name())     // string
+                py::cast(a.name()),     // string
+                py::cast(a.extra_cost()) // double
             );
           },
           [](py::tuple t) {
-            if (t.size() != 3)
+            if (t.size() != 4)
               throw std::runtime_error("Invalid state for Action!");
 
             auto preconds = t[0].cast<std::unordered_set<Fluent>>();
             auto effects =
                 t[1].cast<std::vector<std::shared_ptr<const GroundedEffect>>>();
             auto name = t[2].cast<std::string>();
+            auto extra_cost = t[3].cast<double>();
 
             return Action(std::move(preconds), std::move(effects),
-                          std::move(name));
+                          std::move(name), extra_cost);
           }))
       .def("__str__", &Action::str)
       .def("__repr__", [](const Action &a) { return a.str(); })

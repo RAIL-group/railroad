@@ -269,9 +269,10 @@ class Action {
 public:
   Action(std::unordered_set<Fluent> preconditions,
          std::vector<std::shared_ptr<const GroundedEffect>> effects,
-         std::string name = "anonymous")
+         std::string name = "anonymous",
+         double extra_cost = 0.0)
       : preconditions_(std::move(preconditions)), effects_(std::move(effects)),
-        name_(std::move(name)) {
+        name_(std::move(name)), extra_cost_(extra_cost) {
     for (const auto &f : preconditions_) {
       if (f.is_negated()) {
         neg_precond_flipped_.insert(f.invert());
@@ -293,6 +294,7 @@ public:
     return effects_;
   }
   const std::string &name() const { return name_; }
+  double extra_cost() const { return extra_cost_; }
   const std::unordered_set<Fluent> &pos_preconditions() const {
     return pos_precond_;
   }
@@ -363,6 +365,7 @@ private:
   std::unordered_set<Fluent> preconditions_;
   std::vector<std::shared_ptr<const GroundedEffect>> effects_;
   std::string name_;
+  double extra_cost_;
   std::unordered_set<Fluent> pos_precond_;
   std::unordered_set<Fluent> neg_precond_flipped_;
 

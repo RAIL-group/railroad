@@ -8,6 +8,7 @@ from mrppddl.core import (
     get_action_by_name,
     GroundedEffect,
     Action,
+    Operator,
 )
 from mrppddl.helper import construct_move_operator, construct_search_operator
 import random
@@ -451,3 +452,54 @@ def test_search_sequence():
             assert state.time == 13
         else:
             assert round(prob, 2) in {0.6, 0.4}
+
+
+def test_action_extra_cost():
+    """Test that extra_cost is properly passed from Operator to Action."""
+    # Define a simple operator with extra_cost
+    test_operator = Operator(
+        name="test_action",
+        parameters=[("?robot", "robot"), ("?loc", "location")],
+        preconditions=[Fluent("at", "?robot", "?loc")],
+        effects=[
+            Effect(
+                time=1.0,
+                resulting_fluents={Fluent("tested", "?robot")}
+            )
+        ],
+        extra_cost=5.0
+    )
+
+    # Instantiate the operator
+    objects_by_type = {
+        "robot": ["r1"],
+        "location": ["roomA"],
+    }
+    actions = test_operator.instantiate(objects_by_type)
+
+    # Verify that the action has the extra_cost
+    assert len(actions) == 1
+    action = actions[0]
+    assert action.extra_cost == 5.0
+    assert action.name == "test_action r1 roomA"
+
+    # Test with default extra_cost (should be 0.0)
+    default_operator = Operator(
+        name="default_action",
+        parameters=[("?robot", "robot")],
+        preconditions=[Fluent("free", "?robot")],
+        effects=[Effect(time=1.0, resulting_fluents={Fluent("done", "?robot")})]
+    )
+
+    default_actions = default_operator.instantiate({"robot": ["r1"]})
+    assert len(default_actions) == 1
+    assert default_actions[0].extra_cost == 0.0
+
+    # Test creating Action directly with extra_cost
+    direct_action = Action(
+        preconditions={Fluent("at r1 roomA")},
+        effects=[GroundedEffect(1.0, {Fluent("tested r1")})],
+        name="direct_action",
+        extra_cost=10.0
+    )
+    assert direct_action.extra_cost == 10.0

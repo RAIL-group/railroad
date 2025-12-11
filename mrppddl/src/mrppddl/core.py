@@ -77,11 +77,13 @@ class Operator:
         parameters: List[Tuple[str, str]],
         preconditions: List[Fluent],
         effects: Sequence[Effect],
+        extra_cost: float = 0.0,
     ):
         self.name = name
         self.parameters = parameters
         self.preconditions = preconditions
         self.effects = effects
+        self.extra_cost = extra_cost
 
     def instantiate(self, objects_by_type: Dict[str, List[str]]) -> List[Action]:
         grounded_actions = []
@@ -105,7 +107,7 @@ class Operator:
         name_str = f"{self.name} " + " ".join(
             binding[var] for var, _ in self.parameters
         )
-        return Action(grounded_preconditions, grounded_effects, name=name_str)
+        return Action(grounded_preconditions, grounded_effects, name=name_str, extra_cost=self.extra_cost)
 
     def _substitute_fluent(self, fluent: Fluent, binding: Dict[str, str]) -> Fluent:
         grounded_args = tuple(binding.get(arg, arg) for arg in fluent.args)
@@ -296,7 +298,7 @@ def convert_action_to_positive_preconditions(
             new_preconditions.add(~neg_fluent)
 
     # Create new action with converted preconditions
-    return Action(new_preconditions, action.effects, name=action.name)
+    return Action(new_preconditions, action.effects, name=action.name, extra_cost=action.extra_cost)
 
 
 def convert_action_effects(
@@ -371,7 +373,7 @@ def convert_action_effects(
     converted_effects = [convert_grounded_effect(eff) for eff in action.effects]
 
     # Create new action with converted effects
-    return Action(action.preconditions, converted_effects, name=action.name)
+    return Action(action.preconditions, converted_effects, name=action.name, extra_cost=action.extra_cost)
 
 
 def preprocess_actions_for_relaxed_planning(

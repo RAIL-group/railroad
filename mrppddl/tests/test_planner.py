@@ -152,7 +152,7 @@ def test_mcts_search_picks_more_likely_location(roomA_prob, num_robots):
     selected_actions = []
     num_planning_attempts = 20
     for _ in range(num_planning_attempts):
-        action = mcts(initial_state, goal_fluents, max_iterations=10000, c=1.414)
+        action = mcts(initial_state, goal_fluents, max_iterations=10000, c=100)
         selected_actions.append(action)
 
     # Count how many selected actions mention roomA

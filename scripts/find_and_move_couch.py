@@ -102,6 +102,7 @@ def main():
             Effect(time=0, resulting_fluents={F("not free ?r")}),
             Effect(time=100, resulting_fluents={F("free ?r")}),
         ],
+        extra_cost=100,
     )
     pick_op = environments.actions.construct_pick_operator(
         pick_time=lambda r, l, o: 5.0
@@ -147,9 +148,6 @@ def main():
         for iteration in range(max_iterations):
             # Check if goal is reached
             if sim.is_goal_reached(goal_fluents):
-                console.print("\n" + "=" * 70)
-                console.print("GOAL REACHED!")
-                console.print("=" * 70)
                 break
 
             # Get available actions
@@ -157,7 +155,7 @@ def main():
 
             # Plan next action
             mcts = MCTSPlanner(all_actions)
-            action_name = mcts(sim.state, goal_fluents, max_iterations=10000, c=100, max_depth=20)
+            action_name = mcts(sim.state, goal_fluents, max_iterations=10000, c=400, max_depth=20)
             tree_trace = mcts.get_trace_from_last_mcts_tree()
 
             if action_name == 'NONE':

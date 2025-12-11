@@ -358,6 +358,7 @@ inline std::string mcts(const State &root_state,
     #endif
     MCTSDecisionNode *node = root.get();
     int depth = 0;
+    double accumulated_extra_cost = 0.0;
 
     // ---------------- Selection ----------------
     while (depth < max_depth) {
@@ -399,6 +400,9 @@ inline std::string mcts(const State &root_state,
       if (!best_chance || best_chance->children.empty())
         break;
 
+      // Accumulate the extra cost of the selected action
+      accumulated_extra_cost += best_chance->action->extra_cost();
+
       // sample a successor decision node according to outcome weights
       std::size_t idx = sample_index(best_chance->outcome_weights, rng);
       node = best_chance->children[idx].get();
@@ -409,6 +413,9 @@ inline std::string mcts(const State &root_state,
     if (!node->untried_actions.empty() && !is_node_goal && !is_node_unsolvable) {
       const Action *action = node->untried_actions.back();
       node->untried_actions.pop_back();
+
+      // Accumulate the extra cost of the expanded action
+      accumulated_extra_cost += action->extra_cost();
 
       auto outcomes = transition(node->state, action);
       if (!outcomes.empty()) {
@@ -447,7 +454,7 @@ inline std::string mcts(const State &root_state,
     double h = 0.0;
     int goal_count = is_goal_fn.goal_count(node->state.fluents());
     if (is_goal_fn(node->state.fluents())) {
-      reward = -node->state.time() + SUCCESS_REWARD + 0 * goal_count;
+      reward = -node->state.time() + SUCCESS_REWARD + 0 * goal_count - accumulated_extra_cost;
     } else {
       h = heuristic_fn ? heuristic_fn(node->state) : 0.0;
       if (h > 1e10) {
@@ -458,7 +465,7 @@ inline std::string mcts(const State &root_state,
       if (did_need_relaxed_transition)
 	h += 100;
 
-      reward = -node->state.time() - h * HEURISTIC_MULTIPLIER + 0 * goal_count;
+      reward = -node->state.time() - h * HEURISTIC_MULTIPLIER + 0 * goal_count - accumulated_extra_cost;
     }
 
     // ---------------- Backpropagation ----------------

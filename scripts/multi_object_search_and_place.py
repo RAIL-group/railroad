@@ -172,13 +172,14 @@ def main():
             Effect(time=0, resulting_fluents={F("not free ?r")}),
             Effect(time=100, resulting_fluents={F("free ?r")}),
         ],
+        extra_cost=100,
     )
 
     # Create simulator
     sim = Simulator(
         initial_state,
         objects_by_type,
-        [move_op, search_op, pick_op, place_op, no_op],
+        [no_op, move_op, search_op, pick_op, place_op],
         env
     )
 
@@ -201,7 +202,7 @@ def main():
 
         # Plan next action
         mcts = MCTSPlanner(all_actions)
-        action_name = mcts(sim.state, goal_fluents, max_iterations=10000, c=1000, max_depth=40)
+        action_name = mcts(sim.state, goal_fluents, max_iterations=10000, c=400, max_depth=20)
 
         if action_name == 'NONE':
             print("\n" + "=" * 70)
