@@ -63,6 +63,7 @@ def main():
             F("at robot2 living_room"),
             F("revealed living_room"),
             F("at Remote living_room"),
+            F("revealed den"),
             F("found Remote"),
         },
     )
@@ -145,7 +146,7 @@ def main():
 
             # Plan next action
             mcts = MCTSPlanner(all_actions)
-            action_name = mcts(sim.state, goal_fluents, max_iterations=2000, c=400, max_depth=20)
+            action_name = mcts(sim.state, goal_fluents, max_iterations=10000, c=100, max_depth=20)
             tree_trace = mcts.get_trace_from_last_mcts_tree()
 
             if action_name == 'NONE':
