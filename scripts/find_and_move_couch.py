@@ -12,13 +12,14 @@ disorganized and some items are missing entirely.
 """
 
 import numpy as np
-from rich import print
 from mrppddl.core import Fluent as F, State, get_action_by_name
 from mrppddl.planner import MCTSPlanner
 from mrppddl.dashboard import PlannerDashboard
 import environments
 from environments import Simulator, SimpleEnvironment
+from mrppddl._bindings import ff_heuristic
 
+# Fancy error handling; shows local vars
 from rich.traceback import install
 install(show_locals=True)
 
@@ -127,23 +128,11 @@ def main():
     # Dashboard
     from rich.live import Live
     from rich.console import Console
-    console = Console()
-    from mrppddl._bindings import ff_heuristic
     h_value = ff_heuristic(initial_state, goal_fluents, sim.get_actions())
-    dashboard = PlannerDashboard(goal_fluents, initial_heuristic=h_value)
 
-    with Live(dashboard.renderable, refresh_per_second=100, screen=True):
-        relevant_fluents = {
-            f for f in sim.state.fluents
-                if any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
-        }
-
-        dashboard.update(
-            sim_state=sim.state,
-            relevant_fluents=set(),
-            step_index="---",
-            last_action_name="---"
-        )
+    with PlannerDashboard(goal_fluents, initial_heuristic=h_value) as dashboard:
+        # (Optional) initial dashboard update
+        dashboard.update(sim_state=sim.state)
 
         for iteration in range(max_iterations):
             # Check if goal is reached
@@ -159,17 +148,13 @@ def main():
             tree_trace = mcts.get_trace_from_last_mcts_tree()
 
             if action_name == 'NONE':
-                console.print("No more actions available. Goal may not be achievable.")
+                dashboard.console.print("No more actions available. Goal may not be achievable.")
                 break
 
-            try:
-                # Execute action
-                action = get_action_by_name(all_actions, action_name)
-                sim.advance(action, do_interrupt=False)
-                actions_taken.append(action_name)
-            except ValueError as e:
-                print(f"  ERROR: {e}")
-                break
+            # Execute action
+            action = get_action_by_name(all_actions, action_name)
+            sim.advance(action, do_interrupt=False)
+            actions_taken.append(action_name)
 
             h_value = ff_heuristic(sim.state, goal_fluents, sim.get_actions())
             relevant_fluents = {
@@ -185,8 +170,8 @@ def main():
                 heuristic_value=h_value,
             )
 
-    # Print the full dashboard history to the console (optional)
-    dashboard.print_history(sim.state, actions_taken)
+        # Print the full dashboard history to the console (optional)
+        dashboard.print_history(sim.state, actions_taken)
 
 
 if __name__ == "__main__":

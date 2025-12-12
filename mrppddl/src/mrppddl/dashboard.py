@@ -4,15 +4,11 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.progress import Progress, BarColumn, TextColumn
 from rich.table import Table
-from rich.text import Text
-from rich.pretty import Pretty
-from rich.syntax import Syntax
-from time import sleep
 
 import re
-from typing import List, Dict
+from time import sleep, perf_counter
+from typing import List, Dict, Set
 
-from mrppddl._bindings import ff_heuristic
 
 console = Console()
 
@@ -76,6 +72,7 @@ class PlannerDashboard:
         self.goal_fluents = list(goal_fluents)
         self.num_goals = len(self.goal_fluents)
         self.initial_heuristic = initial_heuristic
+        self._start_time = perf_counter()
 
         self.history: list[dict] = []
         # Root layout
@@ -109,11 +106,36 @@ class PlannerDashboard:
         # Initial panels
         self.layout["progress"].update(self._build_progress_panel())
         self.layout["status"].update(
-            Panel("Waiting for first step…", title="State", border_style="green")
+            Panel("Initializing... running first planning step.", title="State", border_style="green")
         )
         self.layout["debug"].update(
             Panel("No trace yet.", title="MCTS Trace", border_style="magenta")
         )
+
+    def __enter__(self):
+        self._live = Live(
+            self.renderable,
+            console=self.console,
+            refresh_per_second=100,   # adjust as needed
+            screen=True,
+            auto_refresh=True,
+        )
+        self._live.__enter__()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if hasattr(self, "_live"):
+            self._live.__exit__(exc_type, exc, tb)
+            self._live = None
+
+    def start(self):
+        if not hasattr(self, "_live"):
+            self.__enter__()
+        return self
+
+    def stop(self):
+        if hasattr(self, "_live"):
+            self.__exit__(None, None, None)
 
     # ------------------------------------------------------------------ #
     # Layout helpers
@@ -146,6 +168,7 @@ class PlannerDashboard:
         # Top metadata table (step, time, last action)
         meta = Table.grid(padding=(0, 1))
         meta.add_row("Cost", f"{sim_state.time:.1f}")
+        meta.add_row("Elapsed Time", f"{perf_counter() - self._start_time:,.2f}")
         meta.add_row(
             "Goals reached",
             f"{self._count_achieved_goals(sim_state)}/{self.num_goals}",
@@ -211,17 +234,6 @@ class PlannerDashboard:
     def _build_progress_panel(self) -> Panel:
         # Just the single shared Progress instance
         return Panel(self.progress, title="Planner Progress", border_style="cyan")
-
-    # # Stack one or two Progress bars in a small grid
-    #     grid = Table.grid(expand=True)
-    #     grid.add_row(self.goal_progress)
-    #     if self.heuristic_progress is not None:
-    #         grid.add_row(self.heuristic_progress)
-    #     return Panel(
-    #         grid,
-    #         title="Planner Progress",
-    #         border_style="cyan",
-    #     )
 
     @property
     def renderable(self):
@@ -342,7 +354,7 @@ class PlannerDashboard:
     def update(
         self,
         sim_state,
-        relevant_fluents,
+        relevant_fluents: Set = set(),
         tree_trace: str | None = None,
         step_index: int | None = None,
         last_action_name: str | None = None,
