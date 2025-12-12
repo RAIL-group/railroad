@@ -127,11 +127,7 @@ def main():
     max_iterations = 60  # Limit iterations to avoid infinite loops
 
     # Dashboard
-    from rich.live import Live
-    from rich.console import Console
     h_value = ff_heuristic(initial_state, goal_fluents, sim.get_actions())
-
-
     with PlannerDashboard(goal_fluents, initial_heuristic=h_value) as dashboard:
         # (Optional) initial dashboard update
         dashboard.update(sim_state=sim.state)
@@ -146,8 +142,7 @@ def main():
 
             # Plan next action
             mcts = MCTSPlanner(all_actions)
-            action_name = mcts(sim.state, goal_fluents, max_iterations=10000, c=300, max_depth=20)
-            tree_trace = mcts.get_trace_from_last_mcts_tree()
+            action_name = mcts(sim.state, goal_fluents, max_iterations=4000, c=300, max_depth=20)
 
             if action_name == 'NONE':
                 dashboard.console.print("No more actions available. Goal may not be achievable.")
@@ -158,6 +153,7 @@ def main():
             sim.advance(action, do_interrupt=False)
             actions_taken.append(action_name)
 
+            tree_trace = mcts.get_trace_from_last_mcts_tree()
             h_value = ff_heuristic(sim.state, goal_fluents, sim.get_actions())
             relevant_fluents = {
                 f for f in sim.state.fluents
@@ -166,7 +162,7 @@ def main():
             dashboard.update(
                 sim_state=sim.state,
                 relevant_fluents=relevant_fluents,
-                tree_trace=str(sim.state) + "\n\n" + tree_trace,
+                tree_trace=tree_trace,
                 step_index=iteration,
                 last_action_name=action_name,
                 heuristic_value=h_value,
@@ -174,6 +170,7 @@ def main():
 
     # Print the full dashboard history to the console (optional)
     dashboard.print_history(sim.state, actions_taken)
+
 
 if __name__ == "__main__":
     main()

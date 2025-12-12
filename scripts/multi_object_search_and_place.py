@@ -15,6 +15,7 @@ import numpy as np
 from mrppddl.core import Fluent as F, State, get_action_by_name
 from mrppddl._bindings import ff_heuristic
 from mrppddl.planner import MCTSPlanner
+from mrppddl.dashboard import PlannerDashboard
 import environments
 from environments import Simulator
 
@@ -98,17 +99,6 @@ class HouseholdEnvironment(environments.BaseEnvironment):
 
 
 def main():
-    print("=" * 70)
-    print("Multi-Object Search and Place Task")
-    print("=" * 70)
-    print()
-    print("Goal: Organize household items to their proper locations")
-    print("  - Kitchen items (Knife, Mug) -> kitchen")
-    print("  - Bedroom items (Clock, Pillow) -> bedroom")
-    print("  - Office items (Notebook) -> office")
-    print()
-    print("=" * 70)
-    print()
 
     # Initialize environment
     env = HouseholdEnvironment(LOCATIONS, OBJECTS_AT_LOCATIONS)
@@ -188,74 +178,51 @@ def main():
     actions_taken = []
     max_iterations = 60  # Limit iterations to avoid infinite loops
 
-    for iteration in range(max_iterations):
-        # Check if goal is reached
-        if sim.is_goal_reached(goal_fluents):
-            print("\n" + "=" * 70)
-            print("GOAL REACHED!")
-            print("=" * 70)
-            break
+    # Dashboard
+    h_value = ff_heuristic(initial_state, goal_fluents, sim.get_actions())
+    with PlannerDashboard(goal_fluents, initial_heuristic=h_value) as dashboard:
+        # (Optional) initial dashboard update
+        dashboard.update(sim_state=sim.state)
 
-        # Get available actions
-        all_actions = sim.get_actions()
-        print(sim.state)
+        for iteration in range(max_iterations):
+            # Check if goal is reached
+            if sim.is_goal_reached(goal_fluents):
+                break
 
-        # Plan next action
-        mcts = MCTSPlanner(all_actions)
-        action_name = mcts(sim.state, goal_fluents, max_iterations=10000, c=400, max_depth=20)
+            # Get available actions
+            all_actions = sim.get_actions()
 
-        if action_name == 'NONE':
-            print("\n" + "=" * 70)
-            print("No more actions available. Goal may not be achievable.")
-            print("(This could be because some objects are missing!)")
-            print("=" * 70)
-            break
+            # Plan next action
+            mcts = MCTSPlanner(all_actions)
+            action_name = mcts(sim.state, goal_fluents, max_iterations=4000, c=300, max_depth=20)
 
-        # Execute action
-        action = get_action_by_name(all_actions, action_name)
-        print(f"[Step {iteration + 1}] Executing: {action_name}")
+            if action_name == 'NONE':
+                dashboard.console.print("No more actions available. Goal may not be achievable.")
+                break
 
-        try:
+            # Execute action
+            action = get_action_by_name(all_actions, action_name)
+
             sim.advance(action, do_interrupt=False)
             actions_taken.append(action_name)
 
             # Print relevant state information
+            tree_trace = mcts.get_trace_from_last_mcts_tree()
             relevant_fluents = {
                 f for f in sim.state.fluents
                 if any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
             }
-            print(f"  Time: {sim.state.time:.1f}s")
-            print(f"  Relevant state changes:")
-            for f in sorted(relevant_fluents, key=lambda x: x.name):
-                if "robot1" not in f.name or "at robot1" in f.name or "holding" in f.name:
-                    print(f"    {f}")
-            print()
+            dashboard.update(
+                sim_state=sim.state,
+                relevant_fluents=relevant_fluents,
+                tree_trace=tree_trace,
+                step_index=iteration,
+                last_action_name=action_name,
+                heuristic_value=h_value,
+            )
 
-        except ValueError as e:
-            print(f"  ERROR: {e}")
-            break
-
-    # Summary
-    print("\n" + "=" * 70)
-    print("EXECUTION SUMMARY")
-    print("=" * 70)
-    print(f"Total actions executed: {len(actions_taken)}")
-    print(f"Total time: {sim.state.time:.1f} seconds")
-    print()
-    print("Actions taken:")
-    for i, action in enumerate(actions_taken, 1):
-        print(f"  {i}. {action}")
-    print()
-
-    # Check which goals were achieved
-    print("Goal status:")
-    for goal in goal_fluents:
-        achieved = goal in sim.state.fluents
-        status = "✓" if achieved else "✗"
-        print(f"  {status} {goal}")
-    print()
-
-    print("=" * 70)
+    # Print the full dashboard history to the console (optional)
+    dashboard.print_history(sim.state, actions_taken)
 
 
 if __name__ == "__main__":

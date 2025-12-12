@@ -1,9 +1,11 @@
-from rich.console import Console
+from rich.console import Console, Group
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
 from rich.progress import Progress, BarColumn, TextColumn
 from rich.table import Table
+from rich.rule import Rule
+from rich.text import Text
 
 import re
 from time import sleep, perf_counter
@@ -239,10 +241,18 @@ class PlannerDashboard:
             border_style="green",
         )
 
-    def _build_trace_panel(self, trace_text: str) -> Panel:
-        # text = Text.from_ansi(trace_text) if "\x1b[" in trace_text else Text(trace_text)
+    def _build_trace_panel(self, sim_state, trace_text: str) -> Panel:
+        def highlighted(text: str) -> Text:
+            t = Text(text)
+            self.console.highlighter.highlight(t)
+            return t
+        content = Group(
+            highlighted(str(sim_state)),
+            Rule(style="dim"),
+            highlighted(trace_text),
+        )
         return Panel(
-            trace_text,
+            content,
             title="MCTS Tree Trace",
             border_style="magenta",
             highlight=True,
@@ -406,14 +416,14 @@ class PlannerDashboard:
             )
         )
         if tree_trace:
-            self.layout["debug"].update(self._build_trace_panel(tree_trace))
+            self.layout["debug"].update(self._build_trace_panel(sim_state, tree_trace))
 
         sleep(0.01)
 
         self._record_history_entry(
             sim_state=sim_state,
             relevant_fluents=relevant_fluents,
-            tree_trace=tree_trace,
+            tree_trace=str(sim_state) + "\n\n" + tree_trace if tree_trace else None,
             step_index=step_index,
             last_action_name=last_action_name,
             heuristic_value=heuristic_value,
