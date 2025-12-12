@@ -63,8 +63,8 @@ def main():
             F("at robot2 living_room"),
             F("revealed living_room"),
             F("at Remote living_room"),
-            F("revealed den"),
             F("found Remote"),
+            F("revealed den"),
         },
     )
 
@@ -102,7 +102,7 @@ def main():
         preconditions=[F("free ?r")],
         effects=[
             Effect(time=0, resulting_fluents={F("not free ?r")}),
-            Effect(time=100, resulting_fluents={F("free ?r")}),
+            Effect(time=5, resulting_fluents={F("free ?r")}),
         ],
         extra_cost=100,
     )
@@ -146,7 +146,7 @@ def main():
 
             # Plan next action
             mcts = MCTSPlanner(all_actions)
-            action_name = mcts(sim.state, goal_fluents, max_iterations=10000, c=100, max_depth=20)
+            action_name = mcts(sim.state, goal_fluents, max_iterations=10000, c=300, max_depth=20)
             tree_trace = mcts.get_trace_from_last_mcts_tree()
 
             if action_name == 'NONE':
@@ -166,7 +166,7 @@ def main():
             dashboard.update(
                 sim_state=sim.state,
                 relevant_fluents=relevant_fluents,
-                tree_trace=tree_trace,
+                tree_trace=str(sim.state) + "\n\n" + tree_trace,
                 step_index=iteration,
                 last_action_name=action_name,
                 heuristic_value=h_value,
