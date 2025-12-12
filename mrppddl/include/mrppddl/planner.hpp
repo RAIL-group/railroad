@@ -410,7 +410,9 @@ inline std::string mcts(const State &root_state,
     }
 
     // ---------------- Expansion ----------------
-    if (!node->untried_actions.empty() && !is_node_goal && !is_node_unsolvable) {
+    // FIXME: used to also include !is_node_unsolvable, but
+    // this created failures that shouldn't have existed.
+    if (!node->untried_actions.empty() && !is_node_goal) {
       const Action *action = node->untried_actions.back();
       node->untried_actions.pop_back();
 
