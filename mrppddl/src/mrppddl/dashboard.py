@@ -10,8 +10,6 @@ from time import sleep, perf_counter
 from typing import List, Dict, Set
 
 
-console = Console()
-
 def split_markdown_flat(text: str) -> List[Dict[str, str]]:
     """
     Split markdown into a flat list of items:
@@ -68,11 +66,12 @@ class PlannerDashboard:
         if console:
             self.console = console
         else:
-            self.console = Console()
+            self.console = Console(force_terminal=True)
         self.goal_fluents = list(goal_fluents)
         self.num_goals = len(self.goal_fluents)
         self.initial_heuristic = initial_heuristic
         self._start_time = perf_counter()
+        self.actions_taken = list()
 
         self.history: list[dict] = []
         # Root layout
@@ -115,8 +114,8 @@ class PlannerDashboard:
     def __enter__(self):
         self._live = Live(
             self.renderable,
-            console=self.console,
-            refresh_per_second=100,   # adjust as needed
+            console=Console(force_terminal=True),
+            refresh_per_second=100,
             screen=True,
             auto_refresh=True,
         )
@@ -181,7 +180,7 @@ class PlannerDashboard:
         # Active fluents
         active_table = Table(
             show_header=True,
-            header_style="bold magenta",
+            header_style="bold cyan",
             box=None,
             pad_edge=False,
         )
@@ -210,11 +209,29 @@ class PlannerDashboard:
             else:
                 goals_table.add_row(f"[red]{g}[/red]", "[red]✗[/red]")
 
+        # Display the most recent actions
+        actions_table = Table(
+            show_header=True,
+            header_style="bold cyan",
+            box=None,
+            pad_edge=False,
+        )
+        actions_table.add_column("#", justify="right")
+        actions_table.add_column("Recently Selected Actions")
+        if self.actions_taken:
+            for num, action in reversed(list(enumerate(self.actions_taken))):
+                actions_table.add_row(str(num), action)
+            pass
+        else:
+            actions_table.add_row("---", "[italic]No actions selected yet.[/]")
+            pass
+        
         # Combine meta + subtables into one grid
         container = Table.grid(padding=1)
         container.add_row(meta)
         container.add_row(goals_table)
         container.add_row(active_table)
+        container.add_row(actions_table)
 
         return Panel(
             container,
@@ -290,7 +307,6 @@ class PlannerDashboard:
             step = entry["step"]
             t = entry["time"]
             action = entry["last_action"]
-            h = entry["heuristic"]
 
             lines.append(f"# Step {step} | t = {t:.2f}s | action = {action}")
             lines.append(f"Selected Action: {action}\n")
@@ -310,7 +326,7 @@ class PlannerDashboard:
         
         return "\n".join(lines)
 
-    def print_history(self, final_state, actions_taken):
+    def print_history(self, final_state=None, actions_taken=None):
         """Pretty-print the full history using Rich."""
         local_console = self.console
 
@@ -373,6 +389,9 @@ class PlannerDashboard:
             completed=achieved,
             extra=f"{int(achieved)}/{self.num_goals} goals",
         )
+
+        if last_action_name:
+            self.actions_taken.append(last_action_name)
 
         # Heuristic (optional)
         self._update_heuristic(heuristic_value)

@@ -130,6 +130,7 @@ def main():
     from rich.console import Console
     h_value = ff_heuristic(initial_state, goal_fluents, sim.get_actions())
 
+
     with PlannerDashboard(goal_fluents, initial_heuristic=h_value) as dashboard:
         # (Optional) initial dashboard update
         dashboard.update(sim_state=sim.state)
@@ -144,7 +145,7 @@ def main():
 
             # Plan next action
             mcts = MCTSPlanner(all_actions)
-            action_name = mcts(sim.state, goal_fluents, max_iterations=10000, c=400, max_depth=20)
+            action_name = mcts(sim.state, goal_fluents, max_iterations=2000, c=400, max_depth=20)
             tree_trace = mcts.get_trace_from_last_mcts_tree()
 
             if action_name == 'NONE':
@@ -170,9 +171,8 @@ def main():
                 heuristic_value=h_value,
             )
 
-        # Print the full dashboard history to the console (optional)
-        dashboard.print_history(sim.state, actions_taken)
-
+    # Print the full dashboard history to the console (optional)
+    dashboard.print_history(sim.state, actions_taken)
 
 if __name__ == "__main__":
     main()
