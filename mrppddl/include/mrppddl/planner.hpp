@@ -365,19 +365,19 @@ inline std::string mcts(const State &root_state,
 
     // ---------------- Selection ----------------
     while (depth < max_depth) {
-      if (heuristic_fn && heuristic_fn(node->state) > 1e10) {
-	is_node_unsolvable = true;
-        break;
-      }
-      if (node->children.size() + node->untried_actions.size() == 0) {
-	if (node->state.upcoming_effects().size()) {
-	  node->state = transition(node->state, nullptr, true)[0].second;
-	  did_need_relaxed_transition = true;
-	} else {
-	  is_node_unsolvable = true;
-	  break;
-	}
-      }
+      // if (heuristic_fn && heuristic_fn(node->state) > 1e10) {
+      // 	is_node_unsolvable = true;
+      //   break;
+      // }
+      // if (node->children.size() + node->untried_actions.size() == 0) {
+      // 	if (node->state.upcoming_effects().size()) {
+      // 	  node->state = transition(node->state, nullptr, true)[0].second;
+      // 	  did_need_relaxed_transition = true;
+      // 	} else {
+      // 	  is_node_unsolvable = true;
+      // 	  break;
+      // 	}
+      // }
       if (!node->untried_actions.empty())
         break;
       if (node->children.empty())

@@ -160,9 +160,9 @@ def main():
         preconditions=[F("free ?r")],
         effects=[
             Effect(time=0, resulting_fluents={F("not free ?r")}),
-            Effect(time=100, resulting_fluents={F("free ?r")}),
+            Effect(time=5, resulting_fluents={F("free ?r")}),
         ],
-        extra_cost=100,
+        extra_cost=10,
     )
 
     # Create simulator
