@@ -277,7 +277,9 @@ void print_best_path(std::ostream& os, const MCTSDecisionNode* node, HeuristicFn
        << "Q=" << q_value << ", "
        << "g=" << time_cost << ", "
        << "h=" << h_value << ", "
-       << "g+h=" << time_cost + h_value
+       << "g+h=" << time_cost + h_value << ", "
+       << "untried=" << node->untried_actions.size() << ", "
+       << "children=" << node->children.size()
        << std::endl;
 
     if (node->children.empty()) {
@@ -306,7 +308,8 @@ void print_best_path(std::ostream& os, const MCTSDecisionNode* node, HeuristicFn
     // Print the action taken
     for (int i = 0; i < current_depth; ++i) os << "  ";
     os << "  └── Action: " << best_chance_node->action->name()
-       << " (visits=" << best_chance_node->visits << ")" << std::endl;
+       << " (visits=" << best_chance_node->visits 
+       << ")" << std::endl;
 
 
     // In a probabilistic environment, a chance node can have multiple outcomes.
@@ -345,10 +348,10 @@ inline std::string mcts(const State &root_state,
   auto heuristic_fn = make_ff_heuristic(is_goal_fn, all_actions, ff_memory);
   std::bernoulli_distribution do_extra_exploration(PROB_EXTRA_EXPLORE);
 
-  bool is_node_goal = false;
-  bool is_node_unsolvable = false;
-  bool did_need_relaxed_transition = false;
   for (int it = 0; it < max_iterations; ++it) {
+    bool is_node_goal = false;
+    bool is_node_unsolvable = false;
+    bool did_need_relaxed_transition = false;
 
     #ifdef MRPPDDL_USE_PYBIND
     // Only used when building the Python extension

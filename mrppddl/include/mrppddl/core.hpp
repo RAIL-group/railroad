@@ -326,7 +326,7 @@ public:
 
     out << "]\n  Effects:\n";
     for (const auto &eff : effects_) {
-      out << "    after " << eff->time() << "...\n";
+      out << "    after " << eff->time() << " " << eff->str() << "\n";
     }
     out << ")";
     return out.str();

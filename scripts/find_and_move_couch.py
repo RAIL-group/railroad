@@ -90,9 +90,10 @@ def main():
     )
 
     # Search operator with 80% success rate when object is actually present
+    object_find_prob = lambda r, loc, o: 0.8 if o in OBJECTS_AT_LOCATIONS.get(loc, dict()).get("object", dict()) else 0.2
     search_op = environments.actions.construct_search_operator(
-        object_find_prob=lambda r, l, o: 0.8 if o in OBJECTS_AT_LOCATIONS.get(l, dict()).get("objects", dict()) else 0.2,
-        search_time=lambda r, l: 5.0
+        object_find_prob=object_find_prob,
+        search_time=lambda r, loc: 5.0
     )
 
     from mrppddl.core import Operator, Effect
