@@ -2,6 +2,7 @@ from typing import Dict, List, Tuple, Callable, Union
 from enum import IntEnum
 import numpy as np
 
+
 class ActionStatus(IntEnum):
     IDLE = -1
     RUNNING = 0
@@ -66,12 +67,14 @@ class SimpleEnvironment(BaseEnvironment):
         }
         self.locations = locations.copy()
         self._ground_truth = objects_at_locations
-        self._objects_at_locations = {loc: {"object": set()} for loc in locations}
+        self._objects_at_locations = {
+            loc: {"object": set()} for loc in locations}
         self.robots = {
             f"robot{i + 1}": Robot(name=f"robot{i + 1}",
-                               pose=locations["living_room"].copy(),
-                               skills_time=SKILLS_TIME[f'robot{i + 1}']) for i in range(num_robots)
+                                   pose=locations["living_room"].copy(),
+                                   skills_time=SKILLS_TIME[f'robot{i + 1}']) for i in range(num_robots)
         }
+
     def get_objects_at_location(self, location):
         """Return objects at a location (simulates perception)."""
         objects_found = self._ground_truth.get(location, {}).copy()
@@ -145,7 +148,7 @@ class SimpleEnvironment(BaseEnvironment):
         if not all_robots_assigned:
             return ActionStatus.IDLE
         robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
-        time_to_target = [(n, np.linalg.norm(r.pose - r.target_pose)) for n, r in self.robots.items()]
+        time_to_target = [(n, r.time_to_completion) for n, r in self.robots.items()]
 
         remaining_times = [(n, t - p) for (n, t), p in zip(time_to_target, robots_progress)]
         min_robot, min_distance = min(remaining_times, key=lambda x: x[1])
@@ -169,7 +172,7 @@ class SimpleEnvironment(BaseEnvironment):
         if not all_robots_assigned:
             return ActionStatus.IDLE
         robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
-        time_to_action = [(n, r.skills_time[action_name]) for n, r in self.robots.items()]
+        time_to_action = [(n, r.time_to_completion) for n, r in self.robots.items()]
 
         remaining_times = [(n, t - p) for (n, t), p in zip(time_to_action, robots_progress)]
         min_robot, _ = min(remaining_times, key=lambda x: x[1])
@@ -187,6 +190,7 @@ class SimpleEnvironment(BaseEnvironment):
             return self._get_pick_place_search_status(robot_name, action_name)
         raise ValueError(f"Unknown action name: {action_name}")
 
+
 class Robot:
     def __init__(self, name: str, pose=None, skills_time: Dict[str, float] = None):
         self.name = name
@@ -195,6 +199,8 @@ class Robot:
         self.is_free = True
         self.skills_time = skills_time
         self.start_time = None
+        self.time_to_completion = None
+        self.robot_velocity = 1.0
 
     def __repr__(self):
         return f"Robot(name={self.name}, pose={self.pose})"
@@ -203,20 +209,25 @@ class Robot:
         self.is_free = False
         self.start_time = start_time
         self.target_pose = new_pose
+        self.time_to_completion = np.linalg.norm(np.array(self.pose)[:2] - np.array(new_pose)[:2]) / self.robot_velocity
 
     def pick(self, start_time):
         self.is_free = False
         self.start_time = start_time
+        self.time_to_completion = self.skills_time['pick']
 
     def place(self, start_time):
         self.is_free = False
         self.start_time = start_time
+        self.time_to_completion = self.skills_time['place']
 
     def search(self, start_time):
         self.is_free = False
         self.start_time = start_time
+        self.time_to_completion = self.skills_time['search']
 
     def stop(self):
         self.is_free = True
         self.target_pose = None
         self.start_time = None
+        self.time_to_completion = None

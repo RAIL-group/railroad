@@ -111,7 +111,7 @@ class EnvironmentInterface():
             # Remove any actions that are now done
             self.ongoing_actions = [act for act in self.ongoing_actions if not act.is_done]
 
-            # Update environment time (used only in simulators to measure robot's action progress)
+            # Update environment time (used ONLY in simulators to measure robot's action progress)
             self.environment.time = self._state.time
 
             robot_free = self._any_free_robots()
@@ -289,11 +289,10 @@ class OngoingMoveAction(OngoingAction):
         _, self.robot, self.start, self.end = self.name.split()  # (e.g., move r1 locA locB)
 
     def advance(self, time):
-        delta_time = self.time - self._start_time
         if not self.is_action_called:
             self.environment.move_robot(self.robot, self.end)
             self.is_action_called = True
-        return super().advance(delta_time)
+        return super().advance(time)
 
     def interrupt(self):
         """If the time > start_time, it can be interrupted. The robot location
