@@ -50,16 +50,34 @@ class EnvironmentInterface():
             f"{rob}_loc"
             for rob in self.objects_by_type["robot"]
             if F(f"at {rob} {rob}_loc") in self._state.fluents
-        )
-        return list(itertools.chain.from_iterable(
+            )
+        all_actions = list(itertools.chain.from_iterable(
             operator.instantiate(objects_with_rloc)
             for operator in self.operators
         ))
 
+        def filter_fn(action):
+            ans = action.name.split()
+            if ans[0] == 'move' and '_loc' in ans[3]:
+                # (move robot1 robot1_loc other_loc)
+                return False
+            if ans[0] == 'place' and '_loc' in ans[2]:
+                # (place robot1 robot1_loc Pillow)
+                return False
+            if ans[0] == 'search' and '_loc' in ans[2]:
+                # (search robot1 robot1_loc Pillow)
+                return False
+
+            return True
+
+        # Filter out actions that should not be allowed.
+        filtered_actions = [a for a in all_actions if filter_fn(a)]
+        return filtered_actions
+
     def _any_free_robots(self):
         return any(f.name == "free" for f in self._state.fluents)
 
-    def advance(self, action):
+    def advance(self, action, do_interrupt=True) -> State:
         # Check preconditions for safety (helps in debugging)
         if not self.state.satisfies_precondition(action):
             raise ValueError(f"Action preconditions not satisfied: {action.name} in state {self.state}")
@@ -99,9 +117,10 @@ class EnvironmentInterface():
             robot_free = self._any_free_robots()
 
         # interrupt ongoing actions if needed
-        for act in self.ongoing_actions:
-            new_fluents = act.interrupt()
-            self._state.update_fluents(new_fluents)
+        if do_interrupt:
+            for act in self.ongoing_actions:
+                new_fluents = act.interrupt()
+                self._state.update_fluents(new_fluents)
 
         self.ongoing_actions = [act for act in self.ongoing_actions if act.upcoming_effects]
         return self.state
@@ -270,14 +289,27 @@ class OngoingMoveAction(OngoingAction):
         _, self.robot, self.start, self.end = self.name.split()  # (e.g., move r1 locA locB)
 
     def advance(self, time):
+        delta_time = self.time - self._start_time
         if not self.is_action_called:
             self.environment.move_robot(self.robot, self.end)
             self.is_action_called = True
-        return super().advance(time)
+        return super().advance(delta_time)
 
     def interrupt(self):
+        """If the time > start_time, it can be interrupted. The robot location
+        is updated, this action is marked as done, and the new fluents are
+        returned."""
+
         if self.time <= self._start_time:
             return set()  # Cannot interrupt before start time
+
+
+        # This action is done. Treat this as having "reached" the destination
+        # but where the destination is robot_loc, which means we must replace
+        # all the old "target location" with "robot_loc". While this may seem
+        # like a fair bit of needless complexity, it means that we don't need to
+        # have a custom function for each new move action: all it's
+        # post-conditions are added automatically.
 
         # stop robot
         self.environment.stop_robot(self.robot)
@@ -290,6 +322,8 @@ class OngoingMoveAction(OngoingAction):
             if eff.is_probabilistic:
                 raise ValueError("Probabilistic effects cannot be interrupted.")
             for fluent in eff.resulting_fluents:
+                if (~fluent) in new_fluents:
+                    new_fluents.remove(~fluent)
                 new_fluents.add(
                     F(" ".join(
                         [fluent.name]

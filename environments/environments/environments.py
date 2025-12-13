@@ -1,5 +1,6 @@
 from typing import Dict, List, Tuple, Callable, Union
 from enum import IntEnum
+import numpy as np
 
 class ActionStatus(IntEnum):
     IDLE = -1
@@ -47,15 +48,30 @@ class BaseEnvironment:
     def get_action_status(self, robot_name: str, action_name: str) -> ActionStatus:
         raise NotImplementedError()
 
+
 class SimpleEnvironment(BaseEnvironment):
     """Simple household environment for testing multi-object manipulation."""
 
-    def __init__(self, locations, objects_at_locations):
+    def __init__(self, locations, objects_at_locations, num_robots=1):
         super().__init__()
+        SKILLS_TIME = {
+            'robot1': {
+                'pick': 5,
+                'place': 5,
+                'search': 5},
+            'robot2': {
+                'pick': 5,
+                'place': 5,
+                'search': 5}
+        }
         self.locations = locations.copy()
         self._ground_truth = objects_at_locations
         self._objects_at_locations = {loc: {"object": set()} for loc in locations}
-
+        self.robots = {
+            f"robot{i + 1}": Robot(name=f"robot{i + 1}",
+                               pose=locations["living_room"].copy(),
+                               skills_time=SKILLS_TIME[f'robot{i + 1}']) for i in range(num_robots)
+        }
     def get_objects_at_location(self, location):
         """Return objects at a location (simulates perception)."""
         objects_found = self._ground_truth.get(location, {}).copy()
@@ -74,10 +90,14 @@ class SimpleEnvironment(BaseEnvironment):
             return distance  # 1 unit of distance = 1 second
         return get_move_time
 
-    def get_intermediate_coordinates(self, time, loc_from, loc_to):
+    def get_intermediate_coordinates(self, time, loc_from, loc_to, is_coords=True):
         """Compute intermediate position during movement (for visualization)."""
-        coord_from = self.locations[loc_from]
-        coord_to = self.locations[loc_to]
+        if not is_coords:
+            coord_from = self.locations[loc_from]
+            coord_to = self.locations[loc_to]
+        else:
+            coord_from = loc_from
+            coord_to = loc_to
         dist = np.linalg.norm(coord_to - coord_from)
         if dist < 0.01:
             return coord_to
@@ -103,6 +123,69 @@ class SimpleEnvironment(BaseEnvironment):
         if object_type not in self._ground_truth[location]:
             self._ground_truth[location][object_type] = set()
         self._ground_truth[location][object_type].add(obj)
+
+    def move_robot(self, robot_name, location):
+        target_coords = self.locations[location]
+        self.robots[robot_name].move(target_coords, self.time)
+
+    def pick_robot(self, robot_name):
+        self.robots[robot_name].pick(self.time)
+
+    def place_robot(self, robot_name):
+        self.robots[robot_name].place(self.time)
+
+    def search_robot(self, robot_name):
+        self.robots[robot_name].search(self.time)
+
+    def stop_robot(self, robot_name):
+        self.robots[robot_name].stop()
+
+    def _get_move_status(self, robot_name):
+        all_robots_assigned = all(not r.is_free for r in self.robots.values())
+        if not all_robots_assigned:
+            return ActionStatus.IDLE
+        robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
+        time_to_target = [(n, np.linalg.norm(r.pose - r.target_pose)) for n, r in self.robots.items()]
+
+        remaining_times = [(n, t - p) for (n, t), p in zip(time_to_target, robots_progress)]
+        min_robot, min_distance = min(remaining_times, key=lambda x: x[1])
+
+        if min_robot != robot_name:
+            return ActionStatus.RUNNING
+
+        # compute intermediate pose for all robots
+        for r_name in self.robots:
+            r_pose = self.get_intermediate_coordinates(
+                min_distance, self.robots[r_name].pose, self.robots[r_name].target_pose, is_coords=True)
+            self.robots[r_name].pose = r_pose
+            self.locations[f'{r_name}_loc'] = r_pose
+
+        # stop the robot that has reached its target
+        self.robots[robot_name].stop()
+        return ActionStatus.DONE
+
+    def _get_pick_place_search_status(self, robot_name, action_name):
+        all_robots_assigned = all(not r.is_free for r in self.robots.values())
+        if not all_robots_assigned:
+            return ActionStatus.IDLE
+        robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
+        time_to_action = [(n, r.skills_time[action_name]) for n, r in self.robots.items()]
+
+        remaining_times = [(n, t - p) for (n, t), p in zip(time_to_action, robots_progress)]
+        min_robot, _ = min(remaining_times, key=lambda x: x[1])
+
+        if min_robot != robot_name:
+            return ActionStatus.RUNNING
+
+        self.stop_robot(robot_name)
+        return ActionStatus.DONE
+
+    def get_action_status(self, robot_name, action_name):
+        if action_name == 'move':
+            return self._get_move_status(robot_name)
+        if action_name in ['pick', 'place', 'search']:
+            return self._get_pick_place_search_status(robot_name, action_name)
+        raise ValueError(f"Unknown action name: {action_name}")
 
 class Robot:
     def __init__(self, name: str, pose=None, skills_time: Dict[str, float] = None):

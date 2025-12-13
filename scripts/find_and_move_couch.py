@@ -16,7 +16,8 @@ from mrppddl.core import Fluent as F, State, get_action_by_name
 from mrppddl.planner import MCTSPlanner
 from mrppddl.dashboard import PlannerDashboard
 import environments
-from environments import Simulator, SimpleEnvironment
+from environments.core import EnvironmentInterface as Simulator
+from environments import SimpleEnvironment
 from mrppddl._bindings import ff_heuristic
 
 # Fancy error handling; shows local vars
@@ -47,7 +48,7 @@ OBJECTS_AT_LOCATIONS = {
 def main():
 
     # Initialize environment
-    env = SimpleEnvironment(LOCATIONS, OBJECTS_AT_LOCATIONS)
+    env = SimpleEnvironment(LOCATIONS, OBJECTS_AT_LOCATIONS, num_robots=2)
 
     # Define the objects we're looking for
     objects_of_interest = ["Remote", "Cookie", "Plate", "Couch"]
@@ -85,13 +86,13 @@ def main():
     }
 
     # Create operators
-    move_op = environments.actions.construct_move_operator(
+    move_op = environments.operators.construct_move_operator(
         move_time=env.get_move_cost_fn()
     )
 
     # Search operator with 80% success rate when object is actually present
     object_find_prob = lambda r, loc, o: 0.8 if o in OBJECTS_AT_LOCATIONS.get(loc, dict()).get("object", dict()) else 0.2
-    search_op = environments.actions.construct_search_operator(
+    search_op = environments.operators.construct_search_operator(
         object_find_prob=object_find_prob,
         search_time=lambda r, loc: 5.0
     )
@@ -107,11 +108,11 @@ def main():
         ],
         extra_cost=100,
     )
-    pick_op = environments.actions.construct_pick_operator(
+    pick_op = environments.operators.construct_pick_operator(
         pick_time=lambda r, l, o: 5.0
     )
 
-    place_op = environments.actions.construct_place_operator(
+    place_op = environments.operators.construct_place_operator(
         place_time=lambda r, l, o: 5.0
     )
 
@@ -135,7 +136,7 @@ def main():
 
         for iteration in range(max_iterations):
             # Check if goal is reached
-            if sim.is_goal_reached(goal_fluents):
+            if sim.goal_reached(goal_fluents):
                 break
 
             # Get available actions
