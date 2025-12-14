@@ -29,7 +29,8 @@ class ProcTHOREnvironment(BaseEnvironment):
         self.robots = {
             f"r{i + 1}": Robot(name=f"r{i + 1}",
                                pose=self.start_coords,
-                               skills_time=SKILLS_TIME[f'r{i + 1}']) for i in range(args.num_robots)
+                               skills_time=SKILLS_TIME[f'r{i + 1}'],
+                               robot_move_time_fn=self.get_robot_move_cost()) for i in range(args.num_robots)
         }
         self.locations = self._get_location_to_coordinates_dict()
         self.all_objects = self._get_all_objects()
@@ -93,6 +94,13 @@ class ProcTHOREnvironment(BaseEnvironment):
             return cost
         return move_cost_fn
 
+
+    def get_robot_move_cost(self):
+        def move_cost_fn(loc_from_coords, loc_to_coords):
+            cost = utils.get_cost_between_two_coords(self.grid, loc_from_coords, loc_to_coords)
+            return cost
+        return move_cost_fn
+
     def get_intermediate_coordinates(self, time, loc_from, loc_to, is_coords=False):
         if not is_coords:
             loc_from_coords = self.locations[loc_from]
@@ -148,7 +156,7 @@ class ProcTHOREnvironment(BaseEnvironment):
         if not all_robots_assigned:
             return ActionStatus.IDLE
         robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
-        time_to_action = [(n, r.skills_time[action_name]) for n, r in self.robots.items()]
+        time_to_action = [(n, r.time_to_completion) for n, r in self.robots.items()]
 
         remaining_times = [(n, t - p) for (n, t), p in zip(time_to_action, robots_progress)]
         min_robot, _ = min(remaining_times, key=lambda x: x[1])
@@ -164,20 +172,22 @@ class ProcTHOREnvironment(BaseEnvironment):
         if not all_robots_assigned:
             return ActionStatus.IDLE
 
-        time_to_target = [(n, utils.get_cost_between_two_coords(
-            self.grid, r.pose, r.target_pose)) for n, r in self.robots.items()]
-        min_robot, min_distance = min(time_to_target, key=lambda x: x[1])
+        robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
+        time_to_target = [(n, r.time_to_completion) for n, r in self.robots.items()]
+
+        remaining_times = [(n, t - p) for (n, t), p in zip(time_to_target, robots_progress)]
+        min_robot, min_distance = min(remaining_times, key=lambda x: x[1])
 
         if min_robot != robot_name:
             return ActionStatus.RUNNING
 
         # compute intermediate pose for all robots
         for r_name in self.robots:
-            # start_pose = (self.robots[r_name].pose.x, self.robots[r_name].pose.y)
-            r_pose = self.get_intermediate_coordinates(
-                min_distance, self.robots[r_name].pose, self.robots[r_name].target_pose, is_coords=True)
-            self.robots[r_name].pose = r_pose
-            self.locations[f'{r_name}_loc'] = r_pose
+            if self.robots[r_name].current_action_name == 'move':
+                r_pose = self.get_intermediate_coordinates(
+                    min_distance, self.robots[r_name].pose, self.robots[r_name].target_pose, is_coords=True)
+                self.robots[r_name].pose = r_pose
+                self.locations[f'{r_name}_loc'] = r_pose
 
         # stop the robot that has reached its target
         self.robots[robot_name].stop()

@@ -152,6 +152,7 @@ class EnvironmentInterface():
     def _get_advance_time(self):
         for act in self.ongoing_actions:
             if act.is_action_complete:
+                act.do_add_all_remaining_effects = True
                 return act.time_to_next_event
         return self.time
 
@@ -199,6 +200,7 @@ class OngoingAction:
         ], key=lambda el: el[0])
         self.environment = environment
         self.is_action_called = False
+        self.do_add_all_remaining_effects = False
         self.robot = self.name.split()[1]  # (e.g., move r1 locA locB)
 
     @property
@@ -235,6 +237,15 @@ class OngoingAction:
                        if effect[0] <= time + 1e-9]
         # Remove the new_effects from upcoming_effects (effects are sorted)
         self._upcoming_effects = self._upcoming_effects[len(new_effects):]
+
+        # If the action is complete, add all the remaining effects immediately
+        # This is so that we can add fluents like just-picked, just-moved, etc. after delta_time
+        # of action completion. These just-picked, just-moved were added so that it can be used # in preconditions to prevent the same action being taken again immediately
+        # for planning efficiency.
+
+        if self.do_add_all_remaining_effects:
+            new_effects += self._upcoming_effects
+            self._upcoming_effects = []
 
         return new_effects
 

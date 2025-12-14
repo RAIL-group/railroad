@@ -158,10 +158,11 @@ class SimpleEnvironment(BaseEnvironment):
 
         # compute intermediate pose for all robots
         for r_name in self.robots:
-            r_pose = self.get_intermediate_coordinates(
-                min_distance, self.robots[r_name].pose, self.robots[r_name].target_pose, is_coords=True)
-            self.robots[r_name].pose = r_pose
-            self.locations[f'{r_name}_loc'] = r_pose
+            if self.robots[r_name].current_action_name == 'move':
+                r_pose = self.get_intermediate_coordinates(
+                    min_distance, self.robots[r_name].pose, self.robots[r_name].target_pose, is_coords=True)
+                self.robots[r_name].pose = r_pose
+                self.locations[f'{r_name}_loc'] = r_pose
 
         # stop the robot that has reached its target
         self.robots[robot_name].stop()
@@ -192,12 +193,14 @@ class SimpleEnvironment(BaseEnvironment):
 
 
 class Robot:
-    def __init__(self, name: str, pose=None, skills_time: Dict[str, float] = None):
+    def __init__(self, name: str, pose=None, skills_time: Dict[str, float] = None, robot_move_time_fn=None):
         self.name = name
+        self.current_action_name = None
         self.pose = pose
         self.target_pose = None
         self.is_free = True
         self.skills_time = skills_time
+        self.robot_move_time_fn = robot_move_time_fn
         self.start_time = None
         self.time_to_completion = None
         self.robot_velocity = 1.0
@@ -206,27 +209,35 @@ class Robot:
         return f"Robot(name={self.name}, pose={self.pose})"
 
     def move(self, new_pose, start_time):
+        self.current_action_name = 'move'
         self.is_free = False
         self.start_time = start_time
         self.target_pose = new_pose
-        self.time_to_completion = np.linalg.norm(np.array(self.pose)[:2] - np.array(new_pose)[:2]) / self.robot_velocity
+        if not self.robot_move_time_fn:
+            self.time_to_completion = np.linalg.norm(np.array(self.pose)[:2] - np.array(new_pose)[:2]) / self.robot_velocity
+        else:
+            self.time_to_completion = self.robot_move_time_fn(self.pose, new_pose) / self.robot_velocity
 
     def pick(self, start_time):
+        self.current_action_name = 'pick'
         self.is_free = False
         self.start_time = start_time
         self.time_to_completion = self.skills_time['pick']
 
     def place(self, start_time):
+        self.current_action_name = 'place'
         self.is_free = False
         self.start_time = start_time
         self.time_to_completion = self.skills_time['place']
 
     def search(self, start_time):
+        self.current_action_name = 'search'
         self.is_free = False
         self.start_time = start_time
         self.time_to_completion = self.skills_time['search']
 
     def stop(self):
+        self.current_action_name = None
         self.is_free = True
         self.target_pose = None
         self.start_time = None
