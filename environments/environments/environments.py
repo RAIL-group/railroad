@@ -143,6 +143,9 @@ class SimpleEnvironment(BaseEnvironment):
     def stop_robot(self, robot_name):
         self.robots[robot_name].stop()
 
+    def no_op_robot(self, robot_name):
+        self.robots[robot_name].no_op(self.time)
+
     def _get_move_status(self, robot_name):
         all_robots_assigned = all(not r.is_free for r in self.robots.values())
         if not all_robots_assigned:
@@ -187,7 +190,7 @@ class SimpleEnvironment(BaseEnvironment):
     def get_action_status(self, robot_name, action_name):
         if action_name == 'move':
             return self._get_move_status(robot_name)
-        if action_name in ['pick', 'place', 'search']:
+        if action_name in ['pick', 'place', 'search', 'no-op']:
             return self._get_pick_place_search_status(robot_name, action_name)
         raise ValueError(f"Unknown action name: {action_name}")
 
@@ -235,6 +238,12 @@ class Robot:
         self.is_free = False
         self.start_time = start_time
         self.time_to_completion = self.skills_time['search']
+
+    def no_op(self, start_time):
+        self.current_action_name = 'no-op'
+        self.is_free = False
+        self.start_time = start_time
+        self.time_to_completion = 5.0 # TODO: change to skills time
 
     def stop(self):
         self.current_action_name = None

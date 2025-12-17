@@ -137,7 +137,7 @@ class EnvironmentInterface():
 
     def _get_ongoing_action(self, action):
         action_name = action.name.split()[0]
-        if action_name not in {"move", "pick", "place", "search"}:
+        if action_name not in {"move", "pick", "place", "search", "no-op"}:
             raise ValueError(f"Action {action.name} not supported in simulator.")
         if action_name == "move":
             new_act = OngoingMoveAction(self._state.time, action, self.environment)
@@ -147,6 +147,8 @@ class EnvironmentInterface():
             new_act = OngoingPickAction(self._state.time, action, self.environment)
         elif action_name == "place":
             new_act = OngoingPlaceAction(self._state.time, action, self.environment)
+        elif action_name == "no-op":
+            new_act = OngoingNoOpAction(self._state.time, action, self.environment)
         return new_act
 
     def _get_advance_time(self):
@@ -343,3 +345,11 @@ class OngoingMoveAction(OngoingAction):
 
         self._upcoming_effects = []
         return new_fluents
+
+
+class OngoingNoOpAction(OngoingAction):
+    def advance(self, time):
+        if not self.is_action_called:
+            self.environment.no_op_robot(self.robot)
+            self.is_action_called = True
+        return super().advance(time)
