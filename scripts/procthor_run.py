@@ -59,16 +59,28 @@ def main():
     pick_time = lambda r, l, o: 5
     place_time = lambda r, l, o: 5
     object_find_prob = lambda r, l, o: 1.0
-    move_op = environments.operators.construct_move_operator_nonblocking(move_time_fn)
+    move_op = environments.operators.construct_move_operator(move_time_fn)
     search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
-    pick_op = environments.operators.construct_pick_operator_nonblocking(pick_time)
-    place_op = environments.operators.construct_place_operator_nonblocking(place_time)
+    pick_op = environments.operators.construct_pick_operator(pick_time)
+    place_op = environments.operators.construct_place_operator(place_time)
+
+    from mrppddl.core import Operator, Effect
+    no_op = Operator(
+        name="no-op",
+        parameters=[("?r", "robot")],
+        preconditions=[F("free ?r")],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free ?r")}),
+            Effect(time=5, resulting_fluents={F("free ?r")}),
+        ],
+        extra_cost=100,
+    )
 
     # Create simulator
     sim = Simulator(
         initial_state,
         objects_by_type,
-        [pick_op, place_op, move_op, search_op],
+        [no_op, pick_op, place_op, move_op, search_op],
         env
     )
 
@@ -78,7 +90,9 @@ def main():
 
     # Dashboard
     h_value = ff_heuristic(initial_state, goal_fluents, sim.get_actions())
-    with PlannerDashboard(goal_fluents, initial_heuristic=h_value) as dashboard:
+    dashboard = PlannerDashboard(goal_fluents, initial_heuristic=h_value)
+    # with PlannerDashboard(goal_fluents, initial_heuristic=h_value) as dashboard:
+    if True:
         # (Optional) initial dashboard update
         dashboard.update(sim_state=sim.state)
 
@@ -92,7 +106,7 @@ def main():
 
             # Plan next action
             mcts = MCTSPlanner(all_actions)
-            action_name = mcts(sim.state, goal_fluents, max_iterations=4000, c=300, max_depth=20)
+            action_name = mcts(sim.state, goal_fluents, max_iterations=10000, c=300, max_depth=20)
 
             if action_name == 'NONE':
                 dashboard.console.print("No more actions available. Goal may not be achievable.")
