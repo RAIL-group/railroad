@@ -90,9 +90,7 @@ def main():
 
     # Dashboard
     h_value = ff_heuristic(initial_state, goal_fluents, sim.get_actions())
-    dashboard = PlannerDashboard(goal_fluents, initial_heuristic=h_value)
-    # with PlannerDashboard(goal_fluents, initial_heuristic=h_value) as dashboard:
-    if True:
+    with PlannerDashboard(goal_fluents, initial_heuristic=h_value) as dashboard:
         # (Optional) initial dashboard update
         dashboard.update(sim_state=sim.state)
 
