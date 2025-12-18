@@ -91,7 +91,11 @@ class EnvironmentInterface():
             if all(act.is_done for act in self.ongoing_actions):
                 break
 
-            adv_time = self._get_advance_time()
+            adv_time, completed_actions = self._get_advance_time_and_completed_actions()
+
+            # stop robots for completed actions
+            for act in completed_actions:
+                self.environment.stop_robot(act.robot)
 
             new_effects = list(itertools.chain.from_iterable(
                 [act.advance(adv_time) for act in self.ongoing_actions])
@@ -151,12 +155,17 @@ class EnvironmentInterface():
             new_act = OngoingNoOpAction(self._state.time, action, self.environment)
         return new_act
 
-    def _get_advance_time(self):
+    def _get_advance_time_and_completed_actions(self):
+        time_to_next_event = self.time
+        completed_actions = []
+
         for act in self.ongoing_actions:
             if act.is_action_complete:
+                completed_actions.append(act)
                 act.do_add_all_remaining_effects = True
-                return act.time_to_next_event
-        return self.time
+                time_to_next_event = act.time_to_next_event
+
+        return time_to_next_event, completed_actions
 
     def goal_reached(self, goal_fluents):
         if all(fluent in self.state.fluents for fluent in goal_fluents):

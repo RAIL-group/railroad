@@ -74,7 +74,6 @@ class SimpleEnvironment(BaseEnvironment):
                                    pose=locations["living_room"].copy(),
                                    skills_time=SKILLS_TIME[f'robot{i + 1}']) for i in range(num_robots)
         }
-        self.min_robot = None
         self.min_time = None
 
     def get_objects_at_location(self, location):
@@ -161,29 +160,26 @@ class SimpleEnvironment(BaseEnvironment):
         time_to_target = [(n, r.time_to_completion) for n, r in self.robots.items()]
 
         remaining_times = [(n, t - p) for (n, t), p in zip(time_to_target, robots_progress)]
-        min_robot, min_time = min(remaining_times, key=lambda x: x[1])
-        return min_robot, min_time
+        _, min_time = min(remaining_times, key=lambda x: x[1])
+        min_robots = [n for n, t in remaining_times if t == min_time]
+        return min_robots, min_time
 
     def _get_move_status(self, robot_name):
         all_robots_assigned = all(not r.is_free for r in self.robots.values())
         if not all_robots_assigned:
             return ActionStatus.IDLE
-        self.min_robot, self.min_time = self.get_robot_that_finishes_first_and_when()
-        if self.min_robot != robot_name:
+        min_robots, self.min_time = self.get_robot_that_finishes_first_and_when()
+        if robot_name not in min_robots:
             return ActionStatus.RUNNING
-        # Otherwise, this robot has reached its target
-        self.robots[robot_name].stop()
         return ActionStatus.DONE
 
     def _get_pick_place_search_status(self, robot_name, action_name):
         all_robots_assigned = all(not r.is_free for r in self.robots.values())
         if not all_robots_assigned:
             return ActionStatus.IDLE
-        self.min_robot, self.min_time = self.get_robot_that_finishes_first_and_when()
-        if self.min_robot != robot_name:
+        min_robots, self.min_time = self.get_robot_that_finishes_first_and_when()
+        if robot_name not in min_robots:
             return ActionStatus.RUNNING
-
-        self.stop_robot(robot_name)
         return ActionStatus.DONE
 
     def get_action_status(self, robot_name, action_name):
