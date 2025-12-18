@@ -74,6 +74,8 @@ class SimpleEnvironment(BaseEnvironment):
                                    pose=locations["living_room"].copy(),
                                    skills_time=SKILLS_TIME[f'robot{i + 1}']) for i in range(num_robots)
         }
+        self.min_robot = None
+        self.min_time = None
 
     def get_objects_at_location(self, location):
         """Return objects at a location (simulates perception)."""
@@ -141,33 +143,35 @@ class SimpleEnvironment(BaseEnvironment):
         self.robots[robot_name].search(self.time)
 
     def stop_robot(self, robot_name):
+        # If the robot was moving, it's now at a new intermediate location
+        robot = self.robots[robot_name]
+        if robot.current_action_name == 'move':
+            robot_pose = self.get_intermediate_coordinates(
+                self.min_time, robot.pose, robot.target_pose, is_coords=True)
+            self.locations[f'{robot_name}_loc'] = robot_pose
+            robot.pose = robot_pose
+
         self.robots[robot_name].stop()
 
     def no_op_robot(self, robot_name):
         self.robots[robot_name].no_op(self.time)
 
-    def _get_move_status(self, robot_name):
-        all_robots_assigned = all(not r.is_free for r in self.robots.values())
-        if not all_robots_assigned:
-            return ActionStatus.IDLE
+    def get_robot_that_finishes_first_and_when(self):
         robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
         time_to_target = [(n, r.time_to_completion) for n, r in self.robots.items()]
 
         remaining_times = [(n, t - p) for (n, t), p in zip(time_to_target, robots_progress)]
-        min_robot, min_distance = min(remaining_times, key=lambda x: x[1])
+        min_robot, min_time = min(remaining_times, key=lambda x: x[1])
+        return min_robot, min_time
 
-        if min_robot != robot_name:
+    def _get_move_status(self, robot_name):
+        all_robots_assigned = all(not r.is_free for r in self.robots.values())
+        if not all_robots_assigned:
+            return ActionStatus.IDLE
+        self.min_robot, self.min_time = self.get_robot_that_finishes_first_and_when()
+        if self.min_robot != robot_name:
             return ActionStatus.RUNNING
-
-        # compute intermediate pose for all robots
-        for r_name in self.robots:
-            if self.robots[r_name].current_action_name == 'move':
-                r_pose = self.get_intermediate_coordinates(
-                    min_distance, self.robots[r_name].pose, self.robots[r_name].target_pose, is_coords=True)
-                self.robots[r_name].pose = r_pose
-                self.locations[f'{r_name}_loc'] = r_pose
-
-        # stop the robot that has reached its target
+        # Otherwise, this robot has reached its target
         self.robots[robot_name].stop()
         return ActionStatus.DONE
 
@@ -175,13 +179,8 @@ class SimpleEnvironment(BaseEnvironment):
         all_robots_assigned = all(not r.is_free for r in self.robots.values())
         if not all_robots_assigned:
             return ActionStatus.IDLE
-        robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
-        time_to_action = [(n, r.time_to_completion) for n, r in self.robots.items()]
-
-        remaining_times = [(n, t - p) for (n, t), p in zip(time_to_action, robots_progress)]
-        min_robot, _ = min(remaining_times, key=lambda x: x[1])
-
-        if min_robot != robot_name:
+        self.min_robot, self.min_time = self.get_robot_that_finishes_first_and_when()
+        if self.min_robot != robot_name:
             return ActionStatus.RUNNING
 
         self.stop_robot(robot_name)
@@ -204,7 +203,7 @@ class Robot:
         self.is_free = True
         self.skills_time = skills_time
         self.robot_move_time_fn = robot_move_time_fn
-        self.start_time = None
+        self.start_time = 0.0
         self.time_to_completion = None
         self.robot_velocity = 1.0
 
@@ -243,11 +242,11 @@ class Robot:
         self.current_action_name = 'no-op'
         self.is_free = False
         self.start_time = start_time
-        self.time_to_completion = 5.0 # TODO: change to skills time
+        self.time_to_completion = 5.0  # TODO: change to skills time
 
     def stop(self):
         self.current_action_name = None
         self.is_free = True
         self.target_pose = None
-        self.start_time = None
+        self.start_time = 0.0
         self.time_to_completion = None
