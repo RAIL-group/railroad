@@ -164,30 +164,21 @@ class SimpleEnvironment(BaseEnvironment):
         min_robots = [n for n, t in remaining_times if t == min_time]
         return min_robots, min_time
 
-    def _get_move_status(self, robot_name):
-        all_robots_assigned = all(not r.is_free for r in self.robots.values())
-        if not all_robots_assigned:
-            return ActionStatus.IDLE
-        min_robots, self.min_time = self.get_robot_that_finishes_first_and_when()
-        if robot_name not in min_robots:
-            return ActionStatus.RUNNING
-        return ActionStatus.DONE
-
-    def _get_pick_place_search_status(self, robot_name, action_name):
-        all_robots_assigned = all(not r.is_free for r in self.robots.values())
-        if not all_robots_assigned:
-            return ActionStatus.IDLE
-        min_robots, self.min_time = self.get_robot_that_finishes_first_and_when()
-        if robot_name not in min_robots:
-            return ActionStatus.RUNNING
-        return ActionStatus.DONE
-
     def get_action_status(self, robot_name, action_name):
-        if action_name == 'move':
-            return self._get_move_status(robot_name)
-        if action_name in ['pick', 'place', 'search', 'no-op']:
-            return self._get_pick_place_search_status(robot_name, action_name)
-        raise ValueError(f"Unknown action name: {action_name}")
+        if action_name not in ['move', 'pick', 'place', 'search', 'no-op']:
+            print(f"Action: '{action_name}' not verified in Simulation!")
+
+        # For simulation we do the following:
+        # If all robots are not assigned, return IDLE
+        # If some robots are assigned, but this robot is not the one finishing first, return RUNNING
+        # If this robot is among the ones finishing first, return DONE
+        all_robots_assigned = all(not r.is_free for r in self.robots.values())
+        if not all_robots_assigned:
+            return ActionStatus.IDLE
+        min_robots, self.min_time = self.get_robot_that_finishes_first_and_when()
+        if robot_name not in min_robots:
+            return ActionStatus.RUNNING
+        return ActionStatus.DONE
 
 
 class Robot:

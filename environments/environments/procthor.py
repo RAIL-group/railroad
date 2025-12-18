@@ -39,6 +39,8 @@ class ProcTHOREnvironment(BaseEnvironment):
         self.partial_graph = self.known_graph.get_object_free_graph()
         self.move_cost = self.get_move_cost_fn()
 
+        self.min_time = None
+
     def _get_all_objects(self):
         all_objects = set()
         for container_idx in self.known_graph.container_indices:
@@ -141,54 +143,98 @@ class ProcTHOREnvironment(BaseEnvironment):
     def place_robot(self, robot_name):
         self.robots[robot_name].place(self.time)
 
+    def no_op_robot(self, robot_name):
+        self.robots[robot_name].no_op(self.time)
+
     def stop_robot(self, robot_name):
+        # If the robot was moving, it's now at a new intermediate location
+        robot = self.robots[robot_name]
+        if robot.current_action_name == 'move':
+            robot_pose = self.get_intermediate_coordinates(
+                self.min_time, robot.pose, robot.target_pose, is_coords=True)
+            self.locations[f'{robot_name}_loc'] = robot_pose
+            robot.pose = robot_pose
+
         self.robots[robot_name].stop()
 
-    def get_action_status(self, robot_name, action_name):
-        if action_name == 'move':
-            return self._get_move_status(robot_name)
-        if action_name in ['pick', 'place', 'search']:
-            return self._get_pick_place_search_status(robot_name, action_name)
-        raise ValueError(f"Unknown action name: {action_name}")
-
-    def _get_pick_place_search_status(self, robot_name, action_name):
-        all_robots_assigned = all(not r.is_free for r in self.robots.values())
-        if not all_robots_assigned:
-            return ActionStatus.IDLE
-        robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
-        time_to_action = [(n, r.time_to_completion) for n, r in self.robots.items()]
-
-        remaining_times = [(n, t - p) for (n, t), p in zip(time_to_action, robots_progress)]
-        min_robot, _ = min(remaining_times, key=lambda x: x[1])
-
-        if min_robot != robot_name:
-            return ActionStatus.RUNNING
-
-        self.stop_robot(robot_name)
-        return ActionStatus.DONE
-
-    def _get_move_status(self, robot_name):
-        all_robots_assigned = all(not r.is_free for r in self.robots.values())
-        if not all_robots_assigned:
-            return ActionStatus.IDLE
-
+    def get_robot_that_finishes_first_and_when(self):
         robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
         time_to_target = [(n, r.time_to_completion) for n, r in self.robots.items()]
 
         remaining_times = [(n, t - p) for (n, t), p in zip(time_to_target, robots_progress)]
-        min_robot, min_distance = min(remaining_times, key=lambda x: x[1])
+        _, min_time = min(remaining_times, key=lambda x: x[1])
+        min_robots = [n for n, t in remaining_times if t == min_time]
+        return min_robots, min_time
 
-        if min_robot != robot_name:
+    def get_action_status(self, robot_name, action_name):
+        if action_name not in ['move', 'pick', 'place', 'search', 'no-op']:
+            print(f"Action: '{action_name}' not verified in Simulation!")
+
+        # For simulation we do the following:
+        # If all robots are not assigned, return IDLE
+        # If some robots are assigned, but this robot is not the one finishing first, return RUNNING
+        # If this robot is among the ones finishing first, return DONE
+        all_robots_assigned = all(not r.is_free for r in self.robots.values())
+        if not all_robots_assigned:
+            return ActionStatus.IDLE
+        min_robots, self.min_time = self.get_robot_that_finishes_first_and_when()
+        if robot_name not in min_robots:
             return ActionStatus.RUNNING
-
-        # compute intermediate pose for all robots
-        for r_name in self.robots:
-            if self.robots[r_name].current_action_name == 'move':
-                r_pose = self.get_intermediate_coordinates(
-                    min_distance, self.robots[r_name].pose, self.robots[r_name].target_pose, is_coords=True)
-                self.robots[r_name].pose = r_pose
-                self.locations[f'{r_name}_loc'] = r_pose
-
-        # stop the robot that has reached its target
-        self.robots[robot_name].stop()
         return ActionStatus.DONE
+
+
+
+
+
+
+    # def stop_robot(self, robot_name):
+    #     self.robots[robot_name].stop()
+
+    # def get_action_status(self, robot_name, action_name):
+    #     if action_name == 'move':
+    #         return self._get_move_status(robot_name)
+    #     if action_name in ['pick', 'place', 'search']:
+    #         return self._get_pick_place_search_status(robot_name, action_name)
+    #     raise ValueError(f"Unknown action name: {action_name}")
+
+    # def _get_pick_place_search_status(self, robot_name, action_name):
+    #     all_robots_assigned = all(not r.is_free for r in self.robots.values())
+    #     if not all_robots_assigned:
+    #         return ActionStatus.IDLE
+    #     robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
+    #     time_to_action = [(n, r.time_to_completion) for n, r in self.robots.items()]
+
+    #     remaining_times = [(n, t - p) for (n, t), p in zip(time_to_action, robots_progress)]
+    #     min_robot, _ = min(remaining_times, key=lambda x: x[1])
+
+    #     if min_robot != robot_name:
+    #         return ActionStatus.RUNNING
+
+    #     self.stop_robot(robot_name)
+    #     return ActionStatus.DONE
+
+    # def _get_move_status(self, robot_name):
+    #     all_robots_assigned = all(not r.is_free for r in self.robots.values())
+    #     if not all_robots_assigned:
+    #         return ActionStatus.IDLE
+
+    #     robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
+    #     time_to_target = [(n, r.time_to_completion) for n, r in self.robots.items()]
+
+    #     remaining_times = [(n, t - p) for (n, t), p in zip(time_to_target, robots_progress)]
+    #     min_robot, min_distance = min(remaining_times, key=lambda x: x[1])
+
+    #     if min_robot != robot_name:
+    #         return ActionStatus.RUNNING
+
+    #     # compute intermediate pose for all robots
+    #     for r_name in self.robots:
+    #         if self.robots[r_name].current_action_name == 'move':
+    #             r_pose = self.get_intermediate_coordinates(
+    #                 min_distance, self.robots[r_name].pose, self.robots[r_name].target_pose, is_coords=True)
+    #             self.robots[r_name].pose = r_pose
+    #             self.locations[f'{r_name}_loc'] = r_pose
+
+    #     # stop the robot that has reached its target
+    #     self.robots[robot_name].stop()
+    #     return ActionStatus.DONE

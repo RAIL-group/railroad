@@ -133,44 +133,6 @@ def main():
     # Print the full dashboard history to the console (optional)
     dashboard.print_history(sim.state, actions_taken)
 
-    # actions_taken = []
-    # for _ in range(max_iterations):
-    #     if sim.goal_reached(goal_fluents):
-    #         print("Goal reached!")
-    #         break
-    #     all_actions = sim.get_actions()
-    #     mcts = MCTSPlanner(all_actions)
-    #     action_name = mcts(sim.state, goal_fluents, max_iterations=10000, c=1.41)
-    #     print("------------------------")
-    #     print(f'{action_name=}')
-    #     print("------------------------")
-    #     if action_name != 'NONE':
-    #         action = get_action_by_name(all_actions, action_name)
-    #         sim.advance(action, do_interrupt=True)
-    #         # sim.advance(action, do_interrupt=False)
-    #         print(sim.state.fluents)
-    #         actions_taken.append(action_name)
-    #     else:
-    #         for action in all_actions:
-    #             name, r, start, end = action.name.split()
-    #             if name == 'move' and start == 'garbagecan_5':
-    #                 print(action.name)
-    #                 print(action.preconditions)
-    #                 print(sim.state.satisfies_precondition(action))
-    #                 print('---')
-    #         break
-
-
-    # print(f"Actions taken: {actions_taken}")
-
-    # robot_all_poses = [Pose(*env.locations['start'])]
-    # for action in actions_taken:
-    #     if not action.startswith('move'):
-    #         continue
-    #     _, _, _, to = action.split()
-    #     robot_all_poses.append(Pose(*env.locations[to]))
-    # print(robot_all_poses)
-
 
 if __name__ == "__main__":
     main()
