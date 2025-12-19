@@ -89,6 +89,13 @@ def _execute_task_worker(task: Task, mlflow_uri: Optional[str] = None) -> Task:
                 result = task.benchmark_fn(case)
                 task.result = result
                 task.status = TaskStatus.SUCCESS
+
+                # Check if benchmark reported failure via "success" field
+                if isinstance(result, dict) and "success" in result:
+                    if not result["success"]:
+                        task.status = TaskStatus.FAILURE
+                        task.error = "Benchmark reported success=False"
+
             except TimeoutError as e:
                 task.status = TaskStatus.TIMEOUT
                 task.error = f"Task exceeded timeout of {task.timeout}s"
@@ -156,11 +163,19 @@ class ParallelExecutor:
 
         try:
             with ProcessPoolExecutor(max_workers=self.num_workers) as executor:
-                # Submit all tasks
+                # Submit all tasks at once
                 futures = {}
                 for task in plan.tasks:
                     future = executor.submit(_execute_task_worker, task, mlflow_uri)
                     futures[future] = task
+
+                # Mark first batch as running (up to num_workers)
+                tasks_to_mark = list(plan.tasks)[:self.num_workers]
+                for task in tasks_to_mark:
+                    self.progress.mark_task_started(task)
+
+                # Track which tasks we've marked as started
+                marked_count = len(tasks_to_mark)
 
                 # Process completions
                 try:
@@ -181,14 +196,26 @@ class ParallelExecutor:
                                 import sys
                                 print(f"Warning: Failed to log task to MLflow: {e}", file=sys.stderr)
 
-                            # Update progress
+                            # Update progress (this will remove from running tasks)
                             self.progress.update_task(completed_task)
+
+                            # Mark next task as running if we haven't marked all yet
+                            if marked_count < len(plan.tasks):
+                                next_task = plan.tasks[marked_count]
+                                self.progress.mark_task_started(next_task)
+                                marked_count += 1
 
                         except Exception as e:
                             # Handle worker crash
                             original_task.status = TaskStatus.FAILURE
                             original_task.error = f"Worker crashed: {e}"
                             self.progress.update_task(original_task)
+
+                            # Mark next task as running if we haven't marked all yet
+                            if marked_count < len(plan.tasks):
+                                next_task = plan.tasks[marked_count]
+                                self.progress.mark_task_started(next_task)
+                                marked_count += 1
 
                 except KeyboardInterrupt:
                     # Cancel all pending futures

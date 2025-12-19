@@ -171,7 +171,7 @@ class BenchmarkRunner:
 
         # Start progress display
         with ProgressDisplay(plan) as progress:
-            if self.parallel > 1:
+            if True or self.parallel > 1:
                 # Parallel execution
                 from .parallel import ParallelExecutor
                 executor = ParallelExecutor(
@@ -183,9 +183,6 @@ class BenchmarkRunner:
             else:
                 # Sequential execution
                 plan = self._execute_sequential(plan, progress)
-
-        # Log summary metrics
-        self._log_summary(plan)
 
         return plan
 
@@ -218,6 +215,10 @@ class BenchmarkRunner:
         # Update status
         task.status = TaskStatus.RUNNING
 
+        # Mark task as started in progress display
+        if progress:
+            progress.mark_task_started(task)
+
         # Create BenchmarkCase
         case = BenchmarkCase(
             benchmark_name=task.benchmark_name,
@@ -243,6 +244,13 @@ class BenchmarkRunner:
                     result = task.benchmark_fn(case)
                     task.result = result
                     task.status = TaskStatus.SUCCESS
+
+                    # Check if benchmark reported failure via "success" field
+                    if isinstance(result, dict) and "success" in result:
+                        if not result["success"]:
+                            task.status = TaskStatus.FAILURE
+                            task.error = "Benchmark reported success=False"
+
                 except TimeoutError as e:
                     task.status = TaskStatus.TIMEOUT
                     task.error = f"Task exceeded timeout of {task.timeout}s"
@@ -279,25 +287,3 @@ class BenchmarkRunner:
             progress.update_task(task)
 
         return task
-
-    def _log_summary(self, plan: ExecutionPlan):
-        """
-        Log aggregate statistics.
-
-        Args:
-            plan: Completed execution plan
-        """
-        stats = plan.get_summary_stats()
-
-        summary = {
-            "total_tasks": plan.total_tasks,
-            "success_count": stats["success"],
-            "failure_count": stats["failure"],
-            "timeout_count": stats["timeout"],
-            "total_wall_time": sum(t.wall_time for t in plan.tasks if t.wall_time),
-        }
-
-        try:
-            self.tracker.log_summary(summary)
-        except Exception as e:
-            print(f"Warning: Failed to log summary to MLflow: {e}", file=sys.stderr)

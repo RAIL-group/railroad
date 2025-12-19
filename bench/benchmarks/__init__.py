@@ -8,8 +8,10 @@ Benchmarks are automatically registered when decorated.
 # Import all benchmark modules (triggers @benchmark decorators)
 from . import basic_planning
 from . import multi_robot
+from . import movie_night
 
 __all__ = [
     "basic_planning",
     "multi_robot",
+    "movie_night",
 ]

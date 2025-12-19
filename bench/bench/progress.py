@@ -4,12 +4,82 @@ Rich-based progress visualization for benchmark execution.
 Provides live terminal display with progress bars and statistics.
 """
 
-from rich.console import Console, Group
-from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeRemainingColumn
+from rich.console import Console, Group, RenderableType
+from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeRemainingColumn, ProgressColumn, Task as ProgressTask
 from rich.table import Table
 from rich.panel import Panel
 from rich.live import Live
+from rich.text import Text
+from collections import defaultdict
 from .plan import ExecutionPlan, Task, TaskStatus
+
+
+class BenchmarkStatsColumn(ProgressColumn):
+    """Custom column that shows benchmark/case stats or completed/total."""
+
+    def __init__(self, benchmark_stats_ref, case_stats_ref, task_id_to_key_ref):
+        """
+        Initialize with reference to stats dicts.
+
+        Args:
+            benchmark_stats_ref: Reference to the benchmark_stats dictionary
+            case_stats_ref: Reference to the case_stats dictionary
+            task_id_to_key_ref: Reference to mapping from task_id to case_key
+        """
+        super().__init__()
+        self.benchmark_stats = benchmark_stats_ref
+        self.case_stats = case_stats_ref
+        self.task_id_to_key = task_id_to_key_ref
+
+    def render(self, task: ProgressTask) -> RenderableType:
+        """Render the stats for this task."""
+        # Check if this task has a case key mapping
+        if task.id in self.task_id_to_key:
+            case_key = self.task_id_to_key[task.id]
+            stats = self.case_stats[case_key]
+            parts = []
+            if stats["success"] > 0:
+                parts.append(f"[green]✓{stats['success']}[/green]")
+            if stats["failure"] > 0:
+                parts.append(f"[red]✗{stats['failure']}[/red]")
+            if stats["timeout"] > 0:
+                parts.append(f"[yellow]⏱{stats['timeout']}[/yellow]")
+
+            result = "/".join(parts) + f"/{task.total}" if parts else f"{task.completed}/{task.total}"
+
+            # Add aggregate metrics for cases
+            metrics = []
+            if stats["wall_time_count"] > 0:
+                avg_wall_time = stats["wall_time_sum"] / stats["wall_time_count"]
+                metrics.append(f"[dim]t={avg_wall_time:.1f}s[/dim]")
+            if stats["plan_cost_count"] > 0:
+                avg_plan_cost = stats["plan_cost_sum"] / stats["plan_cost_count"]
+                metrics.append(f"[dim]cost={avg_plan_cost:.1f}[/dim]")
+
+            if metrics:
+                result += " " + " ".join(metrics)
+
+            return Text.from_markup(result)
+
+        # Check if this is a benchmark task (starts with "  " but not "    ")
+        elif task.description.startswith("  ") and not task.description.startswith("    "):
+            benchmark_name = task.description.strip()
+
+            if benchmark_name in self.benchmark_stats:
+                stats = self.benchmark_stats[benchmark_name]
+                parts = []
+                if stats["success"] > 0:
+                    parts.append(f"[green]✓{stats['success']}[/green]")
+                if stats["failure"] > 0:
+                    parts.append(f"[red]✗{stats['failure']}[/red]")
+                if stats["timeout"] > 0:
+                    parts.append(f"[yellow]⏱{stats['timeout']}[/yellow]")
+
+                if parts:
+                    return Text.from_markup("/".join(parts) + f"/{task.total}")
+
+        # Default: just show completed/total
+        return Text(f" {task.completed}/{task.total}")
 
 
 class ProgressDisplay:
@@ -29,13 +99,32 @@ class ProgressDisplay:
         self.plan = plan
         self.console = Console()
 
-        # Create progress bars
+        # Per-benchmark and per-case statistics (create before Progress so we can pass to custom column)
+        self.benchmark_stats = defaultdict(lambda: {
+            "success": 0,
+            "failure": 0,
+            "timeout": 0,
+        })
+        self.case_stats = defaultdict(lambda: {
+            "success": 0,
+            "failure": 0,
+            "timeout": 0,
+            "wall_time_sum": 0.0,
+            "wall_time_count": 0,
+            "plan_cost_sum": 0.0,
+            "plan_cost_count": 0,
+        })
+
+        # Mapping from progress task_id to case_key for proper stats lookup
+        self.task_id_to_key = {}
+
+        # Create progress bars with custom stats column
         self.progress = Progress(
             SpinnerColumn(),
             TextColumn("[bold blue]{task.description}"),
             BarColumn(),
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            TextColumn("({task.completed}/{task.total})"),
+            BenchmarkStatsColumn(self.benchmark_stats, self.case_stats, self.task_id_to_key),
             TimeRemainingColumn(),
         )
 
@@ -45,14 +134,39 @@ class ProgressDisplay:
             total=plan.total_tasks,
         )
 
-        # Per-benchmark progress
+        # Per-benchmark and per-case progress
         self.benchmark_tasks = {}
+        self.case_tasks = {}  # Key: (benchmark_name, case_idx)
+
         for benchmark_name, tasks in plan.group_by_benchmark().items():
-            task_id = self.progress.add_task(
+            # Add benchmark-level progress bar
+            benchmark_task_id = self.progress.add_task(
                 f"  {benchmark_name}",
                 total=len(tasks),
             )
-            self.benchmark_tasks[benchmark_name] = task_id
+            self.benchmark_tasks[benchmark_name] = benchmark_task_id
+
+            # Group by case and add case-level progress bars
+            cases = defaultdict(list)
+            for task in tasks:
+                cases[task.case_idx].append(task)
+
+            for case_idx in sorted(cases.keys()):
+                case_tasks = cases[case_idx]
+                num_repeats = len(case_tasks)
+
+                # Format case parameters for display
+                params = case_tasks[0].params
+                param_str = ", ".join(f"{k}={v}" for k, v in params.items())
+
+                case_task_id = self.progress.add_task(
+                    f"    Case {case_idx}: {param_str}",
+                    total=num_repeats,
+                )
+                case_key = (benchmark_name, case_idx)
+                self.case_tasks[case_key] = case_task_id
+                # Store mapping for stats lookup
+                self.task_id_to_key[case_task_id] = case_key
 
         # Statistics
         self.stats = {
@@ -60,6 +174,9 @@ class ProgressDisplay:
             "failure": 0,
             "timeout": 0,
         }
+
+        # Track currently running tasks per benchmark
+        self.running_tasks = defaultdict(list)
 
         self.live = None
 
@@ -80,23 +197,57 @@ class ProgressDisplay:
             self.live = None
 
     def _make_layout(self) -> Panel:
-        """Create layout with progress bars + stats table."""
+        """Create layout with progress bars + stats table + running tasks."""
+        # Build components list
+        components = [self.progress]
+
+        # Add running tasks display if any are running
+        if any(self.running_tasks.values()):
+            components.append("")
+            running_display = Table.grid(padding=(0, 1))
+            running_display.add_column(style="dim cyan")
+
+            for benchmark_name in sorted(self.running_tasks.keys()):
+                tasks = self.running_tasks[benchmark_name]
+                if tasks:
+                    # Show benchmark name and running tasks
+                    for task in tasks:
+                        param_str = ", ".join(f"{k}={v}" for k, v in task.params.items())
+                        task_desc = f"  └─ {benchmark_name} case {task.case_idx} repeat {task.repeat_idx}"
+                        if param_str:
+                            task_desc += f" ({param_str})"
+                        running_display.add_row(task_desc)
+
+            components.append(running_display)
+
         # Stats table
+        components.append("")
         stats_table = Table.grid(padding=(0, 2))
         stats_table.add_row(
             f"[green]Success: {self.stats['success']}[/green]",
             f"[red]Failed: {self.stats['failure']}[/red]",
             f"[yellow]Timeout: {self.stats['timeout']}[/yellow]",
         )
+        components.append(stats_table)
 
         # Combine
-        group = Group(
-            self.progress,
-            "",
-            stats_table,
-        )
+        group = Group(*components)
 
         return Panel(group, title="Benchmark Progress", border_style="cyan")
+
+    def mark_task_started(self, task: Task):
+        """
+        Mark a task as started (add to running tasks display).
+
+        Args:
+            task: Task that just started
+        """
+        # Add to running tasks
+        self.running_tasks[task.benchmark_name].append(task)
+
+        # Refresh layout
+        if self.live:
+            self.live.update(self._make_layout())
 
     def update_task(self, task: Task):
         """
@@ -105,6 +256,12 @@ class ProgressDisplay:
         Args:
             task: Completed task
         """
+        # Remove from running tasks (match by task ID since object may differ)
+        running = self.running_tasks[task.benchmark_name]
+        self.running_tasks[task.benchmark_name] = [
+            t for t in running if t.id != task.id
+        ]
+
         # Update overall
         self.progress.update(self.overall_task, advance=1)
 
@@ -113,13 +270,34 @@ class ProgressDisplay:
         if benchmark_task_id is not None:
             self.progress.update(benchmark_task_id, advance=1)
 
-        # Update stats
+        # Update case-specific
+        case_key = (task.benchmark_name, task.case_idx)
+        case_task_id = self.case_tasks.get(case_key)
+        if case_task_id is not None:
+            self.progress.update(case_task_id, advance=1)
+
+        # Update stats (overall, per-benchmark, and per-case)
         if task.status == TaskStatus.SUCCESS:
             self.stats["success"] += 1
+            self.benchmark_stats[task.benchmark_name]["success"] += 1
+            self.case_stats[case_key]["success"] += 1
         elif task.status == TaskStatus.FAILURE:
             self.stats["failure"] += 1
+            self.benchmark_stats[task.benchmark_name]["failure"] += 1
+            self.case_stats[case_key]["failure"] += 1
         elif task.status == TaskStatus.TIMEOUT:
             self.stats["timeout"] += 1
+            self.benchmark_stats[task.benchmark_name]["timeout"] += 1
+            self.case_stats[case_key]["timeout"] += 1
+
+        # Track aggregate metrics for cases (wall_time and plan_cost)
+        if task.wall_time is not None:
+            self.case_stats[case_key]["wall_time_sum"] += task.wall_time
+            self.case_stats[case_key]["wall_time_count"] += 1
+
+        if task.result and isinstance(task.result, dict) and "plan_cost" in task.result:
+            self.case_stats[case_key]["plan_cost_sum"] += float(task.result["plan_cost"])
+            self.case_stats[case_key]["plan_cost_count"] += 1
 
         # Refresh layout
         if self.live:

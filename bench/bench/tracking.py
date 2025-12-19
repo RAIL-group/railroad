@@ -103,7 +103,7 @@ class MLflowTracker:
             }
             # Add benchmark parameters with param_ prefix
             for key, value in task.params.items():
-                params[f"param_{key}"] = str(value)
+                params[str(key)] = str(value)
 
             mlflow.log_params(params)
 
@@ -138,10 +138,18 @@ class MLflowTracker:
                 if artifacts:
                     with tempfile.TemporaryDirectory() as tmpdir:
                         for key, value in artifacts.items():
-                            artifact_path = Path(tmpdir) / f"{key}.json"
-                            with open(artifact_path, 'w') as f:
-                                json.dump(value, f, indent=2, default=str)
-                            mlflow.log_artifact(str(artifact_path))
+                            # Special handling for HTML artifacts
+                            if key == 'log_html':
+                                artifact_path = Path(tmpdir) / "log.html"
+                                with open(artifact_path, 'w') as f:
+                                    f.write(str(value))
+                                mlflow.log_artifact(str(artifact_path))
+                            else:
+                                # Regular artifacts as JSON
+                                artifact_path = Path(tmpdir) / f"{key}.json"
+                                with open(artifact_path, 'w') as f:
+                                    json.dump(value, f, indent=2, default=str)
+                                mlflow.log_artifact(str(artifact_path))
 
             # Always log wall time and success status
             if task.wall_time is not None:

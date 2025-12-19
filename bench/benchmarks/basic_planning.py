@@ -18,7 +18,6 @@ import time
     name="single_robot_navigation",
     description="Single robot navigation with move operator",
     tags=["planning", "single-agent", "navigation"],
-    timeout=60.0,
 )
 def bench_single_robot_nav(case: BenchmarkCase):
     """
@@ -30,9 +29,6 @@ def bench_single_robot_nav(case: BenchmarkCase):
     num_locations = case.params["num_locations"]
     mcts_iterations = case.params["mcts_iterations"]
     seed = case.params.get("seed", case.repeat_idx)
-
-    # Set random seed for reproducibility
-    random.seed(seed)
 
     # Create simple test environment
     import numpy as np
@@ -50,8 +46,6 @@ def bench_single_robot_nav(case: BenchmarkCase):
             F("free robot1"),
         },
     )
-    import time
-    time.sleep(1)
 
     # Define goal: visit the last location
     goal_fluents = {F(f"at robot1 loc{num_locations - 1}")}

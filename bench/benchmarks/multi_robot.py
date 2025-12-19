@@ -33,7 +33,6 @@ def bench_two_robot_coord(case: BenchmarkCase):
 
     # Set random seed
     random.seed(seed)
-
     # Create environment
     import numpy as np
     locations = {f"loc{i}": np.array([i * 2.0, 0.0]) for i in range(num_locations)}
