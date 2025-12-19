@@ -18,3 +18,8 @@ wheels/
 resources/
 data/
 /uv.lock
+
+
+# Logging
+mlruns
+mlflow.db
