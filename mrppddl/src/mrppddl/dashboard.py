@@ -68,7 +68,7 @@ class PlannerDashboard:
         if console:
             self.console = console
         else:
-            self.console = Console(force_terminal=True)
+            self.console = Console(force_terminal=True, record=True)
         self.goal_fluents = list(goal_fluents)
         self.num_goals = len(self.goal_fluents)
         self.initial_heuristic = initial_heuristic

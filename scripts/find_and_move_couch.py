@@ -45,7 +45,14 @@ OBJECTS_AT_LOCATIONS = {
 }
 
 
-def main():
+from bench import benchmark, BenchmarkCase
+@benchmark(
+    name="move_couch",
+    description="Two robots coordinating to reach separate goals",
+    tags=["planning", "multi-agent", "coordination"],
+    timeout=120.0,
+)
+def bench_move_couch(case: BenchmarkCase):
 
     # Initialize environment
     robot_locations = {"robot1": "living_room",

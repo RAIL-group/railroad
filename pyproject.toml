@@ -20,6 +20,7 @@ dependencies = [
     "common",
     "gridmap",
     "environments",
+    "bench",
     "prior>=1.0.3",
     "ai2thor>=5.0.0",
     "sentence-transformers>=5.1.2",
@@ -31,6 +32,7 @@ dependencies = [
     "pandas>=2.3.3",
     "pytest-xdist>=3.8.0",
     "roslibpy",
+    "mlflow>=2.19.0",
 ]
 
 [tool.uv.sources]
@@ -39,6 +41,7 @@ common = { path = "common", editable = true }
 gridmap = { path = "gridmap", editable = true }
 environments = { path = "environments", editable = true }
 procthor = { path = "procthor", editable = true }
+bench = { path = "bench", editable = true }
 
 [tool.pytest.ini_options]
 filterwarnings = [

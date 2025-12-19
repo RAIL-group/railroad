@@ -1,0 +1,182 @@
+"""
+MLflow integration layer for experiment tracking.
+
+Provides centralized logging interface for benchmark results.
+"""
+
+import sys
+import os
+from io import StringIO
+from contextlib import redirect_stderr
+from typing import Dict, Any, Optional
+from pathlib import Path
+import json
+import tempfile
+
+# Suppress MLflow database initialization logs by redirecting stderr during import
+_stderr = sys.stderr
+sys.stderr = StringIO()
+import mlflow
+sys.stderr = _stderr
+
+from .plan import Task, TaskStatus
+
+
+class MLflowTracker:
+    """
+    Centralized MLflow logging interface.
+
+    Handles experiment creation and task result logging.
+
+    Experiment hierarchy:
+        Experiment: mrppddl_bench_{timestamp}
+            └─ Run (per task): {benchmark_name}_{case_idx}_{repeat_idx}
+    """
+
+    def __init__(self, tracking_uri: Optional[str] = None):
+        """
+        Initialize MLflow tracker.
+
+        Args:
+            tracking_uri: MLflow tracking URI. Defaults to sqlite:///mlflow.db
+        """
+        # Suppress database initialization logs
+        _stderr = sys.stderr
+        sys.stderr = StringIO()
+
+        try:
+            if tracking_uri:
+                mlflow.set_tracking_uri(tracking_uri)
+            else:
+                # Default: SQLite database (avoids filesystem deprecation warning)
+                mlflow.set_tracking_uri("sqlite:///mlflow.db")
+        finally:
+            sys.stderr = _stderr
+
+        self.experiment_id = None
+        self.experiment_name = None
+
+    def create_experiment(self, name: str, metadata: Dict[str, Any]):
+        """
+        Create new experiment with metadata tags.
+
+        Args:
+            name: Experiment name (e.g., mrppddl_bench_1234567890)
+            metadata: Metadata dictionary to log as experiment tags
+        """
+        # Suppress database initialization logs
+        _stderr = sys.stderr
+        sys.stderr = StringIO()
+
+        try:
+            self.experiment_name = name
+
+            # Create or get existing experiment
+            experiment = mlflow.get_experiment_by_name(name)
+            if experiment:
+                self.experiment_id = experiment.experiment_id
+            else:
+                # Convert metadata to string tags (MLflow only supports string tags)
+                tags = {k: str(v) for k, v in metadata.items()}
+                self.experiment_id = mlflow.create_experiment(
+                    name=name,
+                    tags=tags,
+                )
+
+            mlflow.set_experiment(experiment_id=self.experiment_id)
+        finally:
+            sys.stderr = _stderr
+
+    def log_task(self, task: Task):
+        """
+        Log a single task execution as an MLflow run.
+
+        Args:
+            task: Completed task with results
+        """
+        with mlflow.start_run(run_name=task.id) as run:
+            # Log parameters (inputs)
+            params = {
+                "benchmark_name": task.benchmark_name,
+                "case_idx": str(task.case_idx),
+                "repeat_idx": str(task.repeat_idx),
+            }
+            # Add benchmark parameters with param_ prefix
+            for key, value in task.params.items():
+                params[f"param_{key}"] = str(value)
+
+            mlflow.log_params(params)
+
+            # Log tags
+            tags = {
+                "status": task.status.value,
+            }
+            # Add benchmark tags
+            for i, tag in enumerate(task.tags):
+                tags[f"tag_{i}"] = tag
+
+            mlflow.set_tags(tags)
+
+            # Log metrics (outputs)
+            metrics = {}
+
+            if task.result:
+                # Separate scalar metrics from complex data
+                artifacts = {}
+
+                for key, value in task.result.items():
+                    if isinstance(value, (int, float, bool)):
+                        metrics[key] = float(value)
+                    elif isinstance(value, str) and len(value) < 500:
+                        # Short strings can be logged as params
+                        mlflow.log_param(f"result_{key}", value)
+                    else:
+                        # Complex data goes to artifacts
+                        artifacts[key] = value
+
+                # Log artifacts to temp files
+                if artifacts:
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        for key, value in artifacts.items():
+                            artifact_path = Path(tmpdir) / f"{key}.json"
+                            with open(artifact_path, 'w') as f:
+                                json.dump(value, f, indent=2, default=str)
+                            mlflow.log_artifact(str(artifact_path))
+
+            # Always log wall time and success status
+            if task.wall_time is not None:
+                metrics["wall_time"] = task.wall_time
+
+            metrics["success"] = 1.0 if task.status == TaskStatus.SUCCESS else 0.0
+
+            mlflow.log_metrics(metrics)
+
+            # Log stdout/stderr as artifacts
+            with tempfile.TemporaryDirectory() as tmpdir:
+                if task.stdout:
+                    stdout_path = Path(tmpdir) / "stdout.txt"
+                    with open(stdout_path, 'w') as f:
+                        f.write(task.stdout)
+                    mlflow.log_artifact(str(stdout_path))
+
+                if task.stderr:
+                    stderr_path = Path(tmpdir) / "stderr.txt"
+                    with open(stderr_path, 'w') as f:
+                        f.write(task.stderr)
+                    mlflow.log_artifact(str(stderr_path))
+
+            # Log error message if failed
+            if task.error:
+                mlflow.log_param("error_message", task.error[:500])  # Truncate if too long
+
+    def log_summary(self, summary: Dict[str, Any]):
+        """
+        Log experiment-level summary as a special run.
+
+        Args:
+            summary: Summary statistics dictionary
+        """
+        with mlflow.start_run(run_name="__summary__") as run:
+            # Log all summary values as metrics
+            metrics = {k: float(v) for k, v in summary.items() if isinstance(v, (int, float))}
+            mlflow.log_metrics(metrics)
