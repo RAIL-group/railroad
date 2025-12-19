@@ -39,6 +39,7 @@ from bench import benchmark, BenchmarkCase
 def bench_movie_night(case: BenchmarkCase):
     mcts_iterations = case.params["mcts_iterations"]
     mcts_search_weight = case.params["mcts_search_weight"]
+    num_robots = case.params["num_robots"]
 
     # Define locations with coordinates (for move cost calculation)
     locations = {
@@ -57,25 +58,31 @@ def bench_movie_night(case: BenchmarkCase):
     }
 
     # Initialize environment
-    env = SimpleEnvironment(locations, objects_at_locations, num_robots=2)
+    env = SimpleEnvironment(locations, objects_at_locations, num_robots=num_robots)
 
     # Define the objects we're looking for
     objects_of_interest = ["Remote", "Cookie", "Plate", "Couch"]
 
     # Define initial state
-    initial_state = State(
-        time=0,
-        fluents={
+    initial_fluents = {
             # Robots free and start in (revealed) living room
             F("free robot1"),
-            F("free robot2"),
             F("at robot1 living_room"),
-            F("at robot2 living_room"),
             F("revealed living_room"),
             F("at Remote living_room"),
             F("found Remote"),
             F("revealed den"),
-        },
+        }
+    if num_robots >= 2:
+        initial_fluents.add(F("free robot2"))
+        initial_fluents.add(F("at robot2 living_room"))
+    if num_robots >= 3:
+        initial_fluents.add(F("free robot3"))
+        initial_fluents.add(F("at robot3 living_room"))
+
+    initial_state = State(
+        time=0,
+        fluents=initial_fluents,
     )
 
     # Define goal: all items at their proper locations
@@ -88,7 +95,7 @@ def bench_movie_night(case: BenchmarkCase):
 
     # Initial objects by type (robot only knows about some objects initially)
     objects_by_type = {
-        "robot": ["robot1", "robot2"],
+        "robot": ["robot1", "robot2", "robot3"],
         "location": list(locations.keys()),
         "object": objects_of_interest,  # Robot knows these objects exist
     }
@@ -205,8 +212,16 @@ def bench_movie_night(case: BenchmarkCase):
 
 # Register parameter combinations
 bench_movie_night.add_cases([
-    {"mcts_iterations": 400, "mcts_search_weight": 300},
-    {"mcts_iterations": 1000, "mcts_search_weight": 300},
-    {"mcts_iterations": 4000, "mcts_search_weight": 300},
-    {"mcts_iterations": 10000, "mcts_search_weight": 300},
+    {"mcts_iterations": 400, "mcts_search_weight": 300, "num_robots": 1},
+    {"mcts_iterations": 1000, "mcts_search_weight": 300, "num_robots": 1},
+    {"mcts_iterations": 4000, "mcts_search_weight": 300, "num_robots": 1},
+    {"mcts_iterations": 10000, "mcts_search_weight": 300, "num_robots": 1},
+    {"mcts_iterations": 400, "mcts_search_weight": 300, "num_robots": 2},
+    {"mcts_iterations": 1000, "mcts_search_weight": 300, "num_robots": 2},
+    {"mcts_iterations": 4000, "mcts_search_weight": 300, "num_robots": 2},
+    {"mcts_iterations": 10000, "mcts_search_weight": 300, "num_robots": 2},
+    {"mcts_iterations": 400, "mcts_search_weight": 300, "num_robots": 3},
+    {"mcts_iterations": 1000, "mcts_search_weight": 300, "num_robots": 3},
+    {"mcts_iterations": 4000, "mcts_search_weight": 300, "num_robots": 3},
+    {"mcts_iterations": 10000, "mcts_search_weight": 300, "num_robots": 3},
 ])
