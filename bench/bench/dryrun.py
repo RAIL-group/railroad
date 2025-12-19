@@ -1,12 +1,12 @@
 """
 Dry-run formatter for displaying execution plans.
 
-Provides Rich-based tree visualization of what will be executed.
+Provides Rich-based visualization of what will be executed.
 """
 
 from rich.console import Console
-from rich.tree import Tree
 from rich.table import Table
+from rich.text import Text
 from datetime import datetime
 from collections import defaultdict
 from .plan import ExecutionPlan
@@ -14,7 +14,7 @@ from .plan import ExecutionPlan
 
 def format_dry_run(plan: ExecutionPlan):
     """
-    Format and display execution plan as rich tree.
+    Format and display execution plan.
 
     Args:
         plan: Execution plan to display
@@ -50,8 +50,9 @@ def format_dry_run(plan: ExecutionPlan):
     console.print(meta_table)
     console.print()
 
-    # Tree view of benchmarks
-    tree = Tree("[bold]Benchmarks[/bold]", guide_style="dim")
+    # Display benchmarks
+    console.print("[bold]Benchmarks[/bold]")
+    console.print()
 
     # Group tasks by benchmark and case
     for benchmark_name, tasks in plan.group_by_benchmark().items():
@@ -62,12 +63,21 @@ def format_dry_run(plan: ExecutionPlan):
 
         # Get tags from first task
         tags = tasks[0].tags
-        tags_display = f", tags={{{', '.join(tags)}}}" if tags else ""
 
-        benchmark_node = tree.add(
-            f"[yellow]{benchmark_name}[/yellow] "
-            f"({num_cases} cases × {num_repeats} repeats = {num_tasks} tasks{tags_display})"
-        )
+        # Format benchmark header
+        header = Text()
+        header.append(benchmark_name, style="bold yellow")
+        header.append(f" ({num_cases} cases × {num_repeats} repeats = {num_tasks} tasks)")
+
+        if tags:
+            header.append(" [")
+            for i, tag in enumerate(tags):
+                if i > 0:
+                    header.append(", ")
+                header.append(tag, style="cyan")
+            header.append("]")
+
+        console.print(header)
 
         # Group by case
         by_case = defaultdict(list)
@@ -83,10 +93,9 @@ def format_dry_run(plan: ExecutionPlan):
 
             param_str = ", ".join(f"{k}={v}" for k, v in params.items())
 
-            case_node = benchmark_node.add(
-                f"Case {case_idx}: [dim]{param_str}[/dim] "
+            console.print(
+                f"  Case {case_idx}: {param_str} "
                 f"(timeout={timeout}s, repeats={len(case_tasks)})"
             )
 
-    console.print(tree)
-    console.print()
+        console.print()
