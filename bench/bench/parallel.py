@@ -158,6 +158,28 @@ class ParallelExecutor:
         Returns:
             Completed execution plan
         """
+        import sys
+        import os
+
+        # Set up signal handler for immediate exit on Ctrl-C
+        def signal_handler(signum, frame):
+            # Try to stop the live display and show cursor
+            try:
+                if self.progress.live:
+                    self.progress.live.stop()
+            except:
+                pass
+            # Show cursor on both stdout and stderr (ANSI escape sequence)
+            sys.stdout.write("\033[?25h")
+            sys.stdout.flush()
+            sys.stderr.write("\033[?25h")
+            print("\n\nInterrupted by user. Exiting immediately...", file=sys.stderr)
+            sys.stderr.flush()
+            # Use os._exit for immediate termination without cleanup
+            os._exit(1)
+
+        old_handler = signal.signal(signal.SIGINT, signal_handler)
+
         # Get MLflow URI from tracker
         mlflow_uri = self.tracker.tracking_uri if hasattr(self.tracker, 'tracking_uri') else None
 
@@ -218,16 +240,36 @@ class ParallelExecutor:
                                 marked_count += 1
 
                 except KeyboardInterrupt:
-                    # Cancel all pending futures
-                    for future in futures:
-                        future.cancel()
-                    # Shutdown executor without waiting
-                    executor.shutdown(wait=False, cancel_futures=True)
-                    raise
+                    # Try to stop the live display and show cursor
+                    try:
+                        if self.progress.live:
+                            self.progress.live.stop()
+                    except:
+                        pass
+                    # Show cursor on both stdout and stderr
+                    sys.stdout.write("\033[?25h")
+                    sys.stdout.flush()
+                    sys.stderr.write("\033[?25h")
+                    print("\n\nInterrupted by user. Exiting...", file=sys.stderr)
+                    sys.stderr.flush()
+                    os._exit(1)
 
         except KeyboardInterrupt:
-            import sys
-            print("\n\nInterrupted by user. Shutting down workers...", file=sys.stderr)
-            raise
+            # Try to stop the live display and show cursor
+            try:
+                if self.progress.live:
+                    self.progress.live.stop()
+            except:
+                pass
+            # Show cursor on both stdout and stderr
+            sys.stdout.write("\033[?25h")
+            sys.stdout.flush()
+            sys.stderr.write("\033[?25h")
+            print("\n\nInterrupted by user. Exiting...", file=sys.stderr)
+            sys.stderr.flush()
+            os._exit(1)
+        finally:
+            # Restore old signal handler
+            signal.signal(signal.SIGINT, old_handler)
 
         return plan

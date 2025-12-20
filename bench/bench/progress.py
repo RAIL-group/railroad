@@ -12,6 +12,7 @@ from rich.live import Live
 from rich.text import Text
 from rich.style import Style
 from rich.spinner import Spinner
+from datetime import timedelta
 from collections import defaultdict
 from .plan import ExecutionPlan, Task, TaskStatus
 
@@ -47,6 +48,22 @@ class StatusBarColumn(BarColumn):
             self.finished_style = Style(color="blue")
 
         return super().render(task)
+
+
+class CompactTimeRemainingColumn(ProgressColumn):
+    """Custom time remaining column that shows only minutes:seconds."""
+
+    def render(self, task: ProgressTask) -> Text:
+        """Render time remaining in mm:ss format."""
+        remaining = task.time_remaining
+        if remaining is None:
+            return Text("-:--", style="progress.remaining")
+
+        # Convert to minutes and seconds only
+        minutes = int(remaining // 60)
+        seconds = int(remaining % 60)
+
+        return Text(f"{minutes}:{seconds:02d}", style="progress.remaining")
 
 
 class BenchmarkStatsColumn(ProgressColumn):
@@ -160,7 +177,7 @@ class ProgressDisplay:
             StatusBarColumn(),
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
             BenchmarkStatsColumn(self.benchmark_stats, self.case_stats, self.task_id_to_key),
-            TimeRemainingColumn(),
+            CompactTimeRemainingColumn(),
         )
 
         # Overall progress
@@ -232,7 +249,8 @@ class ProgressDisplay:
         self.live = Live(
             self._make_layout(),
             console=self.console,
-            refresh_per_second=4
+            refresh_per_second=4,
+            vertical_overflow="visible"
         )
         self.live.__enter__()
         return self
@@ -246,6 +264,7 @@ class ProgressDisplay:
     def _make_layout(self) -> Panel:
         """Create layout with progress bars + stats table + running tasks."""
         # Build components list
+        # Only include the main progress, not individual bars if too many
         components = [self.progress]
 
         # Add running tasks display if any are running
@@ -298,7 +317,8 @@ class ProgressDisplay:
         # Combine
         group = Group(*components)
 
-        return Panel(group, title="Benchmark Progress", border_style="cyan")
+        # Don't constrain height - let it scroll naturally
+        return Panel(group, title="Benchmark Progress", border_style="cyan", height=None)
 
     def mark_task_started(self, task: Task):
         """
