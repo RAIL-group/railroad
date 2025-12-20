@@ -141,6 +141,9 @@ class ProgressDisplay:
     Shows overall progress + per-benchmark breakdown + statistics table.
     """
 
+    # Maximum number of cases to show at once (to fit on screen)
+    MAX_CASES_PER_PAGE = 8
+
     def __init__(self, plan: ExecutionPlan):
         """
         Initialize progress display for a given execution plan.
@@ -189,7 +192,35 @@ class ProgressDisplay:
         self.benchmark_tasks = {}  # benchmark_name -> task_id in its Progress
         self.case_tasks = {}  # (benchmark_name, case_idx) -> task_id
 
+        # Track pages for benchmarks with many cases
+        self.benchmark_pages = {}  # benchmark_name -> list of case_idx lists (pages)
+        self.benchmark_current_page = {}  # benchmark_name -> current page index
+        self.benchmark_case_to_page = {}  # benchmark_name -> {case_idx: page_idx}
+
         for benchmark_name, tasks in plan.group_by_benchmark().items():
+            # Group by case
+            cases = defaultdict(list)
+            for task in tasks:
+                cases[task.case_idx].append(task)
+
+            sorted_case_indices = sorted(cases.keys())
+
+            # Split cases into pages if there are too many
+            pages = []
+            for i in range(0, len(sorted_case_indices), self.MAX_CASES_PER_PAGE):
+                page_cases = sorted_case_indices[i:i + self.MAX_CASES_PER_PAGE]
+                pages.append(page_cases)
+
+            self.benchmark_pages[benchmark_name] = pages
+            self.benchmark_current_page[benchmark_name] = 0
+
+            # Map each case to its page
+            case_to_page = {}
+            for page_idx, page_cases in enumerate(pages):
+                for case_idx in page_cases:
+                    case_to_page[case_idx] = page_idx
+            self.benchmark_case_to_page[benchmark_name] = case_to_page
+
             # Create a dedicated Progress for this benchmark
             task_id_to_key = {}
             bench_progress = Progress(
@@ -203,22 +234,24 @@ class ProgressDisplay:
 
             # Add benchmark-level task
             description = benchmark_descriptions.get(benchmark_name, "")
-            if description:
-                task_desc = f"  {benchmark_name}\n    [italic dim]{description}[/italic dim]"
+            if len(pages) > 1:
+                # Show page info if split
+                task_desc = f"  {benchmark_name} [dim](Page 1/{len(pages)})[/dim]"
+                if description:
+                    task_desc += f"\n    [italic dim]{description}[/italic dim]"
             else:
-                task_desc = f"  {benchmark_name}"
+                if description:
+                    task_desc = f"  {benchmark_name}\n    [italic dim]{description}[/italic dim]"
+                else:
+                    task_desc = f"  {benchmark_name}"
 
             benchmark_task_id = bench_progress.add_task(
                 task_desc,
                 total=len(tasks),
             )
 
-            # Group by case and add case-level progress bars
-            cases = defaultdict(list)
-            for task in tasks:
-                cases[task.case_idx].append(task)
-
-            for case_idx in sorted(cases.keys()):
+            # Add ALL case-level progress bars (we'll filter in _make_layout)
+            for case_idx in sorted_case_indices:
                 case_tasks = cases[case_idx]
                 num_repeats = len(case_tasks)
 
@@ -232,6 +265,7 @@ class ProgressDisplay:
                 case_task_id = bench_progress.add_task(
                     f"    Case {case_idx}: {param_str}",
                     total=num_repeats,
+                    visible=False,  # Hidden by default, shown per page
                 )
                 case_key = (benchmark_name, case_idx)
                 self.case_tasks[case_key] = case_task_id
@@ -265,6 +299,9 @@ class ProgressDisplay:
         for benchmark_name, tasks in plan.group_by_benchmark().items():
             self.benchmark_pending_tasks[benchmark_name] = len(tasks)
 
+        # Track completed tasks per page for page transition
+        self.page_completed_tasks = defaultdict(lambda: defaultdict(int))  # {benchmark: {page_idx: count}}
+
         self.live = None
 
     def __enter__(self):
@@ -285,12 +322,23 @@ class ProgressDisplay:
             self.live = None
 
     def _make_layout(self) -> Panel:
-        """Create layout with only active benchmark + overall progress at bottom."""
+        """Create layout with only active benchmark + current page + overall progress at bottom."""
         components = []
 
         # Show only the currently active benchmark
         if self.active_benchmark and self.active_benchmark not in self.completed_benchmarks:
-            components.append(self.benchmark_progresses[self.active_benchmark])
+            bench_progress = self.benchmark_progresses[self.active_benchmark]
+
+            # Update visibility of case tasks based on current page
+            current_page_idx = self.benchmark_current_page[self.active_benchmark]
+            current_page_cases = self.benchmark_pages[self.active_benchmark][current_page_idx]
+
+            for (bname, case_idx), case_task_id in self.case_tasks.items():
+                if bname == self.active_benchmark:
+                    # Show only cases in the current page
+                    bench_progress.tasks[case_task_id].visible = (case_idx in current_page_cases)
+
+            components.append(bench_progress)
             components.append("")
 
         # Stats table
@@ -311,53 +359,47 @@ class ProgressDisplay:
 
         return Panel(group, title="Benchmark Progress", border_style="cyan", height=None)
 
-    def _print_benchmark_summary(self, benchmark_name: str):
+    def _print_page_summary(self, benchmark_name: str, page_idx: int):
         """
-        Print completed benchmark summary above the live view.
+        Print completed page summary above the live view.
 
         Args:
-            benchmark_name: Name of completed benchmark
+            benchmark_name: Name of benchmark
+            page_idx: Index of completed page
         """
         if not self.live:
             return
 
-        # Get stats for this benchmark
-        stats = self.benchmark_stats[benchmark_name]
+        page_cases = self.benchmark_pages[benchmark_name][page_idx]
+        total_pages = len(self.benchmark_pages[benchmark_name])
 
-        # Build summary table
-        summary = Table.grid(padding=(0, 2))
-        summary.add_column(style="bold cyan")
-        summary.add_column()
+        # Print header only on first page to avoid repetition
+        if page_idx == 0:
+            description = self.plan.metadata.get("benchmark_descriptions", {}).get(benchmark_name, "")
+            header = f"[bold]{benchmark_name}[/bold]"
 
-        summary.add_row(
-            "Benchmark:",
-            f"[bold]{benchmark_name}[/bold]"
-        )
-        summary.add_row(
-            "Results:",
-            f"[green]✓ {stats['success']}[/green]  "
-            f"[red]✗ {stats['failure']}[/red]  "
-            f"[yellow]⏱ {stats['timeout']}[/yellow]"
-        )
+            if description:
+                header += f"\n  [italic dim]{description}[/italic dim]"
 
-        # Add case-level summaries
-        case_summaries = []
-        for (bname, case_idx), case_task_id in sorted(self.case_tasks.items()):
-            if bname != benchmark_name:
-                continue
+            self.console.print(header)
 
-            case_stats = self.case_stats[(bname, case_idx)]
+        # Print each case
+        for case_idx in page_cases:
+            case_key = (benchmark_name, case_idx)
+            case_stats = self.case_stats[case_key]
 
-            # Get case params from the first task with this case
+            # Get case params
             params = {}
             for task in self.plan.tasks:
-                if task.benchmark_name == bname and task.case_idx == case_idx:
+                if task.benchmark_name == benchmark_name and task.case_idx == case_idx:
                     params = task.params
                     break
 
-            # Format params
-            param_parts = [f"{k}={v}" for k, v in params.items()]
-            param_str = ", ".join(param_parts) if param_parts else f"case {case_idx}"
+            # Format params with rich highlighting (matching live view)
+            param_parts = []
+            for k, v in params.items():
+                param_parts.append(f"[cyan]{k}[/cyan]=[yellow]{v}[/yellow]")
+            param_str = ", ".join(param_parts)
 
             # Format stats
             result_parts = []
@@ -368,27 +410,101 @@ class ProgressDisplay:
             if case_stats["timeout"] > 0:
                 result_parts.append(f"[yellow]⏱{case_stats['timeout']}[/yellow]")
 
-            result_str = "/".join(result_parts)
+            result_str = "/".join(result_parts) if result_parts else "0"
 
             # Add metrics
             metrics = []
             if case_stats["wall_time_count"] > 0:
                 avg_wall_time = case_stats["wall_time_sum"] / case_stats["wall_time_count"]
-                metrics.append(f"t={avg_wall_time:.1f}s")
+                metrics.append(f"[dim]t={avg_wall_time:.1f}s[/dim]")
             if case_stats["plan_cost_count"] > 0:
                 avg_plan_cost = case_stats["plan_cost_sum"] / case_stats["plan_cost_count"]
-                metrics.append(f"cost={avg_plan_cost:.1f}")
+                metrics.append(f"[dim]cost={avg_plan_cost:.1f}[/dim]")
 
             metrics_str = " " + " ".join(metrics) if metrics else ""
 
-            case_summaries.append(f"  • {param_str}: {result_str}{metrics_str}")
+            # Print case line (matching live view format)
+            self.console.print(f"  Case {case_idx}: {param_str}  {result_str}{metrics_str}")
 
-        if case_summaries:
-            summary.add_row("Cases:", "\n".join(case_summaries))
+        # Print empty line only after the last page
+        if page_idx == total_pages - 1:
+            self.console.print()  # Empty line for separation
 
-        # Print above the live view using console.print
-        # This will appear above the live display
-        self.console.print(Panel(summary, title=f"✓ Completed: {benchmark_name}", border_style="green"))
+    def _print_benchmark_summary(self, benchmark_name: str):
+        """
+        Print completed benchmark summary above the live view.
+        Only prints for single-page benchmarks (multi-page already printed per-page).
+
+        Args:
+            benchmark_name: Name of completed benchmark
+        """
+        if not self.live:
+            return
+
+        # Check if this is a multi-page benchmark
+        total_pages = len(self.benchmark_pages[benchmark_name])
+
+        # For multi-page benchmarks, we already printed each page summary
+        # So just skip the final summary
+        if total_pages > 1:
+            return
+
+        # For single-page benchmarks, print the summary now
+        # Use the same format as page summaries
+        description = self.plan.metadata.get("benchmark_descriptions", {}).get(benchmark_name, "")
+        header = f"[bold]{benchmark_name}[/bold]"
+
+        if description:
+            header += f"\n  [italic dim]{description}[/italic dim]"
+
+        self.console.print(header)
+
+        # Print all cases
+        for (bname, case_idx), case_task_id in sorted(self.case_tasks.items()):
+            if bname != benchmark_name:
+                continue
+
+            case_stats = self.case_stats[(bname, case_idx)]
+
+            # Get case params
+            params = {}
+            for task in self.plan.tasks:
+                if task.benchmark_name == bname and task.case_idx == case_idx:
+                    params = task.params
+                    break
+
+            # Format params with rich highlighting (matching live view)
+            param_parts = []
+            for k, v in params.items():
+                param_parts.append(f"[cyan]{k}[/cyan]=[yellow]{v}[/yellow]")
+            param_str = ", ".join(param_parts)
+
+            # Format stats
+            result_parts = []
+            if case_stats["success"] > 0:
+                result_parts.append(f"[green]✓{case_stats['success']}[/green]")
+            if case_stats["failure"] > 0:
+                result_parts.append(f"[red]✗{case_stats['failure']}[/red]")
+            if case_stats["timeout"] > 0:
+                result_parts.append(f"[yellow]⏱{case_stats['timeout']}[/yellow]")
+
+            result_str = "/".join(result_parts) if result_parts else "0"
+
+            # Add metrics
+            metrics = []
+            if case_stats["wall_time_count"] > 0:
+                avg_wall_time = case_stats["wall_time_sum"] / case_stats["wall_time_count"]
+                metrics.append(f"[dim]t={avg_wall_time:.1f}s[/dim]")
+            if case_stats["plan_cost_count"] > 0:
+                avg_plan_cost = case_stats["plan_cost_sum"] / case_stats["plan_cost_count"]
+                metrics.append(f"[dim]cost={avg_plan_cost:.1f}[/dim]")
+
+            metrics_str = " " + " ".join(metrics) if metrics else ""
+
+            # Print case line (matching live view format)
+            self.console.print(f"  Case {case_idx}: {param_str}  {result_str}{metrics_str}")
+
+        self.console.print()  # Empty line for separation
 
     def mark_task_started(self, task: Task):
         """
@@ -467,6 +583,40 @@ class ProgressDisplay:
 
         # Update pending tasks count
         self.benchmark_pending_tasks[benchmark_name] -= 1
+
+        # Track page completion
+        case_page = self.benchmark_case_to_page[benchmark_name].get(task.case_idx, 0)
+        self.page_completed_tasks[benchmark_name][case_page] += 1
+
+        # Check if current page is complete
+        current_page_idx = self.benchmark_current_page[benchmark_name]
+        current_page_cases = self.benchmark_pages[benchmark_name][current_page_idx]
+        total_pages = len(self.benchmark_pages[benchmark_name])
+
+        # Count tasks in current page (cases * repeats)
+        tasks_per_case = self.plan.metadata.get("num_repeats", 3)
+        expected_tasks_in_page = len(current_page_cases) * tasks_per_case
+        completed_in_page = self.page_completed_tasks[benchmark_name][current_page_idx]
+
+        if completed_in_page >= expected_tasks_in_page:
+            # Page complete
+            if total_pages > 1:
+                self._print_page_summary(benchmark_name, current_page_idx)
+
+            # Move to next page if available
+            if current_page_idx + 1 < total_pages:
+                self.benchmark_current_page[benchmark_name] += 1
+                # Update benchmark title to show new page
+                new_page_idx = self.benchmark_current_page[benchmark_name]
+                bench_progress = self.benchmark_progresses[benchmark_name]
+                benchmark_task_id = self.benchmark_tasks[benchmark_name]
+
+                description = self.plan.metadata.get("benchmark_descriptions", {}).get(benchmark_name, "")
+                task_desc = f"  {benchmark_name} [dim](Page {new_page_idx + 1}/{total_pages})[/dim]"
+                if description:
+                    task_desc += f"\n    [italic dim]{description}[/italic dim]"
+
+                bench_progress.tasks[benchmark_task_id].description = task_desc
 
         # Check if benchmark is now complete
         self.benchmark_completed_tasks[benchmark_name] += 1

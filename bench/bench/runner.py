@@ -95,22 +95,30 @@ class BenchmarkRunner:
             for benchmark in benchmarks
         }
 
-        # Collate tasks: queue by benchmark first, then repeat, then case
-        # This ensures all tasks for one benchmark complete before moving to the next
+        # Collate tasks: queue by benchmark, then page, then repeat, then case
+        # This ensures cases on the current page are run first
+        PAGE_SIZE = 8  # Match MAX_CASES_PER_PAGE from ProgressDisplay
+
         for benchmark in benchmarks:
-            for repeat_idx in range(self.num_repeats):
-                for case_idx, params in enumerate(benchmark.cases):
-                    task = Task(
-                        id=f"{benchmark.name}_{case_idx}_{repeat_idx}",
-                        benchmark_name=benchmark.name,
-                        benchmark_fn=benchmark.fn,
-                        case_idx=case_idx,
-                        repeat_idx=repeat_idx,
-                        params=params,
-                        timeout=benchmark.timeout,
-                        tags=benchmark.tags,
-                    )
-                    tasks.append(task)
+            # Split cases into pages
+            case_list = list(enumerate(benchmark.cases))
+
+            for page_start in range(0, len(case_list), PAGE_SIZE):
+                page_cases = case_list[page_start:page_start + PAGE_SIZE]
+
+                for repeat_idx in range(self.num_repeats):
+                    for case_idx, params in page_cases:
+                        task = Task(
+                            id=f"{benchmark.name}_{case_idx}_{repeat_idx}",
+                            benchmark_name=benchmark.name,
+                            benchmark_fn=benchmark.fn,
+                            case_idx=case_idx,
+                            repeat_idx=repeat_idx,
+                            params=params,
+                            timeout=benchmark.timeout,
+                            tags=benchmark.tags,
+                        )
+                        tasks.append(task)
 
         # Apply case-level filter if specified
         if self.case_filter:
