@@ -89,6 +89,12 @@ class BenchmarkRunner:
         else:
             benchmarks = self.benchmarks
 
+        # Collect benchmark descriptions for display
+        benchmark_descriptions = {
+            benchmark.name: benchmark.description
+            for benchmark in benchmarks
+        }
+
         # Collate tasks: queue by repeat first, then benchmark, then case
         # This ensures different cases run in parallel rather than exhausting
         # all repeats of one case before moving to the next
@@ -122,6 +128,7 @@ class BenchmarkRunner:
 
         # Gather provenance metadata
         metadata = self._collect_metadata()
+        metadata["benchmark_descriptions"] = benchmark_descriptions
 
         return ExecutionPlan(tasks=tasks, metadata=metadata)
 

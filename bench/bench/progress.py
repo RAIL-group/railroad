@@ -10,8 +10,43 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.live import Live
 from rich.text import Text
+from rich.style import Style
+from rich.spinner import Spinner
 from collections import defaultdict
 from .plan import ExecutionPlan, Task, TaskStatus
+
+
+class StatusBarColumn(BarColumn):
+    """Custom bar column that changes color based on task status."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(
+            *args,
+            complete_style="blue",  # Default in-progress color
+            finished_style="green",  # Default finished color
+            **kwargs
+        )
+
+    def render(self, task: ProgressTask) -> RenderableType:
+        """Render bar with dynamic color based on status."""
+        # Check if task has failure status
+        has_failures = task.fields.get("has_failures", False)
+        is_finished = task.finished
+
+        if has_failures:
+            # Turn red immediately when failure detected (like PyTorch)
+            self.complete_style = Style(color="red")
+            self.finished_style = Style(color="red")
+        elif is_finished:
+            # Green for successful completion
+            self.complete_style = Style(color="green")
+            self.finished_style = Style(color="green")
+        else:
+            # Blue while in progress with no failures
+            self.complete_style = Style(color="blue")
+            self.finished_style = Style(color="blue")
+
+        return super().render(task)
 
 
 class BenchmarkStatsColumn(ProgressColumn):
@@ -118,11 +153,11 @@ class ProgressDisplay:
         # Mapping from progress task_id to case_key for proper stats lookup
         self.task_id_to_key = {}
 
-        # Create progress bars with custom stats column
+        # Create progress bars with custom stats column and status-colored bars
         self.progress = Progress(
             SpinnerColumn(),
             TextColumn("[bold blue]{task.description}"),
-            BarColumn(),
+            StatusBarColumn(),
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
             BenchmarkStatsColumn(self.benchmark_stats, self.case_stats, self.task_id_to_key),
             TimeRemainingColumn(),
@@ -138,10 +173,19 @@ class ProgressDisplay:
         self.benchmark_tasks = {}
         self.case_tasks = {}  # Key: (benchmark_name, case_idx)
 
+        # Get benchmark descriptions from metadata
+        benchmark_descriptions = plan.metadata.get("benchmark_descriptions", {})
+
         for benchmark_name, tasks in plan.group_by_benchmark().items():
-            # Add benchmark-level progress bar
+            # Add benchmark-level progress bar with description if available
+            description = benchmark_descriptions.get(benchmark_name, "")
+            if description:
+                task_desc = f"  {benchmark_name}\n    [italic dim]{description}[/italic dim]"
+            else:
+                task_desc = f"  {benchmark_name}"
+
             benchmark_task_id = self.progress.add_task(
-                f"  {benchmark_name}",
+                task_desc,
                 total=len(tasks),
             )
             self.benchmark_tasks[benchmark_name] = benchmark_task_id
@@ -155,9 +199,12 @@ class ProgressDisplay:
                 case_tasks = cases[case_idx]
                 num_repeats = len(case_tasks)
 
-                # Format case parameters for display
+                # Format case parameters for display with rich syntax highlighting
                 params = case_tasks[0].params
-                param_str = ", ".join(f"{k}={v}" for k, v in params.items())
+                param_parts = []
+                for k, v in params.items():
+                    param_parts.append(f"[cyan]{k}[/cyan]=[yellow]{v}[/yellow]")
+                param_str = ", ".join(param_parts)
 
                 case_task_id = self.progress.add_task(
                     f"    Case {case_idx}: {param_str}",
@@ -204,19 +251,37 @@ class ProgressDisplay:
         # Add running tasks display if any are running
         if any(self.running_tasks.values()):
             components.append("")
+
+            # Add header
+            components.append(Text("Ongoing Runs", style="bold cyan"))
+
+            # Create table with spinner column
             running_display = Table.grid(padding=(0, 1))
-            running_display.add_column(style="dim cyan")
+            running_display.add_column()  # Spinner column
+            running_display.add_column()  # Task description column
 
             for benchmark_name in sorted(self.running_tasks.keys()):
                 tasks = self.running_tasks[benchmark_name]
                 if tasks:
                     # Show benchmark name and running tasks
                     for task in tasks:
-                        param_str = ", ".join(f"{k}={v}" for k, v in task.params.items())
-                        task_desc = f"  └─ {benchmark_name} case {task.case_idx} repeat {task.repeat_idx}"
+                        # Format params with rich syntax highlighting
+                        param_parts = []
+                        for k, v in task.params.items():
+                            param_parts.append(f"[cyan]{k}[/cyan]=[yellow]{v}[/yellow]")
+                        param_str = ", ".join(param_parts)
+
+                        # Build task description: benchmark name is NOT dim, rest is dim
+                        task_desc = f"[bold]{benchmark_name}[/bold] [dim]case {task.case_idx} repeat {task.repeat_idx}"
                         if param_str:
                             task_desc += f" ({param_str})"
-                        running_display.add_row(task_desc)
+                        task_desc += "[/dim]"
+
+                        # Add spinner and task description using Rich's built-in Spinner
+                        running_display.add_row(
+                            Spinner("dots", style="cyan"),
+                            task_desc
+                        )
 
             components.append(running_display)
 
@@ -285,10 +350,24 @@ class ProgressDisplay:
             self.stats["failure"] += 1
             self.benchmark_stats[task.benchmark_name]["failure"] += 1
             self.case_stats[case_key]["failure"] += 1
+
+            # Mark tasks as having failures for red bar color
+            self.progress.update(self.overall_task, has_failures=True)
+            if benchmark_task_id is not None:
+                self.progress.update(benchmark_task_id, has_failures=True)
+            if case_task_id is not None:
+                self.progress.update(case_task_id, has_failures=True)
         elif task.status == TaskStatus.TIMEOUT:
             self.stats["timeout"] += 1
             self.benchmark_stats[task.benchmark_name]["timeout"] += 1
             self.case_stats[case_key]["timeout"] += 1
+
+            # Mark tasks as having failures for red bar color
+            self.progress.update(self.overall_task, has_failures=True)
+            if benchmark_task_id is not None:
+                self.progress.update(benchmark_task_id, has_failures=True)
+            if case_task_id is not None:
+                self.progress.update(case_task_id, has_failures=True)
 
         # Track aggregate metrics for cases (wall_time and plan_cost)
         if task.wall_time is not None:

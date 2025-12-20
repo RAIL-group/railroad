@@ -54,6 +54,9 @@ def format_dry_run(plan: ExecutionPlan):
     console.print("[bold]Benchmarks[/bold]")
     console.print()
 
+    # Get benchmark descriptions from metadata
+    benchmark_descriptions = plan.metadata.get("benchmark_descriptions", {})
+
     # Group tasks by benchmark and case
     for benchmark_name, tasks in plan.group_by_benchmark().items():
         # Count cases and repeats
@@ -79,6 +82,11 @@ def format_dry_run(plan: ExecutionPlan):
 
         console.print(header)
 
+        # Show description if available
+        description = benchmark_descriptions.get(benchmark_name, "")
+        if description:
+            console.print(f"  [italic dim]{description}[/italic dim]")
+
         # Group by case
         by_case = defaultdict(list)
         for task in tasks:
@@ -91,11 +99,15 @@ def format_dry_run(plan: ExecutionPlan):
             params = case_tasks[0].params
             timeout = case_tasks[0].timeout
 
-            param_str = ", ".join(f"{k}={v}" for k, v in params.items())
+            # Format params with rich syntax highlighting
+            param_parts = []
+            for k, v in params.items():
+                param_parts.append(f"[cyan]{k}[/cyan]=[yellow]{v}[/yellow]")
+            param_str = ", ".join(param_parts)
 
             console.print(
                 f"  Case {case_idx}: {param_str} "
-                f"(timeout={timeout}s, repeats={len(case_tasks)})"
+                f"[dim](timeout={timeout}s, repeats={len(case_tasks)})[/dim]"
             )
 
         console.print()
