@@ -95,11 +95,10 @@ class BenchmarkRunner:
             for benchmark in benchmarks
         }
 
-        # Collate tasks: queue by repeat first, then benchmark, then case
-        # This ensures different cases run in parallel rather than exhausting
-        # all repeats of one case before moving to the next
-        for repeat_idx in range(self.num_repeats):
-            for benchmark in benchmarks:
+        # Collate tasks: queue by benchmark first, then repeat, then case
+        # This ensures all tasks for one benchmark complete before moving to the next
+        for benchmark in benchmarks:
+            for repeat_idx in range(self.num_repeats):
                 for case_idx, params in enumerate(benchmark.cases):
                     task = Task(
                         id=f"{benchmark.name}_{case_idx}_{repeat_idx}",
