@@ -97,7 +97,7 @@ class BenchmarkStatsColumn(ProgressColumn):
             if stats["timeout"] > 0:
                 parts.append(f"[yellow]⏱{stats['timeout']}[/yellow]")
 
-            result = "/".join(parts) + f"/{task.total}" if parts else f"{task.completed}/{task.total}"
+            result = "/".join(parts) + f"/{task.total}" if parts else f" {task.completed}/{task.total}"
 
             # Add aggregate metrics for cases
             metrics = []
@@ -142,7 +142,7 @@ class ProgressDisplay:
     """
 
     # Maximum number of cases to show at once (to fit on screen)
-    MAX_CASES_PER_PAGE = 8
+    MAX_CASES_PER_PAGE = 20
 
     def __init__(self, plan: ExecutionPlan):
         """
@@ -197,6 +197,9 @@ class ProgressDisplay:
         self.benchmark_current_page = {}  # benchmark_name -> current page index
         self.benchmark_case_to_page = {}  # benchmark_name -> {case_idx: page_idx}
 
+        # Track max case index for formatting alignment
+        self.benchmark_max_case_idx = {}  # benchmark_name -> max case index
+
         for benchmark_name, tasks in plan.group_by_benchmark().items():
             # Group by case
             cases = defaultdict(list)
@@ -204,6 +207,9 @@ class ProgressDisplay:
                 cases[task.case_idx].append(task)
 
             sorted_case_indices = sorted(cases.keys())
+
+            # Track max case index for formatting
+            self.benchmark_max_case_idx[benchmark_name] = max(sorted_case_indices) if sorted_case_indices else 0
 
             # Split cases into pages if there are too many
             pages = []
@@ -227,7 +233,7 @@ class ProgressDisplay:
                 SpinnerColumn(),
                 TextColumn("[bold blue]{task.description}"),
                 StatusBarColumn(),
-                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                TextColumn("[progress.percentage]"),
                 BenchmarkStatsColumn(self.benchmark_stats, self.case_stats, task_id_to_key),
                 CompactTimeRemainingColumn(),
             )
@@ -251,6 +257,10 @@ class ProgressDisplay:
             )
 
             # Add ALL case-level progress bars (we'll filter in _make_layout)
+            # Calculate width needed for case indices
+            max_case_idx = self.benchmark_max_case_idx[benchmark_name]
+            case_width = len(str(max_case_idx))
+
             for case_idx in sorted_case_indices:
                 case_tasks = cases[case_idx]
                 num_repeats = len(case_tasks)
@@ -263,7 +273,7 @@ class ProgressDisplay:
                 param_str = ", ".join(param_parts)
 
                 case_task_id = bench_progress.add_task(
-                    f"    Case {case_idx}: {param_str}",
+                    f"    Case {case_idx:{case_width}d}: {param_str}",
                     total=num_repeats,
                     visible=False,  # Hidden by default, shown per page
                 )
@@ -383,6 +393,10 @@ class ProgressDisplay:
 
             self.console.print(header)
 
+        # Calculate width needed for case indices
+        max_case_idx = self.benchmark_max_case_idx[benchmark_name]
+        case_width = len(str(max_case_idx))
+
         # Print each case
         for case_idx in page_cases:
             case_key = (benchmark_name, case_idx)
@@ -424,7 +438,7 @@ class ProgressDisplay:
             metrics_str = " " + " ".join(metrics) if metrics else ""
 
             # Print case line (matching live view format)
-            self.console.print(f"  Case {case_idx}: {param_str}  {result_str}{metrics_str}")
+            self.console.print(f"  Case {case_idx:{case_width}d}: {param_str}  {result_str}{metrics_str}")
 
         # Print empty line only after the last page
         if page_idx == total_pages - 1:
@@ -458,6 +472,10 @@ class ProgressDisplay:
             header += f"\n  [italic dim]{description}[/italic dim]"
 
         self.console.print(header)
+
+        # Calculate width needed for case indices
+        max_case_idx = self.benchmark_max_case_idx[benchmark_name]
+        case_width = len(str(max_case_idx))
 
         # Print all cases
         for (bname, case_idx), case_task_id in sorted(self.case_tasks.items()):
@@ -502,7 +520,7 @@ class ProgressDisplay:
             metrics_str = " " + " ".join(metrics) if metrics else ""
 
             # Print case line (matching live view format)
-            self.console.print(f"  Case {case_idx}: {param_str}  {result_str}{metrics_str}")
+            self.console.print(f"  Case {case_idx:{case_width}d}: {param_str}  {result_str}{metrics_str}")
 
         self.console.print()  # Empty line for separation
 

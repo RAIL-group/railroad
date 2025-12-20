@@ -97,7 +97,7 @@ class BenchmarkRunner:
 
         # Collate tasks: queue by benchmark, then page, then repeat, then case
         # This ensures cases on the current page are run first
-        PAGE_SIZE = 8  # Match MAX_CASES_PER_PAGE from ProgressDisplay
+        PAGE_SIZE = 20  # Match MAX_CASES_PER_PAGE from ProgressDisplay
 
         for benchmark in benchmarks:
             # Split cases into pages
