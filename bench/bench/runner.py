@@ -266,6 +266,9 @@ class BenchmarkRunner:
                 # Sequential execution
                 plan = self._execute_sequential(plan, progress)
 
+            # Print final error summary if there are any errors
+            progress.print_final_error_summary()
+
         return plan
 
     def _execute_sequential(self, plan: ExecutionPlan, progress: ProgressDisplay) -> ExecutionPlan:

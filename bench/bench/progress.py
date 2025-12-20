@@ -95,9 +95,9 @@ class BenchmarkStatsColumn(ProgressColumn):
             if stats["error"] > 0:
                 parts.append(f"[red bold]⚠{stats['error']}[/red bold]")
             if stats["failure"] > 0:
-                parts.append(f"[yellow]✗{stats['failure']}[/yellow]")
+                parts.append(f"[red]✗{stats['failure']}[/red]")
             if stats["timeout"] > 0:
-                parts.append(f"[orange1]⏱{stats['timeout']}[/orange1]")
+                parts.append(f"[yellow]⏱{stats['timeout']}[/yellow]")
 
             result = "/".join(parts) + f"/{task.total}" if parts else f" {task.completed}/{task.total}"
 
@@ -125,11 +125,11 @@ class BenchmarkStatsColumn(ProgressColumn):
                 if stats["success"] > 0:
                     parts.append(f"[green]✓{stats['success']}[/green]")
                 if stats["error"] > 0:
-                    parts.append(f"[red bold]⚠{stats['error']}[/red bold]")
+                    parts.append(f"[orange1]⚠{stats['error']}[/orange1]")
                 if stats["failure"] > 0:
-                    parts.append(f"[yellow]✗{stats['failure']}[/yellow]")
+                    parts.append(f"[red]✗{stats['failure']}[/red]")
                 if stats["timeout"] > 0:
-                    parts.append(f"[orange1]⏱{stats['timeout']}[/orange1]")
+                    parts.append(f"[yellow]⏱{stats['timeout']}[/yellow]")
 
                 if parts:
                     return Text.from_markup("/".join(parts) + f"/{task.total}")
@@ -355,6 +355,93 @@ class ProgressDisplay:
             self.live.__exit__(exc_type, exc_val, exc_tb)
             self.live = None
 
+    def print_final_error_summary(self):
+        """Print a final summary of all errors after benchmarks complete."""
+        if not self.error_tasks:
+            return
+
+        # Print separator and header
+        self.console.rule(f"\n[orange1 bold]Error Summary: errors in {len(self.error_tasks)} runs[/orange1 bold]\n")
+
+        # Group errors by benchmark
+        errors_by_benchmark = defaultdict(list)
+        for task in self.error_tasks:
+            errors_by_benchmark[task.benchmark_name].append(task)
+
+        # Print errors grouped by benchmark
+        for benchmark_name in sorted(errors_by_benchmark.keys()):
+            tasks = errors_by_benchmark[benchmark_name]
+            tags = self.benchmark_tags.get(benchmark_name, [])
+
+            # Print benchmark header with tags
+            header_text = Text()
+            header_text.append(benchmark_name, style="bold")
+            if tags:
+                header_text.append(" [")
+                for i, tag in enumerate(tags):
+                    if i > 0:
+                        header_text.append(", ")
+                    header_text.append(tag, style="cyan")
+                header_text.append("]")
+
+            self.console.print(header_text)
+            self.console.print()
+
+            # Group tasks by identical error message and stderr
+            error_groups = defaultdict(list)
+            for task in tasks:
+                # Use error message and stderr as key for grouping
+                error_key = (task.error or "", task.stderr or "")
+                error_groups[error_key].append(task)
+
+            # Print each unique error with all affected cases
+            for (error_msg, stderr), affected_tasks in error_groups.items():
+                # Print affected cases/repeats
+                self.console.print(f"  [orange1]⚠[/orange1] [bold]Affected {len(affected_tasks)} case(s):[/bold]")
+
+                # Group by case and show repeats
+                cases_affected = defaultdict(list)
+                for task in affected_tasks:
+                    cases_affected[task.case_idx].append(task)
+
+                for case_idx in sorted(cases_affected.keys()):
+                    case_tasks = cases_affected[case_idx]
+
+                    # Get parameters from first task (all same case have same params)
+                    params = case_tasks[0].params
+                    param_parts = []
+                    for k, v in params.items():
+                        param_parts.append(f"[cyan]{k}[/cyan]=[yellow]{v}[/yellow]")
+                    param_str = ", ".join(param_parts)
+
+                    # Show which repeats failed
+                    repeat_indices = sorted([t.repeat_idx for t in case_tasks])
+                    if len(repeat_indices) == 1:
+                        repeat_str = f"repeat {repeat_indices[0]}"
+                    else:
+                        repeat_str = f"repeats {', '.join(map(str, repeat_indices))}"
+
+                    self.console.print(
+                        f"    • Case {case_idx} ({repeat_str}): {param_str}"
+                    )
+
+                self.console.print()
+
+                # Print error message
+                if error_msg:
+                    self.console.print(f"  [orange1]Error: {error_msg}[/orange1]")
+
+                # Print stderr if available
+                if stderr:
+                    self.console.print("  [dim]stderr:[/dim]")
+                    # Indent stderr lines
+                    for line in stderr.strip().split('\n'):
+                        self.console.print(f"    [dim]{line}[/dim]")
+
+                self.console.print()
+
+            self.console.print()
+
     def _make_layout(self) -> Panel:
         """Create layout with only active benchmark + current page + overall progress at bottom."""
         components = []
@@ -380,8 +467,8 @@ class ProgressDisplay:
         stats_table.add_row(
             f"[green]Success: {self.stats['success']}[/green]",
             f"[red bold]Errors: {self.stats['error']}[/red bold]",
-            f"[yellow]Failed: {self.stats['failure']}[/yellow]",
-            f"[orange1]Timeout: {self.stats['timeout']}[/orange1]",
+            f"[red]Failed: {self.stats['failure']}[/red]",
+            f"[yellow]Timeout: {self.stats['timeout']}[/yellow]",
         )
         components.append(stats_table)
         components.append("")
@@ -501,9 +588,9 @@ class ProgressDisplay:
             if case_stats["error"] > 0:
                 result_parts.append(f"[red bold]⚠{case_stats['error']}[/red bold]")
             if case_stats["failure"] > 0:
-                result_parts.append(f"[yellow]✗{case_stats['failure']}[/yellow]")
+                result_parts.append(f"[red]✗{case_stats['failure']}[/red]")
             if case_stats["timeout"] > 0:
-                result_parts.append(f"[orange1]⏱{case_stats['timeout']}[/orange1]")
+                result_parts.append(f"[yellow]⏱{case_stats['timeout']}[/yellow]")
 
             result_str = "/".join(result_parts) if result_parts else "0"
 
@@ -599,9 +686,9 @@ class ProgressDisplay:
             if case_stats["error"] > 0:
                 result_parts.append(f"[red bold]⚠{case_stats['error']}[/red bold]")
             if case_stats["failure"] > 0:
-                result_parts.append(f"[yellow]✗{case_stats['failure']}[/yellow]")
+                result_parts.append(f"[red]✗{case_stats['failure']}[/red]")
             if case_stats["timeout"] > 0:
-                result_parts.append(f"[orange1]⏱{case_stats['timeout']}[/orange1]")
+                result_parts.append(f"[yellow]⏱{case_stats['timeout']}[/yellow]")
 
             result_str = "/".join(result_parts) if result_parts else "0"
 

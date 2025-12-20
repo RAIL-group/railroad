@@ -205,16 +205,16 @@ def bench_movie_night(case: BenchmarkCase):
 
 # Register parameter combinations
 bench_movie_night.add_cases([
-    {"mcts.iterations": 400, "mcts.c": 300, "robots": 1},
-    {"mcts.iterations": 1000, "mcts.c": 300, "robots": 1},
-    {"mcts.iterations": 4000, "mcts.c": 300, "robots": 1},
-    {"mcts.iterations": 10000, "mcts.c": 300, "robots": 1},
-    {"mcts.iterations": 400, "mcts.c": 300, "robots": 2},
-    {"mcts.iterations": 1000, "mcts.c": 300, "robots": 2},
-    {"mcts.iterations": 4000, "mcts.c": 300, "robots": 2},
-    {"mcts.iterations": 10000, "mcts.c": 300, "robots": 2},
-    {"mcts.iterations": 400, "mcts.c": 300, "robots": 3},
-    {"mcts.iterations": 1000, "mcts.c": 300, "robots": 3},
-    {"mcts.iterations": 4000, "mcts.c": 300, "robots": 3},
-    {"mcts.iterations": 10000, "mcts.c": 300, "robots": 3},
+    {"mcts.iterations": 400, "mcts.c": 300, "num_robots": 1},
+    {"mcts.iterations": 1000, "mcts.c": 300, "num_robots": 1},
+    {"mcts.iterations": 4000, "mcts.c": 300, "num_robots": 1},
+    {"mcts.iterations": 10000, "mcts.c": 300, "num_robots": 1},
+    {"mcts.iterations": 400, "mcts.c": 300, "num_robots": 2},
+    {"mcts.iterations": 1000, "mcts.c": 300, "num_robots": 2},
+    {"mcts.iterations": 4000, "mcts.c": 300, "num_robots": 2},
+    {"mcts.iterations": 10000, "mcts.c": 300, "num_robots": 2},
+    {"mcts.iterations": 400, "mcts.c": 300, "num_robots": 3},
+    {"mcts.iterations": 1000, "mcts.c": 300, "num_robots": 3},
+    {"mcts.iterations": 4000, "mcts.c": 300, "num_robots": 3},
+    {"mcts.iterations": 10000, "mcts.c": 300, "num_robots": 3},
 ])
