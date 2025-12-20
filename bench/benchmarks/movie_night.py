@@ -31,16 +31,12 @@ from rich.console import Console
 
 from bench import benchmark, BenchmarkCase
 @benchmark(
-    name="movie_night",
-    description="N Robots find some objects to bring to the den",
+    name="movie_night_search",
+    description="Robots must search a small home to find some objects to bring to the den.",
     tags=["multi-agent", "search"],
     timeout=120.0,
 )
 def bench_movie_night(case: BenchmarkCase):
-    mcts_iterations = case.params["mcts_iterations"]
-    mcts_search_weight = case.params["mcts_search_weight"]
-    num_robots = case.params["num_robots"]
-    print(num_robots)
 
     # Define locations with coordinates (for move cost calculation)
     locations = {
@@ -59,27 +55,23 @@ def bench_movie_night(case: BenchmarkCase):
     }
 
     # Initialize environment
-    env = SimpleEnvironment(locations, objects_at_locations, num_robots=num_robots)
+    env = SimpleEnvironment(locations, objects_at_locations, num_robots=case.num_robots)
 
     # Define the objects we're looking for
     objects_of_interest = ["Remote", "Cookie", "Plate", "Couch"]
 
     # Define initial state
     initial_fluents = {
-            # Robots free and start in (revealed) living room
-            F("free robot1"),
-            F("at robot1 living_room"),
             F("revealed living_room"),
             F("at Remote living_room"),
             F("found Remote"),
             F("revealed den"),
         }
-    if num_robots >= 2:
-        initial_fluents.add(F("free robot2"))
-        initial_fluents.add(F("at robot2 living_room"))
-    if num_robots >= 3:
-        initial_fluents.add(F("free robot3"))
-        initial_fluents.add(F("at robot3 living_room"))
+    for ii in range(case.num_robots):
+        # Free all robots and put in the living room
+        robot_name = f"robot{ii+1}"
+        initial_fluents.add(F(f"free {robot_name}"))
+        initial_fluents.add(F(f"at {robot_name} living_room"))
 
     initial_state = State(
         time=0,
@@ -166,8 +158,8 @@ def bench_movie_night(case: BenchmarkCase):
             # Plan next action
             mcts = MCTSPlanner(all_actions)
             action_name = mcts(sim.state, goal_fluents, 
-                               max_iterations=mcts_iterations,
-                               c=mcts_search_weight,
+                               max_iterations=case.mcts.iterations,
+                               c=case.mcts.c,
                                max_depth=20)
 
             if action_name == 'NONE':
@@ -213,16 +205,16 @@ def bench_movie_night(case: BenchmarkCase):
 
 # Register parameter combinations
 bench_movie_night.add_cases([
-    {"mcts_iterations": 400, "mcts_search_weight": 300, "num_robots": 1},
-    {"mcts_iterations": 1000, "mcts_search_weight": 300, "num_robots": 1},
-    {"mcts_iterations": 4000, "mcts_search_weight": 300, "num_robots": 1},
-    {"mcts_iterations": 10000, "mcts_search_weight": 300, "num_robots": 1},
-    {"mcts_iterations": 400, "mcts_search_weight": 300, "num_robots": 2},
-    {"mcts_iterations": 1000, "mcts_search_weight": 300, "num_robots": 2},
-    {"mcts_iterations": 4000, "mcts_search_weight": 300, "num_robots": 2},
-    {"mcts_iterations": 10000, "mcts_search_weight": 300, "num_robots": 2},
-    {"mcts_iterations": 400, "mcts_search_weight": 300, "num_robots": 3},
-    {"mcts_iterations": 1000, "mcts_search_weight": 300, "num_robots": 3},
-    {"mcts_iterations": 4000, "mcts_search_weight": 300, "num_robots": 3},
-    {"mcts_iterations": 10000, "mcts_search_weight": 300, "num_robots": 3},
+    {"mcts.iterations": 400, "mcts.c": 300, "robots": 1},
+    {"mcts.iterations": 1000, "mcts.c": 300, "robots": 1},
+    {"mcts.iterations": 4000, "mcts.c": 300, "robots": 1},
+    {"mcts.iterations": 10000, "mcts.c": 300, "robots": 1},
+    {"mcts.iterations": 400, "mcts.c": 300, "robots": 2},
+    {"mcts.iterations": 1000, "mcts.c": 300, "robots": 2},
+    {"mcts.iterations": 4000, "mcts.c": 300, "robots": 2},
+    {"mcts.iterations": 10000, "mcts.c": 300, "robots": 2},
+    {"mcts.iterations": 400, "mcts.c": 300, "robots": 3},
+    {"mcts.iterations": 1000, "mcts.c": 300, "robots": 3},
+    {"mcts.iterations": 4000, "mcts.c": 300, "robots": 3},
+    {"mcts.iterations": 10000, "mcts.c": 300, "robots": 3},
 ])

@@ -13,6 +13,49 @@ from typing import Dict, Any, Callable, List, Optional
 _BENCHMARKS: List['Benchmark'] = []
 
 
+class _DotAccessor:
+    """
+    Helper class for accessing nested parameters via dot notation.
+
+    Wraps a subset of parameters that share a common prefix.
+    """
+
+    def __init__(self, params: Dict[str, Any], prefix: str = ""):
+        self._params = params
+        self._prefix = prefix
+
+    def __getattr__(self, name: str):
+        # Construct the full key with prefix
+        if self._prefix:
+            full_key = f"{self._prefix}.{name}"
+        else:
+            full_key = name
+
+        # Check for direct match
+        if full_key in self._params:
+            return self._params[full_key]
+
+        # Check for nested parameters (keys starting with "full_key.")
+        nested_params = {}
+        prefix_search = f"{full_key}."
+        for key, value in self._params.items():
+            if key.startswith(prefix_search):
+                nested_params[key] = value
+
+        if nested_params:
+            # Return a new accessor for the nested level
+            return _DotAccessor(self._params, full_key)
+
+        raise AttributeError(f"No parameter '{full_key}'")
+
+    def __repr__(self):
+        if self._prefix:
+            # Show only params with this prefix
+            relevant = {k: v for k, v in self._params.items() if k.startswith(f"{self._prefix}.")}
+            return f"_DotAccessor({relevant})"
+        return f"_DotAccessor({self._params})"
+
+
 def get_all_benchmarks() -> List['Benchmark']:
     """Get all registered benchmarks."""
     return _BENCHMARKS.copy()
@@ -29,11 +72,43 @@ class BenchmarkCase:
     Encapsulates parameters for a single benchmark case.
 
     Passed to benchmark functions during execution.
+
+    Parameters can be accessed in two ways:
+    1. Dictionary style: case.params["mcts.iterations"]
+    2. Dot notation: case.mcts.iterations
     """
     benchmark_name: str
     case_idx: int
     repeat_idx: int
     params: Dict[str, Any]
+
+    def __getattr__(self, name: str):
+        """
+        Enable dot notation access to parameters.
+
+        Supports both direct parameters and nested parameters with dots.
+        Example: case.mcts.iterations accesses params["mcts.iterations"]
+        """
+        # Avoid infinite recursion by checking if we're looking for private attrs
+        if name.startswith('_'):
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
+        # Try direct parameter access
+        if name in self.params:
+            return self.params[name]
+
+        # Check for nested parameters (keys starting with "name.")
+        prefix_search = f"{name}."
+        nested_params = {}
+        for key, value in self.params.items():
+            if key.startswith(prefix_search):
+                nested_params[key] = value
+
+        if nested_params:
+            # Return a dot accessor for nested access
+            return _DotAccessor(self.params, name)
+
+        raise AttributeError(f"No parameter '{name}' in benchmark case")
 
     def __str__(self):
         param_str = ", ".join(f"{k}={v}" for k, v in self.params.items())

@@ -38,7 +38,6 @@ def format_dry_run(plan: ExecutionPlan):
         timestamp_str = "unknown"
 
     meta_table.add_row("Total tasks:", str(plan.total_tasks))
-    meta_table.add_row("Estimated time:", f"{plan.estimated_time:.1f}s (sequential)")
     meta_table.add_row("Benchmarks:", str(plan.metadata.get('num_benchmarks', 'unknown')))
     meta_table.add_row("Repeats:", str(plan.metadata.get('num_repeats', 'unknown')))
     meta_table.add_row("Parallel workers:", str(plan.metadata.get('parallel_workers', 1)))

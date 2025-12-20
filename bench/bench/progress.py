@@ -92,10 +92,12 @@ class BenchmarkStatsColumn(ProgressColumn):
             parts = []
             if stats["success"] > 0:
                 parts.append(f"[green]✓{stats['success']}[/green]")
+            if stats["error"] > 0:
+                parts.append(f"[red bold]⚠{stats['error']}[/red bold]")
             if stats["failure"] > 0:
-                parts.append(f"[red]✗{stats['failure']}[/red]")
+                parts.append(f"[yellow]✗{stats['failure']}[/yellow]")
             if stats["timeout"] > 0:
-                parts.append(f"[yellow]⏱{stats['timeout']}[/yellow]")
+                parts.append(f"[orange1]⏱{stats['timeout']}[/orange1]")
 
             result = "/".join(parts) + f"/{task.total}" if parts else f" {task.completed}/{task.total}"
 
@@ -122,10 +124,12 @@ class BenchmarkStatsColumn(ProgressColumn):
                 parts = []
                 if stats["success"] > 0:
                     parts.append(f"[green]✓{stats['success']}[/green]")
+                if stats["error"] > 0:
+                    parts.append(f"[red bold]⚠{stats['error']}[/red bold]")
                 if stats["failure"] > 0:
-                    parts.append(f"[red]✗{stats['failure']}[/red]")
+                    parts.append(f"[yellow]✗{stats['failure']}[/yellow]")
                 if stats["timeout"] > 0:
-                    parts.append(f"[yellow]⏱{stats['timeout']}[/yellow]")
+                    parts.append(f"[orange1]⏱{stats['timeout']}[/orange1]")
 
                 if parts:
                     return Text.from_markup("/".join(parts) + f"/{task.total}")
@@ -158,17 +162,22 @@ class ProgressDisplay:
         self.benchmark_stats = defaultdict(lambda: {
             "success": 0,
             "failure": 0,
+            "error": 0,  # Hard errors (exceptions/crashes)
             "timeout": 0,
         })
         self.case_stats = defaultdict(lambda: {
             "success": 0,
             "failure": 0,
+            "error": 0,  # Hard errors (exceptions/crashes)
             "timeout": 0,
             "wall_time_sum": 0.0,
             "wall_time_count": 0,
             "plan_cost_sum": 0.0,
             "plan_cost_count": 0,
         })
+
+        # Track tasks with hard errors for stderr printing
+        self.error_tasks = []  # List of tasks with actual errors
 
         # Create overall progress bar
         self.overall_progress = Progress(
@@ -186,6 +195,12 @@ class ProgressDisplay:
 
         # Get benchmark descriptions from metadata
         benchmark_descriptions = plan.metadata.get("benchmark_descriptions", {})
+
+        # Get tags for each benchmark (from first task)
+        self.benchmark_tags = {}
+        for benchmark_name, tasks in plan.group_by_benchmark().items():
+            if tasks:
+                self.benchmark_tags[benchmark_name] = tasks[0].tags
 
         # Create separate Progress objects for each benchmark
         self.benchmark_progresses = {}  # benchmark_name -> Progress object
@@ -240,16 +255,24 @@ class ProgressDisplay:
 
             # Add benchmark-level task
             description = benchmark_descriptions.get(benchmark_name, "")
+            tags = self.benchmark_tags.get(benchmark_name, [])
+
+            # Format tags similar to dryrun.py
+            tag_str = ""
+            if tags:
+                tag_parts = [f"[cyan]{tag}[/cyan]" for tag in tags]
+                tag_str = " [" + ", ".join(tag_parts) + "]"
+
             if len(pages) > 1:
                 # Show page info if split
-                task_desc = f"  {benchmark_name} [dim](Page 1/{len(pages)})[/dim]"
+                task_desc = f"  {benchmark_name}{tag_str} [dim](Page 1/{len(pages)})[/dim]"
                 if description:
                     task_desc += f"\n    [italic dim]{description}[/italic dim]"
             else:
                 if description:
-                    task_desc = f"  {benchmark_name}\n    [italic dim]{description}[/italic dim]"
+                    task_desc = f"  {benchmark_name}{tag_str}\n    [italic dim]{description}[/italic dim]"
                 else:
-                    task_desc = f"  {benchmark_name}"
+                    task_desc = f"  {benchmark_name}{tag_str}"
 
             benchmark_task_id = bench_progress.add_task(
                 task_desc,
@@ -289,6 +312,7 @@ class ProgressDisplay:
         self.stats = {
             "success": 0,
             "failure": 0,
+            "error": 0,  # Hard errors (exceptions/crashes)
             "timeout": 0,
         }
 
@@ -355,8 +379,9 @@ class ProgressDisplay:
         stats_table = Table.grid(padding=(0, 2))
         stats_table.add_row(
             f"[green]Success: {self.stats['success']}[/green]",
-            f"[red]Failed: {self.stats['failure']}[/red]",
-            f"[yellow]Timeout: {self.stats['timeout']}[/yellow]",
+            f"[red bold]Errors: {self.stats['error']}[/red bold]",
+            f"[yellow]Failed: {self.stats['failure']}[/yellow]",
+            f"[orange1]Timeout: {self.stats['timeout']}[/orange1]",
         )
         components.append(stats_table)
         components.append("")
@@ -368,6 +393,49 @@ class ProgressDisplay:
         group = Group(*components)
 
         return Panel(group, title="Benchmark Progress", border_style="cyan", height=None)
+
+    def _print_error_details(self, benchmark_name: str, case_indices: list):
+        """
+        Print stderr for error tasks in specified cases.
+
+        Args:
+            benchmark_name: Name of benchmark
+            case_indices: List of case indices to check for errors
+        """
+        # Find error tasks for this benchmark and these cases
+        error_tasks_to_print = [
+            task for task in self.error_tasks
+            if task.benchmark_name == benchmark_name and task.case_idx in case_indices
+        ]
+
+        if not error_tasks_to_print:
+            return
+
+        # Print header for errors
+        self.console.print()
+        self.console.print("[red bold]Errors:[/red bold]")
+
+        for task in error_tasks_to_print:
+            # Format task identifier
+            param_parts = []
+            for k, v in task.params.items():
+                param_parts.append(f"[cyan]{k}[/cyan]=[yellow]{v}[/yellow]")
+            param_str = ", ".join(param_parts)
+
+            self.console.print(
+                f"\n  [red bold]⚠[/red bold] Case {task.case_idx}, Repeat {task.repeat_idx}: {param_str}"
+            )
+
+            # Print error message
+            if task.error:
+                self.console.print(f"    [red]Error: {task.error}[/red]")
+
+            # Print stderr if available
+            if task.stderr:
+                self.console.print("    [dim]stderr:[/dim]")
+                # Indent stderr lines
+                for line in task.stderr.strip().split('\n'):
+                    self.console.print(f"      [dim]{line}[/dim]")
 
     def _print_page_summary(self, benchmark_name: str, page_idx: int):
         """
@@ -386,12 +454,23 @@ class ProgressDisplay:
         # Print header only on first page to avoid repetition
         if page_idx == 0:
             description = self.plan.metadata.get("benchmark_descriptions", {}).get(benchmark_name, "")
-            header = f"[bold]{benchmark_name}[/bold]"
+            tags = self.benchmark_tags.get(benchmark_name, [])
+
+            # Build header with tags
+            header_text = Text()
+            header_text.append(benchmark_name, style="bold")
+            if tags:
+                header_text.append(" [")
+                for i, tag in enumerate(tags):
+                    if i > 0:
+                        header_text.append(", ")
+                    header_text.append(tag, style="cyan")
+                header_text.append("]")
+
+            self.console.print(header_text)
 
             if description:
-                header += f"\n  [italic dim]{description}[/italic dim]"
-
-            self.console.print(header)
+                self.console.print(f"  [italic dim]{description}[/italic dim]")
 
         # Calculate width needed for case indices
         max_case_idx = self.benchmark_max_case_idx[benchmark_name]
@@ -419,10 +498,12 @@ class ProgressDisplay:
             result_parts = []
             if case_stats["success"] > 0:
                 result_parts.append(f"[green]✓{case_stats['success']}[/green]")
+            if case_stats["error"] > 0:
+                result_parts.append(f"[red bold]⚠{case_stats['error']}[/red bold]")
             if case_stats["failure"] > 0:
-                result_parts.append(f"[red]✗{case_stats['failure']}[/red]")
+                result_parts.append(f"[yellow]✗{case_stats['failure']}[/yellow]")
             if case_stats["timeout"] > 0:
-                result_parts.append(f"[yellow]⏱{case_stats['timeout']}[/yellow]")
+                result_parts.append(f"[orange1]⏱{case_stats['timeout']}[/orange1]")
 
             result_str = "/".join(result_parts) if result_parts else "0"
 
@@ -439,6 +520,9 @@ class ProgressDisplay:
 
             # Print case line (matching live view format)
             self.console.print(f"  Case {case_idx:{case_width}d}: {param_str}  {result_str}{metrics_str}")
+
+        # Print stderr for any error tasks in this page
+        self._print_error_details(benchmark_name, page_cases)
 
         # Print empty line only after the last page
         if page_idx == total_pages - 1:
@@ -466,12 +550,23 @@ class ProgressDisplay:
         # For single-page benchmarks, print the summary now
         # Use the same format as page summaries
         description = self.plan.metadata.get("benchmark_descriptions", {}).get(benchmark_name, "")
-        header = f"[bold]{benchmark_name}[/bold]"
+        tags = self.benchmark_tags.get(benchmark_name, [])
+
+        # Build header with tags
+        header_text = Text()
+        header_text.append(benchmark_name, style="bold")
+        if tags:
+            header_text.append(" [")
+            for i, tag in enumerate(tags):
+                if i > 0:
+                    header_text.append(", ")
+                header_text.append(tag, style="cyan")
+            header_text.append("]")
+
+        self.console.print(header_text)
 
         if description:
-            header += f"\n  [italic dim]{description}[/italic dim]"
-
-        self.console.print(header)
+            self.console.print(f"  [italic dim]{description}[/italic dim]")
 
         # Calculate width needed for case indices
         max_case_idx = self.benchmark_max_case_idx[benchmark_name]
@@ -501,10 +596,12 @@ class ProgressDisplay:
             result_parts = []
             if case_stats["success"] > 0:
                 result_parts.append(f"[green]✓{case_stats['success']}[/green]")
+            if case_stats["error"] > 0:
+                result_parts.append(f"[red bold]⚠{case_stats['error']}[/red bold]")
             if case_stats["failure"] > 0:
-                result_parts.append(f"[red]✗{case_stats['failure']}[/red]")
+                result_parts.append(f"[yellow]✗{case_stats['failure']}[/yellow]")
             if case_stats["timeout"] > 0:
-                result_parts.append(f"[yellow]⏱{case_stats['timeout']}[/yellow]")
+                result_parts.append(f"[orange1]⏱{case_stats['timeout']}[/orange1]")
 
             result_str = "/".join(result_parts) if result_parts else "0"
 
@@ -521,6 +618,10 @@ class ProgressDisplay:
 
             # Print case line (matching live view format)
             self.console.print(f"  Case {case_idx:{case_width}d}: {param_str}  {result_str}{metrics_str}")
+
+        # Print stderr for any error tasks in this benchmark
+        all_case_indices = [case_idx for (bname, case_idx) in sorted(self.case_tasks.items()) if bname == benchmark_name]
+        self._print_error_details(benchmark_name, all_case_indices)
 
         self.console.print()  # Empty line for separation
 
@@ -568,9 +669,20 @@ class ProgressDisplay:
             self.benchmark_stats[benchmark_name]["success"] += 1
             self.case_stats[case_key]["success"] += 1
         elif task.status == TaskStatus.FAILURE:
-            self.stats["failure"] += 1
-            self.benchmark_stats[benchmark_name]["failure"] += 1
-            self.case_stats[case_key]["failure"] += 1
+            # Differentiate between hard errors (exceptions/crashes) and soft failures (success=False)
+            is_hard_error = task.error != "Benchmark reported success=False"
+
+            if is_hard_error:
+                # Hard error: exception or crash with stderr
+                self.stats["error"] += 1
+                self.benchmark_stats[benchmark_name]["error"] += 1
+                self.case_stats[case_key]["error"] += 1
+                self.error_tasks.append(task)
+            else:
+                # Soft failure: success=False
+                self.stats["failure"] += 1
+                self.benchmark_stats[benchmark_name]["failure"] += 1
+                self.case_stats[case_key]["failure"] += 1
 
             # Mark tasks as having failures for red bar color
             self.overall_progress.update(self.overall_task, has_failures=True)
@@ -630,7 +742,15 @@ class ProgressDisplay:
                 benchmark_task_id = self.benchmark_tasks[benchmark_name]
 
                 description = self.plan.metadata.get("benchmark_descriptions", {}).get(benchmark_name, "")
-                task_desc = f"  {benchmark_name} [dim](Page {new_page_idx + 1}/{total_pages})[/dim]"
+                tags = self.benchmark_tags.get(benchmark_name, [])
+
+                # Format tags
+                tag_str = ""
+                if tags:
+                    tag_parts = [f"[cyan]{tag}[/cyan]" for tag in tags]
+                    tag_str = " [" + ", ".join(tag_parts) + "]"
+
+                task_desc = f"  {benchmark_name}{tag_str} [dim](Page {new_page_idx + 1}/{total_pages})[/dim]"
                 if description:
                     task_desc += f"\n    [italic dim]{description}[/italic dim]"
 
