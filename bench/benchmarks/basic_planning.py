@@ -15,9 +15,9 @@ import time
 
 
 @benchmark(
-    name="single_robot_navigation",
-    description="Single robot navigation with move operator",
-    tags=["planning", "single-agent", "navigation"],
+    name="single_robot_at_location",
+    description="Simple case showing that a robot can reach a destionation via move.",
+    tags=["simple", "navigation"],
 )
 def bench_single_robot_nav(case: BenchmarkCase):
     """
@@ -26,9 +26,7 @@ def bench_single_robot_nav(case: BenchmarkCase):
     Measures planning performance for a robot moving between locations.
     """
     # Extract parameters
-    num_locations = case.params["num_locations"]
-    mcts_iterations = case.params["mcts_iterations"]
-    seed = case.params.get("seed", case.repeat_idx)
+    num_locations = case.num_locations
 
     # Create simple test environment
     import numpy as np
@@ -81,7 +79,7 @@ def bench_single_robot_nav(case: BenchmarkCase):
         action_name = planner(
             sim.state,
             goal_fluents,
-            max_iterations=mcts_iterations,
+            max_iterations=case.mcts.iterations,
             c=100
         )
 
@@ -100,14 +98,11 @@ def bench_single_robot_nav(case: BenchmarkCase):
         "wall_time": wall_time,
         "plan_cost": float(sim.state.time),
         "actions_count": len(actions_taken),
-        "planning_steps": iteration + 1,
         "actions": actions_taken,  # Will be logged as artifact
     }
 
 
 # Register parameter combinations
 bench_single_robot_nav.add_cases([
-    {"num_locations": 3, "mcts_iterations": 100, "seed": 42},
-    {"num_locations": 5, "mcts_iterations": 500, "seed": 42},
-    {"num_locations": 10, "mcts_iterations": 1000, "seed": 42},
+    {"num_locations": 3, "mcts.iterations": 100,},
 ])
