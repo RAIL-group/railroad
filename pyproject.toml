@@ -33,6 +33,7 @@ dependencies = [
     "pytest-xdist>=3.8.0",
     "roslibpy",
     "mlflow>=2.19.0",
+    "dash>=3.3.0",
 ]
 
 [tool.uv.sources]
