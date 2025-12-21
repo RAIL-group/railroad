@@ -105,6 +105,11 @@ def create_violin_plots_by_benchmark(df):
         # Prepare annotations for case parameters
         annotations = []
 
+        # Compute limits
+        xmax = bench_df['metrics.plan_cost'].max()
+        xmin = bench_df['metrics.plan_cost'].min()
+        dx = max(xmax - xmin, 1)
+
         # Add a violin for each case (horizontal orientation)
         for y_position, case_idx in enumerate(case_order):
             case_data = bench_df[bench_df['case_idx_int'] == case_idx]
@@ -117,24 +122,30 @@ def create_violin_plots_by_benchmark(df):
                 orientation='h',
 
                 # Violin appearance
-                fillcolor='rgba(31, 119, 180, 0.08)',  # translucent blue
-                line=dict(color='rgba(31, 119, 180, 0.4)', width=0.5),
+                fillcolor='rgba(31, 119, 180, 0.05)',  # translucent blue
+                line=dict(color='rgba(31, 119, 180, 0.4)', width=0.35),
+                width=0.25,
 
                 # Box & mean
                 box_visible=False,
-                meanline_visible=False,
+                meanline_visible=True,
 
                 # Points
                 points='all',
                 pointpos=0,
                 jitter=0.5,
                 marker=dict(
-                    size=6,
-                    color='rgba(20, 20, 20, 0.8)',   # dark points
+                    size=5,
+                    color='rgba(60, 60, 60, 0.4)',   # dark points
                     line=dict(
-                        color='rgba(255, 255, 255, 0.5)',
+                        color='rgba(255, 255, 255, 0.7)',
                         width=0.5
                     )
+                ),
+               
+                hoveron='points',
+                hovertemplate=(
+                    "Plan cost: %{x}<br>"
                 ),
 
                 showlegend=False,
@@ -151,15 +162,12 @@ def create_violin_plots_by_benchmark(df):
             # Format parameters
             param_parts = [f"{k}={v}" for k, v in params.items()
                            if v is not None]
-            param_str = ", ".join(param_parts)
-
-            # Compute a good x position for the annotation (in data coordinates)
-            case_max = case_data['metrics.plan_cost'].max()
-            case_min = case_data['metrics.plan_cost'].min()
+            param_str = f"Case {case_idx}: " + ", ".join(param_parts)
 
             # Put text just to the right of the case's max (or a small constant if span is 0)
+            annote_xloc = 0.95 * xmin - 0.3*dx
             annotations.append(dict(
-                x=bench_df['metrics.plan_cost'].min(),
+                x=annote_xloc,
                 y=f"Case {case_idx}",   # use the same categorical y value as the violin
                 xref='x',               # data coordinates
                 yref='y',               # categorical axis coordinates
@@ -167,28 +175,59 @@ def create_violin_plots_by_benchmark(df):
                 showarrow=False,
                 xanchor='left',
                 yanchor='bottom',       # sit slightly above the centerline; adjust if desired
-                yshift=8,
-                font=dict(size=10, family='monospace'),
-                borderpad=0,
+                yshift=4,
+                font=dict(size=12, family='monospace'),
+                bgcolor='rgba(255, 255, 255, 0.9)',
+                borderpad=0.5,
             ))
 
+            # Compute case mean
+            case_mean = case_data['metrics.plan_cost'].mean()
+
+            # Add a light green circle at the mean
+            fig.add_trace(go.Scatter(
+                x=[case_mean],
+                y=[f"Case {case_idx}"],
+                mode="markers",
+                marker=dict(
+                    symbol="line-ns",
+                    size=7,
+                    color="rgba(255, 255, 255, 0)",
+                    line=dict(color="rgba(120, 120, 255, 1.0)", width=2),
+                ),
+                showlegend=False,
+                hoverinfo="skip",
+            ))
+
+
         # Update layout for this benchmark
-        height = max(280, len(case_order) * 45)  # Adjust height based on number of cases
+        height = max(280, len(case_order) * 40)  # Adjust height based on number of cases
         fig.update_layout(
             title=f"{benchmark} - Plan Cost Distribution",
             xaxis_title="Plan Cost",
             height=height,
-            margin=dict(l=10, r=10, t=40, b=10),
+            margin=dict(l=00, r=10, t=40, b=10),
             annotations=annotations,
-            font=dict(size=10, family='monospace'),
+            font=dict(size=12, family='monospace'),
         )
-        xmax = bench_df['metrics.plan_cost'].max()
-        xmin = bench_df['metrics.plan_cost'].min()
-        fig.update_xaxes(range=[xmin * 0.95, xmax * 1.05 if xmax != 0 else 1])
+        fig.update_layout(
+            plot_bgcolor='rgba(245, 245, 245, 0.0)',
+            paper_bgcolor='white',
+        )
+        fig.update_xaxes(
+            range=[annote_xloc, xmax * 1.05 if xmax != 0 else 1],
+            gridcolor='rgba(0, 0, 0, 0.05)',  # darker than default
+            gridwidth=0.5,
+        )
+
         figures.append({
             'benchmark': benchmark,
             'figure': fig,
         })
+        fig.update_yaxes(
+            ticks="",          # hides tick marks
+            showticklabels=False,
+        )
 
     return figures
 
