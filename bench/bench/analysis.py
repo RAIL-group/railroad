@@ -44,6 +44,7 @@ class BenchmarkAnalyzer:
                 "name": exp.name,
                 "experiment_id": exp.experiment_id,
                 "creation_time": datetime.fromtimestamp(int(exp.creation_time) / 1000),
+                "tags": exp.tags if exp.tags else {},
             }
             for exp in experiments
             if exp.name.startswith("mrppddl_bench_")
@@ -53,6 +54,94 @@ class BenchmarkAnalyzer:
             df = df.sort_values("creation_time", ascending=False)
 
         return df
+
+    def get_experiment_metadata(self, experiment_name: str) -> dict:
+        """
+        Get experiment metadata including tags and benchmark descriptions.
+
+        Args:
+            experiment_name: Name of the experiment
+
+        Returns:
+            Dictionary with metadata and benchmark descriptions
+
+        Raises:
+            ValueError: If experiment not found
+        """
+        experiment = mlflow.get_experiment_by_name(experiment_name)
+        if not experiment:
+            raise ValueError(f"Experiment '{experiment_name}' not found")
+
+        metadata = dict(experiment.tags) if experiment.tags else {}
+
+        # Extract benchmark descriptions from tags
+        benchmark_descriptions = {}
+        for key, value in list(metadata.items()):
+            if key.startswith("benchmark_desc_"):
+                bench_name = key.replace("benchmark_desc_", "")
+                benchmark_descriptions[bench_name] = value
+
+        metadata["benchmark_descriptions"] = benchmark_descriptions
+
+        return metadata
+
+    def get_experiment_summary(self, experiment_name: str) -> dict:
+        """
+        Get summary statistics for an experiment.
+
+        Args:
+            experiment_name: Name of the experiment
+
+        Returns:
+            Dictionary with summary statistics including:
+            - total_runs: Total number of runs
+            - benchmarks: List of benchmark names
+            - success_rate: Overall success rate
+            - success_by_benchmark: Dict of success rates per benchmark
+            - timeout_rate: Overall timeout rate
+
+        Raises:
+            ValueError: If experiment not found
+        """
+        df = self.load_experiment(experiment_name)
+
+        summary = {
+            "total_runs": len(df),
+            "benchmarks": [],
+            "success_rate": 0.0,
+            "success_by_benchmark": {},
+            "timeout_rate": 0.0,
+        }
+
+        if df.empty:
+            return summary
+
+        # Get unique benchmarks
+        if "params.benchmark_name" in df.columns:
+            summary["benchmarks"] = sorted(df["params.benchmark_name"].unique().tolist())
+
+        # Overall success rate
+        if "metrics.success" in df.columns:
+            summary["success_rate"] = float(df["metrics.success"].mean())
+
+        # Success rate by benchmark
+        if "params.benchmark_name" in df.columns and "metrics.success" in df.columns:
+            success_by_bench = df.groupby("params.benchmark_name")["metrics.success"].agg(
+                ["mean", "count"]
+            )
+            summary["success_by_benchmark"] = {
+                bench: {
+                    "success_rate": float(row["mean"]),
+                    "total_runs": int(row["count"]),
+                }
+                for bench, row in success_by_bench.iterrows()
+            }
+
+        # Overall timeout rate
+        if "metrics.timeout" in df.columns:
+            summary["timeout_rate"] = float(df["metrics.timeout"].mean())
+
+        return summary
 
     def load_experiment(self, experiment_name: str) -> pd.DataFrame:
         """

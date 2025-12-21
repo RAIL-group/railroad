@@ -206,6 +206,71 @@ def load_latest_experiment() -> tuple[pd.DataFrame, str]:
     return df, latest_exp["name"]
 
 
+def load_experiment_by_name(experiment_name: str) -> tuple[pd.DataFrame, str, dict]:
+    """
+    Load a specific experiment by name.
+
+    Returns:
+        Tuple of (dataframe, experiment_name, metadata)
+    """
+    analyzer = BenchmarkAnalyzer()
+    df = analyzer.load_experiment(experiment_name)
+    metadata = analyzer.get_experiment_metadata(experiment_name)
+
+    print(f"Loading experiment: {experiment_name}")
+    print(f"Loaded {len(df)} runs")
+
+    return df, experiment_name, metadata
+
+
+def load_all_experiments_with_summaries(limit: int = 10) -> list[dict]:
+    """
+    Load recent experiments with their summary statistics.
+
+    Args:
+        limit: Maximum number of experiments to load (default: 10)
+
+    Returns:
+        List of dicts with experiment info and summaries
+    """
+    print("Loading experiments list...")
+    analyzer = BenchmarkAnalyzer()
+    experiments = analyzer.list_experiments()
+
+    if experiments.empty:
+        print("No experiments found")
+        return []
+
+    # Limit to most recent experiments
+    total_experiments = len(experiments)
+    experiments = experiments.head(limit)
+
+    print(f"Found {total_experiments} total experiments, loading summaries for {len(experiments)} most recent...")
+    results = []
+    for i, (_, exp_row) in enumerate(experiments.iterrows()):
+        exp_name = exp_row["name"]
+        print(f"  [{i+1}/{len(experiments)}] Loading {exp_name}...")
+        try:
+            summary = analyzer.get_experiment_summary(exp_name)
+            metadata = analyzer.get_experiment_metadata(exp_name)
+
+            results.append({
+                "name": exp_name,
+                "creation_time": exp_row["creation_time"],
+                "summary": summary,
+                "metadata": metadata,
+            })
+            print(f"    ✓ Loaded {summary['total_runs']} runs")
+        except Exception as e:
+            print(f"    ✗ Failed to load: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
+
+    print(f"Successfully loaded {len(results)} experiments")
+    return results
+
+
 def compute_per_benchmark_limits(bench_df: pd.DataFrame) -> tuple[float, float]:
     """
     Compute x-axis limits for a specific benchmark.
@@ -687,14 +752,18 @@ def create_main_layout() -> html.Div:
         [
             dcc.Location(id="url", refresh=False),
             dcc.Store(id="data-store"),
-            html.Div(id="main-content"),
+            dcc.Loading(
+                id="loading",
+                type="default",
+                children=html.Div(id="main-content"),
+            ),
             create_log_modal(),
         ],
         style={"padding": "20px", "fontFamily": FONT_FAMILY},
     )
 
 
-def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataFrame) -> list:
+def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataFrame, metadata: dict = None) -> list:
     """
     Build the content layout with all graphs and data sample.
 
@@ -702,17 +771,43 @@ def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataF
         experiment_name: Name of the experiment
         figures: List of figure dicts from create_violin_plots_by_benchmark
         df: DataFrame for raw data sample
+        metadata: Optional experiment metadata with benchmark descriptions
 
     Returns:
         List of Dash components
     """
     children = [
-        html.H1(
-            f"Benchmark Results: {experiment_name}",
-            style={"fontFamily": FONT_FAMILY},
-        ),
+        html.Div([
+            dcc.Link("← Back to Experiment List", href="/", style={
+                "fontFamily": FONT_FAMILY,
+                "fontSize": f"{FONT_SIZE}px",
+                "marginBottom": "10px",
+                "display": "block",
+            }),
+            html.H1(
+                f"Benchmark Results: {experiment_name}",
+                style={"fontFamily": FONT_FAMILY},
+            ),
+        ]),
         html.Hr(),
     ]
+
+    # Add benchmark descriptions if available
+    if metadata and "benchmark_descriptions" in metadata:
+        descriptions = metadata["benchmark_descriptions"]
+        if descriptions:
+            desc_items = [
+                html.Li([
+                    html.Strong(f"{bench_name}: ", style={"fontFamily": FONT_FAMILY}),
+                    html.Span(desc, style={"fontFamily": FONT_FAMILY}),
+                ])
+                for bench_name, desc in sorted(descriptions.items())
+            ]
+            children.extend([
+                html.H3("Benchmark Descriptions", style={"fontFamily": FONT_FAMILY}),
+                html.Ul(desc_items, style={"fontFamily": FONT_FAMILY}),
+                html.Hr(),
+            ])
 
     # Add violin plot for each benchmark
     for i, plot_info in enumerate(figures):
@@ -745,6 +840,122 @@ def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataF
             ),
         ])
     )
+
+    return children
+
+
+def build_experiment_list_layout(experiments: list[dict]) -> list:
+    """
+    Build the experiment list view layout with CLI-style formatting.
+
+    Args:
+        experiments: List of experiment dicts with summaries
+
+    Returns:
+        List of Dash components
+    """
+    if not experiments:
+        return [
+            html.Pre(
+                "No experiments found in MLflow database.",
+                style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "color": COLOR_FAILURE},
+            )
+        ]
+
+    # Build formatted output with Rich-style colors
+    children = []
+
+    # Header
+    children.append(html.Pre(
+        f"Benchmark Experiments (showing {len(experiments)} most recent)",
+        style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0"}
+    ))
+    children.append(html.Br())
+
+    for exp_idx, exp in enumerate(experiments):
+        summary = exp["summary"]
+        metadata = exp["metadata"]
+        benchmark_descriptions = metadata.get("benchmark_descriptions", {})
+
+        # Format creation time
+        creation_time_str = exp["creation_time"].strftime("%Y-%m-%d %H:%M:%S")
+
+        # Experiment header with link
+        exp_name = exp["name"]
+        children.append(html.Div([
+            html.Span("# ", style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "color": "white"}),
+            dcc.Link(
+                exp_name,
+                href=f"/experiment/{exp_name}",
+                style={
+                    "fontFamily": FONT_FAMILY,
+                    "fontSize": f"{FONT_SIZE}px",
+                    "textDecoration": "underline",
+                    "color": "#5599ff",
+                },
+            ),
+        ], style={"margin": "0", "padding": "0"}))
+
+        # Creation time
+        children.append(html.Pre(
+            f"  Created: {creation_time_str}",
+            style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": "#888"}
+        ))
+
+        # Total runs and success rate
+        success_rate_color = COLOR_SUCCESS if summary['success_rate'] > 0.8 else (COLOR_ERROR if summary['success_rate'] > 0.5 else COLOR_FAILURE)
+        children.append(html.Pre([
+            "  Total runs: ",
+            html.Span(f"{summary['total_runs']}", style={"color": "#5599ff"}),
+            " | Success rate: ",
+            html.Span(f"{summary['success_rate']:.1%}", style={"color": success_rate_color}),
+        ], style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0"}))
+
+        # Benchmarks
+        if summary["benchmarks"]:
+            children.append(html.Pre(
+                "  Benchmarks:",
+                style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0"}
+            ))
+
+            for bench_name in summary["benchmarks"]:
+                bench_stats = summary["success_by_benchmark"].get(bench_name, {})
+                success_rate = bench_stats.get("success_rate", 0.0)
+                total_runs = bench_stats.get("total_runs", 0)
+                description = benchmark_descriptions.get(bench_name, "")
+
+                # Format success count with colored symbols
+                n_success = int(success_rate * total_runs)
+                n_total = total_runs
+                n_failure = n_total - n_success
+
+                # Build status string with colored symbols
+                status_parts = []
+                if n_success > 0:
+                    status_parts.append(html.Span(f"{SYMBOL_SUCCESS}{n_success}", style={"color": COLOR_SUCCESS}))
+                    status_parts.append("/")
+                if n_failure > 0:
+                    status_parts.append(html.Span(f"{SYMBOL_FAILURE}{n_failure}", style={"color": COLOR_FAILURE}))
+                    status_parts.append("/")
+
+                # Benchmark line
+                bench_line = html.Pre([
+                    f"    {bench_name}: ",
+                    *status_parts,
+                    f"{n_total} ",
+                    html.Span(f"({success_rate:.1%})", style={"color": "#888"}),
+                ], style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0"})
+                children.append(bench_line)
+
+                # Description if available
+                if description:
+                    children.append(html.Pre(
+                        f"      {description}",
+                        style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": "#666", "fontStyle": "italic"}
+                    ))
+
+        # Add spacing between experiments
+        children.append(html.Br())
 
     return children
 
@@ -793,20 +1004,54 @@ def serve_artifact(run_id: str, filename: str):
 def refresh_data(pathname):
     """Reload data from MLflow and regenerate plots on page load/refresh."""
     try:
-        df, experiment_name = load_latest_experiment()
-        figures = create_violin_plots_by_benchmark(df)
-        content = build_content_layout(experiment_name, figures, df)
+        # Route to experiment list view or detail view
+        if pathname == "/" or pathname is None:
+            # Show experiment list (limited to 10 most recent)
+            experiments = load_all_experiments_with_summaries(limit=10)
+            content = build_experiment_list_layout(experiments)
+            return content, {}
 
-        # Store minimal data for click handling
-        # Just store run_id to artifact_uri mapping
-        store_data = {}
-        if "run_id" in df.columns and "artifact_uri" in df.columns:
-            for _, row in df.iterrows():
-                store_data[row["run_id"]] = row.get("artifact_uri", "")
+        elif pathname.startswith("/experiment/"):
+            # Show specific experiment
+            experiment_name = pathname.replace("/experiment/", "")
 
-        return content, store_data
+            try:
+                df, experiment_name, metadata = load_experiment_by_name(experiment_name)
+                figures = create_violin_plots_by_benchmark(df)
+                content = build_content_layout(experiment_name, figures, df, metadata)
+
+                # Store minimal data for click handling
+                # Just store run_id to artifact_uri mapping
+                store_data = {}
+                if "run_id" in df.columns and "artifact_uri" in df.columns:
+                    for _, row in df.iterrows():
+                        store_data[row["run_id"]] = row.get("artifact_uri", "")
+
+                return content, store_data
+            except ValueError as e:
+                return [html.Div(
+                    f"Experiment not found: {e}",
+                    style={"color": "red", "fontFamily": FONT_FAMILY}
+                )], {}
+
+        else:
+            # Unknown path
+            return [html.Div(
+                f"Page not found: {pathname}",
+                style={"color": "red", "fontFamily": FONT_FAMILY}
+            )], {}
+
     except Exception as e:
-        return [html.Div(f"Error loading data: {e}", style={"color": "red"})], {}
+        import traceback
+        error_detail = traceback.format_exc()
+        return [html.Div([
+            html.H3("Error loading data:", style={"color": "red", "fontFamily": FONT_FAMILY}),
+            html.Pre(str(e), style={"fontFamily": FONT_FAMILY}),
+            html.Details([
+                html.Summary("Full traceback", style={"fontFamily": FONT_FAMILY}),
+                html.Pre(error_detail, style={"fontFamily": FONT_FAMILY, "fontSize": "10px"}),
+            ]),
+        ])], {}
 
 
 @app.callback(

@@ -135,7 +135,11 @@ class BenchmarkRunner:
 
         # Gather provenance metadata
         metadata = self._collect_metadata()
-        metadata["benchmark_descriptions"] = benchmark_descriptions
+
+        # Flatten benchmark descriptions into individual tags
+        # (MLflow tags must be string key-value pairs)
+        for bench_name, description in benchmark_descriptions.items():
+            metadata[f"benchmark_desc_{bench_name}"] = description
 
         return ExecutionPlan(tasks=tasks, metadata=metadata)
 
