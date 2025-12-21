@@ -34,6 +34,7 @@ dependencies = [
     "roslibpy",
     "mlflow>=2.19.0",
     "dash>=3.3.0",
+    "dash-bootstrap-components>=1.6.0",
 ]
 
 [tool.uv.sources]
