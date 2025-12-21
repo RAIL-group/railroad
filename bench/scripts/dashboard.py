@@ -3,7 +3,7 @@
 Interactive Plotly Dash dashboard for benchmark results visualization.
 
 Usage:
-    uv run python bench/scripts/dashboard.py
+    uv run bench/scripts/dashboard.py
 """
 
 import dash
@@ -13,10 +13,12 @@ import pandas as pd
 from pathlib import Path
 import sys
 
-# Add bench to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from bench.analysis import BenchmarkAnalyzer
+
+
+# Needed to opt-in to new behavior and surpress warnings
+pd.set_option("future.no_silent_downcasting", True)
 
 
 def load_latest_experiment():
@@ -58,58 +60,6 @@ def _success_mask(series: pd.Series) -> pd.Series:
         s = s.astype(str).str.lower().isin(["1", "true", "t", "yes", "y"])
         return s
     return s > 0.5
-
-
-def prepare_grouped_data(df: pd.DataFrame) -> pd.DataFrame:
-    """Group data by benchmark and case, computing statistics (plan_cost stats exclude failed runs)."""
-    df = df.copy()
-
-    # Create a case identifier combining benchmark name and case index
-    df["case_id"] = df["params.benchmark_name"] + "_case_" + df["params.case_idx"].astype(str)
-
-    if "metrics.plan_cost" not in df.columns:
-        print("Warning: metrics.plan_cost not found in data")
-        return pd.DataFrame()
-
-    # Success rate across all runs (per case)
-    if "metrics.success" in df.columns:
-        sr = df.groupby("case_id")["metrics.success"].apply(lambda s: _success_mask(s).mean())
-    else:
-        sr = df.groupby("case_id")["case_id"].apply(lambda _: float("nan"))
-
-    # Plan cost stats ONLY on successful runs
-    if "metrics.success" in df.columns:
-        m = _success_mask(df["metrics.success"])
-        df_success = df[m].copy()
-    else:
-        df_success = df.copy()
-
-    # Drop NaN plan_cost for statistical aggregation
-    df_success = df_success.dropna(subset=["metrics.plan_cost"])
-
-    cost_stats = df_success.groupby("case_id")["metrics.plan_cost"].agg(
-        plan_cost_mean="mean",
-        plan_cost_std="std",
-        plan_cost_min="min",
-        plan_cost_max="max",
-        repeat_count="count",
-    )
-
-    meta = df.groupby("case_id").agg(
-        benchmark=("params.benchmark_name", "first"),
-        case_idx=("params.case_idx", "first"),
-    )
-
-    grouped = meta.join(cost_stats, how="left")
-    grouped["success_rate"] = sr
-    grouped = grouped.reset_index()
-
-    # Sort by benchmark and case index
-    grouped = grouped.sort_values(["benchmark", "case_idx"])
-
-    print(f"\nGrouped into {len(grouped)} unique cases")
-    print(f"Benchmarks: {grouped['benchmark'].unique()}")
-    return grouped
 
 
 def create_violin_plots_by_benchmark(df: pd.DataFrame):
@@ -332,7 +282,6 @@ app = dash.Dash(__name__)
 # Load data
 try:
     df, experiment_name = load_latest_experiment()
-    grouped_df = prepare_grouped_data(df)
     violin_plots = create_violin_plots_by_benchmark(df)
 except Exception as e:
     print(f"Error loading data: {e}")
@@ -341,7 +290,6 @@ except Exception as e:
 # Create layout
 layout_children = [
     html.H1(f"Benchmark Results: {experiment_name}"),
-    html.P(f"Total runs: {len(df)} | Unique cases: {len(grouped_df)}"),
     html.Hr(),
 ]
 
@@ -353,19 +301,6 @@ for plot_info in violin_plots:
             html.Hr(),
         ]
     )
-
-# Add summary statistics section
-layout_children.extend(
-    [
-        html.Div(
-            [
-                html.H3("Summary Statistics"),
-                html.Pre(grouped_df.to_string()),
-            ]
-        ),
-        html.Hr(),
-    ]
-)
 
 # Add raw data sample
 cols = [
