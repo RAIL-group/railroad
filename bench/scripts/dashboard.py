@@ -215,22 +215,39 @@ def create_violin_plots_by_benchmark(df: pd.DataFrame):
 
             # Failed runs: overlay as red X
             if not failed_data.empty:
-                fig.add_trace(
-                    go.Scatter(
-                        x=failed_data["metrics.plan_cost"],
-                        y=[case_label] * len(failed_data),
-                        mode="markers",
-                        marker=dict(
-                            symbol="x",
-                            size=7,
-                            color="rgba(220, 20, 60, 0.5)",
-                            line=dict(width=0.1, color="rgba(220, 20, 60, 0.05)"),
-                        ),
-                        showlegend=False,
-                        hovertemplate="FAILED<br>Plan cost: %{x}<br>",
-                    )
-                )
+                import numpy as np
+                failed_data["metrics.plan_cost"] += np.random.uniform(-0.01 * dx, 0.01 * dx, size=len(failed_data))
+                fig.add_trace(go.Violin(
+                    y=[case_label] * len(failed_data),
+                    x=failed_data["metrics.plan_cost"],
 
+                    name=f"{case_label} failed",
+                    orientation="h",
+
+                    # Hide violin body entirely (points-only trace)
+                    fillcolor="rgba(0,0,0,0)",
+                    line=dict(color="rgba(0,0,0,0)", width=0),
+
+                    # No summary stats (avoid implying a distribution summary)
+                    box_visible=False,
+                    meanline_visible=False,
+
+                    # Points with jitter
+                    points="all",
+                    pointpos=0,
+                    jitter=0.5,
+
+                    # Thin red X
+                    marker=dict(
+                        symbol="x-thin",
+                        size=5,
+                        line=dict(color="rgba(220, 20, 60, 0.7)", width=1),  # thin X stroke
+                    ),
+
+                    hoveron="points",
+                    hovertemplate="FAILED<br>Plan cost: %{x}<br><extra></extra>",
+                    showlegend=False,
+                ))
 
             # Case parameter annotation (from first row in this case)
             case_row = case_data.iloc[0]
