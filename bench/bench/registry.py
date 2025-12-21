@@ -129,12 +129,14 @@ class Benchmark:
         description: str = "",
         tags: Optional[List[str]] = None,
         timeout: float = 300.0,  # 5 minutes default
+        repeat: int = 3,  # 3 repeats default
     ):
         self.fn = fn
         self.name = name
         self.description = description
         self.tags = tags or []
         self.timeout = timeout
+        self.repeat = repeat
         self.cases: List[Dict[str, Any]] = []
 
     def add_cases(self, cases: List[Dict[str, Any]]):
@@ -148,7 +150,7 @@ class Benchmark:
         self.cases.extend(cases)
 
     def __repr__(self):
-        return f"Benchmark(name={self.name}, cases={len(self.cases)}, timeout={self.timeout})"
+        return f"Benchmark(name={self.name}, cases={len(self.cases)}, timeout={self.timeout}, repeat={self.repeat})"
 
 
 def benchmark(
@@ -156,6 +158,7 @@ def benchmark(
     description: str = "",
     tags: Optional[List[str]] = None,
     timeout: float = 300.0,
+    repeat: int = 3,
 ):
     """
     Decorator to register a function as a benchmark.
@@ -188,6 +191,7 @@ def benchmark(
         description: Human-readable description
         tags: List of tags for filtering
         timeout: Timeout in seconds for each case execution
+        repeat: Number of times to repeat each case (default: 3)
 
     Returns:
         Decorated function with benchmark metadata attached
@@ -201,6 +205,7 @@ def benchmark(
             description=description,
             tags=tags,
             timeout=timeout,
+            repeat=repeat,
         )
 
         # Attach metadata to function for easy access

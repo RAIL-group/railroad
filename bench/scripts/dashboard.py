@@ -30,7 +30,7 @@ pd.set_option("future.no_silent_downcasting", True)
 
 
 # =============================================================================
-# STYLING CONSTANTS
+# STYLING CONSTANTS - Catppuccin Mocha Theme
 # =============================================================================
 
 # Font Configuration
@@ -38,11 +38,31 @@ FONT_FAMILY = "Iosevka, monospace"
 FONT_SIZE = 12
 FONT_SIZE_TITLE = 16
 
-# Status Colors (matching progress.py)
-COLOR_SUCCESS = "#228B22"      # Forest green
-COLOR_FAILURE = "#DC143C"      # Crimson
-COLOR_ERROR = "#FF8C00"        # Orange
-COLOR_TIMEOUT = "#FFD700"      # Gold
+# Catppuccin Mocha Palette
+CATPPUCCIN_BASE = "#1e1e2e"        # Main background
+CATPPUCCIN_MANTLE = "#181825"      # Darker background
+CATPPUCCIN_CRUST = "#11111b"       # Darkest background
+CATPPUCCIN_TEXT = "#cdd6f4"        # Main text
+CATPPUCCIN_SUBTEXT1 = "#bac2de"    # Secondary text
+CATPPUCCIN_SUBTEXT0 = "#a6adc8"    # Tertiary text
+CATPPUCCIN_OVERLAY0 = "#6c7086"    # Overlay/dimmed
+CATPPUCCIN_SURFACE0 = "#313244"    # Surface
+CATPPUCCIN_SURFACE1 = "#45475a"    # Surface raised
+
+# Catppuccin Accent Colors
+CATPPUCCIN_GREEN = "#a6e3a1"       # Success
+CATPPUCCIN_RED = "#f38ba8"         # Failure
+CATPPUCCIN_PEACH = "#fab387"       # Error/Warning
+CATPPUCCIN_YELLOW = "#f9e2af"      # Timeout
+CATPPUCCIN_BLUE = "#89b4fa"        # Links/Info
+CATPPUCCIN_SAPPHIRE = "#74c7ec"    # Accents
+CATPPUCCIN_MAUVE = "#cba6f7"       # Highlights
+
+# Status Colors
+COLOR_SUCCESS = CATPPUCCIN_GREEN
+COLOR_FAILURE = CATPPUCCIN_RED
+COLOR_ERROR = CATPPUCCIN_PEACH
+COLOR_TIMEOUT = CATPPUCCIN_YELLOW
 
 # Status Symbols (matching progress.py)
 SYMBOL_SUCCESS = "\u2713"      # checkmark
@@ -51,27 +71,27 @@ SYMBOL_ERROR = "\u26a0"        # warning
 SYMBOL_TIMEOUT = "\u23f1"      # stopwatch
 
 # Violin Plot Styling
-VIOLIN_FILL = "rgba(31, 119, 180, 0.05)"
-VIOLIN_LINE = "rgba(31, 119, 180, 0.4)"
+VIOLIN_FILL = f"rgba(137, 180, 250, 0.1)"  # Blue with transparency
+VIOLIN_LINE = f"rgba(137, 180, 250, 0.5)"  # Blue
 VIOLIN_LINE_WIDTH = 0.35
 VIOLIN_WIDTH = 0.25
 
 # Data Point Markers
 POINT_SIZE = 5
-POINT_COLOR = "rgba(60, 60, 60, 0.4)"
-POINT_OUTLINE = "rgba(255, 255, 255, 0.7)"
+POINT_COLOR = f"rgba(205, 214, 244, 0.4)"  # Text color with transparency
+POINT_OUTLINE = f"rgba(49, 50, 68, 0.8)"   # Surface0
 POINT_OUTLINE_WIDTH = 0.5
 
 # Mean Marker
 MEAN_MARKER_SIZE = 7
-MEAN_MARKER_COLOR = "rgba(120, 120, 255, 1.0)"
+MEAN_MARKER_COLOR = CATPPUCCIN_SAPPHIRE
 MEAN_MARKER_WIDTH = 2
 
 # Failed Run Markers
 FAILED_MARKER_SYMBOL = "x-thin"
 FAILED_MARKER_SIZE = 5
 FAILED_MARKER_WIDTH = 1
-FAILED_MARKER_COLOR = "rgba(220, 20, 60, 0.7)"
+FAILED_MARKER_COLOR = f"rgba(243, 139, 168, 0.8)"  # Red with transparency
 
 # Layout & Spacing
 MARGIN = dict(l=0, r=10, t=40, b=10)
@@ -81,11 +101,17 @@ ANNOTATION_PADDING = 0.5
 ANNOTATION_X_OFFSET = 0.3  # Fraction of dx to offset annotations
 
 # Grid Styling
-GRID_COLOR = "rgba(0, 0, 0, 0.05)"
+GRID_COLOR = f"rgba(108, 112, 134, 0.2)"  # Overlay0 with transparency
 GRID_WIDTH = 0.5
-PLOT_BGCOLOR = "rgba(245, 245, 245, 0.0)"
-PAPER_BGCOLOR = "white"
-ANNOTATION_BGCOLOR = "rgba(255, 255, 255, 0.9)"
+PLOT_BGCOLOR = CATPPUCCIN_MANTLE
+PAPER_BGCOLOR = CATPPUCCIN_BASE
+ANNOTATION_BGCOLOR = f"rgba(49, 50, 68, 0.95)"  # Surface0 with slight transparency
+ANNOTATION_BGCOLOR = f"rgba(24, 24, 37, 0.80)"  # Surface0 with slight transparency
+
+# Text Colors
+TEXT_COLOR = CATPPUCCIN_TEXT
+TEXT_DIMMED = CATPPUCCIN_SUBTEXT0
+TEXT_SECONDARY = CATPPUCCIN_OVERLAY0
 
 
 # =============================================================================
@@ -514,14 +540,14 @@ def create_case_annotation(
         text=param_str,
         hovertext=hover_text,
         hoverlabel=dict(
-            font=dict(family=FONT_FAMILY, size=FONT_SIZE),
-            bgcolor=PAPER_BGCOLOR,
+            font=dict(family=FONT_FAMILY, size=FONT_SIZE, color=TEXT_COLOR),
+            bgcolor=CATPPUCCIN_SURFACE0,
         ),
         showarrow=False,
         xanchor="left",
         yanchor="bottom",
         yshift=4,
-        font=dict(size=FONT_SIZE, family=FONT_FAMILY),
+        font=dict(size=FONT_SIZE, family=FONT_FAMILY, color=TEXT_COLOR),
         bgcolor=ANNOTATION_BGCOLOR,
         borderpad=ANNOTATION_PADDING,
     )
@@ -669,7 +695,7 @@ def create_benchmark_figure(benchmark: str, bench_df: pd.DataFrame) -> go.Figure
     fig.update_layout(
         title=dict(
             text=f"{benchmark} - Plan Cost Distribution",
-            font=dict(size=FONT_SIZE_TITLE, family=FONT_FAMILY),
+            font=dict(size=FONT_SIZE_TITLE, family=FONT_FAMILY, color=TEXT_COLOR),
             x=0,  # Left-align title
             xanchor="left",
         ),
@@ -677,7 +703,7 @@ def create_benchmark_figure(benchmark: str, bench_df: pd.DataFrame) -> go.Figure
         height=height,
         margin=MARGIN,
         annotations=annotations,
-        font=dict(size=FONT_SIZE, family=FONT_FAMILY),
+        font=dict(size=FONT_SIZE, family=FONT_FAMILY, color=TEXT_COLOR),
         plot_bgcolor=PLOT_BGCOLOR,
         paper_bgcolor=PAPER_BGCOLOR,
     )
@@ -688,6 +714,7 @@ def create_benchmark_figure(benchmark: str, bench_df: pd.DataFrame) -> go.Figure
         categoryarray=case_labels,
         ticks="",
         showticklabels=False,
+        color=TEXT_COLOR,
     )
 
     # Set x-axis range
@@ -695,6 +722,7 @@ def create_benchmark_figure(benchmark: str, bench_df: pd.DataFrame) -> go.Figure
         range=[annote_xloc, (xmax * 1.05) if xmax != 0 else 1],
         gridcolor=GRID_COLOR,
         gridwidth=GRID_WIDTH,
+        color=TEXT_COLOR,
     )
 
     return fig
@@ -759,7 +787,13 @@ def create_main_layout() -> html.Div:
             ),
             create_log_modal(),
         ],
-        style={"padding": "20px", "fontFamily": FONT_FAMILY},
+        style={
+            "padding": "20px",
+            "fontFamily": FONT_FAMILY,
+            "backgroundColor": CATPPUCCIN_BASE,
+            "color": TEXT_COLOR,
+            "minHeight": "100vh",
+        },
     )
 
 
@@ -783,13 +817,14 @@ def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataF
                 "fontSize": f"{FONT_SIZE}px",
                 "marginBottom": "10px",
                 "display": "block",
+                "color": CATPPUCCIN_BLUE,
             }),
             html.H1(
                 f"Benchmark Results: {experiment_name}",
-                style={"fontFamily": FONT_FAMILY},
+                style={"fontFamily": FONT_FAMILY, "color": TEXT_COLOR},
             ),
         ]),
-        html.Hr(),
+        html.Hr(style={"borderColor": CATPPUCCIN_SURFACE0}),
     ]
 
     # Add benchmark descriptions if available
@@ -798,15 +833,15 @@ def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataF
         if descriptions:
             desc_items = [
                 html.Li([
-                    html.Strong(f"{bench_name}: ", style={"fontFamily": FONT_FAMILY}),
-                    html.Span(desc, style={"fontFamily": FONT_FAMILY}),
+                    html.Strong(f"{bench_name}: ", style={"fontFamily": FONT_FAMILY, "color": CATPPUCCIN_MAUVE}),
+                    html.Span(desc, style={"fontFamily": FONT_FAMILY, "color": TEXT_COLOR}),
                 ])
                 for bench_name, desc in sorted(descriptions.items())
             ]
             children.extend([
-                html.H3("Benchmark Descriptions", style={"fontFamily": FONT_FAMILY}),
-                html.Ul(desc_items, style={"fontFamily": FONT_FAMILY}),
-                html.Hr(),
+                html.H3("Benchmark Descriptions", style={"fontFamily": FONT_FAMILY, "color": TEXT_COLOR}),
+                html.Ul(desc_items, style={"fontFamily": FONT_FAMILY, "color": TEXT_COLOR}),
+                html.Hr(style={"borderColor": CATPPUCCIN_SURFACE0}),
             ])
 
     # Add violin plot for each benchmark
@@ -833,10 +868,17 @@ def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataF
 
     children.append(
         html.Div([
-            html.H3("Raw Data Sample", style={"fontFamily": FONT_FAMILY}),
+            html.H3("Raw Data Sample", style={"fontFamily": FONT_FAMILY, "color": TEXT_COLOR}),
             html.Pre(
                 df[existing_cols].head(10).to_string(),
-                style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px"},
+                style={
+                    "fontFamily": FONT_FAMILY,
+                    "fontSize": f"{FONT_SIZE}px",
+                    "color": TEXT_COLOR,
+                    "backgroundColor": CATPPUCCIN_MANTLE,
+                    "padding": "10px",
+                    "borderRadius": "4px",
+                },
             ),
         ])
     )
@@ -868,7 +910,7 @@ def build_experiment_list_layout(experiments: list[dict]) -> list:
     # Header
     children.append(html.Pre(
         f"Benchmark Experiments (showing {len(experiments)} most recent)",
-        style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0"}
+        style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}
     ))
     children.append(html.Br())
 
@@ -883,7 +925,7 @@ def build_experiment_list_layout(experiments: list[dict]) -> list:
         # Experiment header with link
         exp_name = exp["name"]
         children.append(html.Div([
-            html.Span("# ", style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "color": "white"}),
+            html.Span("# ", style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "color": TEXT_COLOR}),
             dcc.Link(
                 exp_name,
                 href=f"/experiment/{exp_name}",
@@ -891,7 +933,7 @@ def build_experiment_list_layout(experiments: list[dict]) -> list:
                     "fontFamily": FONT_FAMILY,
                     "fontSize": f"{FONT_SIZE}px",
                     "textDecoration": "underline",
-                    "color": "#5599ff",
+                    "color": CATPPUCCIN_BLUE,
                 },
             ),
         ], style={"margin": "0", "padding": "0"}))
@@ -899,23 +941,23 @@ def build_experiment_list_layout(experiments: list[dict]) -> list:
         # Creation time
         children.append(html.Pre(
             f"  Created: {creation_time_str}",
-            style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": "#888"}
+            style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_DIMMED}
         ))
 
         # Total runs and success rate
         success_rate_color = COLOR_SUCCESS if summary['success_rate'] > 0.8 else (COLOR_ERROR if summary['success_rate'] > 0.5 else COLOR_FAILURE)
         children.append(html.Pre([
             "  Total runs: ",
-            html.Span(f"{summary['total_runs']}", style={"color": "#5599ff"}),
+            html.Span(f"{summary['total_runs']}", style={"color": CATPPUCCIN_SAPPHIRE}),
             " | Success rate: ",
             html.Span(f"{summary['success_rate']:.1%}", style={"color": success_rate_color}),
-        ], style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0"}))
+        ], style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}))
 
         # Benchmarks
         if summary["benchmarks"]:
             children.append(html.Pre(
                 "  Benchmarks:",
-                style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0"}
+                style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}
             ))
 
             for bench_name in summary["benchmarks"]:
@@ -943,15 +985,15 @@ def build_experiment_list_layout(experiments: list[dict]) -> list:
                     f"    {bench_name}: ",
                     *status_parts,
                     f"{n_total} ",
-                    html.Span(f"({success_rate:.1%})", style={"color": "#888"}),
-                ], style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0"})
+                    html.Span(f"({success_rate:.1%})", style={"color": TEXT_DIMMED}),
+                ], style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR})
                 children.append(bench_line)
 
                 # Description if available
                 if description:
                     children.append(html.Pre(
                         f"      {description}",
-                        style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": "#666", "fontStyle": "italic"}
+                        style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_SECONDARY, "fontStyle": "italic"}
                     ))
 
         # Add spacing between experiments

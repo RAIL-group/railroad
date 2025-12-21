@@ -17,6 +17,7 @@ import time
 @benchmark(
     name="single_robot_at_location",
     description="Simple case showing that a robot can reach a destionation via move.",
+    repeat=1,
     tags=["simple", "navigation"],
 )
 def bench_single_robot_nav(case: BenchmarkCase):

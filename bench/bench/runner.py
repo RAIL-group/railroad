@@ -45,7 +45,7 @@ class BenchmarkRunner:
     def __init__(
         self,
         benchmarks: List[Benchmark],
-        num_repeats: int = 3,
+        repeat_max: Optional[int] = None,
         parallel: int = 1,
         mlflow_tracking_uri: Optional[str] = None,
         tags: Optional[List[str]] = None,
@@ -56,14 +56,14 @@ class BenchmarkRunner:
 
         Args:
             benchmarks: List of benchmarks to run
-            num_repeats: Number of repeats per case (default: 3)
+            repeat_max: Maximum number of repeats per case (default: None, uses each benchmark's repeat setting)
             parallel: Number of parallel workers (default: 1)
             mlflow_tracking_uri: MLflow tracking URI (default: sqlite:///mlflow.db)
             tags: Filter benchmarks by tags (default: None, run all)
             case_filter: Filter cases by matching against benchmark name and parameters (default: None)
         """
         self.benchmarks = benchmarks
-        self.num_repeats = num_repeats
+        self.repeat_max = repeat_max
         self.parallel = parallel
         self.tracker = MLflowTracker(tracking_uri=mlflow_tracking_uri)
         self.filter_tags = tags
@@ -100,13 +100,19 @@ class BenchmarkRunner:
         PAGE_SIZE = 20  # Match MAX_CASES_PER_PAGE from ProgressDisplay
 
         for benchmark in benchmarks:
+            # Determine number of repeats for this benchmark
+            # Use benchmark's repeat setting, capped by repeat_max if provided
+            num_repeats = benchmark.repeat
+            if self.repeat_max is not None:
+                num_repeats = min(num_repeats, self.repeat_max)
+
             # Split cases into pages
             case_list = list(enumerate(benchmark.cases))
 
             for page_start in range(0, len(case_list), PAGE_SIZE):
                 page_cases = case_list[page_start:page_start + PAGE_SIZE]
 
-                for repeat_idx in range(self.num_repeats):
+                for repeat_idx in range(num_repeats):
                     for case_idx, params in page_cases:
                         task = Task(
                             id=f"{benchmark.name}_{case_idx}_{repeat_idx}",
@@ -226,7 +232,7 @@ class BenchmarkRunner:
             "user": getpass.getuser(),
             "git_hash": git_hash,
             "git_dirty": git_dirty,
-            "num_repeats": self.num_repeats,
+            "repeat_max": self.repeat_max if self.repeat_max is not None else "None",
             "parallel_workers": self.parallel,
             "num_benchmarks": len(self.benchmarks),
         }

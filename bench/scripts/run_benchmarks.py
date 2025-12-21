@@ -3,9 +3,9 @@
 CLI entry point for running benchmarks.
 
 Usage:
-    python scripts/run_benchmarks.py --repeats 5 --parallel 4
+    python scripts/run_benchmarks.py --repeat-max 5 --parallel 4
     python scripts/run_benchmarks.py --dry-run
-    python scripts/run_benchmarks.py -k robot --repeats 3
+    python scripts/run_benchmarks.py -k robot --repeat-max 3
     python scripts/run_benchmarks.py --tags multi-agent
 """
 
@@ -27,14 +27,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Run all benchmarks with 3 repeats
-  python scripts/run_benchmarks.py --repeats 3
+  # Run all benchmarks with maximum 3 repeats per case
+  python scripts/run_benchmarks.py --repeat-max 3
 
   # Dry run to see what will execute
   python scripts/run_benchmarks.py --dry-run
 
   # Run with 4 parallel workers
-  python scripts/run_benchmarks.py --repeats 5 --parallel 4
+  python scripts/run_benchmarks.py --repeat-max 5 --parallel 4
 
   # Filter by benchmark name
   python scripts/run_benchmarks.py -k movie_night
@@ -55,10 +55,10 @@ Examples:
         help="Filter cases using pytest-style expressions with 'and', 'or', 'not' (e.g., 'movie_night and mcts_iterations=400', 'num_robots=1 or num_robots=2')",
     )
     parser.add_argument(
-        "--repeats",
+        "--repeat-max",
         type=int,
-        default=3,
-        help="Number of repeats per case (default: 3)",
+        default=None,
+        help="Maximum number of repeats per case (default: None, uses benchmark's repeat setting)",
     )
     parser.add_argument(
         "--parallel",
@@ -107,7 +107,7 @@ Examples:
     # Create runner (filtering now happens at case level in runner)
     runner = BenchmarkRunner(
         benchmarks=all_benchmarks,
-        num_repeats=args.repeats,
+        repeat_max=args.repeat_max,
         parallel=args.parallel,
         mlflow_tracking_uri=args.mlflow_uri,
         tags=args.tags,
