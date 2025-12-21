@@ -108,6 +108,22 @@ def _success_mask(series: pd.Series) -> pd.Series:
     return s > 0.5
 
 
+def _timeout_mask(series: pd.Series) -> pd.Series:
+    """
+    Robustly interpret metrics.timeout as a boolean mask.
+    Handles bool, 0/1, floats, and missing.
+    """
+    if series is None:
+        return pd.Series(False)
+    s = series.fillna(0)
+    try:
+        s = s.astype(float)
+    except Exception:
+        s = s.astype(str).str.lower().isin(["1", "true", "t", "yes", "y"])
+        return s
+    return s > 0.5
+
+
 def format_status_count(n_success: int, n_total: int, n_error: int = 0, n_timeout: int = 0) -> str:
     """
     Format success/failure counts with emoji symbols matching progress.py.
@@ -301,6 +317,56 @@ def create_failed_points_trace(
     )
 
 
+def create_timeout_points_trace(
+    plan_costs: pd.Series,
+    case_label: str,
+    run_ids: pd.Series,
+    dx: float,
+) -> go.Violin:
+    """
+    Create clock markers for timeout runs.
+
+    Args:
+        plan_costs: Series of plan_cost values (will be jittered)
+        case_label: Y-axis label
+        run_ids: Series of run_id values for click handling
+        dx: Range of x values for jitter scaling
+
+    Returns:
+        Configured go.Violin trace showing only points as clock markers
+    """
+    # Add jitter to timeout points
+    jittered_costs = plan_costs + np.random.uniform(-0.01 * dx, 0.01 * dx, size=len(plan_costs))
+
+    return go.Violin(
+        y=[case_label] * len(plan_costs),
+        x=jittered_costs,
+        customdata=run_ids.tolist(),
+        name=f"{case_label} timeout",
+        orientation="h",
+        # Hide violin body entirely (points-only trace)
+        fillcolor="rgba(0,0,0,0)",
+        line=dict(color="rgba(0,0,0,0)", width=0),
+        # No summary stats
+        box_visible=False,
+        meanline_visible=False,
+        # Points with jitter
+        points="all",
+        pointpos=0,
+        jitter=0.5,
+        # Yellow diamond for timeout
+        marker=dict(
+            symbol="diamond",
+            size=POINT_SIZE + 1,
+            color="rgba(255, 215, 0, 0.8)",  # Gold/yellow
+            line=dict(color=COLOR_TIMEOUT, width=1),
+        ),
+        hoveron="points",
+        hovertemplate="TIMEOUT ⏱<br>Plan cost: %{x}<br>Run ID: %{customdata}<br>Click for log<extra></extra>",
+        showlegend=False,
+    )
+
+
 def create_mean_marker(mean_val: float, case_label: str) -> go.Scatter:
     """
     Create the mean marker trace.
@@ -336,6 +402,8 @@ def create_case_annotation(
     x_position: float,
     case_label: str,
     case_width: int = 2,
+    n_error: int = 0,
+    n_timeout: int = 0,
 ) -> dict:
     """
     Create annotation with hover showing summary statistics.
@@ -349,12 +417,14 @@ def create_case_annotation(
         x_position: X coordinate for annotation
         case_label: Y coordinate reference
         case_width: Width for case index formatting
+        n_error: Number of error runs
+        n_timeout: Number of timeout runs
 
     Returns:
         Plotly annotation dict
     """
     # Format status count
-    status_html = format_status_count(n_success, n_total)
+    status_html = format_status_count(n_success, n_total, n_error, n_timeout)
 
     # Format parameters
     param_parts = [f"{k}={v}" for k, v in params.items() if v is not None]
@@ -436,18 +506,27 @@ def create_benchmark_figure(benchmark: str, bench_df: pd.DataFrame) -> go.Figure
         case_label = f"Case {case_idx}"
         case_data = bench_df[bench_df["case_idx_int"] == case_idx].copy()
 
-        # Determine success mask
+        # Determine success, timeout, and failure masks
         if "metrics.success" in case_data.columns:
-            mask = _success_mask(case_data["metrics.success"])
+            success_mask = _success_mask(case_data["metrics.success"])
         else:
-            mask = pd.Series([True] * len(case_data), index=case_data.index)
+            success_mask = pd.Series([True] * len(case_data), index=case_data.index)
 
-        success_data = case_data[mask].copy()
-        failed_data = case_data[~mask].copy()
+        if "metrics.timeout" in case_data.columns:
+            timeout_mask = _timeout_mask(case_data["metrics.timeout"])
+        else:
+            timeout_mask = pd.Series([False] * len(case_data), index=case_data.index)
+
+        # Separate data: success, timeout, and other failures
+        success_data = case_data[success_mask].copy()
+        timeout_data = case_data[~success_mask & timeout_mask].copy()
+        failed_data = case_data[~success_mask & ~timeout_mask].copy()
 
         # Fill NaN plan_cost with xmax for display
         if "metrics.plan_cost" in success_data.columns:
             success_data["metrics.plan_cost"] = success_data["metrics.plan_cost"].fillna(xmax)
+        if "metrics.plan_cost" in timeout_data.columns:
+            timeout_data["metrics.plan_cost"] = timeout_data["metrics.plan_cost"].fillna(xmax)
         if "metrics.plan_cost" in failed_data.columns:
             failed_data["metrics.plan_cost"] = failed_data["metrics.plan_cost"].fillna(xmax)
 
@@ -463,6 +542,16 @@ def create_benchmark_figure(benchmark: str, bench_df: pd.DataFrame) -> go.Figure
             # Mean marker
             case_mean = float(success_data["metrics.plan_cost"].mean())
             fig.add_trace(create_mean_marker(case_mean, case_label))
+
+        # Timeout runs as diamond markers
+        if not timeout_data.empty and "metrics.plan_cost" in timeout_data.columns:
+            run_ids = timeout_data["run_id"] if "run_id" in timeout_data.columns else pd.Series([""] * len(timeout_data))
+            fig.add_trace(create_timeout_points_trace(
+                timeout_data["metrics.plan_cost"],
+                case_label,
+                run_ids,
+                dx,
+            ))
 
         # Failed runs as X markers
         if not failed_data.empty and "metrics.plan_cost" in failed_data.columns:
@@ -491,13 +580,17 @@ def create_benchmark_figure(benchmark: str, bench_df: pd.DataFrame) -> go.Figure
 
         # Create annotation
         n_total = len(case_data)
-        n_success = int(mask.sum())
+        n_success = int(success_mask.sum())
+        n_timeout = int(timeout_mask.sum())
+        n_error = 0  # Could be computed from error field if available
 
         annotations.append(create_case_annotation(
             case_idx=case_idx,
             params=params,
             n_success=n_success,
             n_total=n_total,
+            n_error=n_error,
+            n_timeout=n_timeout,
             summary_stats=summary_stats,
             x_position=annote_xloc,
             case_label=case_label,

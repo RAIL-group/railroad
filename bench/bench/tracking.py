@@ -156,6 +156,7 @@ class MLflowTracker:
                 metrics["wall_time"] = task.wall_time
 
             metrics["success"] = 1.0 if task.status == TaskStatus.SUCCESS else 0.0
+            metrics["timeout"] = 1.0 if task.status == TaskStatus.TIMEOUT else 0.0
 
             mlflow.log_metrics(metrics)
 
