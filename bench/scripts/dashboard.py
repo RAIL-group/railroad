@@ -94,16 +94,16 @@ FAILED_MARKER_WIDTH = 1
 FAILED_MARKER_COLOR = f"rgba(243, 139, 168, 0.8)"  # Red with transparency
 
 # Layout & Spacing
-MARGIN = dict(l=0, r=10, t=40, b=10)
+MARGIN = dict(l=0, r=10, t=10, b=10)
 HEIGHT_PER_CASE = 40
-MIN_PLOT_HEIGHT = 280
+MIN_PLOT_HEIGHT = 60
 ANNOTATION_PADDING = 0.5
 ANNOTATION_X_OFFSET = 0.3  # Fraction of dx to offset annotations
 
 # Grid Styling
 GRID_COLOR = f"rgba(108, 112, 134, 0.2)"  # Overlay0 with transparency
 GRID_WIDTH = 0.5
-PLOT_BGCOLOR = CATPPUCCIN_MANTLE
+PLOT_BGCOLOR = CATPPUCCIN_BASE
 PAPER_BGCOLOR = CATPPUCCIN_BASE
 ANNOTATION_BGCOLOR = f"rgba(49, 50, 68, 0.95)"  # Surface0 with slight transparency
 ANNOTATION_BGCOLOR = f"rgba(24, 24, 37, 0.80)"  # Surface0 with slight transparency
@@ -205,6 +205,123 @@ def format_case_params(params: dict) -> str:
     """Format case parameters consistently (plain text version)."""
     parts = [f"{k}={v}" for k, v in params.items() if v is not None]
     return ", ".join(parts)
+
+
+def build_benchmark_summary_line(bench_name: str, bench_stats: dict, description: str = "") -> html.Pre:
+    """
+    Build a single benchmark summary line with status symbols.
+
+    Args:
+        bench_name: Name of the benchmark
+        bench_stats: Dict with success_rate and total_runs
+        description: Optional description of the benchmark
+
+    Returns:
+        html.Pre element with formatted benchmark line
+    """
+    success_rate = bench_stats.get("success_rate", 0.0)
+    total_runs = bench_stats.get("total_runs", 0)
+
+    # Format success count with colored symbols
+    n_success = int(success_rate * total_runs)
+    n_total = total_runs
+    n_failure = n_total - n_success
+
+    # Build status string with colored symbols
+    status_parts = []
+    if n_success > 0:
+        status_parts.append(html.Span(f"{SYMBOL_SUCCESS}{n_success}", style={"color": COLOR_SUCCESS}))
+        status_parts.append("/")
+    if n_failure > 0:
+        status_parts.append(html.Span(f"{SYMBOL_FAILURE}{n_failure}", style={"color": COLOR_FAILURE}))
+        status_parts.append("/")
+
+    # Benchmark line
+    return html.Pre([
+        f"  {bench_name}: ",
+        *status_parts,
+        f"{n_total} ",
+        html.Span(f"({success_rate:.1%})", style={"color": TEXT_DIMMED}),
+    ], style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR})
+
+
+def build_experiment_summary_block(exp_name: str, summary: dict, metadata: dict, creation_time=None, include_link: bool = False) -> list:
+    """
+    Build a complete experiment summary block with benchmarks.
+
+    Args:
+        exp_name: Experiment name
+        summary: Summary dict with total_runs, success_rate, benchmarks, success_by_benchmark
+        metadata: Metadata dict with benchmark_descriptions
+        creation_time: Optional creation time
+        include_link: If True, make experiment name a clickable link
+
+    Returns:
+        List of Dash components forming the summary block
+    """
+    benchmark_descriptions = metadata.get("benchmark_descriptions", {})
+    children = []
+
+    # Experiment name
+    if include_link:
+        children.append(html.Div([
+            html.Span("# ", style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "color": TEXT_COLOR}),
+            dcc.Link(
+                exp_name,
+                href=f"/experiment/{exp_name}",
+                style={
+                    "fontFamily": FONT_FAMILY,
+                    "fontSize": f"{FONT_SIZE}px",
+                    "textDecoration": "underline",
+                    "color": CATPPUCCIN_BLUE,
+                },
+            ),
+        ], style={"margin": "0", "padding": "0"}))
+    else:
+        children.append(html.Pre(
+            f"# {exp_name}",
+            style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR, "fontWeight": "bold"}
+        ))
+
+    # Creation time (if provided)
+    if creation_time:
+        creation_time_str = creation_time.strftime("%Y-%m-%d %H:%M:%S")
+        children.append(html.Pre(
+            f"  Created: {creation_time_str}",
+            style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_DIMMED}
+        ))
+
+    # Total runs and success rate
+    success_rate_color = COLOR_SUCCESS if summary['success_rate'] > 0.8 else (COLOR_ERROR if summary['success_rate'] > 0.5 else COLOR_FAILURE)
+    children.append(html.Pre([
+        "  Total runs: ",
+        html.Span(f"{summary['total_runs']}", style={"color": CATPPUCCIN_SAPPHIRE}),
+        " | Success rate: ",
+        html.Span(f"{summary['success_rate']:.1%}", style={"color": success_rate_color}),
+    ], style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}))
+
+    # Benchmarks
+    if summary.get("benchmarks"):
+        children.append(html.Pre(
+            "  Benchmarks:",
+            style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}
+        ))
+
+        for bench_name in summary["benchmarks"]:
+            bench_stats = summary["success_by_benchmark"].get(bench_name, {})
+            description = benchmark_descriptions.get(bench_name, "")
+
+            # Benchmark line
+            children.append(build_benchmark_summary_line(bench_name, bench_stats, description))
+
+            # Description if available
+            if description:
+                children.append(html.Pre(
+                    f"      {description}",
+                    style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_SECONDARY, "fontStyle": "italic"}
+                ))
+
+    return children
 
 
 # =============================================================================
@@ -321,139 +438,104 @@ def create_violin_trace(
     plan_costs: pd.Series,
     case_label: str,
     run_ids: pd.Series,
+    dx: float = 0.0,
+    trace_type: str = "success",
 ) -> go.Violin:
     """
-    Create a single violin trace for successful runs.
+    Create a violin trace with customizable appearance for different run types.
 
     Args:
         plan_costs: Series of plan_cost values
         case_label: Y-axis label (e.g., "Case 5")
         run_ids: Series of run_id values for click handling
+        dx: Range of x values for jitter scaling (used for failed/timeout traces)
+        trace_type: Type of trace - "success", "failed", or "timeout"
 
     Returns:
         Configured go.Violin trace
     """
-    return go.Violin(
-        y=[case_label] * len(plan_costs),
-        x=plan_costs,
-        customdata=run_ids.tolist(),
-        name=case_label,
-        orientation="h",
-        fillcolor=VIOLIN_FILL,
-        line=dict(color=VIOLIN_LINE, width=VIOLIN_LINE_WIDTH),
-        width=VIOLIN_WIDTH,
-        box_visible=False,
-        meanline_visible=True,
-        points="all",
-        pointpos=0,
-        jitter=0.5,
-        marker=dict(
-            size=POINT_SIZE,
-            color=POINT_COLOR,
-            line=dict(color=POINT_OUTLINE, width=POINT_OUTLINE_WIDTH),
-            symbol="circle",
-        ),
-        hoveron="points",
-        hovertemplate="Plan cost: %{x}<br>Run ID: %{customdata}<br>Click for log<extra></extra>",
-        showlegend=False,
-    )
+    # Default parameters for success traces
+    config = {
+        "fillcolor": VIOLIN_FILL,
+        "line_color": VIOLIN_LINE,
+        "line_width": VIOLIN_LINE_WIDTH,
+        "violin_width": VIOLIN_WIDTH,
+        "meanline_visible": True,
+        "marker_symbol": "circle",
+        "marker_size": POINT_SIZE,
+        "marker_color": POINT_COLOR,
+        "marker_line_color": POINT_OUTLINE,
+        "marker_line_width": POINT_OUTLINE_WIDTH,
+        "hovertemplate": "Plan cost: %{x}<br>Run ID: %{customdata}<br>Click for log<extra></extra>",
+        "name_suffix": "",
+        "apply_jitter": False,
+    }
 
+    # Customize based on trace type
+    if trace_type == "failed":
+        config.update({
+            "fillcolor": "rgba(0,0,0,0)",
+            "line_color": "rgba(0,0,0,0)",
+            "line_width": 0,
+            "violin_width": VIOLIN_WIDTH,
+            "meanline_visible": False,
+            "marker_symbol": FAILED_MARKER_SYMBOL,
+            "marker_size": FAILED_MARKER_SIZE,
+            "marker_color": None,  # No fill, line only
+            "marker_line_color": FAILED_MARKER_COLOR,
+            "marker_line_width": FAILED_MARKER_WIDTH,
+            "hovertemplate": "FAILED<br>Plan cost: %{x}<br>Run ID: %{customdata}<br>Click for log<extra></extra>",
+            "name_suffix": " failed",
+            "apply_jitter": True,
+        })
+    elif trace_type == "timeout":
+        config.update({
+            "fillcolor": "rgba(0,0,0,0)",
+            "line_color": "rgba(0,0,0,0)",
+            "line_width": 0,
+            "violin_width": VIOLIN_WIDTH,
+            "meanline_visible": False,
+            "marker_symbol": "diamond",
+            "marker_size": POINT_SIZE + 1,
+            "marker_color": "rgba(255, 215, 0, 0.8)",
+            "marker_line_color": COLOR_TIMEOUT,
+            "marker_line_width": 1,
+            "hovertemplate": "TIMEOUT ⏱<br>Plan cost: %{x}<br>Run ID: %{customdata}<br>Click for log<extra></extra>",
+            "name_suffix": " timeout",
+            "apply_jitter": True,
+        })
 
-def create_failed_points_trace(
-    plan_costs: pd.Series,
-    case_label: str,
-    run_ids: pd.Series,
-    dx: float,
-) -> go.Violin:
-    """
-    Create X markers for failed runs.
+    # Apply jitter if needed
+    x_values = plan_costs.copy()
+    if config["apply_jitter"] and dx > 0:
+        x_values = plan_costs + np.random.uniform(-0.01 * dx, 0.01 * dx, size=len(plan_costs))
 
-    Args:
-        plan_costs: Series of plan_cost values (will be jittered)
-        case_label: Y-axis label
-        run_ids: Series of run_id values for click handling
-        dx: Range of x values for jitter scaling
-
-    Returns:
-        Configured go.Violin trace showing only points as X markers
-    """
-    # Add jitter to failed points
-    jittered_costs = plan_costs + np.random.uniform(-0.01 * dx, 0.01 * dx, size=len(plan_costs))
-
-    return go.Violin(
-        y=[case_label] * len(plan_costs),
-        x=jittered_costs,
-        customdata=run_ids.tolist(),
-        name=f"{case_label} failed",
-        orientation="h",
-        # Hide violin body entirely (points-only trace)
-        fillcolor="rgba(0,0,0,0)",
-        line=dict(color="rgba(0,0,0,0)", width=0),
-        # No summary stats
-        box_visible=False,
-        meanline_visible=False,
-        # Points with jitter
-        points="all",
-        pointpos=0,
-        jitter=0.5,
-        # Thin red X
-        marker=dict(
-            symbol=FAILED_MARKER_SYMBOL,
-            size=FAILED_MARKER_SIZE,
-            line=dict(color=FAILED_MARKER_COLOR, width=FAILED_MARKER_WIDTH),
-        ),
-        hoveron="points",
-        hovertemplate="FAILED<br>Plan cost: %{x}<br>Run ID: %{customdata}<br>Click for log<extra></extra>",
-        showlegend=False,
-    )
-
-
-def create_timeout_points_trace(
-    plan_costs: pd.Series,
-    case_label: str,
-    run_ids: pd.Series,
-    dx: float,
-) -> go.Violin:
-    """
-    Create clock markers for timeout runs.
-
-    Args:
-        plan_costs: Series of plan_cost values (will be jittered)
-        case_label: Y-axis label
-        run_ids: Series of run_id values for click handling
-        dx: Range of x values for jitter scaling
-
-    Returns:
-        Configured go.Violin trace showing only points as clock markers
-    """
-    # Add jitter to timeout points
-    jittered_costs = plan_costs + np.random.uniform(-0.01 * dx, 0.01 * dx, size=len(plan_costs))
+    # Build marker dict
+    marker_dict = {
+        "symbol": config["marker_symbol"],
+        "size": config["marker_size"],
+        "line": dict(color=config["marker_line_color"], width=config["marker_line_width"]),
+    }
+    if config["marker_color"] is not None:
+        marker_dict["color"] = config["marker_color"]
 
     return go.Violin(
         y=[case_label] * len(plan_costs),
-        x=jittered_costs,
+        x=x_values,
         customdata=run_ids.tolist(),
-        name=f"{case_label} timeout",
+        name=case_label + config["name_suffix"],
         orientation="h",
-        # Hide violin body entirely (points-only trace)
-        fillcolor="rgba(0,0,0,0)",
-        line=dict(color="rgba(0,0,0,0)", width=0),
-        # No summary stats
+        fillcolor=config["fillcolor"],
+        line=dict(color=config["line_color"], width=config["line_width"]),
+        width=config["violin_width"],
         box_visible=False,
-        meanline_visible=False,
-        # Points with jitter
+        meanline_visible=config["meanline_visible"],
         points="all",
         pointpos=0,
         jitter=0.5,
-        # Yellow diamond for timeout
-        marker=dict(
-            symbol="diamond",
-            size=POINT_SIZE + 1,
-            color="rgba(255, 215, 0, 0.8)",  # Gold/yellow
-            line=dict(color=COLOR_TIMEOUT, width=1),
-        ),
+        marker=marker_dict,
         hoveron="points",
-        hovertemplate="TIMEOUT ⏱<br>Plan cost: %{x}<br>Run ID: %{customdata}<br>Click for log<extra></extra>",
+        hovertemplate=config["hovertemplate"],
         showlegend=False,
     )
 
@@ -519,7 +601,7 @@ def create_case_annotation(
 
     # Format parameters
     param_parts = [f"{k}={v}" for k, v in params.items() if v is not None]
-    param_str = f"{status_html} Case {case_idx:{case_width}d}: " + ", ".join(param_parts)
+    param_str = f"   {status_html} Case {case_idx:{case_width}d}: " + ", ".join(param_parts)
 
     # Build hover text with summary statistics
     hover_parts = ["<b>Summary Statistics</b>"]
@@ -628,6 +710,8 @@ def create_benchmark_figure(benchmark: str, bench_df: pd.DataFrame) -> go.Figure
                 success_data["metrics.plan_cost"],
                 case_label,
                 run_ids,
+                dx=dx,
+                trace_type="success",
             ))
 
             # Mean marker
@@ -637,21 +721,23 @@ def create_benchmark_figure(benchmark: str, bench_df: pd.DataFrame) -> go.Figure
         # Timeout runs as diamond markers
         if not timeout_data.empty and "metrics.plan_cost" in timeout_data.columns:
             run_ids = timeout_data["run_id"] if "run_id" in timeout_data.columns else pd.Series([""] * len(timeout_data))
-            fig.add_trace(create_timeout_points_trace(
+            fig.add_trace(create_violin_trace(
                 timeout_data["metrics.plan_cost"],
                 case_label,
                 run_ids,
-                dx,
+                dx=dx,
+                trace_type="timeout",
             ))
 
         # Failed runs as X markers
         if not failed_data.empty and "metrics.plan_cost" in failed_data.columns:
             run_ids = failed_data["run_id"] if "run_id" in failed_data.columns else pd.Series([""] * len(failed_data))
-            fig.add_trace(create_failed_points_trace(
+            fig.add_trace(create_violin_trace(
                 failed_data["metrics.plan_cost"],
                 case_label,
                 run_ids,
-                dx,
+                dx=dx,
+                trace_type="failed",
             ))
 
         # Get case parameters (from first row)
@@ -693,12 +779,6 @@ def create_benchmark_figure(benchmark: str, bench_df: pd.DataFrame) -> go.Figure
 
     # Update layout
     fig.update_layout(
-        title=dict(
-            text=f"{benchmark} - Plan Cost Distribution",
-            font=dict(size=FONT_SIZE_TITLE, family=FONT_FAMILY, color=TEXT_COLOR),
-            x=0,  # Left-align title
-            xanchor="left",
-        ),
         xaxis_title="Plan Cost",
         height=height,
         margin=MARGIN,
@@ -797,7 +877,7 @@ def create_main_layout() -> html.Div:
     )
 
 
-def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataFrame, metadata: dict = None) -> list:
+def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataFrame, metadata: dict = None, summary: dict = None) -> list:
     """
     Build the content layout with all graphs and data sample.
 
@@ -806,46 +886,143 @@ def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataF
         figures: List of figure dicts from create_violin_plots_by_benchmark
         df: DataFrame for raw data sample
         metadata: Optional experiment metadata with benchmark descriptions
+        summary: Optional experiment summary with stats
 
     Returns:
         List of Dash components
     """
     children = [
-        html.Div([
-            dcc.Link("← Back to Experiment List", href="/", style={
-                "fontFamily": FONT_FAMILY,
-                "fontSize": f"{FONT_SIZE}px",
-                "marginBottom": "10px",
-                "display": "block",
-                "color": CATPPUCCIN_BLUE,
-            }),
-            html.H1(
-                f"Benchmark Results: {experiment_name}",
-                style={"fontFamily": FONT_FAMILY, "color": TEXT_COLOR},
-            ),
-        ]),
-        html.Hr(style={"borderColor": CATPPUCCIN_SURFACE0}),
+        dcc.Link("← Back to Experiment List", href="/", style={
+            "fontFamily": FONT_FAMILY,
+            "fontSize": f"{FONT_SIZE}px",
+            "marginBottom": "10px",
+            "display": "block",
+            "color": CATPPUCCIN_BLUE,
+        }),
+        html.Br(),
     ]
 
-    # Add benchmark descriptions if available
-    if metadata and "benchmark_descriptions" in metadata:
-        descriptions = metadata["benchmark_descriptions"]
-        if descriptions:
-            desc_items = [
-                html.Li([
-                    html.Strong(f"{bench_name}: ", style={"fontFamily": FONT_FAMILY, "color": CATPPUCCIN_MAUVE}),
-                    html.Span(desc, style={"fontFamily": FONT_FAMILY, "color": TEXT_COLOR}),
-                ])
-                for bench_name, desc in sorted(descriptions.items())
-            ]
-            children.extend([
-                html.H3("Benchmark Descriptions", style={"fontFamily": FONT_FAMILY, "color": TEXT_COLOR}),
-                html.Ul(desc_items, style={"fontFamily": FONT_FAMILY, "color": TEXT_COLOR}),
-                html.Hr(style={"borderColor": CATPPUCCIN_SURFACE0}),
-            ])
+    # Add experiment summary if available
+    if summary and metadata:
+        # Build summary with clickable benchmark links
+        summary_children = []
+        benchmark_descriptions = metadata.get("benchmark_descriptions", {})
+
+        # Experiment name
+        summary_children.append(html.Pre(
+            f"# Benchmark Results: {experiment_name}",
+            style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR, "fontWeight": "bold"}
+        ))
+
+        # Total runs and success rate
+        success_rate_color = COLOR_SUCCESS if summary['success_rate'] > 0.8 else (COLOR_ERROR if summary['success_rate'] > 0.5 else COLOR_FAILURE)
+        summary_children.append(html.Pre([
+            "  Total runs: ",
+            html.Span(f"{summary['total_runs']}", style={"color": CATPPUCCIN_SAPPHIRE}),
+            " | Success rate: ",
+            html.Span(f"{summary['success_rate']:.1%}", style={"color": success_rate_color}),
+        ], style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}))
+
+        # Benchmarks with clickable links
+        if summary.get("benchmarks"):
+            summary_children.append(html.Pre(
+                "  Benchmarks:",
+                style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}
+            ))
+
+            for bench_name in summary["benchmarks"]:
+                bench_stats = summary["success_by_benchmark"].get(bench_name, {})
+                description = benchmark_descriptions.get(bench_name, "")
+                success_rate = bench_stats.get("success_rate", 0.0)
+                total_runs = bench_stats.get("total_runs", 0)
+
+                # Format success count with colored symbols
+                n_success = int(success_rate * total_runs)
+                n_total = total_runs
+                n_failure = n_total - n_success
+
+                # Build status string with colored symbols
+                status_parts = []
+                if n_success > 0:
+                    status_parts.append(html.Span(f"{SYMBOL_SUCCESS}{n_success}", style={"color": COLOR_SUCCESS}))
+                    status_parts.append("/")
+                if n_failure > 0:
+                    status_parts.append(html.Span(f"{SYMBOL_FAILURE}{n_failure}", style={"color": COLOR_FAILURE}))
+                    status_parts.append("/")
+
+                # Benchmark line with clickable link
+                summary_children.append(html.Pre([
+                    "    ",
+                    html.A(bench_name, href=f"#benchmark-{bench_name}", style={
+                        "fontFamily": FONT_FAMILY,
+                        "fontSize": f"{FONT_SIZE}px",
+                        "color": CATPPUCCIN_BLUE,
+                        "textDecoration": "underline",
+                    }),
+                    ": ",
+                    *status_parts,
+                    f"{n_total} ",
+                    html.Span(f"({success_rate:.1%})", style={"color": TEXT_DIMMED}),
+                ], style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}))
+
+                # Description if available
+                if description:
+                    summary_children.append(html.Pre(
+                        f"      {description}",
+                        style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_SECONDARY, "fontStyle": "italic"}
+                    ))
+
+        children.extend(summary_children)
+    else:
+        # Fallback if no summary available
+        children.append(html.Pre(
+            f"# Benchmark Results: {experiment_name}",
+            style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR, "fontWeight": "bold"}
+        ))
+
+    children.append(html.Br())
 
     # Add violin plot for each benchmark
     for i, plot_info in enumerate(figures):
+        bench_name = plot_info["benchmark"]
+
+        # Add benchmark-specific summary with anchor
+        if summary and metadata:
+            bench_stats = summary["success_by_benchmark"].get(bench_name, {})
+            benchmark_descriptions = metadata.get("benchmark_descriptions", {})
+            description = benchmark_descriptions.get(bench_name, "")
+
+            success_rate = bench_stats.get("success_rate", 0.0)
+            total_runs = bench_stats.get("total_runs", 0)
+            n_success = int(success_rate * total_runs)
+            n_total = total_runs
+            n_failure = n_total - n_success
+
+            # Build status string
+            status_parts = []
+            if n_success > 0:
+                status_parts.append(html.Span(f"{SYMBOL_SUCCESS}{n_success}", style={"color": COLOR_SUCCESS}))
+                status_parts.append("/")
+            if n_failure > 0:
+                status_parts.append(html.Span(f"{SYMBOL_FAILURE}{n_failure}", style={"color": COLOR_FAILURE}))
+                status_parts.append("/")
+
+            # Benchmark header with anchor
+            children.append(html.Div(id=f"benchmark-{bench_name}"))
+            children.append(html.Pre([
+                html.Span(f"## {bench_name}", style={"fontWeight": "bold", "textDecoration": "underline"}),
+                " - ",
+                *status_parts,
+                f"{n_total} ",
+                html.Span(f"({success_rate:.1%})", style={"color": TEXT_DIMMED}),
+            ], style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}))
+
+            if description:
+                children.append(html.Pre(
+                    f"   {description}",
+                    style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_SECONDARY, "fontStyle": "italic"}
+                ))
+
         children.extend([
             html.Div([
                 dcc.Graph(
@@ -853,7 +1030,7 @@ def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataF
                     figure=plot_info["figure"],
                 )
             ]),
-            html.Hr(),
+            html.Br(),
         ])
 
     # Add raw data sample
@@ -866,9 +1043,18 @@ def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataF
     ]
     existing_cols = [c for c in cols if c in df.columns]
 
+    children.append(html.Br())
     children.append(
         html.Div([
-            html.H3("Raw Data Sample", style={"fontFamily": FONT_FAMILY, "color": TEXT_COLOR}),
+            html.Pre("## Raw Data Sample", style={
+                "fontFamily": FONT_FAMILY,
+                "fontSize": f"{FONT_SIZE}px",
+                "color": TEXT_COLOR,
+                "fontWeight": "bold",
+                "textDecoration": "underline",
+                "margin": "0",
+                "padding": "0",
+            }),
             html.Pre(
                 df[existing_cols].head(10).to_string(),
                 style={
@@ -917,84 +1103,18 @@ def build_experiment_list_layout(experiments: list[dict]) -> list:
     for exp_idx, exp in enumerate(experiments):
         summary = exp["summary"]
         metadata = exp["metadata"]
-        benchmark_descriptions = metadata.get("benchmark_descriptions", {})
-
-        # Format creation time
-        creation_time_str = exp["creation_time"].strftime("%Y-%m-%d %H:%M:%S")
-
-        # Experiment header with link
         exp_name = exp["name"]
-        children.append(html.Div([
-            html.Span("# ", style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "color": TEXT_COLOR}),
-            dcc.Link(
-                exp_name,
-                href=f"/experiment/{exp_name}",
-                style={
-                    "fontFamily": FONT_FAMILY,
-                    "fontSize": f"{FONT_SIZE}px",
-                    "textDecoration": "underline",
-                    "color": CATPPUCCIN_BLUE,
-                },
-            ),
-        ], style={"margin": "0", "padding": "0"}))
+        creation_time = exp["creation_time"]
 
-        # Creation time
-        children.append(html.Pre(
-            f"  Created: {creation_time_str}",
-            style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_DIMMED}
-        ))
-
-        # Total runs and success rate
-        success_rate_color = COLOR_SUCCESS if summary['success_rate'] > 0.8 else (COLOR_ERROR if summary['success_rate'] > 0.5 else COLOR_FAILURE)
-        children.append(html.Pre([
-            "  Total runs: ",
-            html.Span(f"{summary['total_runs']}", style={"color": CATPPUCCIN_SAPPHIRE}),
-            " | Success rate: ",
-            html.Span(f"{summary['success_rate']:.1%}", style={"color": success_rate_color}),
-        ], style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}))
-
-        # Benchmarks
-        if summary["benchmarks"]:
-            children.append(html.Pre(
-                "  Benchmarks:",
-                style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}
-            ))
-
-            for bench_name in summary["benchmarks"]:
-                bench_stats = summary["success_by_benchmark"].get(bench_name, {})
-                success_rate = bench_stats.get("success_rate", 0.0)
-                total_runs = bench_stats.get("total_runs", 0)
-                description = benchmark_descriptions.get(bench_name, "")
-
-                # Format success count with colored symbols
-                n_success = int(success_rate * total_runs)
-                n_total = total_runs
-                n_failure = n_total - n_success
-
-                # Build status string with colored symbols
-                status_parts = []
-                if n_success > 0:
-                    status_parts.append(html.Span(f"{SYMBOL_SUCCESS}{n_success}", style={"color": COLOR_SUCCESS}))
-                    status_parts.append("/")
-                if n_failure > 0:
-                    status_parts.append(html.Span(f"{SYMBOL_FAILURE}{n_failure}", style={"color": COLOR_FAILURE}))
-                    status_parts.append("/")
-
-                # Benchmark line
-                bench_line = html.Pre([
-                    f"    {bench_name}: ",
-                    *status_parts,
-                    f"{n_total} ",
-                    html.Span(f"({success_rate:.1%})", style={"color": TEXT_DIMMED}),
-                ], style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR})
-                children.append(bench_line)
-
-                # Description if available
-                if description:
-                    children.append(html.Pre(
-                        f"      {description}",
-                        style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_SECONDARY, "fontStyle": "italic"}
-                    ))
+        # Use reusable function to build experiment summary block
+        summary_block = build_experiment_summary_block(
+            exp_name=exp_name,
+            summary=summary,
+            metadata=metadata,
+            creation_time=creation_time,
+            include_link=True,
+        )
+        children.extend(summary_block)
 
         # Add spacing between experiments
         children.append(html.Br())
@@ -1059,8 +1179,13 @@ def refresh_data(pathname):
 
             try:
                 df, experiment_name, metadata = load_experiment_by_name(experiment_name)
+
+                # Get experiment summary
+                analyzer = BenchmarkAnalyzer()
+                summary = analyzer.get_experiment_summary(experiment_name)
+
                 figures = create_violin_plots_by_benchmark(df)
-                content = build_content_layout(experiment_name, figures, df, metadata)
+                content = build_content_layout(experiment_name, figures, df, metadata, summary)
 
                 # Store minimal data for click handling
                 # Just store run_id to artifact_uri mapping
