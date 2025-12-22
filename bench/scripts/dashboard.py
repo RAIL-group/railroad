@@ -94,9 +94,9 @@ FAILED_MARKER_WIDTH = 1
 FAILED_MARKER_COLOR = f"rgba(243, 139, 168, 0.8)"  # Red with transparency
 
 # Layout & Spacing
-MARGIN = dict(l=0, r=10, t=10, b=10)
+MARGIN = dict(l=0, r=10, t=0, b=0)
 HEIGHT_PER_CASE = 40
-MIN_PLOT_HEIGHT = 60
+MIN_PLOT_HEIGHT = 80
 ANNOTATION_PADDING = 0.5
 ANNOTATION_X_OFFSET = 0.3  # Fraction of dx to offset annotations
 
@@ -105,8 +105,8 @@ GRID_COLOR = f"rgba(108, 112, 134, 0.2)"  # Overlay0 with transparency
 GRID_WIDTH = 0.5
 PLOT_BGCOLOR = CATPPUCCIN_BASE
 PAPER_BGCOLOR = CATPPUCCIN_BASE
-ANNOTATION_BGCOLOR = f"rgba(49, 50, 68, 0.95)"  # Surface0 with slight transparency
-ANNOTATION_BGCOLOR = f"rgba(24, 24, 37, 0.80)"  # Surface0 with slight transparency
+# ANNOTATION_BGCOLOR = f"rgba(24, 24, 37, 0.80)"  # Surface0 with slight transparency
+ANNOTATION_BGCOLOR = PLOT_BGCOLOR
 
 # Text Colors
 TEXT_COLOR = CATPPUCCIN_TEXT
@@ -202,8 +202,11 @@ def compute_case_summary_stats(case_data: pd.DataFrame) -> dict:
 
 
 def format_case_params(params: dict) -> str:
-    """Format case parameters consistently (plain text version)."""
-    parts = [f"{k}={v}" for k, v in params.items() if v is not None]
+    """Format case parameters with colored HTML (matching progress.py style)."""
+    parts = [
+        f"<span style='color:{CATPPUCCIN_SAPPHIRE}'>{k}</span>=<span style='color:{CATPPUCCIN_YELLOW}'>{v}</span>"
+        for k, v in params.items() if v is not None
+    ]
     return ", ".join(parts)
 
 
@@ -599,9 +602,9 @@ def create_case_annotation(
     # Format status count
     status_html = format_status_count(n_success, n_total, n_error, n_timeout)
 
-    # Format parameters
-    param_parts = [f"{k}={v}" for k, v in params.items() if v is not None]
-    param_str = f"   {status_html} Case {case_idx:{case_width}d}: " + ", ".join(param_parts)
+    # Format parameters with colors
+    param_str_colored = format_case_params(params)
+    param_str = f"   {status_html} Case {case_idx:{case_width}d}: " + param_str_colored
 
     # Build hover text with summary statistics
     hover_parts = ["<b>Summary Statistics</b>"]
@@ -779,7 +782,7 @@ def create_benchmark_figure(benchmark: str, bench_df: pd.DataFrame) -> go.Figure
 
     # Update layout
     fig.update_layout(
-        xaxis_title="Plan Cost",
+        xaxis_title="",
         height=height,
         margin=MARGIN,
         annotations=annotations,
@@ -790,6 +793,7 @@ def create_benchmark_figure(benchmark: str, bench_df: pd.DataFrame) -> go.Figure
 
     # Force the y categories so cases with only failed points still show up
     fig.update_yaxes(
+        range=[-0.3, len(case_order)-0.3],
         categoryorder="array",
         categoryarray=case_labels,
         ticks="",
@@ -911,7 +915,8 @@ def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataF
         # Experiment name
         summary_children.append(html.Pre(
             f"# Benchmark Results: {experiment_name}",
-            style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR, "fontWeight": "bold"}
+            style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR, "fontWeight": "bold",                         "textDecoration": "underline",
+}
         ))
 
         # Total runs and success rate
@@ -959,7 +964,7 @@ def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataF
                         "color": CATPPUCCIN_BLUE,
                         "textDecoration": "underline",
                     }),
-                    ": ",
+                    " ",
                     *status_parts,
                     f"{n_total} ",
                     html.Span(f"({success_rate:.1%})", style={"color": TEXT_DIMMED}),
@@ -1011,7 +1016,7 @@ def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataF
             children.append(html.Div(id=f"benchmark-{bench_name}"))
             children.append(html.Pre([
                 html.Span(f"## {bench_name}", style={"fontWeight": "bold", "textDecoration": "underline"}),
-                " - ",
+                " ",
                 *status_parts,
                 f"{n_total} ",
                 html.Span(f"({success_rate:.1%})", style={"color": TEXT_DIMMED}),
@@ -1023,6 +1028,11 @@ def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataF
                     style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_SECONDARY, "fontStyle": "italic"}
                 ))
 
+        children.append(html.Br())
+        children.append(html.Pre(
+            "Plan Cost",
+            style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}
+        ))
         children.extend([
             html.Div([
                 dcc.Graph(
@@ -1032,42 +1042,6 @@ def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataF
             ]),
             html.Br(),
         ])
-
-    # Add raw data sample
-    cols = [
-        "params.benchmark_name",
-        "params.case_idx",
-        "params.repeat_idx",
-        "metrics.plan_cost",
-        "metrics.success",
-    ]
-    existing_cols = [c for c in cols if c in df.columns]
-
-    children.append(html.Br())
-    children.append(
-        html.Div([
-            html.Pre("## Raw Data Sample", style={
-                "fontFamily": FONT_FAMILY,
-                "fontSize": f"{FONT_SIZE}px",
-                "color": TEXT_COLOR,
-                "fontWeight": "bold",
-                "textDecoration": "underline",
-                "margin": "0",
-                "padding": "0",
-            }),
-            html.Pre(
-                df[existing_cols].head(10).to_string(),
-                style={
-                    "fontFamily": FONT_FAMILY,
-                    "fontSize": f"{FONT_SIZE}px",
-                    "color": TEXT_COLOR,
-                    "backgroundColor": CATPPUCCIN_MANTLE,
-                    "padding": "10px",
-                    "borderRadius": "4px",
-                },
-            ),
-        ])
-    )
 
     return children
 
