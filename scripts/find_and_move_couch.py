@@ -16,7 +16,7 @@ from mrppddl.core import Fluent as F, State, get_action_by_name
 from mrppddl.planner import MCTSPlanner
 from mrppddl.dashboard import PlannerDashboard
 import environments
-from environments.core import EnvironmentInterface as Simulator
+from environments.core import EnvironmentInterface
 from environments import SimpleEnvironment
 from mrppddl._bindings import ff_heuristic
 
@@ -48,8 +48,10 @@ OBJECTS_AT_LOCATIONS = {
 def main():
 
     # Initialize environment
-    env = SimpleEnvironment(LOCATIONS, OBJECTS_AT_LOCATIONS, num_robots=2)
-
+    robot_locations = {"robot1": "living_room",
+                                 "robot2": "living_room"}
+    env = SimpleEnvironment(LOCATIONS, OBJECTS_AT_LOCATIONS,
+                            robot_locations=robot_locations)
     # Define the objects we're looking for
     objects_of_interest = ["Remote", "Cookie", "Plate", "Couch"]
 
@@ -86,38 +88,19 @@ def main():
     }
 
     # Create operators
-    move_op = environments.operators.construct_move_operator(
-        move_time=env.get_move_cost_fn()
-    )
-
-    # Search operator with 80% success rate when object is actually present
+    move_time_fn = env.get_skills_cost_fn(skill_name='move')
+    search_time = env.get_skills_cost_fn(skill_name='search')
+    pick_time = env.get_skills_cost_fn(skill_name='pick')
+    place_time = env.get_skills_cost_fn(skill_name='place')
     object_find_prob = lambda r, loc, o: 0.8 if o in OBJECTS_AT_LOCATIONS.get(loc, dict()).get("object", dict()) else 0.2
-    search_op = environments.operators.construct_search_operator(
-        object_find_prob=object_find_prob,
-        search_time=lambda r, loc: 5.0
-    )
-
-    from mrppddl.core import Operator, Effect
-    no_op = Operator(
-        name="no-op",
-        parameters=[("?r", "robot")],
-        preconditions=[F("free ?r")],
-        effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r")}),
-            Effect(time=5, resulting_fluents={F("free ?r")}),
-        ],
-        extra_cost=100,
-    )
-    pick_op = environments.operators.construct_pick_operator(
-        pick_time=lambda r, l, o: 5.0
-    )
-
-    place_op = environments.operators.construct_place_operator(
-        place_time=lambda r, l, o: 5.0
-    )
+    move_op = environments.operators.construct_move_operator(move_time_fn)
+    search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
+    pick_op = environments.operators.construct_pick_operator(pick_time)
+    place_op = environments.operators.construct_place_operator(place_time)
+    no_op = environments.operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
 
     # Create simulator
-    sim = Simulator(
+    sim = EnvironmentInterface(
         initial_state,
         objects_by_type,
         [no_op, pick_op, place_op, move_op, search_op],
@@ -136,7 +119,7 @@ def main():
 
         for iteration in range(max_iterations):
             # Check if goal is reached
-            if sim.goal_reached(goal_fluents):
+            if sim.is_goal_reached(goal_fluents):
                 break
 
             # Get available actions

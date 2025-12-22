@@ -4,7 +4,7 @@ from copy import copy
 from mrppddl.core import Fluent as F, State
 from mrppddl.core import transition
 from mrppddl.core import Operator
-from .environments import BaseEnvironment, ActionStatus
+from .environments import BaseEnvironment, SkillStatus
 from typing import Dict, Set, List
 
 
@@ -141,7 +141,7 @@ class EnvironmentInterface():
 
     def _get_ongoing_action(self, action):
         action_name = action.name.split()[0]
-        if action_name not in {"move", "pick", "place", "search", "no-op"}:
+        if action_name not in {"move", "pick", "place", "search", "no_op"}:
             raise ValueError(f"Action {action.name} not supported in simulator.")
         if action_name == "move":
             new_act = OngoingMoveAction(self._state.time, action, self.environment)
@@ -151,7 +151,7 @@ class EnvironmentInterface():
             new_act = OngoingPickAction(self._state.time, action, self.environment)
         elif action_name == "place":
             new_act = OngoingPlaceAction(self._state.time, action, self.environment)
-        elif action_name == "no-op":
+        elif action_name == "no_op":
             new_act = OngoingNoOpAction(self._state.time, action, self.environment)
         return new_act
 
@@ -167,7 +167,7 @@ class EnvironmentInterface():
 
         return time_to_next_event, completed_actions
 
-    def goal_reached(self, goal_fluents):
+    def is_goal_reached(self, goal_fluents):
         if all(fluent in self.state.fluents for fluent in goal_fluents):
             return True
         return False
@@ -229,8 +229,8 @@ class OngoingAction:
     def is_action_complete(self):
         if self.is_action_called:
             action_name = self.name.split()[0]
-            action_status = self.environment.get_action_status(self.robot, action_name)
-            if action_status == ActionStatus.DONE:
+            action_status = self.environment.get_executed_skill_status(self.robot, action_name)
+            if action_status == SkillStatus.DONE:
                 return True
         return False
 
@@ -270,21 +270,22 @@ class OngoingAction:
 
 class OngoingSearchAction(OngoingAction):
     def advance(self, time):
+        _, _, loc, obj = self.name.split()  # (e.g., search r1 locA objA)
         if not self.is_action_called:
-            self.environment.search_robot(self.robot)
+            self.environment.execute_skill(self.robot, 'search', loc, obj)
             self.is_action_called = True
         return super().advance(time)
 
 
 class OngoingPickAction(OngoingAction):
     def advance(self, time):
+        _, _, loc, obj = self.name.split()  # (e.g., pick r1 locA objA)
         if not self.is_action_called:
-            self.environment.pick_robot(self.robot)
+            self.environment.execute_skill(self.robot, 'pick', loc, obj)
             self.is_action_called = True
 
         new_effects = super().advance(time)
         if self.is_done:
-            _, _, loc, obj = self.name.split()  # (e.g., pick r1 locA objA)
             # remove the object from the location
             self.environment.remove_object_from_location(obj, loc)
         return new_effects
@@ -292,13 +293,13 @@ class OngoingPickAction(OngoingAction):
 
 class OngoingPlaceAction(OngoingAction):
     def advance(self, time):
+        _, _, loc, obj = self.name.split()  # (e.g., place r1 locA objA)
         if not self.is_action_called:
-            self.environment.place_robot(self.robot)
+            self.environment.execute_skill(self.robot, 'place', loc, obj)
             self.is_action_called = True
 
         new_effects = super().advance(time)
         if self.is_done:
-            _, _, loc, obj = self.name.split()  # (e.g., place r1 locA objA)
             # add the object to the location
             self.environment.add_object_at_location(obj, loc)
         return new_effects
@@ -312,7 +313,7 @@ class OngoingMoveAction(OngoingAction):
 
     def advance(self, time):
         if not self.is_action_called:
-            self.environment.move_robot(self.robot, self.end)
+            self.environment.execute_skill(self.robot, 'move', self.start, self.end)
             self.is_action_called = True
         return super().advance(time)
 
@@ -359,6 +360,6 @@ class OngoingMoveAction(OngoingAction):
 class OngoingNoOpAction(OngoingAction):
     def advance(self, time):
         if not self.is_action_called:
-            self.environment.no_op_robot(self.robot)
+            self.environment.execute_skill(self.robot, 'no_op')
             self.is_action_called = True
         return super().advance(time)

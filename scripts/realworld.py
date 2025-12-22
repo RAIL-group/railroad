@@ -10,14 +10,14 @@ from typing import Dict, Set, List, Tuple, Callable
 
 from mrppddl.planner import MCTSPlanner
 import environments
-from environments.environments import BaseEnvironment, ActionStatus
+from environments.environments import BaseEnvironment, SkillStatus
 from environments.operators import construct_move_visited_operator
 from environments.core import EnvironmentInterface as PlanningLoop
 
 
 
 
-STATUS_MAP = {'moving': ActionStatus.RUNNING, 'reached': ActionStatus.DONE, 'stopped': ActionStatus.IDLE}
+STATUS_MAP = {'moving': SkillStatus.RUNNING, 'reached': SkillStatus.DONE, 'stopped': SkillStatus.IDLE}
 
 
 class RealEnvironment(BaseEnvironment):
@@ -124,7 +124,7 @@ if __name__ == '__main__':
         else:
             print("No action.")
 
-        if planning_loop.goal_reached(goal_fluents):
+        if planning_loop.is_goal_reached(goal_fluents):
             print("Goal reached!")
             break
     client.terminate()

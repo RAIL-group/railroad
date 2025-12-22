@@ -123,6 +123,20 @@ def construct_place_operator(place_time: OptCallable) -> Operator:
     )
 
 
+def construct_no_op_operator(no_op_time, extra_cost: float = 0.0) -> Operator:
+    '''Sometimes, patience is a virtuous skill.'''
+    return Operator(
+        name="no_op",
+        parameters=[("?r", "robot")],
+        preconditions=[F("free ?r")],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free ?r")}),
+            Effect(time=no_op_time, resulting_fluents={F("free ?r")}),
+        ],
+        extra_cost=extra_cost,
+    )
+
+
 # REAL WORLD OPERATORS
 def construct_move_visited_operator(move_time: OptCallable):
     move_time = _make_callable(move_time)

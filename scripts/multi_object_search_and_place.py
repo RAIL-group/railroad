@@ -17,7 +17,8 @@ from mrppddl._bindings import ff_heuristic
 from mrppddl.planner import MCTSPlanner
 from mrppddl.dashboard import PlannerDashboard
 import environments
-from environments import Simulator
+from environments import SimpleEnvironment
+from environments.core import EnvironmentInterface
 
 
 # Define locations with coordinates (for move cost calculation)
@@ -40,68 +41,11 @@ OBJECTS_AT_LOCATIONS = {
 }
 
 
-class HouseholdEnvironment(environments.BaseEnvironment):
-    """Simple household environment for testing multi-object manipulation."""
-
-    def __init__(self, locations, objects_at_locations):
-        super().__init__()
-        self.locations = locations.copy()
-        self._ground_truth = objects_at_locations
-        self._objects_at_locations = {loc: {"object": set()} for loc in locations}
-
-    def get_objects_at_location(self, location):
-        """Return objects at a location (simulates perception)."""
-        objects_found = self._ground_truth.get(location, {}).copy()
-        # Update internal knowledge
-        if "object" in objects_found:
-            for obj in objects_found["object"]:
-                self.add_object_at_location(obj, location)
-        return objects_found
-
-    def get_move_cost_fn(self):
-        """Return a function that computes movement time between locations."""
-        def get_move_time(robot, loc_from, loc_to):
-            distance = np.linalg.norm(
-                self.locations[loc_from] - self.locations[loc_to]
-            )
-            return distance  # 1 unit of distance = 1 second
-        return get_move_time
-
-    def get_intermediate_coordinates(self, time, loc_from, loc_to):
-        """Compute intermediate position during movement (for visualization)."""
-        coord_from = self.locations[loc_from]
-        coord_to = self.locations[loc_to]
-        dist = np.linalg.norm(coord_to - coord_from)
-        if dist < 0.01:
-            return coord_to
-        elif time > dist:
-            return coord_to
-        direction = (coord_to - coord_from) / dist
-        new_coord = coord_from + direction * time
-        return new_coord
-
-    def remove_object_from_location(self, obj, location, object_type="object"):
-        """Remove an object from a location (e.g., when picked up)."""
-        self._objects_at_locations[location][object_type].discard(obj)
-        # Also update ground truth
-        if location in self._ground_truth and object_type in self._ground_truth[location]:
-            self._ground_truth[location][object_type].discard(obj)
-
-    def add_object_at_location(self, obj, location, object_type="object"):
-        """Add an object to a location (e.g., when placed down)."""
-        self._objects_at_locations[location][object_type].add(obj)
-        # Also update ground truth
-        if location not in self._ground_truth:
-            self._ground_truth[location] = {}
-        if object_type not in self._ground_truth[location]:
-            self._ground_truth[location][object_type] = set()
-        self._ground_truth[location][object_type].add(obj)
-
-
 def main():
 
     # Initialize environment
-    env = HouseholdEnvironment(LOCATIONS, OBJECTS_AT_LOCATIONS)
+    robot_locations = {'robot1': 'start_loc', 'robot2': 'start_loc'}
+    env = SimpleEnvironment(LOCATIONS, OBJECTS_AT_LOCATIONS, robot_locations)
 
     # Define the objects we're looking for
     objects_of_interest = ["Knife", "Notebook", "Clock", "Mug", "Pillow"]
@@ -134,39 +78,21 @@ def main():
         "object": objects_of_interest,  # Robot knows these objects exist
     }
 
+
     # Create operators
-    move_op = environments.actions.construct_move_operator(
-        move_time=env.get_move_cost_fn()
-    )
-
-    # Search operator with 80% success rate when object is actually present
-    search_op = environments.actions.construct_search_operator(
-        object_find_prob=lambda r, l, o: 0.6 if 'kitchen' in l else 0.4,
-        search_time=lambda r, l: 5.0
-    )
-
-    pick_op = environments.actions.construct_pick_operator(
-        pick_time=lambda r, l, o: 5.0
-    )
-
-    place_op = environments.actions.construct_place_operator(
-        place_time=lambda r, l, o: 5.0
-    )
-
-    from mrppddl.core import Operator, Effect
-    no_op = Operator(
-        name="no-op",
-        parameters=[("?r", "robot")],
-        preconditions=[F("free ?r")],
-        effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r")}),
-            Effect(time=5, resulting_fluents={F("free ?r")}),
-        ],
-        extra_cost=10,
-    )
+    move_time_fn = env.get_skills_cost_fn(skill_name='move')
+    search_time = env.get_skills_cost_fn(skill_name='search')
+    pick_time = env.get_skills_cost_fn(skill_name='pick')
+    place_time = env.get_skills_cost_fn(skill_name='place')
+    object_find_prob=lambda r, l, o: 0.6 if 'kitchen' in l else 0.4
+    move_op = environments.operators.construct_move_operator(move_time_fn)
+    search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
+    pick_op = environments.operators.construct_pick_operator(pick_time)
+    place_op = environments.operators.construct_place_operator(place_time)
+    no_op = environments.operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
 
     # Create simulator
-    sim = Simulator(
+    sim = EnvironmentInterface(
         initial_state,
         objects_by_type,
         [no_op, move_op, search_op, pick_op, place_op],

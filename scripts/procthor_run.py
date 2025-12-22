@@ -8,8 +8,8 @@ from mrppddl.core import Fluent as F, State, get_action_by_name
 import procthor
 import matplotlib.pyplot as plt
 from pathlib import Path
-from environments import plotting, utils
-from environments.core import EnvironmentInterface as Simulator
+from environments import plotting, utils, SimulatedRobot
+from environments.core import EnvironmentInterface
 from mrppddl._bindings import ff_heuristic
 from mrppddl.dashboard import PlannerDashboard
 
@@ -25,15 +25,18 @@ def get_args():
 
 
 def main():
-
     args = get_args()
     args.current_seed = 4001
-    env = environments.procthor.ProcTHOREnvironment(args)
+    robot_locations = {
+        'robot1': 'start',
+        'robot2': 'start',
+    }
+    env = environments.procthor.ProcTHOREnvironment(args, robot_locations=robot_locations)
     objects = ['teddybear_6', 'pencil_17']
     to_loc = 'garbagecan_5'
 
     objects_by_type = {
-        "robot": [f'r{i + 1}' for i in range(args.num_robots)] ,
+        "robot": robot_locations.keys(),
         "location": env.locations.keys(),
         "object": objects,
     }
@@ -42,8 +45,8 @@ def main():
             time=0,
             fluents={
                 F("revealed start"),
-                F("at r1 start"), F("free r1"),
-                F("at r2 start"), F("free r2"),
+                F("at robot1 start"), F("free robot1"),
+                F("at robot2 start"), F("free robot2"),
             },
     )
     # Task: Place all objects at random_location
@@ -54,30 +57,19 @@ def main():
     # goal_fluents = {F(f"at {obj} {to_loc}") for obj in objects}
 
     # Create operators
-    move_time_fn = env.get_move_cost_fn()
-    search_time = lambda r, l: 5
-    pick_time = lambda r, l, o: 5
-    place_time = lambda r, l, o: 5
+    move_time_fn = env.get_skills_cost_fn(skill_name='move')
+    search_time = env.get_skills_cost_fn(skill_name='search')
+    pick_time = env.get_skills_cost_fn(skill_name='pick')
+    place_time = env.get_skills_cost_fn(skill_name='place')
     object_find_prob = lambda r, l, o: 1.0
     move_op = environments.operators.construct_move_operator(move_time_fn)
     search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
     pick_op = environments.operators.construct_pick_operator(pick_time)
     place_op = environments.operators.construct_place_operator(place_time)
-
-    from mrppddl.core import Operator, Effect
-    no_op = Operator(
-        name="no-op",
-        parameters=[("?r", "robot")],
-        preconditions=[F("free ?r")],
-        effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r")}),
-            Effect(time=5, resulting_fluents={F("free ?r")}),
-        ],
-        extra_cost=100,
-    )
+    no_op = environments.operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
 
     # Create simulator
-    sim = Simulator(
+    sim = EnvironmentInterface(
         initial_state,
         objects_by_type,
         [no_op, pick_op, place_op, move_op, search_op],
@@ -96,7 +88,7 @@ def main():
 
         for iteration in range(max_iterations):
             # Check if goal is reached
-            if sim.goal_reached(goal_fluents):
+            if sim.is_goal_reached(goal_fluents):
                 break
 
             # Get available actions

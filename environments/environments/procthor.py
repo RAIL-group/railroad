@@ -2,16 +2,16 @@ import numpy as np
 import itertools
 from procthor import ThorInterface
 from . import utils
-from .environments import BaseEnvironment, Robot, ActionStatus
+from .environments import BaseEnvironment, SimulatedRobot, SkillStatus
 
 
 
 SKILLS_TIME = {
-    'r1': {
+    'robot1': {
         'pick': 15,
         'place': 15,
         'search': 15},
-    'r2': {
+    'robot2': {
         'pick': 10,
         'place': 10,
         'search': 10}
@@ -20,25 +20,24 @@ SKILLS_TIME = {
 
 
 class ProcTHOREnvironment(BaseEnvironment):
-    def __init__(self, args):
+    def __init__(self, args, robot_locations={}):
         super().__init__()
         self.args = args
         self.thor_interface = ThorInterface(self.args)
         self.known_graph, self.grid, self.robot_pose, self.target_object_info = self.thor_interface.gen_map_and_poses()
         self.start_coords = (self.robot_pose.x, self.robot_pose.y)
         self.robots = {
-            f"r{i + 1}": Robot(name=f"r{i + 1}",
-                               pose=self.start_coords,
-                               skills_time=SKILLS_TIME[f'r{i + 1}'],
-                               robot_move_time_fn=self.get_robot_move_cost()) for i in range(args.num_robots)
+            r_name: SimulatedRobot(name=r_name,
+                                   pose=self.start_coords)
+            for r_name in robot_locations.keys()
         }
         self.locations = self._get_location_to_coordinates_dict()
         self.all_objects = self._get_all_objects()
         self.target_object = f'{self.target_object_info['name']}_{self.target_object_info['idxs'][0]}'
 
         self.partial_graph = self.known_graph.get_object_free_graph()
-        self.move_cost = self.get_move_cost_fn()
 
+        self.robot_skill_start_time_and_duration = {robot_name: (0, None) for robot_name in self.robots.keys()}
         self.min_time = None
 
     def _get_all_objects(self):
@@ -78,7 +77,7 @@ class ProcTHOREnvironment(BaseEnvironment):
             loc_to_coords[f"{loc_name}_{container_idx}"] = coords
         return loc_to_coords
 
-    def get_move_cost_fn(self):
+    def _get_move_cost_fn(self):
         inter_container_distances = {}
         for cnt1_idx, cnt2_idx in itertools.combinations(self.known_graph.container_indices, 2):
             loc1 = f"{self.known_graph.get_node_name_by_idx(cnt1_idx)}_{cnt1_idx}"
@@ -90,27 +89,15 @@ class ProcTHOREnvironment(BaseEnvironment):
         def move_cost_fn(robot, loc_from, loc_to):
             if frozenset([loc_from, loc_to]) in inter_container_distances:
                 return inter_container_distances[frozenset([loc_from, loc_to])]
-            loc_from_coords = self.locations[loc_from]
-            loc_to_coords = self.locations[loc_to]
-            cost = utils.get_cost_between_two_coords(self.grid, loc_from_coords, loc_to_coords)
+            coord_from = self.locations[loc_from]
+            coord_to = self.locations[loc_to]
+            cost = utils.get_cost_between_two_coords(self.grid, coord_from, coord_to)
             return cost
         return move_cost_fn
 
 
-    def get_robot_move_cost(self):
-        def move_cost_fn(loc_from_coords, loc_to_coords):
-            cost = utils.get_cost_between_two_coords(self.grid, loc_from_coords, loc_to_coords)
-            return cost
-        return move_cost_fn
-
-    def get_intermediate_coordinates(self, time, loc_from, loc_to, is_coords=False):
-        if not is_coords:
-            loc_from_coords = self.locations[loc_from]
-            loc_to_coords = self.locations[loc_to]
-        else:
-            loc_from_coords = loc_from
-            loc_to_coords = loc_to
-        _, path = utils.get_cost_between_two_coords(self.grid, loc_from_coords, loc_to_coords, return_path=True)
+    def _get_intermediate_coordinates(self, time, coord_from, coord_to):
+        _, path = utils.get_cost_between_two_coords(self.grid, coord_from, coord_to, return_path=True)
         return utils.get_coordinates_at_time(path, time)
 
     def remove_object_from_location(self, obj, location):
@@ -130,44 +117,60 @@ class ProcTHOREnvironment(BaseEnvironment):
         new_obj_idx = self.partial_graph.add_node(obj_node)
         self.partial_graph.add_edge(location_node_idx, new_obj_idx)
 
-    def move_robot(self, robot_name, location):
-        target_coords = self.locations[location]
-        self.robots[robot_name].move(target_coords, self.time)
+    def execute_skill(self, robot_name, skill_name, *args, **kwargs):
+        if skill_name == 'move':
+            loc_from = args[0]
+            loc_to = args[1]
+            target_coords = self.locations[loc_to]
+            self.robots[robot_name].move(target_coords)
 
-    def search_robot(self, robot_name):
-        self.robots[robot_name].search(self.time)
+            # Keep track of move start time and duration
+            move_cost_fn = self._get_move_cost_fn()
+            move_time = move_cost_fn(robot_name, loc_from, loc_to) / 1.0  # robot velocity = 1.0
+            self.robot_skill_start_time_and_duration[robot_name] = (self.time, move_time)
 
-    def pick_robot(self, robot_name):
-        self.robots[robot_name].pick(self.time)
+        elif skill_name in ['pick', 'place', 'search', 'no_op']:
+            getattr(self.robots[robot_name], skill_name)()
 
-    def place_robot(self, robot_name):
-        self.robots[robot_name].place(self.time)
+            # Keep track of skill start time and duration
+            skill_time = self.get_skills_cost_fn(skill_name)(robot_name, *args, **kwargs)
+            self.robot_skill_start_time_and_duration[robot_name] = (self.time, skill_time)
+        else:
+            raise ValueError(f"Skill '{skill_name}' not defined for robot '{robot_name}'.")
 
-    def no_op_robot(self, robot_name):
-        self.robots[robot_name].no_op(self.time)
+
+    def get_skills_cost_fn(self, skill_name: str):
+        if skill_name == 'move':
+            return self._get_move_cost_fn()
+        else:
+            def get_skill_time(robot_name, *args, **kwargs):
+                return SKILLS_TIME[robot_name][skill_name]
+            return get_skill_time
 
     def stop_robot(self, robot_name):
         # If the robot was moving, it's now at a new intermediate location
         robot = self.robots[robot_name]
         if robot.current_action_name == 'move':
-            robot_pose = self.get_intermediate_coordinates(
-                self.min_time, robot.pose, robot.target_pose, is_coords=True)
+            robot_pose = self._get_intermediate_coordinates(
+                self.min_time, robot.pose, robot.target_pose)
             self.locations[f'{robot_name}_loc'] = robot_pose
             robot.pose = robot_pose
 
         self.robots[robot_name].stop()
+        self.robot_skill_start_time_and_duration[robot_name] = (0, None)
 
     def get_robot_that_finishes_first_and_when(self):
-        robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
-        time_to_target = [(n, r.time_to_completion) for n, r in self.robots.items()]
+        robots_progress = np.array(
+            [self.time - start_time for start_time, _ in self.robot_skill_start_time_and_duration.values()])
+        time_to_target = [(r_name, tc) for r_name, (_, tc) in self.robot_skill_start_time_and_duration.items()]
 
-        remaining_times = [(n, t - p) for (n, t), p in zip(time_to_target, robots_progress)]
+        remaining_times = [(r_name, t - p) for (r_name, t), p in zip(time_to_target, robots_progress)]
         _, min_time = min(remaining_times, key=lambda x: x[1])
         min_robots = [n for n, t in remaining_times if t == min_time]
         return min_robots, min_time
 
-    def get_action_status(self, robot_name, action_name):
-        if action_name not in ['move', 'pick', 'place', 'search', 'no-op']:
+    def get_executed_skill_status(self, robot_name, action_name):
+        if action_name not in ['move', 'pick', 'place', 'search', 'no_op']:
             print(f"Action: '{action_name}' not verified in Simulation!")
 
         # For simulation we do the following:
@@ -176,8 +179,8 @@ class ProcTHOREnvironment(BaseEnvironment):
         # If this robot is among the ones finishing first, return DONE
         all_robots_assigned = all(not r.is_free for r in self.robots.values())
         if not all_robots_assigned:
-            return ActionStatus.IDLE
+            return SkillStatus.IDLE
         min_robots, self.min_time = self.get_robot_that_finishes_first_and_when()
         if robot_name not in min_robots:
-            return ActionStatus.RUNNING
-        return ActionStatus.DONE
+            return SkillStatus.RUNNING
+        return SkillStatus.DONE

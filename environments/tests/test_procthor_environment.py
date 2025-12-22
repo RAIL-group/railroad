@@ -9,7 +9,7 @@ import procthor
 import matplotlib.pyplot as plt
 from pathlib import Path
 from environments import plotting, utils
-from environments.core import EnvironmentInterface as Simulator
+from environments.core import EnvironmentInterface
 
 
 def get_args():
@@ -65,10 +65,11 @@ def test_procthor_add_remove_objects():
 
 def test_procthor_move_and_search():
     args = get_args()
-    env = environments.procthor.ProcTHOREnvironment(args)
+    robot_locations = {'robot1': 'start'}
+    env = environments.procthor.ProcTHOREnvironment(args, robot_locations)
 
     objects_by_type = {
-        "robot": [f'r{i+1}' for i in range(args.num_robots)] ,
+        "robot": robot_locations.keys(),
         "location": env.locations.keys(),
         "object": [env.target_object],
     }
@@ -77,18 +78,18 @@ def test_procthor_move_and_search():
             time=0,
             fluents={
                 F("revealed start"),
-                F("at r1 start"), F("free r1"),
-                # F("at r2 start"), F("free r2"),
+                F("at robot1 start"), F("free robot1"),
             },
     )
 
-    move_time_fn = env.get_move_cost_fn()
-    search_time = lambda r, l: 10 if r == "r1" else 15
-    object_find_prob = lambda r, l, o: 1.0
+    move_time_fn = env.get_skills_cost_fn(skill_name='move')
+    search_time = env.get_skills_cost_fn(skill_name='search')
+    object_find_prob = lambda r, loc, o:  1.0
+
     move_op = environments.operators.construct_move_operator(move_time_fn)
     search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
 
-    sim = Simulator(init_state, objects_by_type, [search_op, move_op], env)
+    sim = EnvironmentInterface(init_state, objects_by_type, [search_op, move_op], env)
 
     all_actions = sim.get_actions()
     mcts = MCTSPlanner(all_actions)
@@ -105,7 +106,7 @@ def test_procthor_move_and_search():
             print(sim.state.fluents)
             actions_taken.append(action_name)
 
-        if sim.goal_reached(goal_fluents):
+        if sim.is_goal_reached(goal_fluents):
             print("Goal reached!")
             break
 
@@ -155,12 +156,13 @@ def test_procthor_move_and_search():
 def test_procthor_move_search_pick_place():
     args = get_args()
     args.current_seed = 4001
-    env = environments.procthor.ProcTHOREnvironment(args)
+    robot_locations = {'robot1': 'start'}
+    env = environments.procthor.ProcTHOREnvironment(args, robot_locations)
     objects = ['teddybear_6', 'pencil_17']
     to_loc = 'garbagecan_5'
 
     objects_by_type = {
-        "robot": [f'r{i+1}' for i in range(args.num_robots)],
+        "robot": robot_locations.keys(),
         "location": env.locations.keys(),
         "object": objects,
     }
@@ -169,7 +171,7 @@ def test_procthor_move_search_pick_place():
             time=0,
             fluents={
                 F("revealed start"),
-                F("at r1 start"), F("free r1"),
+                F("at robot1 start"), F("free robot1"),
             },
     )
     # Task: Place all objects at random_location
@@ -179,17 +181,18 @@ def test_procthor_move_search_pick_place():
     goal_fluents = {F(f"at {objects[0]} {to_loc}")}
     # goal_fluents = {F(f"at {obj} {to_loc}") for obj in objects}
 
-    move_time_fn = env.get_move_cost_fn()
-    search_time = lambda r, l: 0 if r == "r1" else 15
-    pick_time = lambda r, l, o: 5 if r == "r1" else 7
-    place_time = lambda r, l, o: 5 if r == "r1" else 7
-    object_find_prob = lambda r, l, o: 1.0
+    move_time_fn = env.get_skills_cost_fn(skill_name='move')
+    search_time = env.get_skills_cost_fn(skill_name='search')
+    pick_time = env.get_skills_cost_fn(skill_name='pick')
+    place_time = env.get_skills_cost_fn(skill_name='place')
+    object_find_prob = lambda r, loc, o:  1.0
+
     move_op = environments.operators.construct_move_operator(move_time_fn)
     search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
     pick_op = environments.operators.construct_pick_operator(pick_time)
     place_op = environments.operators.construct_place_operator(place_time)
 
-    sim = Simulator(init_state, objects_by_type, [move_op, search_op, pick_op, place_op], env)
+    sim = EnvironmentInterface(init_state, objects_by_type, [move_op, search_op, pick_op, place_op], env)
 
     all_actions = sim.get_actions()
     mcts = MCTSPlanner(all_actions)
@@ -203,7 +206,7 @@ def test_procthor_move_search_pick_place():
             print(sim.state.fluents)
             actions_taken.append(action_name)
 
-        if sim.goal_reached(goal_fluents):
+        if sim.is_goal_reached(goal_fluents):
             print("Goal reached!")
             break
 

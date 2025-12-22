@@ -3,7 +3,7 @@ from enum import IntEnum
 import numpy as np
 
 
-class ActionStatus(IntEnum):
+class SkillStatus(IntEnum):
     IDLE = -1
     RUNNING = 0
     DONE = 1
@@ -13,12 +13,6 @@ class BaseEnvironment:
     '''Abstract class for all environments.'''
     def __init__(self):
         self.time = 0.0
-
-    def get_move_cost_fn(self) -> Callable[[str, str, str], float]:
-        raise NotImplementedError()
-
-    def get_intermediate_coordinates(self, time, loc_from, loc_to) -> Union[List, Tuple]:
-        raise NotImplementedError()
 
     def get_objects_at_location(self, location) -> Dict[str, set]:
         '''This is supposed to be a perception method that updates _objects_at_locations. In simulators, we get this
@@ -31,50 +25,36 @@ class BaseEnvironment:
     def add_object_at_location(self, obj, location):
         raise NotImplementedError()
 
-    def move_robot(self, robot_name: str, location: str):
+    def execute_skill(self, robot_name: str, skill_name: str, *args, **kwargs):
         raise NotImplementedError()
 
-    def pick_robot(self, robot_name: str):
+    def get_skills_time_fn(self, skill_name: str) -> Callable[[str, str, str], float]:
         raise NotImplementedError()
 
-    def place_robot(self, robot_name: str):
+    def get_executed_skill_status(self, robot_name: str, skill_name: str) -> SkillStatus:
         raise NotImplementedError()
 
     def stop_robot(self, robot_name: str):
-        raise NotImplementedError()
-
-    def search_robot(self, robot_name: str):
-        raise NotImplementedError()
-
-    def get_action_status(self, robot_name: str, action_name: str) -> ActionStatus:
         raise NotImplementedError()
 
 
 class SimpleEnvironment(BaseEnvironment):
     """Simple household environment for testing multi-object manipulation."""
 
-    def __init__(self, locations, objects_at_locations, num_robots=1):
+    def __init__(self, locations, objects_at_locations, robot_locations):
         super().__init__()
-        SKILLS_TIME = {
-            'robot1': {
-                'pick': 5,
-                'place': 5,
-                'search': 5},
-            'robot2': {
-                'pick': 5,
-                'place': 5,
-                'search': 5}
-        }
+
         self.locations = locations.copy()
         self._ground_truth = objects_at_locations
         self._objects_at_locations = {
             loc: {"object": set()} for loc in locations}
         self.robots = {
-            f"robot{i + 1}": Robot(name=f"robot{i + 1}",
-                                   pose=locations["living_room"].copy(),
-                                   skills_time=SKILLS_TIME[f'robot{i + 1}']) for i in range(num_robots)
+            r_name: SimulatedRobot(name=r_name,
+                                   pose=locations[f"{r_loc}"].copy())
+            for r_name, r_loc in robot_locations.items()
         }
-        self.min_time = None
+        self.robot_skill_start_time_and_duration = {robot_name: (0, None) for robot_name in self.robots.keys()}
+        self.min_time = None  # TODO: change name
 
     def get_objects_at_location(self, location):
         """Return objects at a location (simulates perception)."""
@@ -85,7 +65,7 @@ class SimpleEnvironment(BaseEnvironment):
                 self.add_object_at_location(obj, location)
         return objects_found
 
-    def get_move_cost_fn(self):
+    def _get_move_cost_fn(self):
         """Return a function that computes movement time between locations."""
         def get_move_time(robot, loc_from, loc_to):
             distance = np.linalg.norm(
@@ -94,14 +74,8 @@ class SimpleEnvironment(BaseEnvironment):
             return distance  # 1 unit of distance = 1 second
         return get_move_time
 
-    def get_intermediate_coordinates(self, time, loc_from, loc_to, is_coords=True):
+    def _get_intermediate_coordinates(self, time, coord_from, coord_to):
         """Compute intermediate position during movement (for visualization)."""
-        if not is_coords:
-            coord_from = self.locations[loc_from]
-            coord_to = self.locations[loc_to]
-        else:
-            coord_from = loc_from
-            coord_to = loc_to
         dist = np.linalg.norm(coord_to - coord_from)
         if dist < 0.01:
             return coord_to
@@ -128,44 +102,66 @@ class SimpleEnvironment(BaseEnvironment):
             self._ground_truth[location][object_type] = set()
         self._ground_truth[location][object_type].add(obj)
 
-    def move_robot(self, robot_name, location):
-        target_coords = self.locations[location]
-        self.robots[robot_name].move(target_coords, self.time)
+    def execute_skill(self, robot_name, skill_name, *args, **kwargs):
+        if skill_name == 'move':
+            loc_from = args[0]
+            loc_to = args[1]
+            target_coords = self.locations[loc_to]
+            self.robots[robot_name].move(target_coords)
 
-    def pick_robot(self, robot_name):
-        self.robots[robot_name].pick(self.time)
+            # Keep track of move start time and duration
+            move_cost_fn = self._get_move_cost_fn()
+            move_time = move_cost_fn(robot_name, loc_from, loc_to) / 1.0  # robot velocity = 1.0
+            self.robot_skill_start_time_and_duration[robot_name] = (self.time, move_time)
 
-    def place_robot(self, robot_name):
-        self.robots[robot_name].place(self.time)
+        elif skill_name in ['pick', 'place', 'search', 'no_op']:
+            getattr(self.robots[robot_name], skill_name)()
 
-    def search_robot(self, robot_name):
-        self.robots[robot_name].search(self.time)
+            # Keep track of skill start time and duration
+            skill_time = self.get_skills_cost_fn(skill_name)(robot_name, *args, **kwargs)
+            self.robot_skill_start_time_and_duration[robot_name] = (self.time, skill_time)
+        else:
+            raise ValueError(f"Skill '{skill_name}' not defined for robot '{robot_name}'.")
+
+    def get_skills_cost_fn(self, skill_name):
+        if skill_name == 'move':
+            return self._get_move_cost_fn()
+        else:
+            # Define fixed times for other skills
+            skills_costs = {
+                'pick': 5.0,
+                'place': 5.0,
+                'search': 5.0,
+                'no_op': 5.0,
+            }
+            def get_skill_time(robot_name, *args, **kwargs):
+                return skills_costs[skill_name]
+            return get_skill_time
 
     def stop_robot(self, robot_name):
         # If the robot was moving, it's now at a new intermediate location
         robot = self.robots[robot_name]
         if robot.current_action_name == 'move':
-            robot_pose = self.get_intermediate_coordinates(
-                self.min_time, robot.pose, robot.target_pose, is_coords=True)
+            robot_pose = self._get_intermediate_coordinates(
+                self.min_time, robot.pose, robot.target_pose)
             self.locations[f'{robot_name}_loc'] = robot_pose
             robot.pose = robot_pose
 
         self.robots[robot_name].stop()
-
-    def no_op_robot(self, robot_name):
-        self.robots[robot_name].no_op(self.time)
+        self.robot_skill_start_time_and_duration[robot_name] = (0, None)
 
     def get_robot_that_finishes_first_and_when(self):
-        robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
-        time_to_target = [(n, r.time_to_completion) for n, r in self.robots.items()]
+        robots_progress = np.array(
+            [self.time - start_time for start_time, _ in self.robot_skill_start_time_and_duration.values()])
+        time_to_target = [(r_name, tc) for r_name, (_, tc) in self.robot_skill_start_time_and_duration.items()]
 
-        remaining_times = [(n, t - p) for (n, t), p in zip(time_to_target, robots_progress)]
+        remaining_times = [(r_name, t - p) for (r_name, t), p in zip(time_to_target, robots_progress)]
         _, min_time = min(remaining_times, key=lambda x: x[1])
         min_robots = [n for n, t in remaining_times if t == min_time]
         return min_robots, min_time
 
-    def get_action_status(self, robot_name, action_name):
-        if action_name not in ['move', 'pick', 'place', 'search', 'no-op']:
+    def get_executed_skill_status(self, robot_name, action_name):
+        if action_name not in ['move', 'pick', 'place', 'search', 'no_op']:
             print(f"Action: '{action_name}' not verified in Simulation!")
 
         # For simulation we do the following:
@@ -174,66 +170,46 @@ class SimpleEnvironment(BaseEnvironment):
         # If this robot is among the ones finishing first, return DONE
         all_robots_assigned = all(not r.is_free for r in self.robots.values())
         if not all_robots_assigned:
-            return ActionStatus.IDLE
+            return SkillStatus.IDLE
         min_robots, self.min_time = self.get_robot_that_finishes_first_and_when()
         if robot_name not in min_robots:
-            return ActionStatus.RUNNING
-        return ActionStatus.DONE
+            return SkillStatus.RUNNING
+        return SkillStatus.DONE
 
 
-class Robot:
-    def __init__(self, name: str, pose=None, skills_time: Dict[str, float] = None, robot_move_time_fn=None):
+class SimulatedRobot:
+    def __init__(self, name: str, pose=None):
         self.name = name
         self.current_action_name = None
         self.pose = pose
         self.target_pose = None
         self.is_free = True
-        self.skills_time = skills_time
-        self.robot_move_time_fn = robot_move_time_fn
-        self.start_time = 0.0
-        self.time_to_completion = None
-        self.robot_velocity = 1.0
 
     def __repr__(self):
-        return f"Robot(name={self.name}, pose={self.pose})"
+        return f"SimulatedRobot(name={self.name}, pose={self.pose})"
 
-    def move(self, new_pose, start_time):
+    def move(self, new_pose):
         self.current_action_name = 'move'
         self.is_free = False
-        self.start_time = start_time
         self.target_pose = new_pose
-        if not self.robot_move_time_fn:
-            self.time_to_completion = np.linalg.norm(np.array(self.pose)[:2] - np.array(new_pose)[:2]) / self.robot_velocity
-        else:
-            self.time_to_completion = self.robot_move_time_fn(self.pose, new_pose) / self.robot_velocity
 
-    def pick(self, start_time):
+    def pick(self):
         self.current_action_name = 'pick'
         self.is_free = False
-        self.start_time = start_time
-        self.time_to_completion = self.skills_time['pick']
 
-    def place(self, start_time):
+    def place(self):
         self.current_action_name = 'place'
         self.is_free = False
-        self.start_time = start_time
-        self.time_to_completion = self.skills_time['place']
 
-    def search(self, start_time):
+    def search(self):
         self.current_action_name = 'search'
         self.is_free = False
-        self.start_time = start_time
-        self.time_to_completion = self.skills_time['search']
 
-    def no_op(self, start_time):
-        self.current_action_name = 'no-op'
+    def no_op(self):
+        self.current_action_name = 'no_op'
         self.is_free = False
-        self.start_time = start_time
-        self.time_to_completion = 5.0  # TODO: change to skills time
 
     def stop(self):
         self.current_action_name = None
         self.is_free = True
         self.target_pose = None
-        self.start_time = 0.0
-        self.time_to_completion = None

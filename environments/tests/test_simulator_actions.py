@@ -3,8 +3,8 @@ import numpy as np
 from mrppddl.core import Fluent as F, State, get_action_by_name
 from mrppddl.planner import MCTSPlanner
 import environments
-from environments import BaseEnvironment, Robot, ActionStatus
-from environments.core import EnvironmentInterface as Simulator
+from environments import SimpleEnvironment, SimulatedRobot, SkillStatus
+from environments.core import EnvironmentInterface
 
 
 LOCATIONS = {
@@ -32,117 +32,19 @@ SKILLS_TIME = {
         'search': 10}
 }
 
-
-class TestEnvironment(BaseEnvironment):
-    __test__ = False
-    '''This is how the environment wrapper should look like for any simulator.'''
-    def __init__(self, locations, object_oracle_locations, num_robots=2):
-        super().__init__()
-        self.locations = locations
-        self._object_oracle_locations = object_oracle_locations
-        self._objects_at_locations = {loc: {"object": set()} for loc in locations}
-        self.robots = {
-            f"r{i + 1}": Robot(name=f"r{i + 1}",
-                               pose=locations["start"].copy(),
-                               skills_time=SKILLS_TIME[f'r{i + 1}']) for i in range(num_robots)
-        }
-
-    def get_objects_at_location(self, location):
-        objects_found = self._object_oracle_locations.get(location, {})
-        for obj in objects_found:
-            # update internal state
-            self.add_object_at_location(obj, location)
-        return objects_found
-
-    def get_move_cost_fn(self):
-        def get_move_time(robot, loc_from, loc_to):
-            distance = np.linalg.norm(self.locations[loc_from] - self.locations[loc_to])
-            return distance
-        return get_move_time
-
-    def get_intermediate_coordinates(self, time, loc_from, loc_to, is_coords=False):
-        if not is_coords:
-            coord_from = self.locations[loc_from]
-            coord_to = self.locations[loc_to]
+class TestEnvironment(SimpleEnvironment):
+    def get_skills_cost_fn(self, skill_name: str):
+        if skill_name == 'move':
+            return super()._get_move_cost_fn()
         else:
-            coord_from = loc_from
-            coord_to = loc_to
-        direction = (coord_to - coord_from) / np.linalg.norm(coord_to - coord_from)
-        new_coord = coord_from + direction * time
-        return new_coord
-
-    def remove_object_from_location(self, obj, location, object_type="object"):
-        self._objects_at_locations[location][object_type].discard(obj)
-
-    def add_object_at_location(self, obj, location, object_type="object"):
-        self._objects_at_locations[location][object_type].add(obj)
-
-    def move_robot(self, robot_name, location):
-        target_coords = self.locations[location]
-        self.robots[robot_name].move(target_coords, self.time)
-
-    def pick_robot(self, robot_name):
-        self.robots[robot_name].pick(self.time)
-
-    def place_robot(self, robot_name):
-        self.robots[robot_name].place(self.time)
-
-    def search_robot(self, robot_name):
-        self.robots[robot_name].search(self.time)
-
-    def stop_robot(self, robot_name):
-        self.robots[robot_name].stop()
-
-    def _get_move_status(self, robot_name):
-        all_robots_assigned = all(not r.is_free for r in self.robots.values())
-        if not all_robots_assigned:
-            return ActionStatus.IDLE
-        robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
-        time_to_target = [(n, np.linalg.norm(r.pose - r.target_pose)) for n, r in self.robots.items()]
-
-        remaining_times = [(n, t - p) for (n, t), p in zip(time_to_target, robots_progress)]
-        min_robot, min_distance = min(remaining_times, key=lambda x: x[1])
-
-        if min_robot != robot_name:
-            return ActionStatus.RUNNING
-
-        # compute intermediate pose for all robots
-        for r_name in self.robots:
-            r_pose = self.get_intermediate_coordinates(
-                min_distance, self.robots[r_name].pose, self.robots[r_name].target_pose, is_coords=True)
-            self.robots[r_name].pose = r_pose
-            self.locations[f'{r_name}_loc'] = r_pose
-
-        # stop the robot that has reached its target
-        self.robots[robot_name].stop()
-        return ActionStatus.DONE
-
-    def _get_pick_place_search_status(self, robot_name, action_name):
-        all_robots_assigned = all(not r.is_free for r in self.robots.values())
-        if not all_robots_assigned:
-            return ActionStatus.IDLE
-        robots_progress = np.array([self.time - r.start_time for r in self.robots.values()])
-        time_to_action = [(n, r.skills_time[action_name]) for n, r in self.robots.items()]
-
-        remaining_times = [(n, t - p) for (n, t), p in zip(time_to_action, robots_progress)]
-        min_robot, _ = min(remaining_times, key=lambda x: x[1])
-
-        if min_robot != robot_name:
-            return ActionStatus.RUNNING
-
-        self.stop_robot(robot_name)
-        return ActionStatus.DONE
-
-    def get_action_status(self, robot_name, action_name):
-        if action_name == 'move':
-            return self._get_move_status(robot_name)
-        if action_name in ['pick', 'place', 'search']:
-            return self._get_pick_place_search_status(robot_name, action_name)
-        raise ValueError(f"Unknown action name: {action_name}")
+            def get_skill_time(robot_name, *args, **kwargs):
+                return SKILLS_TIME[robot_name][skill_name]
+            return get_skill_time
 
 
 def test_move_action():
     '''Test that move action is interrupted correctly.'''
+    robot_locations = {"r1": "start", "r2": "start"}
     objects_by_type = {
         "robot": {"r1", "r2"},
         "location": {"start", "roomA", "roomB", "roomC"},
@@ -151,16 +53,19 @@ def test_move_action():
     initial_state = State(
         time=0,
         fluents={
-            F("at", "r1", "start"),
-            F("at", "r2", "start"),
+            F("at", "r1", robot_locations["r1"]),
+            F("at", "r2", robot_locations["r2"]),
             F("free", "r1"),
             F("free", "r2"),
         },
     )
-    env = TestEnvironment(locations=LOCATIONS, object_oracle_locations=OBJECTS_AT_LOCATIONS)
-    move_op = environments.operators.construct_move_operator(move_time=env.get_move_cost_fn())
+    env = SimpleEnvironment(
+        locations=LOCATIONS, objects_at_locations=OBJECTS_AT_LOCATIONS, robot_locations=robot_locations)
 
-    sim = Simulator(initial_state, objects_by_type, [move_op], env)
+    move_time_fn = env.get_skills_cost_fn(skill_name='move')
+    move_op = environments.operators.construct_move_operator(move_time_fn)
+
+    sim = EnvironmentInterface(initial_state, objects_by_type, [move_op], env)
     actions = sim.get_actions()
     a1 = get_action_by_name(actions, "move r1 start roomA")
     sim.advance(a1)
@@ -181,14 +86,12 @@ def test_move_action():
 
 
 def test_search_action():
+    robot_locations = {"r1": "start", "r2": "start"}
     objects_by_type = {
         "robot": {"r1", "r2"},
         "location": {"start", "roomA", "roomB", "roomC"},
         "object": {"objA", "objB"}
     }
-
-    search_time = lambda r, l: SKILLS_TIME[r]['search']  # noqa: E731, E741
-    object_find_prob = lambda r, l, o: 0.8 if l == "roomA" else 0.2  # noqa: E731, E741
 
     initial_state = State(
         time=0,
@@ -199,11 +102,14 @@ def test_search_action():
             F("free", "r2"),
         },
     )
-    env = TestEnvironment(locations=LOCATIONS, object_oracle_locations=OBJECTS_AT_LOCATIONS)
-    search_op = environments.operators.construct_search_operator(object_find_prob=object_find_prob,
-                                                                 search_time=search_time)
+    env = TestEnvironment(
+        locations=LOCATIONS, objects_at_locations=OBJECTS_AT_LOCATIONS, robot_locations=robot_locations)
 
-    sim = Simulator(initial_state, objects_by_type, [search_op], env)
+    search_time = env.get_skills_cost_fn(skill_name='search')
+    object_find_prob = lambda r, l, o: 0.8 if l == "roomA" else 0.2  # noqa: E731, E741
+    search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
+
+    sim = EnvironmentInterface(initial_state, objects_by_type, [search_op], env)
 
     actions = sim.get_actions()
     a1 = get_action_by_name(actions, "search r1 roomA objA")
@@ -233,14 +139,12 @@ def test_search_action():
 
 
 def test_pick_and_place_action():
+    robot_locations = {"r1": "start", "r2": "start"}
     objects_by_type = {
         "robot": {"r1", "r2"},
         "location": {"start", "roomA", "roomB", "roomC"},
         "object": {"objA", "objB"}
     }
-
-    pick_time = lambda r, l, o: SKILLS_TIME[r]['pick']  # noqa: E731, E741
-    place_time = lambda r, l, o: SKILLS_TIME[r]['place']  # noqa: E731, E741
 
     initial_state = State(
         time=0,
@@ -251,11 +155,15 @@ def test_pick_and_place_action():
             F("free", "r1"), F("free", "r2"),
         },
     )
-    env = TestEnvironment(locations=LOCATIONS, object_oracle_locations=OBJECTS_AT_LOCATIONS)
-    pick_op = environments.operators.construct_pick_operator_nonblocking(pick_time=pick_time)
-    place_op = environments.operators.construct_place_operator_nonblocking(place_time=place_time)
+    env = TestEnvironment(
+        locations=LOCATIONS, objects_at_locations=OBJECTS_AT_LOCATIONS, robot_locations=robot_locations)
 
-    sim = Simulator(initial_state, objects_by_type, [pick_op, place_op], env)
+    pick_time = env.get_skills_cost_fn(skill_name='pick')
+    place_time = env.get_skills_cost_fn(skill_name='place')
+    pick_op = environments.operators.construct_pick_operator_nonblocking(pick_time)
+    place_op = environments.operators.construct_place_operator_nonblocking(place_time)
+
+    sim = EnvironmentInterface(initial_state, objects_by_type, [pick_op, place_op], env)
 
     actions = sim.get_actions()
     a1 = get_action_by_name(actions, "pick r1 roomA objA")
@@ -321,25 +229,26 @@ def test_pick_and_place_action():
     assert len(sim.ongoing_actions) == 1
 
 
-OTHER_LOCATIONS = {
-    "start": np.array([0, 0]),
-    "bed_2": np.array([10, 0]),
-    "dresser_3": np.array([0, 15]),
-    "desk_4": np.array([15, 15]),
-    "garbagecan_5": np.array([15, 0]),
-}
-
-OTHER_OBJECTS_AT_LOCATIONS = {
-    "start": dict(),
-    "bed_2": {"object": {"teddybear_6"}},
-    "dresser_3": dict(),
-    "desk_4": {"object": {"pencil_17"}},
-    "garbagecan_5": dict(),
-}
-
 
 # @pytest.mark.timeout(15)
 def test_no_oscillation_pick_place_move_search():
+    robot_locations = {"r1": "start"}
+
+    OTHER_LOCATIONS = {
+        "start": np.array([0, 0]),
+        "bed_2": np.array([10, 0]),
+        "dresser_3": np.array([0, 15]),
+        "desk_4": np.array([15, 15]),
+        "garbagecan_5": np.array([15, 0]),
+    }
+
+    OTHER_OBJECTS_AT_LOCATIONS = {
+        "start": dict(),
+        "bed_2": {"object": {"teddybear_6"}},
+        "dresser_3": dict(),
+        "desk_4": {"object": {"pencil_17"}},
+        "garbagecan_5": dict(),
+    }
     objects_by_type = {
         "robot": ["r1"],
         "location": ["start", "bed_2", "dresser_3", "desk_4", "garbagecan_5"],
@@ -364,19 +273,21 @@ def test_no_oscillation_pick_place_move_search():
         # F("at pencil_17 bed_2"),  # used to osccillate before fix
     }
 
-    env = TestEnvironment(locations=OTHER_LOCATIONS, object_oracle_locations=OTHER_OBJECTS_AT_LOCATIONS, num_robots=1)
+    env = TestEnvironment(locations=OTHER_LOCATIONS,
+                          objects_at_locations=OTHER_OBJECTS_AT_LOCATIONS, robot_locations=robot_locations)
 
-    move_time_fn = env.get_move_cost_fn()
-    search_time = lambda r, l: 10 if r == "r1" else 15
-    pick_time = lambda r, l, o: 5 if r == "r1" else 7
-    place_time = lambda r, l, o: 5 if r == "r1" else 7
-    object_find_prob = lambda r, l, o: 1.0
+    move_time_fn = env.get_skills_cost_fn(skill_name='move')
+    search_time = env.get_skills_cost_fn(skill_name='search')
+    pick_time = env.get_skills_cost_fn(skill_name='pick')
+    place_time = env.get_skills_cost_fn(skill_name='place')
+    object_find_prob = lambda r, loc, o:  1.0
+
     move_op = environments.operators.construct_move_operator(move_time_fn)
     search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
     pick_op = environments.operators.construct_pick_operator(pick_time)
     place_op = environments.operators.construct_place_operator(place_time)
 
-    sim = Simulator(initial_state, objects_by_type, [move_op, search_op, pick_op, place_op], env)
+    sim = EnvironmentInterface(initial_state, objects_by_type, [move_op, search_op, pick_op, place_op], env)
 
     all_actions = sim.get_actions()
     mcts = MCTSPlanner(all_actions)
@@ -396,9 +307,9 @@ def test_no_oscillation_pick_place_move_search():
             # print(sim.state.fluents)
             actions_taken.append(action_name)
 
-        if sim.goal_reached(goal_fluents):
+        if sim.is_goal_reached(goal_fluents):
             print("Goal reached!")
             break
 
     print(f"Actions taken: {actions_taken}")
-    assert sim.goal_reached(goal_fluents)
+    assert sim.is_goal_reached(goal_fluents)

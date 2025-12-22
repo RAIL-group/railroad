@@ -8,7 +8,8 @@ but uses only MCTS with a predefined state where objects have already been found
 import numpy as np
 from mrppddl.core import Fluent as F, State
 from mrppddl.planner import MCTSPlanner
-from environments.simulator.actions import (
+from environments.operators import (
+    construct_no_op_operator,
     construct_move_operator,
     construct_pick_operator,
     construct_place_operator,
@@ -62,16 +63,7 @@ def mcts_looping_with_found_objects():
     }
 
     # Create operators
-    from mrppddl.core import Operator, Effect
-    no_op = Operator(
-        name="no-op",
-        parameters=[("?r", "robot")],
-        preconditions=[F("free ?r")],
-        effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r")}),
-            Effect(time=200, resulting_fluents={F("free ?r")}),
-        ],
-    )
+    no_op = construct_no_op_operator(no_op_time=200.0)
     move_op = construct_move_operator(move_time=get_move_time)
     pick_op = construct_pick_operator(pick_time=3.0)
     place_op = construct_place_operator(place_time=3.0)
