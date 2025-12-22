@@ -233,10 +233,10 @@ def build_benchmark_summary_line(bench_name: str, bench_stats: dict, description
     # Build status string with colored symbols
     status_parts = []
     if n_success > 0:
-        status_parts.append(html.Span(f"{SYMBOL_SUCCESS}{n_success}", style={"color": COLOR_SUCCESS}))
+        status_parts.append(html.Span(f"{SYMBOL_SUCCESS}{n_success}", className="status-success"))
         status_parts.append("/")
     if n_failure > 0:
-        status_parts.append(html.Span(f"{SYMBOL_FAILURE}{n_failure}", style={"color": COLOR_FAILURE}))
+        status_parts.append(html.Span(f"{SYMBOL_FAILURE}{n_failure}", className="status-failure"))
         status_parts.append("/")
 
     # Benchmark line
@@ -244,8 +244,8 @@ def build_benchmark_summary_line(bench_name: str, bench_stats: dict, description
         f"  {bench_name}: ",
         *status_parts,
         f"{n_total} ",
-        html.Span(f"({success_rate:.1%})", style={"color": TEXT_DIMMED}),
-    ], style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR})
+        html.Span(f"({success_rate:.1%})", className="text-dimmed"),
+    ], className="pre-text text-base")
 
 
 def build_experiment_summary_block(exp_name: str, summary: dict, metadata: dict, creation_time=None, include_link: bool = False) -> list:
@@ -268,22 +268,13 @@ def build_experiment_summary_block(exp_name: str, summary: dict, metadata: dict,
     # Experiment name
     if include_link:
         children.append(html.Div([
-            html.Span("# ", style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "color": TEXT_COLOR}),
-            dcc.Link(
-                exp_name,
-                href=f"/experiment/{exp_name}",
-                style={
-                    "fontFamily": FONT_FAMILY,
-                    "fontSize": f"{FONT_SIZE}px",
-                    "textDecoration": "underline",
-                    "color": CATPPUCCIN_BLUE,
-                },
-            ),
-        ], style={"margin": "0", "padding": "0"}))
+            html.Span("# ", className="pre-text text-base"),
+            dcc.Link(exp_name, href=f"/experiment/{exp_name}", className="link"),
+        ], className="text-base"))
     else:
         children.append(html.Pre(
             f"# {exp_name}",
-            style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR, "fontWeight": "bold"}
+            className="pre-text text-base text-bold"
         ))
 
     # Creation time (if provided)
@@ -291,23 +282,23 @@ def build_experiment_summary_block(exp_name: str, summary: dict, metadata: dict,
         creation_time_str = creation_time.strftime("%Y-%m-%d %H:%M:%S")
         children.append(html.Pre(
             f"  Created: {creation_time_str}",
-            style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_DIMMED}
+            className="pre-text text-base text-dimmed"
         ))
 
     # Total runs and success rate
-    success_rate_color = COLOR_SUCCESS if summary['success_rate'] > 0.8 else (COLOR_ERROR if summary['success_rate'] > 0.5 else COLOR_FAILURE)
+    success_rate_class = "status-success" if summary['success_rate'] > 0.8 else ("status-error" if summary['success_rate'] > 0.5 else "status-failure")
     children.append(html.Pre([
         "  Total runs: ",
         html.Span(f"{summary['total_runs']}", style={"color": CATPPUCCIN_SAPPHIRE}),
         " | Success rate: ",
-        html.Span(f"{summary['success_rate']:.1%}", style={"color": success_rate_color}),
-    ], style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}))
+        html.Span(f"{summary['success_rate']:.1%}", className=success_rate_class),
+    ], className="pre-text text-base"))
 
     # Benchmarks
     if summary.get("benchmarks"):
         children.append(html.Pre(
             "  Benchmarks:",
-            style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}
+            className="pre-text text-base"
         ))
 
         for bench_name in summary["benchmarks"]:
@@ -321,7 +312,7 @@ def build_experiment_summary_block(exp_name: str, summary: dict, metadata: dict,
             if description:
                 children.append(html.Pre(
                     f"      {description}",
-                    style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_SECONDARY, "fontStyle": "italic"}
+                    className="pre-text text-base text-secondary"
                 ))
 
     return children
@@ -837,6 +828,69 @@ def create_violin_plots_by_benchmark(df: pd.DataFrame) -> list[dict]:
 
 
 # =============================================================================
+# STYLE CLASSES
+# =============================================================================
+
+# CSS class definitions to be injected into the app
+STYLE_CLASSES = """
+.text-base {
+    margin: 0;
+    padding: 0;
+    color: """ + TEXT_COLOR + """;
+}
+
+.text-dimmed {
+    color: """ + TEXT_DIMMED + """;
+}
+
+.text-secondary {
+    color: """ + TEXT_SECONDARY + """;
+    font-style: italic;
+}
+
+.text-bold {
+    font-weight: bold;
+}
+
+.text-underline {
+    text-decoration: underline;
+}
+
+.link {
+    color: """ + CATPPUCCIN_BLUE + """;
+    text-decoration: underline;
+}
+
+.pre-text {
+    font-family: """ + FONT_FAMILY + """;
+    font-size: """ + str(FONT_SIZE) + """px;
+    margin: 0;
+    padding: 0;
+}
+
+.status-success {
+    color: """ + COLOR_SUCCESS + """;
+    font-weight: bold;
+}
+
+.status-failure {
+    color: """ + COLOR_FAILURE + """;
+    font-weight: bold;
+}
+
+.status-error {
+    color: """ + COLOR_ERROR + """;
+    font-weight: bold;
+}
+
+.status-timeout {
+    color: """ + COLOR_TIMEOUT + """;
+    font-weight: bold;
+}
+"""
+
+
+# =============================================================================
 # LAYOUT FUNCTIONS
 # =============================================================================
 
@@ -845,7 +899,7 @@ def create_log_modal() -> dbc.Modal:
     return dbc.Modal(
         [
             dbc.ModalHeader(
-                dbc.ModalTitle(id="modal-title", style={"fontFamily": FONT_FAMILY}),
+                dbc.ModalTitle(id="modal-title", className="pre-text"),
             ),
             dbc.ModalBody(
                 html.Div(id="modal-body-content"),
@@ -874,6 +928,7 @@ def create_main_layout() -> html.Div:
         style={
             "padding": "20px",
             "fontFamily": FONT_FAMILY,
+            "fontSize": f"{FONT_SIZE}px",
             "backgroundColor": CATPPUCCIN_BASE,
             "color": TEXT_COLOR,
             "minHeight": "100vh",
@@ -896,12 +951,9 @@ def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataF
         List of Dash components
     """
     children = [
-        dcc.Link("← Back to Experiment List", href="/", style={
-            "fontFamily": FONT_FAMILY,
-            "fontSize": f"{FONT_SIZE}px",
+        dcc.Link("← Back to Experiment List", href="/", className="link", style={
             "marginBottom": "10px",
             "display": "block",
-            "color": CATPPUCCIN_BLUE,
         }),
         html.Br(),
     ]
@@ -915,24 +967,23 @@ def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataF
         # Experiment name
         summary_children.append(html.Pre(
             f"# Benchmark Results: {experiment_name}",
-            style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR, "fontWeight": "bold",                         "textDecoration": "underline",
-}
+            className="pre-text text-base text-bold text-underline"
         ))
 
         # Total runs and success rate
-        success_rate_color = COLOR_SUCCESS if summary['success_rate'] > 0.8 else (COLOR_ERROR if summary['success_rate'] > 0.5 else COLOR_FAILURE)
+        success_rate_class = "status-success" if summary['success_rate'] > 0.8 else ("status-error" if summary['success_rate'] > 0.5 else "status-failure")
         summary_children.append(html.Pre([
             "  Total runs: ",
             html.Span(f"{summary['total_runs']}", style={"color": CATPPUCCIN_SAPPHIRE}),
             " | Success rate: ",
-            html.Span(f"{summary['success_rate']:.1%}", style={"color": success_rate_color}),
-        ], style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}))
+            html.Span(f"{summary['success_rate']:.1%}", className=success_rate_class),
+        ], className="pre-text text-base"))
 
         # Benchmarks with clickable links
         if summary.get("benchmarks"):
             summary_children.append(html.Pre(
                 "  Benchmarks:",
-                style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}
+                className="pre-text text-base"
             ))
 
             for bench_name in summary["benchmarks"]:
@@ -949,32 +1000,27 @@ def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataF
                 # Build status string with colored symbols
                 status_parts = []
                 if n_success > 0:
-                    status_parts.append(html.Span(f"{SYMBOL_SUCCESS}{n_success}", style={"color": COLOR_SUCCESS}))
+                    status_parts.append(html.Span(f"{SYMBOL_SUCCESS}{n_success}", className="status-success"))
                     status_parts.append("/")
                 if n_failure > 0:
-                    status_parts.append(html.Span(f"{SYMBOL_FAILURE}{n_failure}", style={"color": COLOR_FAILURE}))
+                    status_parts.append(html.Span(f"{SYMBOL_FAILURE}{n_failure}", className="status-failure"))
                     status_parts.append("/")
 
                 # Benchmark line with clickable link
                 summary_children.append(html.Pre([
                     "    ",
-                    html.A(bench_name, href=f"#benchmark-{bench_name}", style={
-                        "fontFamily": FONT_FAMILY,
-                        "fontSize": f"{FONT_SIZE}px",
-                        "color": CATPPUCCIN_BLUE,
-                        "textDecoration": "underline",
-                    }),
+                    html.A(bench_name, href=f"#benchmark-{bench_name}", className="link"),
                     " ",
                     *status_parts,
                     f"{n_total} ",
-                    html.Span(f"({success_rate:.1%})", style={"color": TEXT_DIMMED}),
-                ], style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}))
+                    html.Span(f"({success_rate:.1%})", className="text-dimmed"),
+                ], className="pre-text text-base"))
 
                 # Description if available
                 if description:
                     summary_children.append(html.Pre(
                         f"      {description}",
-                        style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_SECONDARY, "fontStyle": "italic"}
+                        className="pre-text text-base text-secondary"
                     ))
 
         children.extend(summary_children)
@@ -982,7 +1028,7 @@ def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataF
         # Fallback if no summary available
         children.append(html.Pre(
             f"# Benchmark Results: {experiment_name}",
-            style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR, "fontWeight": "bold"}
+            className="pre-text text-base text-bold"
         ))
 
     children.append(html.Br())
@@ -1006,32 +1052,32 @@ def build_content_layout(experiment_name: str, figures: list[dict], df: pd.DataF
             # Build status string
             status_parts = []
             if n_success > 0:
-                status_parts.append(html.Span(f"{SYMBOL_SUCCESS}{n_success}", style={"color": COLOR_SUCCESS}))
+                status_parts.append(html.Span(f"{SYMBOL_SUCCESS}{n_success}", className="status-success"))
                 status_parts.append("/")
             if n_failure > 0:
-                status_parts.append(html.Span(f"{SYMBOL_FAILURE}{n_failure}", style={"color": COLOR_FAILURE}))
+                status_parts.append(html.Span(f"{SYMBOL_FAILURE}{n_failure}", className="status-failure"))
                 status_parts.append("/")
 
             # Benchmark header with anchor
             children.append(html.Div(id=f"benchmark-{bench_name}"))
             children.append(html.Pre([
-                html.Span(f"## {bench_name}", style={"fontWeight": "bold", "textDecoration": "underline"}),
+                html.Span(f"## {bench_name}", className="text-bold text-underline"),
                 " ",
                 *status_parts,
                 f"{n_total} ",
-                html.Span(f"({success_rate:.1%})", style={"color": TEXT_DIMMED}),
-            ], style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}))
+                html.Span(f"({success_rate:.1%})", className="text-dimmed"),
+            ], className="pre-text text-base"))
 
             if description:
                 children.append(html.Pre(
                     f"   {description}",
-                    style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_SECONDARY, "fontStyle": "italic"}
+                    className="pre-text text-base text-secondary"
                 ))
 
         children.append(html.Br())
         children.append(html.Pre(
             "Plan Cost",
-            style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}
+            className="pre-text text-base"
         ))
         children.extend([
             html.Div([
@@ -1060,7 +1106,7 @@ def build_experiment_list_layout(experiments: list[dict]) -> list:
         return [
             html.Pre(
                 "No experiments found in MLflow database.",
-                style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "color": COLOR_FAILURE},
+                className="pre-text status-failure"
             )
         ]
 
@@ -1070,7 +1116,7 @@ def build_experiment_list_layout(experiments: list[dict]) -> list:
     # Header
     children.append(html.Pre(
         f"Benchmark Experiments (showing {len(experiments)} most recent)",
-        style={"fontFamily": FONT_FAMILY, "fontSize": f"{FONT_SIZE}px", "margin": "0", "padding": "0", "color": TEXT_COLOR}
+        className="pre-text text-base"
     ))
     children.append(html.Br())
 
@@ -1105,6 +1151,30 @@ app = dash.Dash(
     external_stylesheets=[dbc.themes.BOOTSTRAP],
     suppress_callback_exceptions=True,
 )
+
+# Inject custom CSS styles
+app.index_string = '''
+<!DOCTYPE html>
+<html>
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        {%favicon%}
+        {%css%}
+        <style>
+''' + STYLE_CLASSES + '''
+        </style>
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+    </body>
+</html>
+'''
 
 app.layout = create_main_layout()
 
@@ -1170,27 +1240,27 @@ def refresh_data(pathname):
 
                 return content, store_data
             except ValueError as e:
-                return [html.Div(
+                return [html.Pre(
                     f"Experiment not found: {e}",
-                    style={"color": "red", "fontFamily": FONT_FAMILY}
+                    className="pre-text status-failure"
                 )], {}
 
         else:
             # Unknown path
-            return [html.Div(
+            return [html.Pre(
                 f"Page not found: {pathname}",
-                style={"color": "red", "fontFamily": FONT_FAMILY}
+                className="pre-text status-failure"
             )], {}
 
     except Exception as e:
         import traceback
         error_detail = traceback.format_exc()
         return [html.Div([
-            html.H3("Error loading data:", style={"color": "red", "fontFamily": FONT_FAMILY}),
-            html.Pre(str(e), style={"fontFamily": FONT_FAMILY}),
+            html.H3("Error loading data:", className="status-failure"),
+            html.Pre(str(e), className="pre-text text-base"),
             html.Details([
-                html.Summary("Full traceback", style={"fontFamily": FONT_FAMILY}),
-                html.Pre(error_detail, style={"fontFamily": FONT_FAMILY, "fontSize": "10px"}),
+                html.Summary("Full traceback", className="pre-text text-base"),
+                html.Pre(error_detail, className="pre-text", style={"fontSize": "10px"}),
             ]),
         ])], {}
 
