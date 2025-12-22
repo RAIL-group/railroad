@@ -46,7 +46,7 @@ def test_move_action():
     '''Test that move action is interrupted correctly.'''
     robot_locations = {"r1": "start", "r2": "start"}
     objects_by_type = {
-        "robot": {"r1", "r2"},
+        "robot": robot_locations.keys(),
         "location": {"start", "roomA", "roomB", "roomC"},
     }
 
@@ -88,7 +88,7 @@ def test_move_action():
 def test_search_action():
     robot_locations = {"r1": "start", "r2": "start"}
     objects_by_type = {
-        "robot": {"r1", "r2"},
+        "robot": robot_locations.keys(),
         "location": {"start", "roomA", "roomB", "roomC"},
         "object": {"objA", "objB"}
     }
@@ -141,7 +141,7 @@ def test_search_action():
 def test_pick_and_place_action():
     robot_locations = {"r1": "start", "r2": "start"}
     objects_by_type = {
-        "robot": {"r1", "r2"},
+        "robot": robot_locations.keys(),
         "location": {"start", "roomA", "roomB", "roomC"},
         "object": {"objA", "objB"}
     }

@@ -91,7 +91,7 @@ if __name__ == '__main__':
     env = RealEnvironment(client)
 
     objects_by_type = {
-        "robot": {"r1", "r2"},
+        "robot": robot_locations.keys(),
         # "robot": {"r1"},
         "location": env.locations,
     }
