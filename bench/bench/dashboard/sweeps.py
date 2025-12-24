@@ -257,105 +257,137 @@ def create_sweep_figure(
     show_group_lines: bool = True,
 ) -> go.Figure:
     """
-    Create a parameter sweep plot.
+    Create a parameter sweep plot with vertical violin plots.
 
     Design:
     - X-axis: Parameter value (e.g., mcts.iterations) with auto-detected log scale
     - Y-axis: plan_cost
-    - Each sweep group is connected by a faint line
-    - Points colored by success/failure
-    - Optional linear fit line across all data
-    - Hover shows run details
+    - Vertical violin plot for each parameter value (matching per-case styling)
+    - Mean markers for each parameter value
+    - Line connecting the means
+    - Dim data points matching the violin plot styling
 
     Args:
         analysis: SweepAnalysis object
         show_fit_line: Whether to show linear regression line
-        show_group_lines: Whether to connect points in same group
+        show_group_lines: Whether to connect points in same group (unused, kept for compatibility)
 
     Returns:
         Configured go.Figure
     """
+    from .styles import (
+        VIOLIN_FILL,
+        VIOLIN_LINE,
+        VIOLIN_LINE_WIDTH,
+        VIOLIN_WIDTH,
+        POINT_SIZE,
+        POINT_COLOR,
+        POINT_OUTLINE,
+        POINT_OUTLINE_WIDTH,
+        MEAN_MARKER_SIZE,
+        MEAN_MARKER_COLOR,
+        MEAN_MARKER_WIDTH,
+    )
+
     fig = go.Figure()
 
-    # Collect all parameter values for log scale detection
-    all_param_values = []
+    # Collect all data organized by parameter value
+    data_by_param = {}
     for group in analysis.groups:
-        all_param_values.extend(group.param_values)
-
-    use_log = should_use_log_scale(all_param_values)
-
-    # Plot each group
-    for group_idx, group in enumerate(analysis.groups):
-        # Format fixed params for hover
-        fixed_str = ", ".join(f"{k.replace('params.', '')}={v}"
-                              for k, v in group.fixed_params.items())
-
-        # Draw connecting line (faint)
-        if show_group_lines and len(group.param_values) > 1:
-            # Filter to successful runs for line
-            x_line = [x for x, s, y in zip(group.param_values, group.success_mask, group.plan_costs) if s and y is not None and not np.isnan(y)]
-            y_line = [y for y, s in zip(group.plan_costs, group.success_mask) if s and y is not None and not np.isnan(y)]
-
-            if len(x_line) > 1:
-                fig.add_trace(go.Scatter(
-                    x=x_line,
-                    y=y_line,
-                    mode="lines",
-                    line=dict(color="rgba(137, 180, 250, 0.2)", width=1),
-                    showlegend=False,
-                    hoverinfo="skip",
-                ))
-
-        # Plot points
-        for i, (x, y, success) in enumerate(zip(
+        for param_val, plan_cost, success in zip(
             group.param_values,
             group.plan_costs,
             group.success_mask
-        )):
-            color = CATPPUCCIN_GREEN if success else CATPPUCCIN_RED
-            symbol = "circle" if success else "x"
+        ):
+            if param_val not in data_by_param:
+                data_by_param[param_val] = []
+            if plan_cost is not None and not np.isnan(plan_cost):
+                data_by_param[param_val].append(plan_cost)
 
-            hover_text = f"<b>{analysis.param_name.replace('params.', '')}</b>: {x}<br>"
-            if y and not np.isnan(y):
-                hover_text += f"<b>plan_cost</b>: {y:.2f}<br>"
-            else:
-                hover_text += "<b>plan_cost</b>: N/A<br>"
-            hover_text += f"<b>success</b>: {success}<br>"
-            if fixed_str:
-                hover_text += f"<b>fixed</b>: {fixed_str}"
+    # Sort parameter values
+    sorted_params = sorted(data_by_param.keys())
 
-            fig.add_trace(go.Scatter(
-                x=[x],
-                y=[y] if y and not np.isnan(y) else [None],
-                mode="markers",
-                marker=dict(
-                    color=color,
-                    size=8,
-                    symbol=symbol,
-                    line=dict(color="rgba(0,0,0,0.3)", width=1),
-                ),
-                showlegend=False,
-                hovertemplate=hover_text + "<extra></extra>",
-            ))
+    # Check if log scale should be used
+    use_log = should_use_log_scale(sorted_params)
 
-    # Add linear fit line
-    if show_fit_line and analysis.slope is not None:
-        all_x = []
-        for g in analysis.groups:
-            all_x.extend(g.param_values)
+    # Create violin plot for each parameter value
+    mean_x = []
+    mean_y = []
 
-        if all_x:
-            x_range = [min(all_x), max(all_x)]
-            y_fit = [analysis.intercept + analysis.slope * x for x in x_range]
+    for param_val in sorted_params:
+        costs = data_by_param[param_val]
+        if not costs:
+            continue
 
-            fig.add_trace(go.Scatter(
-                x=x_range,
-                y=y_fit,
-                mode="lines",
-                line=dict(color=CATPPUCCIN_BLUE, width=2, dash="dash"),
-                name=f"r={analysis.correlation:.3f}" if analysis.correlation else "fit",
-                showlegend=True,
-            ))
+        # Create vertical violin plot
+        fig.add_trace(go.Violin(
+            x=[str(param_val)] * len(costs),
+            y=costs,
+            name=str(param_val),
+            fillcolor=VIOLIN_FILL,
+            line=dict(color=VIOLIN_LINE, width=VIOLIN_LINE_WIDTH),
+            width=VIOLIN_WIDTH,
+            box_visible=False,
+            meanline_visible=False,  # We'll add custom mean markers
+            points="all",
+            pointpos=0,
+            jitter=0.5,
+            marker=dict(
+                size=POINT_SIZE,
+                color=POINT_COLOR,
+                line=dict(color=POINT_OUTLINE, width=POINT_OUTLINE_WIDTH),
+            ),
+            hoveron="points",
+            hovertemplate=f"Plan cost: %{{y}}<br>{analysis.param_name.replace('params.', '')}: {param_val}<extra></extra>",
+            showlegend=False,
+        ))
+
+        # Calculate mean
+        mean_cost = np.mean(costs)
+        mean_x.append(str(param_val))
+        mean_y.append(mean_cost)
+
+        # Add mean marker
+        fig.add_trace(go.Scatter(
+            x=[str(param_val)],
+            y=[mean_cost],
+            mode="markers",
+            marker=dict(
+                symbol="line-ew",
+                size=MEAN_MARKER_SIZE,
+                color="rgba(255, 255, 255, 0)",
+                line=dict(color=MEAN_MARKER_COLOR, width=MEAN_MARKER_WIDTH),
+            ),
+            showlegend=False,
+            hoverinfo="skip",
+        ))
+
+    # Add line connecting means
+    if len(mean_x) > 1:
+        fig.add_trace(go.Scatter(
+            x=mean_x,
+            y=mean_y,
+            mode="lines",
+            line=dict(color=MEAN_MARKER_COLOR, width=1.5),
+            showlegend=False,
+            hoverinfo="skip",
+        ))
+
+    # Add correlation annotation if available
+    if analysis.correlation is not None:
+        fig.add_annotation(
+            text=f"r = {analysis.correlation:.3f}",
+            xref="paper",
+            yref="paper",
+            x=0.98,
+            y=0.98,
+            xanchor="right",
+            yanchor="top",
+            showarrow=False,
+            font=dict(size=FONT_SIZE, color=TEXT_COLOR, family=FONT_FAMILY),
+            bgcolor="rgba(0,0,0,0.3)",
+            borderpad=4,
+        )
 
     # Layout
     param_display = analysis.param_name.replace("params.", "")
@@ -370,13 +402,15 @@ def create_sweep_figure(
         font=dict(family=FONT_FAMILY, size=FONT_SIZE, color=TEXT_COLOR),
         plot_bgcolor=PLOT_BGCOLOR,
         paper_bgcolor=PAPER_BGCOLOR,
-        height=300,
+        height=300,  # Fixed height to prevent growing
         margin=dict(l=60, r=30, t=40, b=50),
+        autosize=False,  # Disable auto-sizing
+        transition=dict(duration=0),  # Disable animations
     )
 
-    # Apply log scale if needed
+    # Configure axes
     fig.update_xaxes(
-        type="log" if use_log else "linear",
+        type="category",  # Use category type for discrete parameter values
         gridcolor=GRID_COLOR,
         gridwidth=GRID_WIDTH,
         color=TEXT_COLOR,

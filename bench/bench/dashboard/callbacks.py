@@ -49,6 +49,7 @@ def register_callbacks(app):
     @app.callback(
         [Output("main-content", "children"), Output("data-store", "data")],
         [Input("url", "pathname")],
+        prevent_initial_call=False,
     )
     def refresh_data(pathname):
         """Reload data from MLflow and regenerate plots on page load/refresh."""

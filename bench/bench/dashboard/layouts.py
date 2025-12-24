@@ -250,7 +250,12 @@ def build_content_layout(
                             dcc.Graph(
                                 id={"type": "sweep-graph", "benchmark": bench_name, "param": param_name},
                                 figure=plot_info["figure"],
-                                config={"displayModeBar": False},
+                                config={
+                                    "displayModeBar": False,
+                                    "responsive": False,
+                                    "staticPlot": False,
+                                },
+                                style={"height": "300px"},  # Enforce fixed height
                             ),
                         ], style={"padding": "10px"})
                     )
