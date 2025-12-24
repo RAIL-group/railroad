@@ -20,7 +20,7 @@ from .styles import (
     GRID_COLOR,
     GRID_WIDTH,
 )
-from .helpers import _success_mask
+from .helpers import _success_mask, _timeout_mask
 
 
 @dataclass
@@ -32,6 +32,7 @@ class SweepGroup:
     plan_costs: list           # Corresponding plan_cost values
     run_ids: list              # Run IDs for each point
     success_mask: list         # Whether each run succeeded
+    timeout_mask: list         # Whether each run timed out
 
 
 @dataclass
@@ -145,9 +146,10 @@ def find_sweep_groups(
         else:
             fixed_params = {}
 
-        # Get plan_cost and success
+        # Get plan_cost, success, and timeout
         plan_costs = group_df_valid["metrics.plan_cost"].iloc[sort_idx].tolist() if "metrics.plan_cost" in group_df_valid.columns else []
         success = _success_mask(group_df_valid["metrics.success"]).iloc[sort_idx].tolist() if "metrics.success" in group_df_valid.columns else [True] * len(sort_idx)
+        timeout = _timeout_mask(group_df_valid["metrics.timeout"]).iloc[sort_idx].tolist() if "metrics.timeout" in group_df_valid.columns else [False] * len(sort_idx)
         run_ids = group_df_valid["run_id"].iloc[sort_idx].tolist() if "run_id" in group_df_valid.columns else []
 
         groups.append(SweepGroup(
@@ -157,6 +159,7 @@ def find_sweep_groups(
             plan_costs=plan_costs,
             run_ids=run_ids,
             success_mask=success,
+            timeout_mask=timeout,
         ))
 
     return groups
@@ -287,22 +290,47 @@ def create_sweep_figure(
         MEAN_MARKER_SIZE,
         MEAN_MARKER_COLOR,
         MEAN_MARKER_WIDTH,
+        COLOR_TIMEOUT,
+        FAILED_MARKER_SYMBOL,
+        FAILED_MARKER_SIZE,
+        FAILED_MARKER_WIDTH,
+        FAILED_MARKER_COLOR,
     )
 
     fig = go.Figure()
 
-    # Collect all data organized by parameter value
-    data_by_param = {}
+    # Collect all data organized by parameter value, separating success/failure/timeout
+    # First pass: collect all costs to determine xmax for filling NaN timeouts
+    all_costs = []
     for group in analysis.groups:
-        for param_val, plan_cost, success in zip(
+        for cost in group.plan_costs:
+            if cost is not None and not np.isnan(cost):
+                all_costs.append(cost)
+
+    xmax = max(all_costs) if all_costs else 1.0
+
+    # Second pass: organize by parameter value
+    data_by_param = {}  # param_val -> dict of success/failed/timeout lists
+    for group in analysis.groups:
+        for param_val, plan_cost, success, timeout in zip(
             group.param_values,
             group.plan_costs,
-            group.success_mask
+            group.success_mask,
+            group.timeout_mask
         ):
             if param_val not in data_by_param:
-                data_by_param[param_val] = []
-            if plan_cost is not None and not np.isnan(plan_cost):
-                data_by_param[param_val].append(plan_cost)
+                data_by_param[param_val] = {"success": [], "failed": [], "timeout": []}
+
+            # Fill NaN plan_cost with xmax for timeout/failed runs (like per-case plots)
+            if plan_cost is None or np.isnan(plan_cost):
+                plan_cost = xmax
+
+            if success:
+                data_by_param[param_val]["success"].append(plan_cost)
+            elif timeout:
+                data_by_param[param_val]["timeout"].append(plan_cost)
+            else:
+                data_by_param[param_val]["failed"].append(plan_cost)
 
     # Sort parameter values
     sorted_params = sorted(data_by_param.keys())
@@ -310,57 +338,121 @@ def create_sweep_figure(
     # Check if log scale should be used
     use_log = should_use_log_scale(sorted_params)
 
+    # Compute dx for jitter on failed/timeout runs
+    if len(sorted_params) > 1:
+        if use_log:
+            dx = np.log10(sorted_params[-1]) - np.log10(sorted_params[0])
+        else:
+            dx = sorted_params[-1] - sorted_params[0]
+    else:
+        dx = 1.0
+
     # Create violin plot for each parameter value
     mean_x = []
     mean_y = []
 
     for param_val in sorted_params:
-        costs = data_by_param[param_val]
-        if not costs:
-            continue
+        param_data = data_by_param[param_val]
+        success_costs = param_data["success"]
+        failed_costs = param_data["failed"]
+        timeout_costs = param_data["timeout"]
 
-        # Create vertical violin plot positioned at actual numeric value
-        fig.add_trace(go.Violin(
-            x=[param_val] * len(costs),  # Use actual numeric value, not string
-            y=costs,
-            name=str(param_val),
-            fillcolor=VIOLIN_FILL,
-            line=dict(color=VIOLIN_LINE, width=VIOLIN_LINE_WIDTH),
-            width=VIOLIN_WIDTH,
-            box_visible=False,
-            meanline_visible=False,  # We'll add custom mean markers
-            points="all",
-            pointpos=0,
-            jitter=0.5,
-            marker=dict(
-                size=POINT_SIZE,
-                color=POINT_COLOR,
-                line=dict(color=POINT_OUTLINE, width=POINT_OUTLINE_WIDTH),
-            ),
-            hoveron="points",
-            hovertemplate=f"Plan cost: %{{y}}<br>{analysis.param_name.replace('params.', '')}: {param_val}<extra></extra>",
-            showlegend=False,
-        ))
+        # Create vertical violin plot for successful runs
+        if success_costs:
+            fig.add_trace(go.Violin(
+                x=[param_val] * len(success_costs),
+                y=success_costs,
+                name=str(param_val),
+                fillcolor=VIOLIN_FILL,
+                line=dict(color=VIOLIN_LINE, width=VIOLIN_LINE_WIDTH),
+                width=VIOLIN_WIDTH,
+                box_visible=False,
+                meanline_visible=False,
+                points="all",
+                pointpos=0,
+                jitter=0.5,
+                marker=dict(
+                    size=POINT_SIZE,
+                    color=POINT_COLOR,
+                    line=dict(color=POINT_OUTLINE, width=POINT_OUTLINE_WIDTH),
+                ),
+                hoveron="points",
+                hovertemplate=f"Plan cost: %{{y}}<br>{analysis.param_name.replace('params.', '')}: {param_val}<extra></extra>",
+                showlegend=False,
+            ))
 
-        # Calculate mean
-        mean_cost = np.mean(costs)
-        mean_x.append(param_val)  # Use actual numeric value
-        mean_y.append(mean_cost)
+            # Calculate mean from successful runs only
+            mean_cost = np.mean(success_costs)
+            mean_x.append(param_val)
+            mean_y.append(mean_cost)
 
-        # Add mean marker
-        fig.add_trace(go.Scatter(
-            x=[param_val],  # Use actual numeric value
-            y=[mean_cost],
-            mode="markers",
-            marker=dict(
-                symbol="line-ew",
-                size=MEAN_MARKER_SIZE,
-                color="rgba(255, 255, 255, 0)",
-                line=dict(color=MEAN_MARKER_COLOR, width=MEAN_MARKER_WIDTH),
-            ),
-            showlegend=False,
-            hoverinfo="skip",
-        ))
+            # Add mean marker
+            fig.add_trace(go.Scatter(
+                x=[param_val],
+                y=[mean_cost],
+                mode="markers",
+                marker=dict(
+                    symbol="line-ew",
+                    size=MEAN_MARKER_SIZE,
+                    color="rgba(255, 255, 255, 0)",
+                    line=dict(color=MEAN_MARKER_COLOR, width=MEAN_MARKER_WIDTH),
+                ),
+                showlegend=False,
+                hoverinfo="skip",
+            ))
+
+        # Add failed runs as X markers
+        if failed_costs:
+            # Apply jitter to x position
+            x_jittered = [param_val + np.random.uniform(-0.01 * dx, 0.01 * dx) for _ in failed_costs]
+            fig.add_trace(go.Violin(
+                x=x_jittered,
+                y=failed_costs,
+                name=f"{param_val} failed",
+                fillcolor="rgba(0,0,0,0)",
+                line=dict(color="rgba(0,0,0,0)", width=0),
+                width=VIOLIN_WIDTH,
+                box_visible=False,
+                meanline_visible=False,
+                points="all",
+                pointpos=0,
+                jitter=0.5,
+                marker=dict(
+                    symbol=FAILED_MARKER_SYMBOL,
+                    size=FAILED_MARKER_SIZE,
+                    color=None,
+                    line=dict(color=FAILED_MARKER_COLOR, width=FAILED_MARKER_WIDTH),
+                ),
+                hoveron="points",
+                hovertemplate=f"FAILED<br>Plan cost: %{{y}}<br>{analysis.param_name.replace('params.', '')}: {param_val}<extra></extra>",
+                showlegend=False,
+            ))
+
+        # Add timeout runs as diamond markers
+        if timeout_costs:
+            x_jittered = [param_val + np.random.uniform(-0.01 * dx, 0.01 * dx) for _ in timeout_costs]
+            fig.add_trace(go.Violin(
+                x=x_jittered,
+                y=timeout_costs,
+                name=f"{param_val} timeout",
+                fillcolor="rgba(0,0,0,0)",
+                line=dict(color="rgba(0,0,0,0)", width=0),
+                width=VIOLIN_WIDTH,
+                box_visible=False,
+                meanline_visible=False,
+                points="all",
+                pointpos=0,
+                jitter=0.5,
+                marker=dict(
+                    symbol="diamond",
+                    size=POINT_SIZE + 1,
+                    color="rgba(255, 215, 0, 0.8)",
+                    line=dict(color=COLOR_TIMEOUT, width=1),
+                ),
+                hoveron="points",
+                hovertemplate=f"TIMEOUT ⏱<br>Plan cost: %{{y}}<br>{analysis.param_name.replace('params.', '')}: {param_val}<extra></extra>",
+                showlegend=False,
+            ))
 
     # Add line connecting means
     if len(mean_x) > 1:
