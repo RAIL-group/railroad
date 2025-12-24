@@ -319,9 +319,9 @@ def create_sweep_figure(
         if not costs:
             continue
 
-        # Create vertical violin plot
+        # Create vertical violin plot positioned at actual numeric value
         fig.add_trace(go.Violin(
-            x=[str(param_val)] * len(costs),
+            x=[param_val] * len(costs),  # Use actual numeric value, not string
             y=costs,
             name=str(param_val),
             fillcolor=VIOLIN_FILL,
@@ -344,12 +344,12 @@ def create_sweep_figure(
 
         # Calculate mean
         mean_cost = np.mean(costs)
-        mean_x.append(str(param_val))
+        mean_x.append(param_val)  # Use actual numeric value
         mean_y.append(mean_cost)
 
         # Add mean marker
         fig.add_trace(go.Scatter(
-            x=[str(param_val)],
+            x=[param_val],  # Use actual numeric value
             y=[mean_cost],
             mode="markers",
             marker=dict(
@@ -365,7 +365,7 @@ def create_sweep_figure(
     # Add line connecting means
     if len(mean_x) > 1:
         fig.add_trace(go.Scatter(
-            x=mean_x,
+            x=mean_x,  # Use actual numeric values
             y=mean_y,
             mode="lines",
             line=dict(color=MEAN_MARKER_COLOR, width=1.5),
@@ -404,13 +404,13 @@ def create_sweep_figure(
         paper_bgcolor=PAPER_BGCOLOR,
         height=300,  # Fixed height to prevent growing
         margin=dict(l=60, r=30, t=40, b=50),
-        autosize=False,  # Disable auto-sizing
+        autosize=True,  # Allow width to be responsive
         transition=dict(duration=0),  # Disable animations
     )
 
     # Configure axes
     fig.update_xaxes(
-        type="category",  # Use category type for discrete parameter values
+        type="log" if use_log else "linear",  # Use log scale if parameter spans >1 order of magnitude
         gridcolor=GRID_COLOR,
         gridwidth=GRID_WIDTH,
         color=TEXT_COLOR,

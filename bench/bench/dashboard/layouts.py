@@ -252,19 +252,20 @@ def build_content_layout(
                                 figure=plot_info["figure"],
                                 config={
                                     "displayModeBar": False,
-                                    "responsive": False,
+                                    "responsive": True,  # Allow width to be responsive
                                     "staticPlot": False,
                                 },
-                                style={"height": "300px"},  # Enforce fixed height
+                                style={"height": "300px", "width": "100%"},  # Fixed height, responsive width
                             ),
-                        ], style={"padding": "10px"})
+                        ], style={"padding": "10px", "minWidth": "0"})  # Allow shrinking below content size
                     )
 
                 children.append(html.Div(
                     grid_children,
                     style={
                         "display": "grid",
-                        "gridTemplateColumns": "repeat(2, 1fr)",
+                        "gridTemplateColumns": "repeat(auto-fit, minmax(350px, 1fr))",
+                        "maxWidth": "100%",
                         "gap": "20px",
                     }
                 ))
