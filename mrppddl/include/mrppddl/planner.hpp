@@ -336,7 +336,8 @@ inline std::string mcts(const State &root_state,
                         const GoalFn &is_goal_fn, FFMemory *ff_memory,
                         int max_iterations = 1000, int max_depth = 20,
                         double c = std::sqrt(2.0),
-                        std::string* out_tree_trace = nullptr) {
+                        std::string* out_tree_trace = nullptr,
+                        double heuristic_multiplier = 5.0) {
   // RNG (thread_local is convenient if you run this in parallel later)
   static thread_local std::mt19937 rng{std::random_device{}()};
 
@@ -470,7 +471,7 @@ inline std::string mcts(const State &root_state,
       if (did_need_relaxed_transition)
 	h += 100;
 
-      reward = -node->state.time() - h * HEURISTIC_MULTIPLIER + 0 * goal_count - accumulated_extra_cost;
+      reward = -node->state.time() - h * heuristic_multiplier + 0 * goal_count - accumulated_extra_cost;
     }
 
     // ---------------- Backpropagation ----------------
@@ -526,17 +527,19 @@ public:
 
   std::string operator()(const State &root_state,
                          const std::unordered_set<Fluent> &goal_fluents,
-                         int max_iterations, int max_depth, double c) {
+                         int max_iterations, int max_depth, double c,
+                         double heuristic_multiplier = 5.0) {
     auto is_goal_fn = GoalFn(goal_fluents);
     return mcts(root_state, all_actions_, is_goal_fn, &ff_memory_,
-                max_iterations, max_depth, c, &last_mcts_tree_trace_);
+                max_iterations, max_depth, c, &last_mcts_tree_trace_, heuristic_multiplier);
   }
 
   std::string operator()(const State &root_state,
-                         const std::unordered_set<Fluent> &goal_fluents) {
+                         const std::unordered_set<Fluent> &goal_fluents,
+                         double heuristic_multiplier = 5.0) {
     auto is_goal_fn = GoalFn(goal_fluents);
     return mcts(root_state, all_actions_, is_goal_fn, &ff_memory_,
-                max_iterations, max_depth, c, &last_mcts_tree_trace_);
+                max_iterations, max_depth, c, &last_mcts_tree_trace_, heuristic_multiplier);
   }
 
   void clear_cache() { ff_memory_.clear(); }

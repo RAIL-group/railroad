@@ -162,3 +162,31 @@ def test_mcts_search_picks_more_likely_location(roomA_prob, num_robots):
     assert (
         roomA_count >= 0.8 * num_planning_attempts
     ), f"Expected roomA in at least 80% actions, got {roomA_count}/{num_planning_attempts} for roomA_prob={roomA_prob}"
+
+
+def test_heuristic_multiplier_parameter():
+    """Test that heuristic_multiplier parameter can be set and doesn't crash."""
+    # Simple test setup
+    objects_by_type = {
+        "robot": ["r1"],
+        "location": ["start", "a", "b"],
+    }
+    random.seed(42)
+    move_op = construct_move_visited_operator(lambda *args: 5.0)
+    all_actions = move_op.instantiate(objects_by_type)
+
+    initial_state = State(
+        time=0,
+        fluents={F("at r1 start"), F("free r1"), F("visited start")}
+    )
+    goal_fluents = {F("visited a")}
+
+    # Create planner
+    mcts = MCTSPlanner(all_actions)
+
+    # Run planner with heuristic_multiplier=1.0 - should not crash
+    action_name = mcts(initial_state, goal_fluents, max_iterations=100, c=1.414, heuristic_multiplier=1.0)
+
+    # Verify we got a valid result (either an action name or "NONE")
+    assert isinstance(action_name, str)
+    assert len(action_name) > 0

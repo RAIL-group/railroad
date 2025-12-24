@@ -61,6 +61,7 @@ class MCTSPlanner(_MCTSPlannerCpp):
         max_iterations: int = 1000,
         max_depth: int = 100,
         c: float = 1.414,
+        heuristic_multiplier: float = 5.0,
     ) -> str:
         """Run MCTS planning to find the next action.
 
@@ -70,6 +71,7 @@ class MCTSPlanner(_MCTSPlannerCpp):
             max_iterations: Maximum number of MCTS iterations
             max_depth: Maximum depth for rollouts
             c: Exploration constant for UCB1
+            heuristic_multiplier: Multiplier for heuristic in reward calculation
 
         Returns:
             Name of the selected action as a string
@@ -81,7 +83,7 @@ class MCTSPlanner(_MCTSPlannerCpp):
 
         # Call parent's __call__ with converted state
         return super().__call__(
-            converted_state, goal_fluents, max_iterations, max_depth, c
+            converted_state, goal_fluents, max_iterations, max_depth, c, heuristic_multiplier
         )
 
 

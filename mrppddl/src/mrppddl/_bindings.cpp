@@ -316,12 +316,12 @@ PYBIND11_MODULE(_bindings, m) {
           "__call__",
           [](MCTSPlanner &self, const State &s,
              const std::unordered_set<Fluent> &goal_fluents, int max_iterations,
-             int max_depth, double c) {
-            return self(s, goal_fluents, max_iterations, max_depth, c);
+             int max_depth, double c, double heuristic_multiplier) {
+            return self(s, goal_fluents, max_iterations, max_depth, c, heuristic_multiplier);
           },
           py::arg("state"), py::arg("goal_fluents"),
           py::arg("max_iterations") = 1000, py::arg("max_depth") = 20,
-          py::arg("c") = 1.414)
+          py::arg("c") = 1.414, py::arg("heuristic_multiplier") = 5.0)
       .def("get_trace_from_last_mcts_tree", &MCTSPlanner::get_trace_from_last_mcts_tree,
            "Get the tree trace from the most recent MCTS planning call");
   m.def("ff_heuristic",
