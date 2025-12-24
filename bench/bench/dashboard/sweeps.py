@@ -370,7 +370,7 @@ def create_sweep_figure(
                 meanline_visible=False,
                 points="all",
                 pointpos=0,
-                jitter=0.5,
+                jitter=0.2,
                 marker=dict(
                     size=POINT_SIZE,
                     color=POINT_COLOR,
@@ -416,7 +416,7 @@ def create_sweep_figure(
                 meanline_visible=False,
                 points="all",
                 pointpos=0,
-                jitter=0.5,
+                jitter=0.2,
                 marker=dict(
                     symbol=FAILED_MARKER_SYMBOL,
                     size=FAILED_MARKER_SIZE,
@@ -442,7 +442,7 @@ def create_sweep_figure(
                 meanline_visible=False,
                 points="all",
                 pointpos=0,
-                jitter=0.5,
+                jitter=0.2,
                 marker=dict(
                     symbol="diamond",
                     size=POINT_SIZE + 1,
