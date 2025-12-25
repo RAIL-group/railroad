@@ -26,6 +26,7 @@ def create_app() -> dash.Dash:
         <title>{{%title%}}</title>
         {{%favicon%}}
         {{%css%}}
+        <link href="https://cdnjs.cloudflare.com/ajax/libs/Iosevka/6.0.0/iosevka/iosevka.min.css" rel="stylesheet">
         <style>
 {STYLE_CLASSES}
         </style>
@@ -54,4 +55,4 @@ app = create_app()
 if __name__ == "__main__":
     print("\nStarting Dash server...")
     print("Open http://127.0.0.1:8050/ in your browser")
-    app.run(debug=True)
+    app.run(debug=True, dev_tools_ui=False)

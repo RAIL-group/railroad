@@ -123,6 +123,14 @@ TEXT_SECONDARY = CATPPUCCIN_OVERLAY0
 # =============================================================================
 
 STYLE_CLASSES = """
+html, body {
+    background-color: """ + CATPPUCCIN_BASE + """;
+    font-family: """ + FONT_FAMILY + """;
+    color: """ + TEXT_COLOR + """;
+    margin: 0;
+    padding: 0;
+}
+
 .text-base {
     margin: 0;
     padding: 0;

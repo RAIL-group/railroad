@@ -362,6 +362,7 @@ def create_benchmark_figure(benchmark: str, bench_df: pd.DataFrame) -> go.Figure
                 "params.benchmark_name",
                 "params.case_idx",
                 "params.repeat_idx",
+                "params.error_message",
             ]:
                 param_name = col.replace("params.", "")
                 params[param_name] = case_row[col]
@@ -410,6 +411,7 @@ def create_benchmark_figure(benchmark: str, bench_df: pd.DataFrame) -> go.Figure
         ticks="",
         showticklabels=False,
         color=TEXT_COLOR,
+        zeroline=False,
     )
 
     # Set x-axis range
@@ -418,6 +420,7 @@ def create_benchmark_figure(benchmark: str, bench_df: pd.DataFrame) -> go.Figure
         gridcolor=GRID_COLOR,
         gridwidth=GRID_WIDTH,
         color=TEXT_COLOR,
+        zeroline=False,
     )
 
     return fig

@@ -14,6 +14,7 @@ from .styles import (
     CATPPUCCIN_BLUE,
     CATPPUCCIN_GREEN,
     CATPPUCCIN_RED,
+    CATPPUCCIN_SURFACE0,
     PLOT_BGCOLOR,
     PAPER_BGCOLOR,
     TEXT_COLOR,
@@ -33,6 +34,7 @@ class SweepGroup:
     run_ids: list              # Run IDs for each point
     success_mask: list         # Whether each run succeeded
     timeout_mask: list         # Whether each run timed out
+    wall_times: list           # Wall time for each run
 
 
 @dataclass
@@ -146,10 +148,11 @@ def find_sweep_groups(
         else:
             fixed_params = {}
 
-        # Get plan_cost, success, and timeout
+        # Get plan_cost, success, timeout, and wall_time
         plan_costs = group_df_valid["metrics.plan_cost"].iloc[sort_idx].tolist() if "metrics.plan_cost" in group_df_valid.columns else []
         success = _success_mask(group_df_valid["metrics.success"]).iloc[sort_idx].tolist() if "metrics.success" in group_df_valid.columns else [True] * len(sort_idx)
         timeout = _timeout_mask(group_df_valid["metrics.timeout"]).iloc[sort_idx].tolist() if "metrics.timeout" in group_df_valid.columns else [False] * len(sort_idx)
+        wall_times = group_df_valid["metrics.wall_time"].iloc[sort_idx].tolist() if "metrics.wall_time" in group_df_valid.columns else []
         run_ids = group_df_valid["run_id"].iloc[sort_idx].tolist() if "run_id" in group_df_valid.columns else []
 
         groups.append(SweepGroup(
@@ -160,6 +163,7 @@ def find_sweep_groups(
             run_ids=run_ids,
             success_mask=success,
             timeout_mask=timeout,
+            wall_times=wall_times,
         ))
 
     return groups
@@ -310,27 +314,42 @@ def create_sweep_figure(
     xmax = max(all_costs) if all_costs else 1.0
 
     # Second pass: organize by parameter value
-    data_by_param = {}  # param_val -> dict of success/failed/timeout lists
+    data_by_param = {}  # param_val -> dict of success/failed/timeout/plan_costs/wall_times lists
     for group in analysis.groups:
-        for param_val, plan_cost, success, timeout in zip(
+        # Handle case where wall_times might be empty list
+        wall_times_iter = group.wall_times if group.wall_times else [None] * len(group.param_values)
+
+        for param_val, plan_cost, success, timeout, wall_time in zip(
             group.param_values,
             group.plan_costs,
             group.success_mask,
-            group.timeout_mask
+            group.timeout_mask,
+            wall_times_iter
         ):
             if param_val not in data_by_param:
-                data_by_param[param_val] = {"success": [], "failed": [], "timeout": []}
+                data_by_param[param_val] = {
+                    "success": [],
+                    "failed": [],
+                    "timeout": [],
+                    "plan_costs_all": [],
+                    "wall_times_all": [],
+                }
 
             # Fill NaN plan_cost with xmax for timeout/failed runs (like per-case plots)
-            if plan_cost is None or np.isnan(plan_cost):
-                plan_cost = xmax
+            display_cost = plan_cost
+            if display_cost is None or np.isnan(display_cost):
+                display_cost = xmax
+
+            # Store original plan_cost and wall_time for statistics (not filled)
+            data_by_param[param_val]["plan_costs_all"].append(plan_cost)
+            data_by_param[param_val]["wall_times_all"].append(wall_time)
 
             if success:
-                data_by_param[param_val]["success"].append(plan_cost)
+                data_by_param[param_val]["success"].append(display_cost)
             elif timeout:
-                data_by_param[param_val]["timeout"].append(plan_cost)
+                data_by_param[param_val]["timeout"].append(display_cost)
             else:
-                data_by_param[param_val]["failed"].append(plan_cost)
+                data_by_param[param_val]["failed"].append(display_cost)
 
     # Sort parameter values
     sorted_params = sorted(data_by_param.keys())
@@ -465,21 +484,66 @@ def create_sweep_figure(
             hoverinfo="skip",
         ))
 
-    # Add correlation annotation if available
-    if analysis.correlation is not None:
-        fig.add_annotation(
-            text=f"r = {analysis.correlation:.3f}",
-            xref="paper",
-            yref="paper",
-            x=0.98,
-            y=0.98,
-            xanchor="right",
-            yanchor="top",
-            showarrow=False,
-            font=dict(size=FONT_SIZE, color=TEXT_COLOR, family=FONT_FAMILY),
-            bgcolor="rgba(0,0,0,0.3)",
-            borderpad=4,
-        )
+    # Add invisible scatter points for hover with summary statistics
+    hover_x = []
+    hover_y = []
+    hover_text = []
+
+    # Get y-axis range to position hover points at bottom
+    all_y_values = []
+    for param_data in data_by_param.values():
+        all_y_values.extend(param_data["success"])
+        all_y_values.extend(param_data["failed"])
+        all_y_values.extend(param_data["timeout"])
+
+    y_min = min(all_y_values) if all_y_values else 0
+    hover_y_pos = y_min * 0.95  # Position slightly below minimum y value
+
+    for param_val in sorted_params:
+        param_data = data_by_param[param_val]
+
+        # Compute summary statistics
+        plan_costs = [c for c in param_data["plan_costs_all"] if c is not None and not np.isnan(c)]
+        wall_times = [w for w in param_data["wall_times_all"] if w is not None and not np.isnan(w)]
+
+        n_success = len(param_data["success"])
+        n_total = n_success + len(param_data["failed"]) + len(param_data["timeout"])
+
+        avg_plan_cost = np.mean(plan_costs) if plan_costs else None
+        success_rate = n_success / n_total if n_total > 0 else None
+        avg_wall_time = np.mean(wall_times) if wall_times else None
+
+        # Build hover text
+        hover_parts = ["<b>Summary Statistics</b>"]
+        if avg_plan_cost is not None:
+            hover_parts.append(f"Avg Plan Cost: {avg_plan_cost:.2f}")
+        if success_rate is not None:
+            hover_parts.append(f"Success Rate: {success_rate:.1%}")
+        if avg_wall_time is not None:
+            hover_parts.append(f"Avg Wall Time: {avg_wall_time:.2f}s")
+
+        hover_x.append(param_val)
+        hover_y.append(hover_y_pos)
+        hover_text.append("<br>".join(hover_parts))
+
+    # Add invisible scatter trace for hover
+    if hover_x:
+        fig.add_trace(go.Scatter(
+            x=hover_x,
+            y=hover_y,
+            mode="markers",
+            marker=dict(
+                size=15,
+                color="rgba(0,0,0,0)",  # Fully transparent
+            ),
+            hovertext=hover_text,
+            hoverinfo="text",
+            hoverlabel=dict(
+                font=dict(family=FONT_FAMILY, size=FONT_SIZE, color=TEXT_COLOR),
+                bgcolor=CATPPUCCIN_SURFACE0,
+            ),
+            showlegend=False,
+        ))
 
     # Prepare tick labels with success rate annotations
     ticktext = []
@@ -493,20 +557,38 @@ def create_sweep_figure(
     # Layout
     param_display = analysis.param_name.replace("params.", "")
 
+    # Create annotations list for parameter name and r-value
+    annotations = []
+
+    # Add left-aligned parameter name and r-value annotation
+    label_parts = [param_display]
+    if analysis.correlation is not None:
+        # Add r-value with dimmer color (50% opacity)
+        label_parts.append(f"  <span style='opacity:0.5'>r = {analysis.correlation:.3f}</span>")
+
+    annotations.append(dict(
+        text="".join(label_parts),
+        xref="paper",
+        yref="paper",
+        x=0,
+        y=1.02,
+        xanchor="left",
+        yanchor="bottom",
+        showarrow=False,
+        font=dict(size=FONT_SIZE, color=TEXT_COLOR, family=FONT_FAMILY),
+    ))
+
     fig.update_layout(
-        title=dict(
-            text=f"Plan Cost vs {param_display}",
-            font=dict(size=14, family=FONT_FAMILY, color=TEXT_COLOR),
-        ),
         xaxis_title=param_display,
         yaxis_title="plan_cost",
         font=dict(family=FONT_FAMILY, size=FONT_SIZE, color=TEXT_COLOR),
         plot_bgcolor=PLOT_BGCOLOR,
         paper_bgcolor=PAPER_BGCOLOR,
         height=300,  # Fixed height to prevent growing
-        margin=dict(l=60, r=30, t=40, b=50),
+        margin=dict(l=00, r=00, t=5, b=5),  # Increased bottom margin for multi-line tick labels
         autosize=True,  # Allow width to be responsive
         transition=dict(duration=0),  # Disable animations
+        annotations=annotations,
     )
 
     # Configure axes
@@ -517,11 +599,16 @@ def create_sweep_figure(
         color=TEXT_COLOR,
         tickvals=sorted_params,
         ticktext=ticktext,
+        tickfont=dict(size=FONT_SIZE - 1, family=FONT_FAMILY, color=TEXT_COLOR),  # Slightly smaller for compactness
+        title_font=dict(size=FONT_SIZE, family=FONT_FAMILY, color=TEXT_COLOR),
+        zeroline=False,
     )
     fig.update_yaxes(
         gridcolor=GRID_COLOR,
         gridwidth=GRID_WIDTH,
         color=TEXT_COLOR,
+        title_font=dict(size=FONT_SIZE, family=FONT_FAMILY, color=TEXT_COLOR),
+        zeroline=False,
     )
 
     return fig

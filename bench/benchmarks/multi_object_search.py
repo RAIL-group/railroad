@@ -12,6 +12,7 @@ disorganized and some items are missing entirely.
 """
 
 import time
+import itertools
 import numpy as np
 from mrppddl.core import Fluent as F, State, get_action_by_name
 from mrppddl._bindings import ff_heuristic
@@ -248,30 +249,18 @@ def bench_multi_object_search(case: BenchmarkCase):
     }
 
 
-# Register parameter combinations
+# Register parameter combinations using Cartesian product
 bench_multi_object_search.add_cases([
-    {"mcts.iterations": 400, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 1},
-    {"mcts.iterations": 1000, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 1},
-    {"mcts.iterations": 4000, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 1},
-    {"mcts.iterations": 10000, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 1},
-    {"mcts.iterations": 400, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 2},
-    {"mcts.iterations": 1000, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 2},
-    {"mcts.iterations": 4000, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 2},
-    {"mcts.iterations": 10000, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 2},
-    {"mcts.iterations": 400, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 3},
-    {"mcts.iterations": 1000, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 3},
-    {"mcts.iterations": 4000, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 3},
-    {"mcts.iterations": 10000, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 3},
-    {"mcts.iterations": 400, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 1},
-    {"mcts.iterations": 1000, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 1},
-    {"mcts.iterations": 4000, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 1},
-    {"mcts.iterations": 10000, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 1},
-    {"mcts.iterations": 400, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 2},
-    {"mcts.iterations": 1000, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 2},
-    {"mcts.iterations": 4000, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 2},
-    {"mcts.iterations": 10000, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 2},
-    {"mcts.iterations": 400, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 3},
-    {"mcts.iterations": 1000, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 3},
-    {"mcts.iterations": 4000, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 3},
-    {"mcts.iterations": 10000, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 3},
+    {
+        "mcts.iterations": iterations,
+        "mcts.c": c,
+        "mcts.h_mult": h_mult,
+        "num_robots": num_robots,
+    }
+    for c, num_robots, h_mult, iterations in itertools.product(
+        [300],                      # mcts.c
+        [1, 2, 3],                  # num_robots
+        [1, 2, 5, 20],              # mcts.h_mult
+        [100, 400, 1000, 4000],   # mcts.iterations
+    )
 ])
