@@ -59,8 +59,8 @@ SYMBOL_TIMEOUT = "\u23f1"      # stopwatch
 # VIOLIN PLOT STYLING
 # =============================================================================
 
-VIOLIN_FILL = f"rgba(137, 180, 250, 0.1)"  # Blue with transparency
-VIOLIN_LINE = f"rgba(137, 180, 250, 0.5)"  # Blue
+VIOLIN_FILL = "rgba(137, 180, 250, 0.1)"  # Blue with transparency
+VIOLIN_LINE = "rgba(137, 180, 250, 0.5)"  # Blue
 VIOLIN_LINE_WIDTH = 0.35
 VIOLIN_WIDTH = 0.25
 
@@ -69,8 +69,8 @@ VIOLIN_WIDTH = 0.25
 # =============================================================================
 
 POINT_SIZE = 5
-POINT_COLOR = f"rgba(205, 214, 244, 0.4)"  # Text color with transparency
-POINT_OUTLINE = f"rgba(49, 50, 68, 0.8)"   # Surface0
+POINT_COLOR = "rgba(205, 214, 244, 0.4)"  # Text color with transparency
+POINT_OUTLINE = "rgba(49, 50, 68, 0.8)"   # Surface0
 POINT_OUTLINE_WIDTH = 0.5
 
 # =============================================================================
@@ -88,7 +88,7 @@ MEAN_MARKER_WIDTH = 2
 FAILED_MARKER_SYMBOL = "x-thin"
 FAILED_MARKER_SIZE = 5
 FAILED_MARKER_WIDTH = 1
-FAILED_MARKER_COLOR = f"rgba(243, 139, 168, 0.8)"  # Red with transparency
+FAILED_MARKER_COLOR = "rgba(243, 139, 168, 0.8)"  # Red with transparency
 
 # =============================================================================
 # LAYOUT & SPACING
@@ -104,7 +104,7 @@ ANNOTATION_X_OFFSET = 0.3  # Fraction of dx to offset annotations
 # GRID STYLING
 # =============================================================================
 
-GRID_COLOR = f"rgba(108, 112, 134, 0.2)"  # Overlay0 with transparency
+GRID_COLOR = "rgba(108, 112, 134, 0.2)"  # Overlay0 with transparency
 GRID_WIDTH = 0.5
 PLOT_BGCOLOR = CATPPUCCIN_BASE
 PAPER_BGCOLOR = CATPPUCCIN_BASE

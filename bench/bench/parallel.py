@@ -4,9 +4,11 @@ Parallel benchmark execution using process pools.
 Provides process-based parallelism for benchmark tasks.
 """
 
-from concurrent.futures import ProcessPoolExecutor, as_completed
+import os
+import sys
 import time
 import signal
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from typing import Optional
 
 from .plan import ExecutionPlan, Task, TaskStatus
@@ -24,6 +26,22 @@ class TimeoutError(Exception):
 def _timeout_handler(signum, frame):
     """Signal handler for timeout."""
     raise TimeoutError("Task timeout exceeded")
+
+
+def _handle_interrupt(progress: ProgressDisplay, message: str = "Interrupted by user. Exiting..."):
+    """Handle keyboard interrupt by cleaning up display and exiting."""
+    try:
+        if progress.live:
+            progress.live.stop()
+    except Exception:
+        pass
+    # Show cursor on both stdout and stderr
+    sys.stdout.write("\033[?25h")
+    sys.stdout.flush()
+    sys.stderr.write("\033[?25h")
+    print(f"\n\n{message}", file=sys.stderr)
+    sys.stderr.flush()
+    os._exit(1)
 
 
 def _execute_task_worker(task: Task, mlflow_uri: Optional[str] = None) -> Task:
@@ -47,7 +65,6 @@ def _execute_task_worker(task: Task, mlflow_uri: Optional[str] = None) -> Task:
     if task.benchmark_fn is None:
         try:
             # Import benchmarks module to trigger decorator registration
-            import benchmarks
             from bench.registry import get_all_benchmarks
 
             # Find the benchmark by name in the registry
@@ -96,7 +113,7 @@ def _execute_task_worker(task: Task, mlflow_uri: Optional[str] = None) -> Task:
                         task.status = TaskStatus.FAILURE
                         task.error = "Benchmark reported success=False"
 
-            except TimeoutError as e:
+            except TimeoutError:
                 task.status = TaskStatus.TIMEOUT
                 task.error = f"Task exceeded timeout of {task.timeout}s"
             except Exception as e:
@@ -158,25 +175,9 @@ class ParallelExecutor:
         Returns:
             Completed execution plan
         """
-        import sys
-        import os
-
         # Set up signal handler for immediate exit on Ctrl-C
         def signal_handler(signum, frame):
-            # Try to stop the live display and show cursor
-            try:
-                if self.progress.live:
-                    self.progress.live.stop()
-            except Exception:
-                pass
-            # Show cursor on both stdout and stderr (ANSI escape sequence)
-            sys.stdout.write("\033[?25h")
-            sys.stdout.flush()
-            sys.stderr.write("\033[?25h")
-            print("\n\nInterrupted by user. Exiting immediately...", file=sys.stderr)
-            sys.stderr.flush()
-            # Use os._exit for immediate termination without cleanup
-            os._exit(1)
+            _handle_interrupt(self.progress, "Interrupted by user. Exiting immediately...")
 
         old_handler = signal.signal(signal.SIGINT, signal_handler)
 
@@ -215,7 +216,6 @@ class ParallelExecutor:
                             try:
                                 self.tracker.log_task(completed_task)
                             except Exception as e:
-                                import sys
                                 print(f"Warning: Failed to log task to MLflow: {e}", file=sys.stderr)
 
                             # Update progress (this will remove from running tasks)
@@ -240,34 +240,10 @@ class ParallelExecutor:
                                 marked_count += 1
 
                 except KeyboardInterrupt:
-                    # Try to stop the live display and show cursor
-                    try:
-                        if self.progress.live:
-                            self.progress.live.stop()
-                    except Exception:
-                        pass
-                    # Show cursor on both stdout and stderr
-                    sys.stdout.write("\033[?25h")
-                    sys.stdout.flush()
-                    sys.stderr.write("\033[?25h")
-                    print("\n\nInterrupted by user. Exiting...", file=sys.stderr)
-                    sys.stderr.flush()
-                    os._exit(1)
+                    _handle_interrupt(self.progress)
 
         except KeyboardInterrupt:
-            # Try to stop the live display and show cursor
-            try:
-                if self.progress.live:
-                    self.progress.live.stop()
-            except Exception:
-                pass
-            # Show cursor on both stdout and stderr
-            sys.stdout.write("\033[?25h")
-            sys.stdout.flush()
-            sys.stderr.write("\033[?25h")
-            print("\n\nInterrupted by user. Exiting...", file=sys.stderr)
-            sys.stderr.flush()
-            os._exit(1)
+            _handle_interrupt(self.progress)
         finally:
             # Restore old signal handler
             signal.signal(signal.SIGINT, old_handler)

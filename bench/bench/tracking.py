@@ -5,9 +5,7 @@ Provides centralized logging interface for benchmark results.
 """
 
 import sys
-import os
 from io import StringIO
-from contextlib import redirect_stderr
 from typing import Dict, Any, Optional
 from pathlib import Path
 import json

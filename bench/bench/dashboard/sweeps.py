@@ -11,9 +11,6 @@ import plotly.graph_objects as go
 from .styles import (
     FONT_FAMILY,
     FONT_SIZE,
-    CATPPUCCIN_BLUE,
-    CATPPUCCIN_GREEN,
-    CATPPUCCIN_RED,
     CATPPUCCIN_SURFACE0,
     PLOT_BGCOLOR,
     PAPER_BGCOLOR,

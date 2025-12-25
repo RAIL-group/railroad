@@ -5,14 +5,12 @@ Provides live terminal display with progress bars and statistics.
 """
 
 from rich.console import Console, Group, RenderableType
-from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeRemainingColumn, ProgressColumn, Task as ProgressTask
+from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, ProgressColumn, Task as ProgressTask
 from rich.table import Table
 from rich.panel import Panel
 from rich.live import Live
 from rich.text import Text
 from rich.style import Style
-from rich.spinner import Spinner
-from datetime import timedelta
 from collections import defaultdict
 from .plan import ExecutionPlan, Task, TaskStatus
 

@@ -10,13 +10,12 @@ from mrppddl.planner import MCTSPlanner
 from environments import SimpleEnvironment
 from environments.core import EnvironmentInterface
 import environments.operators
-import random
 import time
 
 
 @benchmark(
     name="single_robot_at_location",
-    description="Simple case showing that a robot can reach a destionation via move.",
+    description="Simple case showing that a robot can reach a destination via move.",
     repeat=1,
     tags=["simple", "navigation"],
 )

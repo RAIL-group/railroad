@@ -5,6 +5,7 @@ Orchestrates benchmark discovery, plan creation, execution, and logging.
 """
 
 import os
+import re
 import time
 import subprocess
 import socket
@@ -155,8 +156,6 @@ class BenchmarkRunner:
         Returns:
             True if the filter matches, False otherwise
         """
-        import re
-
         # Tokenize: split on whitespace and parentheses, keeping them
         tokens = re.findall(r'\(|\)|[^\s()]+', filter_expr)
 
