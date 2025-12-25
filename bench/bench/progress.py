@@ -148,15 +148,18 @@ class ProgressDisplay:
     # Maximum number of cases to show at once (to fit on screen)
     MAX_CASES_PER_PAGE = 20
 
-    def __init__(self, plan: ExecutionPlan):
+    def __init__(self, plan: ExecutionPlan, num_workers: int = 1):
         """
         Initialize progress display for a given execution plan.
 
         Args:
             plan: Execution plan with tasks to track
+            num_workers: Number of parallel workers
         """
         self.plan = plan
         self.console = Console()
+        self.num_workers = num_workers
+        self.running_tasks = 0  # Track currently running tasks
 
         # Per-benchmark and per-case statistics
         self.benchmark_stats = defaultdict(lambda: {
@@ -469,6 +472,7 @@ class ProgressDisplay:
             f"[red bold]Errors: {self.stats['error']}[/red bold]",
             f"[red]Failed: {self.stats['failure']}[/red]",
             f"[yellow]Timeout: {self.stats['timeout']}[/yellow]",
+            f"[dim]Workers: {self.running_tasks}/{self.num_workers}[/dim]",
         )
         components.append(stats_table)
         components.append("")
@@ -480,6 +484,86 @@ class ProgressDisplay:
         group = Group(*components)
 
         return Panel(group, title="Benchmark Progress", border_style="cyan", height=None)
+
+    def _format_case_line(self, benchmark_name: str, case_idx: int, case_width: int) -> str:
+        """
+        Format a case summary line for printing.
+
+        Args:
+            benchmark_name: Name of the benchmark
+            case_idx: Case index
+            case_width: Width for case index formatting
+
+        Returns:
+            Formatted case line string with rich markup
+        """
+        case_key = (benchmark_name, case_idx)
+        case_stats = self.case_stats[case_key]
+
+        # Get case params
+        params = {}
+        for task in self.plan.tasks:
+            if task.benchmark_name == benchmark_name and task.case_idx == case_idx:
+                params = task.params
+                break
+
+        # Format params with rich highlighting
+        param_parts = []
+        for k, v in params.items():
+            param_parts.append(f"[cyan]{k}[/cyan]=[yellow]{v}[/yellow]")
+        param_str = ", ".join(param_parts)
+
+        # Format stats
+        result_parts = []
+        if case_stats["success"] > 0:
+            result_parts.append(f"[green]✓{case_stats['success']}[/green]")
+        if case_stats["error"] > 0:
+            result_parts.append(f"[red bold]⚠{case_stats['error']}[/red bold]")
+        if case_stats["failure"] > 0:
+            result_parts.append(f"[red]✗{case_stats['failure']}[/red]")
+        if case_stats["timeout"] > 0:
+            result_parts.append(f"[yellow]⏱{case_stats['timeout']}[/yellow]")
+
+        result_str = "/".join(result_parts) if result_parts else "0"
+
+        # Add metrics
+        metrics = []
+        if case_stats["wall_time_count"] > 0:
+            avg_wall_time = case_stats["wall_time_sum"] / case_stats["wall_time_count"]
+            metrics.append(f"[dim]t={avg_wall_time:.1f}s[/dim]")
+        if case_stats["plan_cost_count"] > 0:
+            avg_plan_cost = case_stats["plan_cost_sum"] / case_stats["plan_cost_count"]
+            metrics.append(f"[dim]cost={avg_plan_cost:.1f}[/dim]")
+
+        metrics_str = " " + " ".join(metrics) if metrics else ""
+
+        return f"  Case {case_idx:{case_width}d}: {param_str}  {result_str}{metrics_str}"
+
+    def _print_benchmark_header(self, benchmark_name: str):
+        """
+        Print benchmark header with name, tags, and description.
+
+        Args:
+            benchmark_name: Name of the benchmark
+        """
+        description = self.plan.metadata.get("benchmark_descriptions", {}).get(benchmark_name, "")
+        tags = self.benchmark_tags.get(benchmark_name, [])
+
+        # Build header with tags
+        header_text = Text()
+        header_text.append(benchmark_name, style="bold")
+        if tags:
+            header_text.append(" [")
+            for i, tag in enumerate(tags):
+                if i > 0:
+                    header_text.append(", ")
+                header_text.append(tag, style="cyan")
+            header_text.append("]")
+
+        self.console.print(header_text)
+
+        if description:
+            self.console.print(f"  [italic dim]{description}[/italic dim]")
 
     def _print_error_details(self, benchmark_name: str, case_indices: list):
         """
@@ -540,24 +624,7 @@ class ProgressDisplay:
 
         # Print header only on first page to avoid repetition
         if page_idx == 0:
-            description = self.plan.metadata.get("benchmark_descriptions", {}).get(benchmark_name, "")
-            tags = self.benchmark_tags.get(benchmark_name, [])
-
-            # Build header with tags
-            header_text = Text()
-            header_text.append(benchmark_name, style="bold")
-            if tags:
-                header_text.append(" [")
-                for i, tag in enumerate(tags):
-                    if i > 0:
-                        header_text.append(", ")
-                    header_text.append(tag, style="cyan")
-                header_text.append("]")
-
-            self.console.print(header_text)
-
-            if description:
-                self.console.print(f"  [italic dim]{description}[/italic dim]")
+            self._print_benchmark_header(benchmark_name)
 
         # Calculate width needed for case indices
         max_case_idx = self.benchmark_max_case_idx[benchmark_name]
@@ -565,55 +632,14 @@ class ProgressDisplay:
 
         # Print each case
         for case_idx in page_cases:
-            case_key = (benchmark_name, case_idx)
-            case_stats = self.case_stats[case_key]
-
-            # Get case params
-            params = {}
-            for task in self.plan.tasks:
-                if task.benchmark_name == benchmark_name and task.case_idx == case_idx:
-                    params = task.params
-                    break
-
-            # Format params with rich highlighting (matching live view)
-            param_parts = []
-            for k, v in params.items():
-                param_parts.append(f"[cyan]{k}[/cyan]=[yellow]{v}[/yellow]")
-            param_str = ", ".join(param_parts)
-
-            # Format stats
-            result_parts = []
-            if case_stats["success"] > 0:
-                result_parts.append(f"[green]✓{case_stats['success']}[/green]")
-            if case_stats["error"] > 0:
-                result_parts.append(f"[red bold]⚠{case_stats['error']}[/red bold]")
-            if case_stats["failure"] > 0:
-                result_parts.append(f"[red]✗{case_stats['failure']}[/red]")
-            if case_stats["timeout"] > 0:
-                result_parts.append(f"[yellow]⏱{case_stats['timeout']}[/yellow]")
-
-            result_str = "/".join(result_parts) if result_parts else "0"
-
-            # Add metrics
-            metrics = []
-            if case_stats["wall_time_count"] > 0:
-                avg_wall_time = case_stats["wall_time_sum"] / case_stats["wall_time_count"]
-                metrics.append(f"[dim]t={avg_wall_time:.1f}s[/dim]")
-            if case_stats["plan_cost_count"] > 0:
-                avg_plan_cost = case_stats["plan_cost_sum"] / case_stats["plan_cost_count"]
-                metrics.append(f"[dim]cost={avg_plan_cost:.1f}[/dim]")
-
-            metrics_str = " " + " ".join(metrics) if metrics else ""
-
-            # Print case line (matching live view format)
-            self.console.print(f"  Case {case_idx:{case_width}d}: {param_str}  {result_str}{metrics_str}")
+            self.console.print(self._format_case_line(benchmark_name, case_idx, case_width))
 
         # Print stderr for any error tasks in this page
         self._print_error_details(benchmark_name, page_cases)
 
         # Print empty line only after the last page
         if page_idx == total_pages - 1:
-            self.console.print()  # Empty line for separation
+            self.console.print()
 
     def _print_benchmark_summary(self, benchmark_name: str):
         """
@@ -630,87 +656,28 @@ class ProgressDisplay:
         total_pages = len(self.benchmark_pages[benchmark_name])
 
         # For multi-page benchmarks, we already printed each page summary
-        # So just skip the final summary
         if total_pages > 1:
             return
 
         # For single-page benchmarks, print the summary now
-        # Use the same format as page summaries
-        description = self.plan.metadata.get("benchmark_descriptions", {}).get(benchmark_name, "")
-        tags = self.benchmark_tags.get(benchmark_name, [])
-
-        # Build header with tags
-        header_text = Text()
-        header_text.append(benchmark_name, style="bold")
-        if tags:
-            header_text.append(" [")
-            for i, tag in enumerate(tags):
-                if i > 0:
-                    header_text.append(", ")
-                header_text.append(tag, style="cyan")
-            header_text.append("]")
-
-        self.console.print(header_text)
-
-        if description:
-            self.console.print(f"  [italic dim]{description}[/italic dim]")
+        self._print_benchmark_header(benchmark_name)
 
         # Calculate width needed for case indices
         max_case_idx = self.benchmark_max_case_idx[benchmark_name]
         case_width = len(str(max_case_idx))
 
         # Print all cases
+        all_case_indices = []
         for (bname, case_idx), case_task_id in sorted(self.case_tasks.items()):
             if bname != benchmark_name:
                 continue
-
-            case_stats = self.case_stats[(bname, case_idx)]
-
-            # Get case params
-            params = {}
-            for task in self.plan.tasks:
-                if task.benchmark_name == bname and task.case_idx == case_idx:
-                    params = task.params
-                    break
-
-            # Format params with rich highlighting (matching live view)
-            param_parts = []
-            for k, v in params.items():
-                param_parts.append(f"[cyan]{k}[/cyan]=[yellow]{v}[/yellow]")
-            param_str = ", ".join(param_parts)
-
-            # Format stats
-            result_parts = []
-            if case_stats["success"] > 0:
-                result_parts.append(f"[green]✓{case_stats['success']}[/green]")
-            if case_stats["error"] > 0:
-                result_parts.append(f"[red bold]⚠{case_stats['error']}[/red bold]")
-            if case_stats["failure"] > 0:
-                result_parts.append(f"[red]✗{case_stats['failure']}[/red]")
-            if case_stats["timeout"] > 0:
-                result_parts.append(f"[yellow]⏱{case_stats['timeout']}[/yellow]")
-
-            result_str = "/".join(result_parts) if result_parts else "0"
-
-            # Add metrics
-            metrics = []
-            if case_stats["wall_time_count"] > 0:
-                avg_wall_time = case_stats["wall_time_sum"] / case_stats["wall_time_count"]
-                metrics.append(f"[dim]t={avg_wall_time:.1f}s[/dim]")
-            if case_stats["plan_cost_count"] > 0:
-                avg_plan_cost = case_stats["plan_cost_sum"] / case_stats["plan_cost_count"]
-                metrics.append(f"[dim]cost={avg_plan_cost:.1f}[/dim]")
-
-            metrics_str = " " + " ".join(metrics) if metrics else ""
-
-            # Print case line (matching live view format)
-            self.console.print(f"  Case {case_idx:{case_width}d}: {param_str}  {result_str}{metrics_str}")
+            all_case_indices.append(case_idx)
+            self.console.print(self._format_case_line(benchmark_name, case_idx, case_width))
 
         # Print stderr for any error tasks in this benchmark
-        all_case_indices = [case_idx for (bname, case_idx) in sorted(self.case_tasks.items()) if bname == benchmark_name]
         self._print_error_details(benchmark_name, all_case_indices)
 
-        self.console.print()  # Empty line for separation
+        self.console.print()
 
     def mark_task_started(self, task: Task):
         """
@@ -719,6 +686,9 @@ class ProgressDisplay:
         Args:
             task: Task that just started
         """
+        # Increment running task count
+        self.running_tasks += 1
+
         # Set this benchmark as active if not already set
         if self.active_benchmark is None:
             self.active_benchmark = task.benchmark_name
@@ -734,6 +704,9 @@ class ProgressDisplay:
         Args:
             task: Completed task
         """
+        # Decrement running task count
+        self.running_tasks = max(0, self.running_tasks - 1)
+
         # Update overall
         self.overall_progress.update(self.overall_task, advance=1)
 

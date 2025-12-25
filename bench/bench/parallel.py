@@ -167,7 +167,7 @@ class ParallelExecutor:
             try:
                 if self.progress.live:
                     self.progress.live.stop()
-            except:
+            except Exception:
                 pass
             # Show cursor on both stdout and stderr (ANSI escape sequence)
             sys.stdout.write("\033[?25h")
@@ -244,7 +244,7 @@ class ParallelExecutor:
                     try:
                         if self.progress.live:
                             self.progress.live.stop()
-                    except:
+                    except Exception:
                         pass
                     # Show cursor on both stdout and stderr
                     sys.stdout.write("\033[?25h")
@@ -259,7 +259,7 @@ class ParallelExecutor:
             try:
                 if self.progress.live:
                     self.progress.live.stop()
-            except:
+            except Exception:
                 pass
             # Show cursor on both stdout and stderr
             sys.stdout.write("\033[?25h")

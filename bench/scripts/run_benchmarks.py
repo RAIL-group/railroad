@@ -3,19 +3,15 @@
 CLI entry point for running benchmarks.
 
 Usage:
-    python scripts/run_benchmarks.py --repeat-max 5 --parallel 4
-    python scripts/run_benchmarks.py --dry-run
-    python scripts/run_benchmarks.py -k robot --repeat-max 3
-    python scripts/run_benchmarks.py --tags multi-agent
+    uv run python scripts/run_benchmarks.py --repeat-max 5 --parallel 4
+    uv run python scripts/run_benchmarks.py --dry-run
+    uv run python scripts/run_benchmarks.py -k robot --repeat-max 3
+    uv run python scripts/run_benchmarks.py --tags multi-agent
 """
 
 import argparse
+import benchmarks
 import sys
-from pathlib import Path
-
-# Add bench package to path
-bench_path = Path(__file__).parent.parent
-# sys.path.insert(0, str(bench_path))
 
 from bench.runner import BenchmarkRunner
 from bench.registry import get_all_benchmarks
@@ -28,24 +24,24 @@ def main():
         epilog="""
 Examples:
   # Run all benchmarks with maximum 3 repeats per case
-  python scripts/run_benchmarks.py --repeat-max 3
+  uv run python scripts/run_benchmarks.py --repeat-max 3
 
   # Dry run to see what will execute
-  python scripts/run_benchmarks.py --dry-run
+  uv run python scripts/run_benchmarks.py --dry-run
 
   # Run with 4 parallel workers
-  python scripts/run_benchmarks.py --repeat-max 5 --parallel 4
+  uv run python scripts/run_benchmarks.py --repeat-max 5 --parallel 4
 
   # Filter by benchmark name
-  python scripts/run_benchmarks.py -k movie_night
+  uv run python scripts/run_benchmarks.py -k movie_night
 
   # Filter by parameter values (supports and/or/not)
-  python scripts/run_benchmarks.py -k "mcts_iterations=400"
-  python scripts/run_benchmarks.py -k "num_robots=1 or num_robots=2"
-  python scripts/run_benchmarks.py -k "movie_night and not mcts_iterations=10000"
+  uv run python scripts/run_benchmarks.py -k "mcts_iterations=400"
+  uv run python scripts/run_benchmarks.py -k "num_robots=1 or num_robots=2"
+  uv run python scripts/run_benchmarks.py -k "movie_night and not mcts_iterations=10000"
 
   # Filter by tags
-  python scripts/run_benchmarks.py --tags multi-agent
+  uv run python scripts/run_benchmarks.py --tags multi-agent
         """,
     )
 
@@ -63,8 +59,8 @@ Examples:
     parser.add_argument(
         "--parallel",
         type=int,
-        default=1,
-        help="Number of parallel workers (default: 1)",
+        default=None,
+        help="Number of parallel workers (default: auto-detect CPU count)",
     )
     parser.add_argument(
         "--tags",
@@ -82,20 +78,6 @@ Examples:
     )
 
     args = parser.parse_args()
-
-    # Import all benchmarks (triggers @benchmark decorators which auto-register)
-    try:
-        # Add benchmarks directory to path
-        benchmarks_path = bench_path / "benchmarks"
-        sys.path.insert(0, str(benchmarks_path))
-
-        # Import the benchmarks module to trigger decorator registration
-        import benchmarks
-
-    except ImportError as e:
-        print(f"Error importing benchmarks: {e}")
-        print("\nMake sure benchmarks/__init__.py exists.")
-        sys.exit(1)
 
     # Get all auto-registered benchmarks
     all_benchmarks = get_all_benchmarks()

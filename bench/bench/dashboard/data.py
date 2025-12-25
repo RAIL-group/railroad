@@ -10,27 +10,6 @@ from bench.analysis import BenchmarkAnalyzer
 _artifact_cache: dict[str, str] = {}
 
 
-def load_latest_experiment() -> tuple[pd.DataFrame, str]:
-    """Load the most recent benchmark experiment."""
-    analyzer = BenchmarkAnalyzer()
-    experiments = analyzer.list_experiments()
-
-    if experiments.empty:
-        raise ValueError("No benchmark experiments found in MLflow database")
-
-    latest_exp = experiments.iloc[0]
-    print(f"Loading experiment: {latest_exp['name']}")
-    print(f"Created at: {latest_exp['creation_time']}")
-
-    df = analyzer.load_experiment(latest_exp["name"])
-
-    if df.empty:
-        raise ValueError(f"No runs found in experiment {latest_exp['name']}")
-
-    print(f"Loaded {len(df)} runs")
-    return df, latest_exp["name"]
-
-
 def load_experiment_by_name(experiment_name: str) -> tuple[pd.DataFrame, str, dict]:
     """
     Load a specific experiment by name.

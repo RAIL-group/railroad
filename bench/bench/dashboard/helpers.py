@@ -19,10 +19,10 @@ from .styles import (
 )
 
 
-def _success_mask(series: pd.Series) -> pd.Series:
+def _bool_mask(series: pd.Series) -> pd.Series:
     """
-    Robustly interpret metrics.success as a boolean mask.
-    Handles bool, 0/1, floats, and missing.
+    Robustly interpret a metric series as a boolean mask.
+    Handles bool, 0/1, floats, and missing values.
     """
     if series is None:
         return pd.Series(False)
@@ -33,22 +33,16 @@ def _success_mask(series: pd.Series) -> pd.Series:
         s = s.astype(str).str.lower().isin(["1", "true", "t", "yes", "y"])
         return s
     return s > 0.5
+
+
+def _success_mask(series: pd.Series) -> pd.Series:
+    """Interpret metrics.success as a boolean mask."""
+    return _bool_mask(series)
 
 
 def _timeout_mask(series: pd.Series) -> pd.Series:
-    """
-    Robustly interpret metrics.timeout as a boolean mask.
-    Handles bool, 0/1, floats, and missing.
-    """
-    if series is None:
-        return pd.Series(False)
-    s = series.fillna(0)
-    try:
-        s = s.astype(float)
-    except Exception:
-        s = s.astype(str).str.lower().isin(["1", "true", "t", "yes", "y"])
-        return s
-    return s > 0.5
+    """Interpret metrics.timeout as a boolean mask."""
+    return _bool_mask(series)
 
 
 def format_status_count(n_success: int, n_total: int, n_error: int = 0, n_timeout: int = 0) -> str:
