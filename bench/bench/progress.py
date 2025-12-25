@@ -810,9 +810,11 @@ class ProgressDisplay:
         current_page_cases = self.benchmark_pages[benchmark_name][current_page_idx]
         total_pages = len(self.benchmark_pages[benchmark_name])
 
-        # Count tasks in current page (cases * repeats)
-        tasks_per_case = self.plan.metadata.get("num_repeats", 3)
-        expected_tasks_in_page = len(current_page_cases) * tasks_per_case
+        # Count actual tasks in current page from the plan
+        expected_tasks_in_page = sum(
+            1 for t in self.plan.tasks
+            if t.benchmark_name == benchmark_name and t.case_idx in current_page_cases
+        )
         completed_in_page = self.page_completed_tasks[benchmark_name][current_page_idx]
 
         if completed_in_page >= expected_tasks_in_page:
