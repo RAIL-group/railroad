@@ -206,7 +206,8 @@ def bench_multi_object_search(case: BenchmarkCase):
         action_name = mcts(sim.state, goal_fluents,
                            max_iterations=case.mcts.iterations,
                            c=case.mcts.c,
-                           max_depth=20)
+                           max_depth=20,
+                           heuristic_multiplier=case.mcts.h_mult)
 
         if action_name == 'NONE':
             dashboard.console.print("No more actions available. Goal may not be achievable.")
@@ -249,17 +250,28 @@ def bench_multi_object_search(case: BenchmarkCase):
 
 # Register parameter combinations
 bench_multi_object_search.add_cases([
-    {"mcts.iterations": 100, "mcts.c": 300, "num_robots": 1},
-    {"mcts.iterations": 400, "mcts.c": 300, "num_robots": 1},
-    {"mcts.iterations": 1000, "mcts.c": 300, "num_robots": 1},
-    {"mcts.iterations": 4000, "mcts.c": 300, "num_robots": 1},
-    {"mcts.iterations": 10000, "mcts.c": 300, "num_robots": 1},
-    {"mcts.iterations": 400, "mcts.c": 300, "num_robots": 2},
-    {"mcts.iterations": 1000, "mcts.c": 300, "num_robots": 2},
-    {"mcts.iterations": 4000, "mcts.c": 300, "num_robots": 2},
-    {"mcts.iterations": 10000, "mcts.c": 300, "num_robots": 2},
-    {"mcts.iterations": 400, "mcts.c": 300, "num_robots": 3},
-    {"mcts.iterations": 1000, "mcts.c": 300, "num_robots": 3},
-    {"mcts.iterations": 4000, "mcts.c": 300, "num_robots": 3},
-    {"mcts.iterations": 10000, "mcts.c": 300, "num_robots": 3},
+    {"mcts.iterations": 400, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 1},
+    {"mcts.iterations": 1000, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 1},
+    {"mcts.iterations": 4000, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 1},
+    {"mcts.iterations": 10000, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 1},
+    {"mcts.iterations": 400, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 2},
+    {"mcts.iterations": 1000, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 2},
+    {"mcts.iterations": 4000, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 2},
+    {"mcts.iterations": 10000, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 2},
+    {"mcts.iterations": 400, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 3},
+    {"mcts.iterations": 1000, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 3},
+    {"mcts.iterations": 4000, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 3},
+    {"mcts.iterations": 10000, "mcts.c": 300, "mcts.h_mult": 2, "num_robots": 3},
+    {"mcts.iterations": 400, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 1},
+    {"mcts.iterations": 1000, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 1},
+    {"mcts.iterations": 4000, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 1},
+    {"mcts.iterations": 10000, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 1},
+    {"mcts.iterations": 400, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 2},
+    {"mcts.iterations": 1000, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 2},
+    {"mcts.iterations": 4000, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 2},
+    {"mcts.iterations": 10000, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 2},
+    {"mcts.iterations": 400, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 3},
+    {"mcts.iterations": 1000, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 3},
+    {"mcts.iterations": 4000, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 3},
+    {"mcts.iterations": 10000, "mcts.c": 300, "mcts.h_mult": 5, "num_robots": 3},
 ])

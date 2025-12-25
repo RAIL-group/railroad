@@ -481,6 +481,15 @@ def create_sweep_figure(
             borderpad=4,
         )
 
+    # Prepare tick labels with success rate annotations
+    ticktext = []
+    for param_val in sorted_params:
+        param_data = data_by_param[param_val]
+        n_success = len(param_data["success"])
+        n_total = n_success + len(param_data["failed"]) + len(param_data["timeout"])
+        success_pct = (n_success / n_total * 100) if n_total > 0 else 0
+        ticktext.append(f"{param_val}<br><sub>{n_success}/{n_total}<br>({success_pct:.0f}%)</sub>")
+
     # Layout
     param_display = analysis.param_name.replace("params.", "")
 
@@ -506,6 +515,8 @@ def create_sweep_figure(
         gridcolor=GRID_COLOR,
         gridwidth=GRID_WIDTH,
         color=TEXT_COLOR,
+        tickvals=sorted_params,
+        ticktext=ticktext,
     )
     fig.update_yaxes(
         gridcolor=GRID_COLOR,

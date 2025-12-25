@@ -129,7 +129,7 @@ class Benchmark:
         description: str = "",
         tags: Optional[List[str]] = None,
         timeout: float = 300.0,  # 5 minutes default
-        repeat: int = 3,  # 3 repeats default
+        repeat: int = 32,  # 32 repeats default
     ):
         self.fn = fn
         self.name = name
@@ -158,7 +158,7 @@ def benchmark(
     description: str = "",
     tags: Optional[List[str]] = None,
     timeout: float = 300.0,
-    repeat: int = 3,
+    repeat: int = 32,
 ):
     """
     Decorator to register a function as a benchmark.
