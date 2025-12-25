@@ -249,7 +249,7 @@ def bench_multi_object_search(case: BenchmarkCase):
     }
 
 
-# Register parameter combinations using Cartesian product
+# Register parameter combinations
 bench_multi_object_search.add_cases([
     {
         "mcts.iterations": iterations,
@@ -258,9 +258,9 @@ bench_multi_object_search.add_cases([
         "num_robots": num_robots,
     }
     for c, num_robots, h_mult, iterations in itertools.product(
-        [300],                      # mcts.c
+        [100, 300],                 # mcts.c
         [1, 2, 3],                  # num_robots
-        [1, 2, 5, 20],              # mcts.h_mult
-        [100, 400, 1000, 4000],   # mcts.iterations
+        [1, 2, 5],                  # mcts.h_mult
+        [400, 1000, 4000],          # mcts.iterations
     )
 ])

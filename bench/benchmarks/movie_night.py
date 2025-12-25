@@ -12,6 +12,7 @@ disorganized and some items are missing entirely.
 """
 
 import time
+import itertools
 import numpy as np
 from mrppddl.core import Fluent as F, State, get_action_by_name
 from mrppddl.planner import MCTSPlanner
@@ -190,16 +191,16 @@ def bench_movie_night(case: BenchmarkCase):
 
 # Register parameter combinations
 bench_movie_night.add_cases([
-    {"mcts.iterations": 400, "mcts.c": 300, "num_robots": 1},
-    {"mcts.iterations": 1000, "mcts.c": 300, "num_robots": 1},
-    {"mcts.iterations": 4000, "mcts.c": 300, "num_robots": 1},
-    {"mcts.iterations": 10000, "mcts.c": 300, "num_robots": 1},
-    {"mcts.iterations": 400, "mcts.c": 300, "num_robots": 2},
-    {"mcts.iterations": 1000, "mcts.c": 300, "num_robots": 2},
-    {"mcts.iterations": 4000, "mcts.c": 300, "num_robots": 2},
-    {"mcts.iterations": 10000, "mcts.c": 300, "num_robots": 2},
-    {"mcts.iterations": 400, "mcts.c": 300, "num_robots": 3},
-    {"mcts.iterations": 1000, "mcts.c": 300, "num_robots": 3},
-    {"mcts.iterations": 4000, "mcts.c": 300, "num_robots": 3},
-    {"mcts.iterations": 10000, "mcts.c": 300, "num_robots": 3},
+    {
+        "mcts.iterations": iterations,
+        "mcts.c": c,
+        "mcts.h_mult": h_mult,
+        "num_robots": num_robots,
+    }
+    for c, num_robots, h_mult, iterations in itertools.product(
+        [100, 300],                 # mcts.c
+        [1, 2, 3],                  # num_robots
+        [1, 2, 5],                  # mcts.h_mult
+        [400, 1000, 4000],          # mcts.iterations
+    )
 ])
