@@ -33,6 +33,8 @@ SKILLS_TIME = {
 }
 
 class TestEnvironment(SimpleEnvironment):
+    __test__ = False  # Tell pytest this is not a test class
+
     def get_skills_cost_fn(self, skill_name: str):
         if skill_name == 'move':
             return super()._get_move_cost_fn()
