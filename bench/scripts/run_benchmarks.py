@@ -36,9 +36,13 @@ Examples:
   # Run with 4 parallel workers
   python scripts/run_benchmarks.py --repeats 5 --parallel 4
 
-  # Filter by name (pytest-style)
-  python scripts/run_benchmarks.py -k navigation
-  python scripts/run_benchmarks.py -k "robot_nav or coordination"
+  # Filter by benchmark name
+  python scripts/run_benchmarks.py -k movie_night
+
+  # Filter by parameter values (supports and/or/not)
+  python scripts/run_benchmarks.py -k "mcts_iterations=400"
+  python scripts/run_benchmarks.py -k "num_robots=1 or num_robots=2"
+  python scripts/run_benchmarks.py -k "movie_night and not mcts_iterations=10000"
 
   # Filter by tags
   python scripts/run_benchmarks.py --tags multi-agent
@@ -48,7 +52,7 @@ Examples:
     parser.add_argument(
         "-k",
         "--filter",
-        help="Filter benchmarks by name (pytest-style substring matching)",
+        help="Filter cases using pytest-style expressions with 'and', 'or', 'not' (e.g., 'movie_night and mcts_iterations=400', 'num_robots=1 or num_robots=2')",
     )
     parser.add_argument(
         "--repeats",
@@ -100,26 +104,14 @@ Examples:
         print("Error: No benchmarks found. Make sure your benchmarks use the @benchmark decorator.")
         sys.exit(1)
 
-    # Apply -k filter if specified
-    if args.filter:
-        filtered_benchmarks = [
-            b for b in all_benchmarks
-            if args.filter.lower() in b.name.lower()
-        ]
-        if not filtered_benchmarks:
-            print(f"No benchmarks matching filter: {args.filter}")
-            sys.exit(0)
-        benchmarks_to_run = filtered_benchmarks
-    else:
-        benchmarks_to_run = all_benchmarks
-
-    # Create runner
+    # Create runner (filtering now happens at case level in runner)
     runner = BenchmarkRunner(
-        benchmarks=benchmarks_to_run,
+        benchmarks=all_benchmarks,
         num_repeats=args.repeats,
         parallel=args.parallel,
         mlflow_tracking_uri=args.mlflow_uri,
         tags=args.tags,
+        case_filter=args.filter,
     )
 
     # Create plan

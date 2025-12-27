@@ -49,6 +49,7 @@ class BenchmarkRunner:
         parallel: int = 1,
         mlflow_tracking_uri: Optional[str] = None,
         tags: Optional[List[str]] = None,
+        case_filter: Optional[str] = None,
     ):
         """
         Initialize benchmark runner.
@@ -59,12 +60,14 @@ class BenchmarkRunner:
             parallel: Number of parallel workers (default: 1)
             mlflow_tracking_uri: MLflow tracking URI (default: sqlite:///mlflow.db)
             tags: Filter benchmarks by tags (default: None, run all)
+            case_filter: Filter cases by matching against benchmark name and parameters (default: None)
         """
         self.benchmarks = benchmarks
         self.num_repeats = num_repeats
         self.parallel = parallel
         self.tracker = MLflowTracker(tracking_uri=mlflow_tracking_uri)
         self.filter_tags = tags
+        self.case_filter = case_filter
 
     def create_plan(self) -> ExecutionPlan:
         """
@@ -86,9 +89,12 @@ class BenchmarkRunner:
         else:
             benchmarks = self.benchmarks
 
-        for benchmark in benchmarks:
-            for case_idx, params in enumerate(benchmark.cases):
-                for repeat_idx in range(self.num_repeats):
+        # Collate tasks: queue by repeat first, then benchmark, then case
+        # This ensures different cases run in parallel rather than exhausting
+        # all repeats of one case before moving to the next
+        for repeat_idx in range(self.num_repeats):
+            for benchmark in benchmarks:
+                for case_idx, params in enumerate(benchmark.cases):
                     task = Task(
                         id=f"{benchmark.name}_{case_idx}_{repeat_idx}",
                         benchmark_name=benchmark.name,
@@ -101,10 +107,72 @@ class BenchmarkRunner:
                     )
                     tasks.append(task)
 
+        # Apply case-level filter if specified
+        if self.case_filter:
+            filtered_tasks = []
+            for task in tasks:
+                # Create searchable string with benchmark name and all parameter values
+                param_str = " ".join(f"{k}={v}" for k, v in sorted(task.params.items()))
+                search_str = f"{task.benchmark_name} {param_str}".lower()
+
+                if self._matches_filter(search_str, self.case_filter):
+                    filtered_tasks.append(task)
+
+            tasks = filtered_tasks
+
         # Gather provenance metadata
         metadata = self._collect_metadata()
 
         return ExecutionPlan(tasks=tasks, metadata=metadata)
+
+    def _matches_filter(self, search_str: str, filter_expr: str) -> bool:
+        """
+        Evaluate a pytest-style filter expression against a search string.
+
+        Supports: and, or, not, parentheses
+        Example: "movie_night and mcts_iterations=400"
+                 "num_robots=1 or num_robots=2"
+                 "movie_night and not mcts_iterations=10000"
+
+        Args:
+            search_str: String to search in (lowercase)
+            filter_expr: Filter expression
+
+        Returns:
+            True if the filter matches, False otherwise
+        """
+        import re
+
+        # Tokenize: split on whitespace and parentheses, keeping them
+        tokens = re.findall(r'\(|\)|[^\s()]+', filter_expr)
+
+        # Build evaluation expression with safe variable names
+        safe_expr_parts = []
+        namespace = {}
+        token_counter = 0
+
+        for token in tokens:
+            token_lower = token.lower()
+
+            if token_lower in ('and', 'or', 'not', '(', ')'):
+                # Preserve operators and parentheses
+                safe_expr_parts.append(token_lower)
+            else:
+                # Create a safe variable for this search term
+                var_name = f'_m{token_counter}'
+                token_counter += 1
+                namespace[var_name] = token.lower() in search_str
+                safe_expr_parts.append(var_name)
+
+        safe_expr = ' '.join(safe_expr_parts)
+
+        try:
+            # Evaluate with restricted builtins for safety
+            result = eval(safe_expr, {"__builtins__": {}}, namespace)
+            return bool(result)
+        except:
+            # Fall back to simple substring match if expression is invalid
+            return filter_expr.lower() in search_str
 
     def _collect_metadata(self) -> dict:
         """

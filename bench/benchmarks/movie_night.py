@@ -40,6 +40,7 @@ def bench_movie_night(case: BenchmarkCase):
     mcts_iterations = case.params["mcts_iterations"]
     mcts_search_weight = case.params["mcts_search_weight"]
     num_robots = case.params["num_robots"]
+    print(num_robots)
 
     # Define locations with coordinates (for move cost calculation)
     locations = {
