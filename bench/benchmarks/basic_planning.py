@@ -34,7 +34,8 @@ def bench_single_robot_nav(case: BenchmarkCase):
     locations["living_room"] = np.array([0.0, 0.0])  # Required for SimpleEnvironment
     locations["start"] = np.array([0.0, 0.0])
 
-    env = SimpleEnvironment(locations=locations, objects_at_locations={})
+    robot_locations = {"robot1": "living_room"}
+    env = SimpleEnvironment(locations=locations, objects_at_locations={}, robot_locations=robot_locations)
 
     # Define initial state
     initial_state = State(
@@ -49,7 +50,7 @@ def bench_single_robot_nav(case: BenchmarkCase):
     goal_fluents = {F(f"at robot1 loc{num_locations - 1}")}
 
     # Create operators
-    move_time_fn = env.get_move_cost_fn()
+    move_time_fn = env.get_skills_cost_fn('move')
     move_op = environments.operators.construct_move_operator(move_time_fn)
 
     objects_by_type = {
@@ -73,7 +74,7 @@ def bench_single_robot_nav(case: BenchmarkCase):
 
     max_steps = 100
     for iteration in range(max_steps):
-        if sim.goal_reached(goal_fluents):
+        if sim.is_goal_reached(goal_fluents):
             break
 
         action_name = planner(
@@ -94,7 +95,7 @@ def bench_single_robot_nav(case: BenchmarkCase):
 
     # Return metrics
     return {
-        "success": sim.goal_reached(goal_fluents),
+        "success": sim.is_goal_reached(goal_fluents),
         "wall_time": wall_time,
         "plan_cost": float(sim.state.time),
         "actions_count": len(actions_taken),

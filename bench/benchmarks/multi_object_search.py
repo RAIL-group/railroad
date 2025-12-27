@@ -110,7 +110,8 @@ def bench_multi_object_search(case: BenchmarkCase):
     }
 
     # Initialize environment
-    env = SimpleEnvironment(locations, objects_at_locations, num_robots=case.num_robots)
+    robot_locations = {f"robot{ii+1}": "start_loc" for ii in range(case.num_robots)}
+    env = SimpleEnvironment(locations, objects_at_locations, robot_locations)
 
     # Define the objects we're looking for
     objects_of_interest = ["Knife", "Notebook", "Clock", "Mug", "Pillow"]
@@ -145,33 +146,26 @@ def bench_multi_object_search(case: BenchmarkCase):
 
     # Create operators
     move_op = environments.operators.construct_move_operator(
-        move_time=env.get_move_cost_fn()
+        move_time=env.get_skills_cost_fn('move')
     )
 
     # Search operator with 80% success rate when object is actually present
     search_op = environments.operators.construct_search_operator(
         object_find_prob=lambda r, l, o: 0.6 if 'kitchen' in l else 0.4,
-        search_time=lambda r, l: 5.0
+        search_time=env.get_skills_cost_fn('search')
     )
 
     pick_op = environments.operators.construct_pick_operator(
-        pick_time=lambda r, l, o: 5.0
+        pick_time=env.get_skills_cost_fn('pick')
     )
 
     place_op = environments.operators.construct_place_operator(
-        place_time=lambda r, l, o: 5.0
+        place_time=env.get_skills_cost_fn('place')
     )
 
-    from mrppddl.core import Operator, Effect
-    no_op = Operator(
-        name="no-op",
-        parameters=[("?r", "robot")],
-        preconditions=[F("free ?r")],
-        effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r")}),
-            Effect(time=5, resulting_fluents={F("free ?r")}),
-        ],
-        extra_cost=10,
+    no_op = environments.operators.construct_no_op_operator(
+        no_op_time=env.get_skills_cost_fn('no_op'),
+        extra_cost=10
     )
 
     # Create simulator
@@ -196,7 +190,7 @@ def bench_multi_object_search(case: BenchmarkCase):
 
     for iteration in range(max_iterations):
         # Check if goal is reached
-        if sim.goal_reached(goal_fluents):
+        if sim.is_goal_reached(goal_fluents):
             break
 
         # Get available actions
@@ -240,7 +234,7 @@ def bench_multi_object_search(case: BenchmarkCase):
     html_output = recording_console.export_html(inline_styles=True)
 
     return {
-        "success": sim.goal_reached(goal_fluents),
+        "success": sim.is_goal_reached(goal_fluents),
         "wall_time": time.perf_counter() - start_time,
         "plan_cost": float(sim.state.time),
         "actions_count": len(actions_taken),

@@ -49,7 +49,8 @@ def bench_movie_night(case: BenchmarkCase):
     }
 
     # Initialize environment
-    env = SimpleEnvironment(locations, objects_at_locations, num_robots=case.num_robots)
+    robot_locations = {f"robot{ii+1}": "living_room" for ii in range(case.num_robots)}
+    env = SimpleEnvironment(locations, objects_at_locations, robot_locations)
 
     # Define the objects we're looking for
     objects_of_interest = ["Remote", "Cookie", "Plate", "Couch"]
@@ -88,33 +89,26 @@ def bench_movie_night(case: BenchmarkCase):
 
     # Create operators
     move_op = environments.operators.construct_move_operator(
-        move_time=env.get_move_cost_fn()
+        move_time=env.get_skills_cost_fn('move')
     )
 
     # Search operator with 80% success rate when object is actually present
     object_find_prob = lambda r, loc, o: 0.8 if o in objects_at_locations.get(loc, dict()).get("object", dict()) else 0.2
     search_op = environments.operators.construct_search_operator(
         object_find_prob=object_find_prob,
-        search_time=lambda r, loc: 5.0
+        search_time=env.get_skills_cost_fn('search')
     )
 
-    from mrppddl.core import Operator, Effect
-    no_op = Operator(
-        name="no-op",
-        parameters=[("?r", "robot")],
-        preconditions=[F("free ?r")],
-        effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r")}),
-            Effect(time=5, resulting_fluents={F("free ?r")}),
-        ],
-        extra_cost=100,
+    no_op = environments.operators.construct_no_op_operator(
+        no_op_time=env.get_skills_cost_fn('no_op'),
+        extra_cost=100
     )
     pick_op = environments.operators.construct_pick_operator(
-        pick_time=lambda r, l, o: 5.0
+        pick_time=env.get_skills_cost_fn('pick')
     )
 
     place_op = environments.operators.construct_place_operator(
-        place_time=lambda r, l, o: 5.0
+        place_time=env.get_skills_cost_fn('place')
     )
 
     # Create simulator
@@ -139,7 +133,7 @@ def bench_movie_night(case: BenchmarkCase):
 
     for iteration in range(max_iterations):
         # Check if goal is reached
-        if sim.goal_reached(goal_fluents):
+        if sim.is_goal_reached(goal_fluents):
             break
 
         # Get available actions
@@ -181,7 +175,7 @@ def bench_movie_night(case: BenchmarkCase):
     html_output = recording_console.export_html(inline_styles=True)
 
     return {
-        "success": sim.goal_reached(goal_fluents),
+        "success": sim.is_goal_reached(goal_fluents),
         "wall_time": time.perf_counter() - start_time,
         "plan_cost": float(sim.state.time),
         "actions_count": len(actions_taken),
