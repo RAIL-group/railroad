@@ -65,6 +65,7 @@ def _execute_task_worker(task: Task, mlflow_uri: Optional[str] = None) -> Task:
     if task.benchmark_fn is None:
         try:
             # Import benchmarks module to trigger decorator registration
+            import benchmarks  # noqa: F401
             from bench.registry import get_all_benchmarks
 
             # Find the benchmark by name in the registry
