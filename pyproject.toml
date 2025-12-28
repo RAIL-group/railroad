@@ -43,7 +43,7 @@ common = { path = "common", editable = true }
 gridmap = { path = "gridmap", editable = true }
 environments = { path = "environments", editable = true }
 procthor = { path = "procthor", editable = true }
-bench = { path = "bench", editable = true }
+bench = { path = "src/bench", editable = true }
 
 [tool.pytest.ini_options]
 filterwarnings = [
