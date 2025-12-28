@@ -97,6 +97,7 @@ The repository is organized as a monorepo with multiple packages:
 - **`environments/`** - Environment abstractions and implementations
 - **`gridmap/`** - Occupancy grid mapping and planning utilities
 - **`common/`** - Shared utilities (Pose class, etc.)
+- **`src/bench/`** - Benchmarking harness with MLflow tracking and dashboard
 - **`scripts/`** - Example scripts and demonstrations
 - **`resources/`** - Downloaded resources (ProcTHOR data, models, etc.)
 
@@ -119,6 +120,22 @@ uv run pytest -vk search
 
 ```bash
 uv run pyright -w mrppddl/src/mrppddl mrppddl/tests
+```
+
+### Running Benchmarks
+
+```bash
+# Run all benchmarks
+uv run benchmarks-run
+
+# Dry run to see what will execute
+uv run benchmarks-run --dry-run
+
+# Run with filters and options
+uv run benchmarks-run -k movie_night --repeat-max 3 --parallel 4
+
+# Launch interactive dashboard
+uv run benchmarks-dashboard
 ```
 
 ### Rebuilding C++ Extensions

@@ -52,7 +52,12 @@ def create_app() -> dash.Dash:
 app = create_app()
 
 
-if __name__ == "__main__":
+def main():
+    """Entry point for benchmarks-dashboard command."""
     print("\nStarting Dash server...")
     print("Open http://127.0.0.1:8050/ in your browser")
     app.run(debug=True, dev_tools_ui=False)
+
+
+if __name__ == "__main__":
+    main()

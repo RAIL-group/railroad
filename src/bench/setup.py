@@ -11,4 +11,10 @@ setup(
         "rich",
         "pandas",
     ],
+    entry_points={
+        "console_scripts": [
+            "benchmarks-dashboard=bench.dashboard.app:main",
+            "benchmarks-run=bench.cli:main",
+        ],
+    },
 )

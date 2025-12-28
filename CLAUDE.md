@@ -15,6 +15,8 @@ This project uses `uv` as the package manager and build tool. The build system a
 - **Run all tests**: `uv run pytest`
 - **Run tests matching filter**: `uv run pytest -vk <filter>`
 - **Type checking**: `uv run pyright -w mrppddl/src/mrppddl mrppddl/tests` (currently not working)
+- **Run benchmarks**: `uv run benchmarks-run` (use `--dry-run` to preview, `-k <filter>` to filter)
+- **Launch benchmark dashboard**: `uv run benchmarks-dashboard`
 
 ### Important Build Notes
 
@@ -60,6 +62,14 @@ The repository is organized as a monorepo with several interdependent packages:
 - **`common/`**: Shared utilities
   - `Pose` class for 2D robot poses with transforms
   - Path length computation utilities
+
+#### Benchmarking (`src/bench/`)
+- **`bench/`**: Benchmark harness for planning system evaluation
+  - `registry.py`: Benchmark registration via `@benchmark` decorator
+  - `runner.py`: Parallel benchmark execution with MLflow tracking
+  - `dashboard/`: Interactive Plotly Dash visualization
+  - `cli.py`: Command-line interface for running benchmarks
+- **`benchmarks/`**: Benchmark definitions (multi-object search, movie night, etc.)
 
 ### Key Concepts
 
