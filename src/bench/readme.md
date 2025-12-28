@@ -1,9 +1,88 @@
+# Benchmark Harness
 
-- The case filter should also look at variable names.
+Benchmark harness for evaluating the PDDL planning system with MLflow tracking and interactive visualization.
 
+## Quick Start
 
-Visualization for the plots:
-- [ ] Right now, I have an annotation for each of the cases that gives detail, but perhaps it would be best to just let the axis label spill over into the plot itself (avoiding any line wrapping). I'll need to move the axis labels up a bit to make sure they don't fully cover the plots.
- - Think I can do this by setting the y-position of the plots and then also adding custom y-ticks. However, I want to make it so that the tick labels spill over onto the plot.
-- [ ] I need to put the failed runs separately. Red 'x' on the rightmost part of the plot.
-- [ ] xmax should be benchmark-specific! Right now it uses the values for all the benchmarks
+### Running Benchmarks
+
+```bash
+# Run all benchmarks
+uv run benchmarks-run
+
+# Dry run to see what will execute
+uv run benchmarks-run --dry-run
+
+# Run with filters and options
+uv run benchmarks-run -k movie_night --repeat-max 3 --parallel 4
+
+# Filter by parameter values
+uv run benchmarks-run -k "mcts_iterations=400"
+uv run benchmarks-run -k "num_robots=1 or num_robots=2"
+
+# Filter by tags
+uv run benchmarks-run --tags multi-agent
+```
+
+### Viewing Results
+
+```bash
+# Launch interactive dashboard
+uv run benchmarks-dashboard
+```
+
+Open http://127.0.0.1:8050/ in your browser to view benchmark results with interactive visualizations.
+
+## Architecture
+
+- **`bench/`**: Core benchmark harness
+  - `registry.py`: Benchmark registration via `@benchmark` decorator
+  - `runner.py`: Parallel execution with MLflow tracking
+  - `cli.py`: Command-line interface
+  - `dashboard/`: Interactive Plotly Dash visualization
+
+- **`benchmarks/`**: Benchmark definitions
+  - `basic_planning.py`: Simple planning scenarios
+  - `movie_night.py`: Multi-agent coordination tasks
+  - `multi_object_search.py`: Object search benchmarks
+
+## Creating Benchmarks
+
+```python
+from bench.registry import benchmark, BenchmarkCase
+
+@benchmark(
+    name="my_benchmark",
+    description="Description of what this benchmarks",
+    tags=["planning", "multi-agent"],
+    timeout=120.0,
+    repeat=32,
+)
+def bench_my_test(case: BenchmarkCase):
+    # Extract parameters
+    num_robots = case.params["num_robots"]
+
+    # Run benchmark
+    # ...
+
+    # Return results
+    return {
+        "success": True,
+        "wall_time": 10.5,
+        "cost": 42.0,
+    }
+
+# Register parameter cases
+bench_my_test.add_cases([
+    {"num_robots": 1, "seed": 42},
+    {"num_robots": 2, "seed": 43},
+])
+```
+
+## TODO
+
+Visualization improvements:
+- [ ] Case filter should look at variable names
+- [ ] Axis labels should spill over into the plot to avoid line wrapping
+- [ ] Display failed runs separately with red 'x' on rightmost part of plot
+- [ ] Make xmax benchmark-specific instead of global
