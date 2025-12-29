@@ -84,6 +84,64 @@ class BenchmarkAnalyzer:
 
         return metadata
 
+    def get_experiment_summary(self, experiment_name: str) -> dict:
+        """
+        Get summary statistics for an experiment.
+
+        Args:
+            experiment_name: Name of the experiment
+
+        Returns:
+            Dictionary with summary statistics including:
+            - total_runs: Total number of runs
+            - benchmarks: List of benchmark names
+            - success_rate: Overall success rate
+            - success_by_benchmark: Dict of success rates per benchmark
+            - timeout_rate: Overall timeout rate
+
+        Raises:
+            ValueError: If experiment not found
+        """
+        df = self.load_experiment(experiment_name)
+
+        summary = {
+            "total_runs": len(df),
+            "benchmarks": [],
+            "success_rate": 0.0,
+            "success_by_benchmark": {},
+            "timeout_rate": 0.0,
+        }
+
+        if df.empty:
+            return summary
+
+        # Get unique benchmarks
+        if "params.benchmark_name" in df.columns:
+            summary["benchmarks"] = sorted(df["params.benchmark_name"].unique().tolist())
+
+        # Overall success rate
+        if "metrics.success" in df.columns:
+            summary["success_rate"] = float(df["metrics.success"].mean())
+
+        # Success rate by benchmark
+        if "params.benchmark_name" in df.columns and "metrics.success" in df.columns:
+            success_by_bench = df.groupby("params.benchmark_name")["metrics.success"].agg(
+                ["mean", "count"]
+            )
+            summary["success_by_benchmark"] = {
+                bench: {
+                    "success_rate": float(row["mean"]),
+                    "total_runs": int(row["count"]),
+                }
+                for bench, row in success_by_bench.iterrows()
+            }
+
+        # Overall timeout rate
+        if "metrics.timeout" in df.columns:
+            summary["timeout_rate"] = float(df["metrics.timeout"].mean())
+
+        return summary
+
     def load_experiment(self, experiment_name: str) -> pd.DataFrame:
         """
         Load all runs from an experiment.
