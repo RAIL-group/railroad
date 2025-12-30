@@ -50,7 +50,7 @@ class EnvironmentInterface():
             f"{rob}_loc"
             for rob in self.objects_by_type["robot"]
             if F(f"at {rob} {rob}_loc") in self._state.fluents
-            )
+        )
         all_actions = list(itertools.chain.from_iterable(
             operator.instantiate(objects_with_rloc)
             for operator in self.operators
@@ -251,8 +251,8 @@ class OngoingAction:
 
         # If the action is complete, add all the remaining effects immediately
         # This is so that we can add fluents like just-picked, just-moved, etc. after delta_time
-        # of action completion. These just-picked, just-moved were added so that it can be used # in preconditions to prevent the same action being taken again immediately
-        # for planning efficiency.
+        # of action completion. These just-picked, just-moved were added so that it can be used in
+        # preconditions to prevent the same action being taken again immediately for planning efficiency.
 
         if self.do_add_all_remaining_effects:
             new_effects += self._upcoming_effects
@@ -324,7 +324,6 @@ class OngoingMoveAction(OngoingAction):
 
         if self.time <= self._start_time:
             return set()  # Cannot interrupt before start time
-
 
         # This action is done. Treat this as having "reached" the destination
         # but where the destination is robot_loc, which means we must replace

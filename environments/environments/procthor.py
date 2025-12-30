@@ -4,8 +4,6 @@ from procthor import ThorInterface
 from . import utils
 from .environments import BaseEnvironment, SimulatedRobot, SkillStatus
 
-
-
 SKILLS_TIME = {
     'robot1': {
         'pick': 15,
@@ -16,7 +14,6 @@ SKILLS_TIME = {
         'place': 10,
         'search': 10}
 }
-
 
 
 class ProcTHOREnvironment(BaseEnvironment):
@@ -44,7 +41,8 @@ class ProcTHOREnvironment(BaseEnvironment):
         all_objects = set()
         for container_idx in self.known_graph.container_indices:
             object_idxs = self.known_graph.get_adjacent_nodes_idx(container_idx, filter_by_type=3)
-            all_objects.update({f'{self.known_graph.get_node_name_by_idx(obj_idx)}_{obj_idx}' for obj_idx in object_idxs})
+            all_objects.update({f'{self.known_graph.get_node_name_by_idx(obj_idx)}_{obj_idx}'
+                                for obj_idx in object_idxs})
         return all_objects
 
     def get_objects_at_location(self, location):
@@ -95,7 +93,6 @@ class ProcTHOREnvironment(BaseEnvironment):
             return cost
         return move_cost_fn
 
-
     def _get_intermediate_coordinates(self, time, coord_from, coord_to):
         _, path = utils.get_cost_between_two_coords(self.grid, coord_from, coord_to, return_path=True)
         return utils.get_coordinates_at_time(path, time)
@@ -137,7 +134,6 @@ class ProcTHOREnvironment(BaseEnvironment):
             self.robot_skill_start_time_and_duration[robot_name] = (self.time, skill_time)
         else:
             raise ValueError(f"Skill '{skill_name}' not defined for robot '{robot_name}'.")
-
 
     def get_skills_cost_fn(self, skill_name: str):
         if skill_name == 'move':

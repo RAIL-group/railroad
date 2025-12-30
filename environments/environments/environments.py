@@ -1,4 +1,4 @@
-from typing import Dict, List, Tuple, Callable, Union
+from typing import Dict, Callable
 from enum import IntEnum
 import numpy as np
 
@@ -134,6 +134,7 @@ class SimpleEnvironment(BaseEnvironment):
                 'search': 5.0,
                 'no_op': 5.0,
             }
+
             def get_skill_time(robot_name, *args, **kwargs):
                 return skills_costs[skill_name]
             return get_skill_time

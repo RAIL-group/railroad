@@ -13,7 +13,7 @@ def plot_grid_with_robot_trajectory(ax, grid, robot_all_poses, trajectory, graph
         idx = graph.get_node_idx_by_position([pose.x, pose.y])
         if idx is not None:
             name = graph.get_node_name_by_idx(idx)
-            ax.text(pose.x, pose.y, f'{i+1} - {name}', color='brown', size=4)
+            ax.text(pose.x, pose.y, f'{i + 1} - {name}', color='brown', size=4)
         else:
             print(f'Plotting warning: No node found in graph for pose [{pose.x:.2f}, {pose.y:.2f}]')
 

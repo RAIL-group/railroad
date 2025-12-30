@@ -47,7 +47,8 @@ def construct_search_operator(object_find_prob: OptCallable, search_time: OptCal
     return Operator(
         name="search",
         parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
-        preconditions=[F("at ?r ?loc"), F("free ?r"), F("not revealed ?loc"), F("not searched ?loc ?obj"), F("not found ?obj"), F("not lock-search ?loc")],
+        preconditions=[F("at ?r ?loc"), F("free ?r"), F("not revealed ?loc"),
+                       F("not searched ?loc ?obj"), F("not found ?obj"), F("not lock-search ?loc")],
         effects=[
             Effect(time=0, resulting_fluents={F("not free ?r"), F("lock-search ?loc")}),
             Effect(time=(search_time, ["?r", "?loc"]),
@@ -62,6 +63,7 @@ def construct_search_operator(object_find_prob: OptCallable, search_time: OptCal
                    )
         ]
     )
+
 
 def construct_pick_operator_nonblocking(pick_time: OptCallable) -> Operator:
     pick_time = _make_callable(pick_time)
@@ -93,6 +95,7 @@ def construct_pick_operator(pick_time: OptCallable) -> Operator:
         ],
     )
 
+
 def construct_place_operator_nonblocking(place_time: OptCallable) -> Operator:
     place_time = _make_callable(place_time)
     return Operator(
@@ -106,13 +109,15 @@ def construct_place_operator_nonblocking(place_time: OptCallable) -> Operator:
         ],
     )
 
+
 def construct_place_operator(place_time: OptCallable) -> Operator:
     place_time = _make_callable(place_time)
     place_time_plus_eps = lambda *args: place_time(*args) + 0.1
     return Operator(
         name="place",
         parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
-        preconditions=[F("at ?r ?loc"), F("free ?r"), F("holding ?r ?obj"), F("hand-full ?r"), ~F("just-picked ?r ?obj")],
+        preconditions=[F("at ?r ?loc"), F("free ?r"), F("holding ?r ?obj"),
+                       F("hand-full ?r"), ~F("just-picked ?r ?obj")],
         effects=[
             Effect(time=0, resulting_fluents={F("not free ?r"), F("not holding ?r ?obj")}),
             Effect(time=(place_time, ["?r", "?loc", "?obj"]),
