@@ -1,9 +1,8 @@
-import pytest
 import numpy as np
 from mrppddl.core import Fluent as F, State, get_action_by_name
 from mrppddl.planner import MCTSPlanner
 import environments
-from environments import SimpleEnvironment, SimulatedRobot, SkillStatus
+from environments import SimpleEnvironment
 from environments.core import EnvironmentInterface
 
 
@@ -31,6 +30,7 @@ SKILLS_TIME = {
         'place': 10,
         'search': 10}
 }
+
 
 class TestEnvironment(SimpleEnvironment):
     __test__ = False  # Tell pytest this is not a test class
@@ -231,7 +231,6 @@ def test_pick_and_place_action():
     assert len(sim.ongoing_actions) == 1
 
 
-
 # @pytest.mark.timeout(15)
 def test_no_oscillation_pick_place_move_search():
     robot_locations = {"r1": "start"}
@@ -282,7 +281,7 @@ def test_no_oscillation_pick_place_move_search():
     search_time = env.get_skills_cost_fn(skill_name='search')
     pick_time = env.get_skills_cost_fn(skill_name='pick')
     place_time = env.get_skills_cost_fn(skill_name='place')
-    object_find_prob = lambda r, loc, o:  1.0
+    object_find_prob = lambda r, loc, o: 1.0
 
     move_op = environments.operators.construct_move_operator(move_time_fn)
     search_op = environments.operators.construct_search_operator(object_find_prob, search_time)

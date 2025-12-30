@@ -1,4 +1,3 @@
-import pytest
 from common import Pose
 import environments
 import environments.procthor
@@ -38,14 +37,14 @@ def test_procthor_add_remove_objects():
     # reveal loc1
     objects = env.get_objects_at_location(loc1)
     loc1_obj_idxs = env.partial_graph.get_adjacent_nodes_idx(loc1_idx, filter_by_type=3)
-    assert len(loc1_obj_idxs) == len(objects['object']) # objects revealed
+    assert len(loc1_obj_idxs) == len(objects['object'])  # objects revealed
 
     # pick a random object from loc1
     obj1 = random.choice(list(objects['object']))
     # remove the object from loc1
     env.remove_object_from_location(obj1, loc1)
     loc1_obj_idxs = env.partial_graph.get_adjacent_nodes_idx(loc1_idx, filter_by_type=3)
-    assert len(loc1_obj_idxs) == len(objects['object']) - 1 # one object removed
+    assert len(loc1_obj_idxs) == len(objects['object']) - 1  # one object removed
     # ensure obj1 is not in loc1 anymore
     for obj_idx in loc1_obj_idxs:
         object_name = env.partial_graph.nodes[obj_idx]['object_name']
@@ -56,12 +55,11 @@ def test_procthor_add_remove_objects():
     loc2_idx = int(loc2.split('_')[1])
     loc2_obj_idxs = env.partial_graph.get_adjacent_nodes_idx(loc2_idx, filter_by_type=3)
     assert len(loc2_obj_idxs) == 0  # nothing is there in loc2 yet
-    env.add_object_at_location(obj1, loc2) # add obj1 to loc2
+    env.add_object_at_location(obj1, loc2)  # add obj1 to loc2
     loc2_obj_idxs = env.partial_graph.get_adjacent_nodes_idx(loc2_idx, filter_by_type=3)
     assert len(loc2_obj_idxs) == 1  # something is there in loc2
     object_name = env.partial_graph.nodes[loc2_obj_idxs[0]]['object_name']
     assert object_name == obj1  # obj1 is  at loc2
-
 
 
 def test_procthor_move_and_search():
@@ -76,16 +74,16 @@ def test_procthor_move_and_search():
     }
 
     init_state = State(
-            time=0,
-            fluents={
-                F("revealed start"),
-                F("at robot1 start"), F("free robot1"),
-            },
+        time=0,
+        fluents={
+            F("revealed start"),
+            F("at robot1 start"), F("free robot1"),
+        },
     )
 
     move_time_fn = env.get_skills_cost_fn(skill_name='move')
     search_time = env.get_skills_cost_fn(skill_name='search')
-    object_find_prob = lambda r, loc, o:  1.0
+    object_find_prob = lambda r, loc, o: 1.0
 
     move_op = environments.operators.construct_move_operator(move_time_fn)
     search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
@@ -121,11 +119,11 @@ def test_procthor_move_and_search():
         robot_all_poses.append(Pose(*env.locations[to]))
     print(robot_all_poses)
 
-
     cost, trajectory = utils.compute_cost_and_trajectory(env.grid, robot_all_poses, 1.0)
 
     plt.figure(figsize=(8, 8))
-    known_locations = [env.known_graph.get_node_name_by_idx(idx) for idx in env.thor_interface.target_objs_info['container_idxs']]
+    known_locations = [env.known_graph.get_node_name_by_idx(idx)
+                       for idx in env.thor_interface.target_objs_info['container_idxs']]
     plt.suptitle(f"Seed: {args.current_seed} | Target object: {env.target_object}\n"
                  f"Known locations: {known_locations} ")
 
@@ -169,11 +167,11 @@ def test_procthor_move_search_pick_place():
     }
 
     init_state = State(
-            time=0,
-            fluents={
-                F("revealed start"),
-                F("at robot1 start"), F("free robot1"),
-            },
+        time=0,
+        fluents={
+            F("revealed start"),
+            F("at robot1 start"), F("free robot1"),
+        },
     )
     # Task: Place all objects at random_location
     # goal_fluents = {F(f"at {obj} {to_loc}") for obj in env.all_objects}
@@ -186,7 +184,7 @@ def test_procthor_move_search_pick_place():
     search_time = env.get_skills_cost_fn(skill_name='search')
     pick_time = env.get_skills_cost_fn(skill_name='pick')
     place_time = env.get_skills_cost_fn(skill_name='place')
-    object_find_prob = lambda r, loc, o:  1.0
+    object_find_prob = lambda r, loc, o: 1.0
 
     move_op = environments.operators.construct_move_operator(move_time_fn)
     search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
@@ -221,11 +219,11 @@ def test_procthor_move_search_pick_place():
         robot_all_poses.append(Pose(*env.locations[to]))
     print(robot_all_poses)
 
-
     cost, trajectory = utils.compute_cost_and_trajectory(env.grid, robot_all_poses, 1.0)
 
     plt.figure(figsize=(8, 8))
-    known_locations = [env.known_graph.get_node_name_by_idx(idx) for idx in env.thor_interface.target_objs_info['container_idxs']]
+    known_locations = [env.known_graph.get_node_name_by_idx(idx)
+                       for idx in env.thor_interface.target_objs_info['container_idxs']]
     plt.suptitle(f"Seed: {args.current_seed} | Target object: {env.target_object}\n"
                  f"Known locations: {known_locations} ")
 

@@ -58,7 +58,8 @@ def test_simulator_advance_blocking_operators():
     search_time = env.get_skills_cost_fn(skill_name='search')
     pick_time = env.get_skills_cost_fn(skill_name='pick')
     place_time = env.get_skills_cost_fn(skill_name='place')
-    object_find_prob = lambda r, loc, o: 0.8 if o in OBJECTS_AT_LOCATIONS.get(loc, dict()).get("object", dict()) else 0.2
+    object_find_prob = lambda r, loc, o: (0.8 if o in OBJECTS_AT_LOCATIONS.get(loc, dict()).get("object", dict())
+                                          else 0.2)
 
     move_op = environments.operators.construct_move_operator(move_time_fn)
     search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
