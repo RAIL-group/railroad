@@ -23,7 +23,8 @@ def get_args():
 
 def test_procthor_add_remove_objects():
     args = get_args()
-    env = environments.procthor.ProcTHOREnvironment(args)
+    robot_locations = {'robot1': 'start'}
+    env = environments.procthor.ProcTHOREnvironment(args, robot_locations)
 
     # pick a random object
     obj1 = random.choice(list(env.all_objects))

@@ -20,7 +20,7 @@ SKILLS_TIME = {
 
 
 class ProcTHOREnvironment(BaseEnvironment):
-    def __init__(self, args, robot_locations={}):
+    def __init__(self, args, robot_locations):
         super().__init__()
         self.args = args
         self.thor_interface = ThorInterface(self.args)
