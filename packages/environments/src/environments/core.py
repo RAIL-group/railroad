@@ -6,6 +6,7 @@ from mrppddl.core import transition
 from mrppddl.core import Operator
 from .environments import BaseEnvironment, SkillStatus
 from typing import Dict, Set, List, Collection
+import math
 
 
 class EnvironmentInterface():
@@ -56,7 +57,7 @@ class EnvironmentInterface():
             for operator in self.operators
         ))
 
-        def filter_fn(action):
+        def filter_intermediate_locations_as_destination(action):
             ans = action.name.split()
             if ans[0] == 'move' and '_loc' in ans[3]:
                 # (move robot1 robot1_loc other_loc)
@@ -70,8 +71,18 @@ class EnvironmentInterface():
 
             return True
 
+        def filter_infinite_effect_time(action):
+            # Infinite time appears when the skill time function returns infinity
+            # This indicates that the skill is not available for the robot
+            for eff in action.effects:
+                if math.isinf(eff.time):
+                    return False
+            return True
+
         # Filter out actions that should not be allowed.
-        filtered_actions = [a for a in all_actions if filter_fn(a)]
+        filtered_actions = [a for a in all_actions if filter_infinite_effect_time(a)]
+        # filtered_actions = all_actions
+        filtered_actions = [a for a in filtered_actions if filter_intermediate_locations_as_destination(a)]
         return filtered_actions
 
     def _any_free_robots(self):
