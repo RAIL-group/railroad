@@ -7,6 +7,8 @@ Benchmarks are automatically registered when decorated.
 
 from dataclasses import dataclass
 from typing import Dict, Any, Callable, List, Optional
+import inspect
+from pathlib import Path
 
 
 # Global registry of all benchmarks (populated by @benchmark decorator)
@@ -198,10 +200,21 @@ def benchmark(
     """
 
     def decorator(fn: Callable) -> Benchmark:
+        # Get the file name where the benchmark is defined
+        # Use the function's code object to get its file location
+        if hasattr(fn, '__code__') and hasattr(fn.__code__, 'co_filename'):
+            caller_file = fn.__code__.co_filename
+            file_name = Path(caller_file).stem
+            # Format name as "file_name::benchmark_name" (pytest style)
+            full_name = f"{file_name}::{name}"
+        else:
+            # Fallback if we can't get the file name
+            full_name = name
+
         # Create Benchmark object
         bench = Benchmark(
             fn=fn,
-            name=name,
+            name=full_name,
             description=description,
             tags=tags,
             timeout=timeout,

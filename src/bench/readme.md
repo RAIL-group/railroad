@@ -13,11 +13,14 @@ uv run benchmarks-run
 # Dry run to see what will execute
 uv run benchmarks-run --dry-run
 
-# Run with filters and options
+# Filter by file name (matches any benchmark in that file)
 uv run benchmarks-run -k movie_night --repeat-max 3 --parallel 4
 
+# Filter by specific benchmark name
+uv run benchmarks-run -k single_robot_at_location
+
 # Filter by parameter values
-uv run benchmarks-run -k "mcts_iterations=400"
+uv run benchmarks-run -k "mcts.iterations=400"
 uv run benchmarks-run -k "num_robots=1 or num_robots=2"
 
 # Filter by tags
@@ -48,11 +51,13 @@ Open http://127.0.0.1:8050/ in your browser to view benchmark results with inter
 
 ## Creating Benchmarks
 
+Benchmarks are automatically registered with a name in the format `{file_name}::{benchmark_name}` (similar to pytest). This allows filtering by either the file name or the specific benchmark name.
+
 ```python
 from bench.registry import benchmark, BenchmarkCase
 
 @benchmark(
-    name="my_benchmark",
+    name="my_benchmark",  # Will be registered as "my_file::my_benchmark"
     description="Description of what this benchmarks",
     tags=["planning", "multi-agent"],
     timeout=120.0,
