@@ -16,14 +16,21 @@ from rich.console import Console
 from bench import benchmark, BenchmarkCase
 
 SKILLS_TIME = {
-    'rover': {'pick': 10,
-               'place': 10,
-               'search': 10},
-    'crawler': {'pick': 10,
-               'place': 10,
-               'search': 10},
-    'drone': {'search': 10}  # drone can only search (and move)
+    'rover': {
+        'pick': 10,
+        'place': 10,
+        'search': 10
+    },
+    'crawler': {
+        'pick': 10,
+        'place': 10,
+        'search': 10
+    },
+    'drone': {
+        'search': 10
+    }  # drone can only search (in addition to move)
 }
+
 
 class DemoEnvironment(SimpleEnvironment):
 
@@ -74,7 +81,7 @@ def bench_heterogeneous_robots(case: BenchmarkCase):
     robot_locations = {available_robots[i]: "start" for i in range(min(case.num_robots, len(available_robots)))}
     env = DemoEnvironment(locations, objects_at_locations, robot_locations)
 
-    initial_fluents={
+    initial_fluents = {
         F("revealed start"),
     }
 
@@ -91,7 +98,7 @@ def bench_heterogeneous_robots(case: BenchmarkCase):
     )
 
     # Define goal: have supplies at the start location
-    goal_fluents = {F(f"at supplies start")}
+    goal_fluents = {F("at supplies start")}
 
     objects_by_type = {
         "robot": robot_names,
@@ -101,9 +108,9 @@ def bench_heterogeneous_robots(case: BenchmarkCase):
 
     # Create operators
     move_time_fn = env.get_skills_cost_fn('move')
-    move_op = environments.operators.construct_move_operator(move_time_fn)
+    move_op = environments.operators.construct_move_operator_nonblocking(move_time_fn)
     search_op = environments.operators.construct_search_operator(object_find_prob=lambda r, loc, o: 1.0,
-                                                                       search_time=env.get_skills_cost_fn('search'))
+                                                                 search_time=env.get_skills_cost_fn('search'))
     no_op = environments.operators.construct_no_op_operator(
         no_op_time=env.get_skills_cost_fn('no_op'),
         extra_cost=100
@@ -146,9 +153,9 @@ def bench_heterogeneous_robots(case: BenchmarkCase):
         # Plan next action
         mcts = MCTSPlanner(all_actions)
         action_name = mcts(env_interface.state, goal_fluents,
-                            max_iterations=case.mcts.iterations,
-                            c=case.mcts.c,
-                            max_depth=20)
+                           max_iterations=case.mcts.iterations,
+                           c=case.mcts.c,
+                           max_depth=20)
 
         if action_name == 'NONE':
             dashboard.console.print("No more actions available. Goal may not be achievable.")
@@ -156,7 +163,7 @@ def bench_heterogeneous_robots(case: BenchmarkCase):
 
         # Execute action
         action = get_action_by_name(all_actions, action_name)
-        env_interface.advance(action, do_interrupt=False)
+        env_interface.advance(action, do_interrupt=case.do_interrupt)
         actions_taken.append(action_name)
 
         tree_trace = mcts.get_trace_from_last_mcts_tree()
@@ -187,6 +194,7 @@ def bench_heterogeneous_robots(case: BenchmarkCase):
         "log_html": html_output,  # Will be logged as HTML artifact
     }
 
+
 # Register parameter combinations
 bench_heterogeneous_robots.add_cases([
     {
@@ -194,11 +202,13 @@ bench_heterogeneous_robots.add_cases([
         "mcts.c": c,
         "mcts.h_mult": h_mult,
         "num_robots": num_robots,
+        "do_interrupt": do_interrupt,
     }
-    for c, num_robots, h_mult, iterations in itertools.product(
+    for c, num_robots, h_mult, iterations, do_interrupt in itertools.product(
         [100, 300],                 # mcts.c
         [1, 2, 3],                  # num_robots
         [1, 2, 5],                  # mcts.h_mult
         [400, 1000, 4000],          # mcts.iterations
+        [True, False],              # do_interrupt
     )
 ])
