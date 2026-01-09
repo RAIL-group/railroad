@@ -568,10 +568,8 @@ inline std::string mcts(const State &root_state,
                 max_iterations, max_depth, c, out_tree_trace);
   }
 
-  // For complex goals (with OR), use the GoalAdapter
-  // Note: Heuristic integration for complex goals is future work.
-  // For now, we use the goal's get_all_literals() which may overestimate.
-  auto goal_fn = GoalFn(goal->get_all_literals());
+  // For complex goals (with OR), use the efficient heuristic
+  // that runs forward phase once and computes min cost over OR branches
 
   // RNG
   static thread_local std::mt19937 rng{std::random_device{}()};
@@ -581,7 +579,11 @@ inline std::string mcts(const State &root_state,
   // Root node
   auto root = std::make_unique<MCTSDecisionNode>(root_state.copy_and_zero_out_time());
   root->untried_actions = get_next_actions(root_state, all_actions);
-  auto heuristic_fn = make_ff_heuristic(goal_fn, all_actions, ff_memory);
+
+  // Use efficient heuristic that handles OR branches properly
+  HeuristicFn heuristic_fn = [goal, all_actions, ff_memory](const State& s) -> double {
+    return ff_heuristic_for_goal(s, goal, all_actions, ff_memory);
+  };
   std::bernoulli_distribution do_extra_exploration(PROB_EXTRA_EXPLORE);
 
   for (int it = 0; it < max_iterations; ++it) {

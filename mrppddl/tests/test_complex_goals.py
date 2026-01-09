@@ -752,3 +752,162 @@ class TestPlannerWithGoals:
             state = transition(state, action)[0][0]
 
         assert goal.evaluate(state.fluents), "Goal should be satisfied"
+
+
+class TestHeuristicORBranches:
+    """Tests for efficient OR branch handling in the heuristic."""
+
+    def test_or_goal_returns_min_branch_cost(self):
+        """OR goal should return the minimum cost over all branches."""
+        # Setup: Robot at 'start', can move to 'near' (cost 5) or 'far' (cost 15)
+        objects_by_type = {
+            "robot": ["r1"],
+            "location": ["start", "near", "far"],
+        }
+
+        # Create move operator with distance-based costs
+        # cost_fn signature: (robot, from_loc, to_loc)
+        def cost_fn(robot, loc1, loc2):
+            if loc2 == "near":
+                return 5.0
+            elif loc2 == "far":
+                return 15.0
+            return 10.0
+
+        move_op = construct_move_visited_operator(cost_fn)
+        all_actions = move_op.instantiate(objects_by_type)
+
+        initial_state = State(
+            time=0,
+            fluents={F("at r1 start"), F("free r1"), F("visited start")}
+        )
+
+        # OR goal: visit 'near' OR visit 'far'
+        # 'near' is cheaper, so heuristic should return cost to reach 'near'
+        or_goal = OrGoal([
+            LiteralGoal(F("visited near")),
+            LiteralGoal(F("visited far")),
+        ])
+
+        # Compute heuristic for each branch individually
+        near_goal = LiteralGoal(F("visited near"))
+        far_goal = LiteralGoal(F("visited far"))
+
+        h_near = ff_heuristic_goal(initial_state, near_goal, all_actions)
+        h_far = ff_heuristic_goal(initial_state, far_goal, all_actions)
+        h_or = ff_heuristic_goal(initial_state, or_goal, all_actions)
+
+        # OR should return min
+        assert h_or == min(h_near, h_far), (
+            f"OR heuristic should be min of branches: "
+            f"h_or={h_or}, h_near={h_near}, h_far={h_far}"
+        )
+
+    def test_true_goal_returns_zero(self):
+        """TrueGoal should return 0 (already satisfied)."""
+        # Minimal setup
+        objects_by_type = {
+            "robot": ["r1"],
+            "location": ["start"],
+        }
+        move_op = construct_move_visited_operator(lambda *args: 5.0)
+        all_actions = move_op.instantiate(objects_by_type)
+
+        initial_state = State(
+            time=0,
+            fluents={F("at r1 start"), F("free r1")}
+        )
+
+        goal = TrueGoal()
+        h_value = ff_heuristic_goal(initial_state, goal, all_actions)
+
+        assert h_value == 0.0, f"TrueGoal should have cost 0, got {h_value}"
+
+    def test_false_goal_returns_infinity(self):
+        """FalseGoal should return infinity (impossible)."""
+        import math
+
+        objects_by_type = {
+            "robot": ["r1"],
+            "location": ["start"],
+        }
+        move_op = construct_move_visited_operator(lambda *args: 5.0)
+        all_actions = move_op.instantiate(objects_by_type)
+
+        initial_state = State(
+            time=0,
+            fluents={F("at r1 start"), F("free r1")}
+        )
+
+        goal = FalseGoal()
+        h_value = ff_heuristic_goal(initial_state, goal, all_actions)
+
+        assert math.isinf(h_value), f"FalseGoal should have infinite cost, got {h_value}"
+
+    def test_or_with_unreachable_branch(self):
+        """OR with an unreachable branch should still work using reachable branch."""
+        import math
+
+        objects_by_type = {
+            "robot": ["r1"],
+            "location": ["start", "reachable"],
+        }
+        move_op = construct_move_visited_operator(lambda *args: 5.0)
+        all_actions = move_op.instantiate(objects_by_type)
+
+        initial_state = State(
+            time=0,
+            fluents={F("at r1 start"), F("free r1"), F("visited start")}
+        )
+
+        # OR goal with one reachable and one unreachable branch
+        or_goal = OrGoal([
+            LiteralGoal(F("visited reachable")),     # Reachable
+            LiteralGoal(F("visited nonexistent")),   # Unreachable (location doesn't exist)
+        ])
+
+        h_value = ff_heuristic_goal(initial_state, or_goal, all_actions)
+
+        # Should return finite cost (from reachable branch)
+        assert not math.isinf(h_value), (
+            f"OR with one reachable branch should have finite cost, got {h_value}"
+        )
+
+    def test_and_with_nested_or_uses_all_literals(self):
+        """AND(A, OR(B,C)) should be treated as single branch with all literals."""
+        objects_by_type = {
+            "robot": ["r1"],
+            "location": ["start", "a", "b", "c"],
+        }
+        move_op = construct_move_visited_operator(lambda *args: 5.0)
+        all_actions = move_op.instantiate(objects_by_type)
+
+        initial_state = State(
+            time=0,
+            fluents={F("at r1 start"), F("free r1"), F("visited start")}
+        )
+
+        # Nested AND-OR goal
+        nested_goal = AndGoal([
+            LiteralGoal(F("visited a")),
+            OrGoal([
+                LiteralGoal(F("visited b")),
+                LiteralGoal(F("visited c")),
+            ]),
+        ])
+
+        # For comparison, pure AND with all literals
+        all_literals_goal = AndGoal([
+            LiteralGoal(F("visited a")),
+            LiteralGoal(F("visited b")),
+            LiteralGoal(F("visited c")),
+        ])
+
+        h_nested = ff_heuristic_goal(initial_state, nested_goal, all_actions)
+        h_all = ff_heuristic_goal(initial_state, all_literals_goal, all_actions)
+
+        # Both should be the same (nested OR gets flattened to all literals)
+        assert h_nested == h_all, (
+            f"Nested AND-OR should use all literals: "
+            f"h_nested={h_nested}, h_all={h_all}"
+        )
