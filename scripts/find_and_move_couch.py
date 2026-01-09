@@ -9,6 +9,10 @@ This script demonstrates a more complex planning scenario where a robot must:
 
 The environment simulates a household with multiple rooms where items are
 disorganized and some items are missing entirely.
+
+Updated to use new Goal objects (AndGoal, LiteralGoal) for complex goal support.
+The goal is defined as an AND of literals, which is equivalent to the previous
+fluent set but demonstrates the new Goal API and enables future OR goal usage.
 """
 
 import numpy as np
@@ -18,7 +22,7 @@ from mrppddl.dashboard import PlannerDashboard
 import environments
 from environments.core import EnvironmentInterface
 from environments import SimpleEnvironment
-from mrppddl._bindings import ff_heuristic
+from mrppddl._bindings import ff_heuristic, ff_heuristic_goal, AndGoal, LiteralGoal, OrGoal
 
 # Fancy error handling; shows local vars
 from rich.traceback import install
@@ -72,12 +76,20 @@ def main():
     )
 
     # Define goal: all items at their proper locations
-    goal_fluents = {
-        F("at Remote den"),
-        F("at Plate den"),
-        F("at Cookie den"),
-        F("at Couch den"),
-    }
+    # Using new Goal objects (complex goal support)
+    goal = AndGoal([
+        OrGoal([
+            LiteralGoal(F("at Remote den")),
+            LiteralGoal(F("at Plate den")),
+        ]),
+        OrGoal([
+            LiteralGoal(F("at Cookie den")),
+            LiteralGoal(F("at Couch den")),
+        ]),
+    ])
+
+    # For backward compatibility with is_goal_reached and ff_heuristic
+    goal_fluents = goal.get_all_literals()
 
 
     # Initial objects by type (robot only knows about some objects initially)
@@ -112,22 +124,23 @@ def main():
     max_iterations = 60  # Limit iterations to avoid infinite loops
 
     # Dashboard
-    h_value = ff_heuristic(initial_state, goal_fluents, sim.get_actions())
+    # Use new ff_heuristic_goal for efficient Goal object support
+    h_value = ff_heuristic_goal(initial_state, goal, sim.get_actions())
     with PlannerDashboard(goal_fluents, initial_heuristic=h_value) as dashboard:
         # (Optional) initial dashboard update
         dashboard.update(sim_state=sim.state)
 
         for iteration in range(max_iterations):
             # Check if goal is reached
-            if sim.is_goal_reached(goal_fluents):
+            if goal.evaluate(sim.state.fluents):
                 break
 
             # Get available actions
             all_actions = sim.get_actions()
 
-            # Plan next action
+            # Plan next action using Goal object
             mcts = MCTSPlanner(all_actions)
-            action_name = mcts(sim.state, goal_fluents, max_iterations=4000, c=300, max_depth=20)
+            action_name = mcts(sim.state, goal, max_iterations=4000, c=300, max_depth=20)
 
             if action_name == 'NONE':
                 dashboard.console.print("No more actions available. Goal may not be achievable.")
@@ -139,7 +152,7 @@ def main():
             actions_taken.append(action_name)
 
             tree_trace = mcts.get_trace_from_last_mcts_tree()
-            h_value = ff_heuristic(sim.state, goal_fluents, sim.get_actions())
+            h_value = ff_heuristic_goal(sim.state, goal, sim.get_actions())
             relevant_fluents = {
                 f for f in sim.state.fluents
                 if any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
