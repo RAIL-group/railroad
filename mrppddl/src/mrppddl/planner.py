@@ -1,7 +1,10 @@
-from typing import List, Set, Dict
+from typing import List, Set, Dict, Union
 from mrppddl._bindings import astar, get_usable_actions  # noqa
 from mrppddl._bindings import MCTSPlanner as _MCTSPlannerCpp
 from mrppddl._bindings import Action, State, Fluent
+from mrppddl._bindings import GoalType, goal_from_fluent_set  # noqa: F401
+# Import Goal as the base class (it's called "Goal" in bindings, maps to GoalBase in C++)
+from mrppddl._bindings import Goal
 from mrppddl.core import (
     extract_negative_preconditions,
     create_positive_fluent_mapping,
@@ -57,7 +60,7 @@ class MCTSPlanner(_MCTSPlannerCpp):
     def __call__(
         self,
         state: State,
-        goal_fluents: Set[Fluent],
+        goal: Union[Set[Fluent], Goal],
         max_iterations: int = 1000,
         max_depth: int = 100,
         c: float = 1.414,
@@ -67,7 +70,9 @@ class MCTSPlanner(_MCTSPlannerCpp):
 
         Args:
             state: Current state (will be automatically converted)
-            goal_fluents: Goal fluents to achieve
+            goal: Goal to achieve. Can be either:
+                - Set[Fluent]: Traditional fluent set (implicit AND)
+                - Goal: Complex goal object (supports AND, OR, etc.)
             max_iterations: Maximum number of MCTS iterations
             max_depth: Maximum depth for rollouts
             c: Exploration constant for UCB1
@@ -81,10 +86,17 @@ class MCTSPlanner(_MCTSPlannerCpp):
             state, self._neg_to_pos_mapping
         )
 
-        # Call parent's __call__ with converted state
-        return super().__call__(
-            converted_state, goal_fluents, max_iterations, max_depth, c, heuristic_multiplier
-        )
+        # Handle both goal types
+        if isinstance(goal, set):
+            # Traditional fluent set - use original method
+            return super().__call__(
+                converted_state, goal, max_iterations, max_depth, c, heuristic_multiplier
+            )
+        else:
+            # Goal object - use plan_with_goal method
+            return super().plan_with_goal(
+                converted_state, goal, max_iterations, max_depth, c
+            )
 
 
 def reconstruct_path(came_from, current):

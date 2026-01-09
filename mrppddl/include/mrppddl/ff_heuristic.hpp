@@ -240,5 +240,25 @@ const std::vector<Action> get_usable_actions_fluent_list(const State &input_stat
  return get_usable_actions(input_state, all_actions);
 }
 
+} // namespace mrppddl
+
+// Include goal.hpp here to get the full definition of GoalBase
+// This is placed after the namespace closes to avoid circular dependencies
+#include "mrppddl/goal.hpp"
+
+namespace mrppddl {
+
+// ff_heuristic overload that accepts GoalBase*
+// For complex goals, extracts all literals and uses the standard FF heuristic
+inline double ff_heuristic_for_goal(const State &input_state,
+                                     const GoalBase *goal,
+                                     const std::vector<Action> &all_actions,
+                                     FFMemory *ff_memory = nullptr) {
+  if (!goal) return 0.0;
+
+  // Extract all literals and use standard FF heuristic
+  auto goal_fn = GoalFn(goal->get_all_literals());
+  return ff_heuristic(input_state, &goal_fn, all_actions, ff_memory);
+}
 
 } // namespace mrppddl

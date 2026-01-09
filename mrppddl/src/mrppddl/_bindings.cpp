@@ -1,6 +1,7 @@
 #define MRPPDDL_USE_PYBIND
 #include "mrppddl/core.hpp"
 #include "mrppddl/ff_heuristic.hpp"
+#include "mrppddl/goal.hpp"
 #include "mrppddl/planner.hpp"
 #include "mrppddl/state.hpp"
 #include <pybind11/functional.h>
@@ -310,6 +311,53 @@ PYBIND11_MODULE(_bindings, m) {
            py::arg("active_fluents"),
            "Count how many goal fluents are present in the active set");
 
+  // Complex Goal classes
+  py::enum_<GoalType>(m, "GoalType")
+      .value("LITERAL", GoalType::LITERAL)
+      .value("AND", GoalType::AND)
+      .value("OR", GoalType::OR)
+      .value("TRUE_GOAL", GoalType::TRUE_GOAL)
+      .value("FALSE_GOAL", GoalType::FALSE_GOAL);
+
+  py::class_<GoalBase, GoalPtr>(m, "Goal")
+      .def("evaluate", &GoalBase::evaluate, py::arg("fluents"),
+           "Check if goal is satisfied by given fluents")
+      .def("get_type", &GoalBase::get_type,
+           "Get the type of this goal")
+      .def("normalize", &GoalBase::normalize,
+           "Return normalized form of this goal")
+      .def("get_all_literals", &GoalBase::get_all_literals,
+           "Get all literal fluents in this goal")
+      .def("is_pure_conjunction", &GoalBase::is_pure_conjunction,
+           "Check if this is a pure conjunction of literals")
+      .def("children", &GoalBase::children,
+           "Get children (for AND/OR goals)")
+      .def("goal_count", &GoalBase::goal_count, py::arg("fluents"),
+           "Count how many goal literals are achieved")
+      .def("__eq__", &GoalBase::operator==)
+      .def("__hash__", &GoalBase::hash);
+
+  py::class_<TrueGoal, GoalBase, std::shared_ptr<TrueGoal>>(m, "TrueGoal")
+      .def(py::init<>());
+
+  py::class_<FalseGoal, GoalBase, std::shared_ptr<FalseGoal>>(m, "FalseGoal")
+      .def(py::init<>());
+
+  py::class_<LiteralGoal, GoalBase, std::shared_ptr<LiteralGoal>>(m, "LiteralGoal")
+      .def(py::init<Fluent>(), py::arg("fluent"))
+      .def("fluent", &LiteralGoal::fluent,
+           "Get the fluent for this literal goal");
+
+  py::class_<AndGoal, GoalBase, std::shared_ptr<AndGoal>>(m, "AndGoal")
+      .def(py::init<std::vector<GoalPtr>>(), py::arg("children"));
+
+  py::class_<OrGoal, GoalBase, std::shared_ptr<OrGoal>>(m, "OrGoal")
+      .def(py::init<std::vector<GoalPtr>>(), py::arg("children"));
+
+  // Factory functions for goals
+  m.def("goal_from_fluent_set", &goal_from_fluent_set, py::arg("fluents"),
+        "Create a goal from a set of fluents (implicit AND)");
+
   py::class_<MCTSPlanner>(m, "MCTSPlanner")
       .def(py::init<std::vector<Action>>(), py::arg("all_actions"))
       .def(
@@ -322,8 +370,21 @@ PYBIND11_MODULE(_bindings, m) {
           py::arg("state"), py::arg("goal_fluents"),
           py::arg("max_iterations") = 1000, py::arg("max_depth") = 20,
           py::arg("c") = 1.414, py::arg("heuristic_multiplier") = 5.0)
+      .def(
+          "plan_with_goal",
+          [](MCTSPlanner &self, const State &s,
+             const GoalPtr &goal, int max_iterations,
+             int max_depth, double c) {
+            return self(s, goal, max_iterations, max_depth, c);
+          },
+          py::arg("state"), py::arg("goal"),
+          py::arg("max_iterations") = 1000, py::arg("max_depth") = 20,
+          py::arg("c") = 1.414,
+          "Plan with a Goal object (supports complex AND/OR goals)")
       .def("get_trace_from_last_mcts_tree", &MCTSPlanner::get_trace_from_last_mcts_tree,
            "Get the tree trace from the most recent MCTS planning call");
+
+  // ff_heuristic with fluent set (original)
   m.def("ff_heuristic",
         [](const State &state, const std::unordered_set<Fluent> &goal_fluents,
            const std::vector<Action> &all_actions) {
@@ -332,4 +393,13 @@ PYBIND11_MODULE(_bindings, m) {
         },
         "Compute FF heuristic value for a state",
         py::arg("state"), py::arg("goal_fluents"), py::arg("all_actions"));
+
+  // ff_heuristic with Goal object
+  m.def("ff_heuristic_goal",
+        [](const State &state, const GoalPtr &goal,
+           const std::vector<Action> &all_actions) {
+          return ff_heuristic_for_goal(state, goal.get(), all_actions);
+        },
+        "Compute FF heuristic value for a state with a Goal object",
+        py::arg("state"), py::arg("goal"), py::arg("all_actions"));
 }

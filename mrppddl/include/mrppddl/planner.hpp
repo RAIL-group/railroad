@@ -7,6 +7,7 @@
 
 #include "mrppddl/core.hpp"
 #include "mrppddl/ff_heuristic.hpp"
+#include "mrppddl/goal.hpp"
 #include "mrppddl/state.hpp"
 #include "mrppddl/constants.hpp"
 
@@ -331,6 +332,41 @@ void print_best_path(std::ostream& os, const MCTSDecisionNode* node, HeuristicFn
 
 // ---------------------- MCTS core ----------------------
 
+// Adapter class to use GoalBase with the same interface as GoalFn
+class GoalAdapter {
+public:
+  explicit GoalAdapter(const GoalBase* goal) : goal_(goal) {}
+
+  bool operator()(const std::unordered_set<Fluent> &fluents) const {
+    return goal_->evaluate(fluents);
+  }
+
+  int goal_count(const std::unordered_set<Fluent> &fluents) const {
+    return goal_->goal_count(fluents);
+  }
+
+  // For FF heuristic - get literals if pure conjunction
+  std::unordered_set<Fluent> get_all_literals() const {
+    return goal_->get_all_literals();
+  }
+
+  bool is_pure_conjunction() const {
+    return goal_->is_pure_conjunction();
+  }
+
+private:
+  const GoalBase* goal_;
+};
+
+// Forward declaration of mcts with GoalAdapter
+inline std::string mcts_impl(const State &root_state,
+                        const std::vector<Action> &all_actions_base,
+                        const GoalAdapter &is_goal_fn, FFMemory *ff_memory,
+                        int max_iterations, int max_depth,
+                        double c,
+                        std::string* out_tree_trace);
+
+// Original mcts signature (uses GoalFn)
 inline std::string mcts(const State &root_state,
                         const std::vector<Action> &all_actions_base,
                         const GoalFn &is_goal_fn, FFMemory *ff_memory,
@@ -518,6 +554,174 @@ inline std::string mcts(const State &root_state,
   // return best_action;
 }
 
+// mcts overload that accepts GoalBase directly
+inline std::string mcts(const State &root_state,
+                        const std::vector<Action> &all_actions_base,
+                        const GoalBase* goal, FFMemory *ff_memory,
+                        int max_iterations = 1000, int max_depth = 20,
+                        double c = std::sqrt(2.0),
+                        std::string* out_tree_trace = nullptr) {
+  // For pure conjunctions, use the existing efficient path
+  if (goal->is_pure_conjunction()) {
+    auto goal_fn = GoalFn(goal->get_all_literals());
+    return mcts(root_state, all_actions_base, goal_fn, ff_memory,
+                max_iterations, max_depth, c, out_tree_trace);
+  }
+
+  // For complex goals (with OR), use the GoalAdapter
+  // Note: Heuristic integration for complex goals is future work.
+  // For now, we use the goal's get_all_literals() which may overestimate.
+  auto goal_fn = GoalFn(goal->get_all_literals());
+
+  // RNG
+  static thread_local std::mt19937 rng{std::random_device{}()};
+
+  auto all_actions = get_usable_actions(root_state, all_actions_base);
+
+  // Root node
+  auto root = std::make_unique<MCTSDecisionNode>(root_state.copy_and_zero_out_time());
+  root->untried_actions = get_next_actions(root_state, all_actions);
+  auto heuristic_fn = make_ff_heuristic(goal_fn, all_actions, ff_memory);
+  std::bernoulli_distribution do_extra_exploration(PROB_EXTRA_EXPLORE);
+
+  for (int it = 0; it < max_iterations; ++it) {
+    bool is_node_goal = false;
+    bool did_need_relaxed_transition = false;
+
+    #ifdef MRPPDDL_USE_PYBIND
+    if (PyErr_CheckSignals() != 0) {
+      throw pybind11::error_already_set();
+    }
+    #endif
+    MCTSDecisionNode *node = root.get();
+    int depth = 0;
+    double accumulated_extra_cost = 0.0;
+
+    // ---------------- Selection ----------------
+    while (depth < max_depth) {
+      if (!node->untried_actions.empty())
+        break;
+      if (node->children.empty())
+        break;
+      // Use GoalBase::evaluate for goal check
+      if (goal->evaluate(node->state.fluents())) {
+        is_node_goal = true;
+        break;
+      }
+
+      MCTSChanceNode *best_chance = nullptr;
+      double best_score = -std::numeric_limits<double>::infinity();
+
+      for (auto &kv : node->children) {
+        MCTSChanceNode *cn = kv.second.get();
+        double score = ucb_score(node->visits, *cn, c);
+        if (score > best_score) {
+          best_score = score;
+          best_chance = cn;
+        }
+      }
+
+      if (!best_chance || best_chance->children.empty())
+        break;
+
+      accumulated_extra_cost += best_chance->action->extra_cost();
+      std::size_t idx = sample_index(best_chance->outcome_weights, rng);
+      node = best_chance->children[idx].get();
+      ++depth;
+    }
+
+    // ---------------- Expansion ----------------
+    if (!node->untried_actions.empty() && !is_node_goal) {
+      const Action *action = node->untried_actions.back();
+      node->untried_actions.pop_back();
+
+      accumulated_extra_cost += action->extra_cost();
+
+      auto outcomes = transition(node->state, action);
+      if (!outcomes.empty()) {
+        auto chance_node = std::make_unique<MCTSChanceNode>(action, node);
+        auto *chance_raw = chance_node.get();
+        node->children.emplace(action, std::move(chance_node));
+
+        chance_raw->children.reserve(outcomes.size());
+        chance_raw->outcome_weights.reserve(outcomes.size());
+
+        for (auto &[succ, prob] : outcomes) {
+          if (prob <= 0.0)
+            continue;
+          auto child_decision =
+              std::make_unique<MCTSDecisionNode>(succ, chance_raw);
+          child_decision->untried_actions =
+              get_next_actions(child_decision->state, all_actions);
+          chance_raw->outcome_weights.push_back(prob);
+          chance_raw->children.push_back(std::move(child_decision));
+        }
+
+        if (chance_raw->children.empty())
+          continue;
+
+        std::size_t idx = sample_index(chance_raw->outcome_weights, rng);
+        node = chance_raw->children[idx].get();
+        ++depth;
+      }
+    }
+
+    // ---------------- Simulation / Evaluation ----------------
+    double reward;
+    double h = 0.0;
+    int goal_count_val = goal->goal_count(node->state.fluents());
+    if (goal->evaluate(node->state.fluents())) {
+      reward = -node->state.time() + SUCCESS_REWARD + 0 * goal_count_val - accumulated_extra_cost;
+    } else {
+      h = heuristic_fn ? heuristic_fn(node->state) : 0.0;
+      if (h > 1e10) {
+        h = HEURISTIC_CANNOT_FIND_GOAL_PENALTY;
+      }
+      if (did_need_relaxed_transition)
+        h += 100;
+
+      reward = -node->state.time() - h * HEURISTIC_MULTIPLIER + 0 * goal_count_val - accumulated_extra_cost;
+    }
+
+    // ---------------- Backpropagation ----------------
+    backpropagate(node, reward);
+  }
+
+  // Generate tree trace
+  std::ostringstream tree_trace_stream;
+  tree_trace_stream << std::fixed << std::setprecision(2);
+  print_best_path(tree_trace_stream, root.get(), heuristic_fn, 20);
+
+  if (out_tree_trace) {
+    *out_tree_trace = tree_trace_stream.str();
+  }
+
+  // Extract policy
+  MCTSResult result;
+  result.root = std::move(root);
+
+  if (!result.root->children.empty()) {
+    const Action *best_action = nullptr;
+    int most_visits = 0;
+
+    for (auto &kv : result.root->children) {
+      MCTSChanceNode *cn = kv.second.get();
+      if (cn->visits == 0)
+        continue;
+      if (cn->visits > most_visits) {
+        most_visits = cn->visits;
+        best_action = kv.first;
+      }
+    }
+
+    if (best_action) {
+      return best_action->name();
+    }
+  }
+
+  return "NONE";
+}
+
 class MCTSPlanner {
 public:
   explicit MCTSPlanner(std::vector<Action> all_actions)
@@ -540,6 +744,20 @@ public:
     auto is_goal_fn = GoalFn(goal_fluents);
     return mcts(root_state, all_actions_, is_goal_fn, &ff_memory_,
                 max_iterations, max_depth, c, &last_mcts_tree_trace_, heuristic_multiplier);
+  }
+
+  // Overload that accepts GoalPtr (complex goals)
+  std::string operator()(const State &root_state,
+                         const GoalPtr &goal,
+                         int max_iterations, int max_depth, double c) {
+    return mcts(root_state, all_actions_, goal.get(), &ff_memory_,
+                max_iterations, max_depth, c, &last_mcts_tree_trace_);
+  }
+
+  std::string operator()(const State &root_state,
+                         const GoalPtr &goal) {
+    return mcts(root_state, all_actions_, goal.get(), &ff_memory_,
+                max_iterations, max_depth, c, &last_mcts_tree_trace_);
   }
 
   void clear_cache() { ff_memory_.clear(); }
