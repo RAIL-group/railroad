@@ -20,7 +20,7 @@ from mrppddl._bindings import (
     goal_from_fluent_set,
     Fluent,
 )
-from mrppddl.core import format_goal, get_best_branch, get_satisfied_branch
+from mrppddl.helper import format_goal, get_best_branch, get_satisfied_branch
 
 
 def split_markdown_flat(text: str) -> List[Dict[str, str]]:
