@@ -228,3 +228,6 @@ If you use this code in your research, please cite:
 
 **Complex Goals**
 - [ ] The live visualization doesn't handle the new goal function and still expects the 'goal_fluents' to be passed. We should fix that.
+- [ ] I also want to be able to handle 'any' and 'all' and 'none' conditions in the goals. To do some of these, I may need to pass the set of available objects, but I think that's okay.
+- [ ] The trick with some of the negative conditions will be to handle the 'mapping' correctly. I need to be sure that's handled in the new implementation and add some test for it. At the moment, I don't think those are handled correctly, but are important for getting a good value out of the heuristic function.
+- [ ] It would also be nice to be able to use python built-ins to specify goal functions: 'and' and 'or' should be able to do most of the basics. It would be a bit 'abuse of notation' to overload the 'and' operator for two fluents, but I think that might be okay for usability.
