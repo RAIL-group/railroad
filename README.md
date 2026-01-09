@@ -225,3 +225,6 @@ If you use this code in your research, please cite:
 **Wait Actions**
 - [ ] **Bug** There is an issue with how the Simulator handles 'wait' actions that I'm unsure how to fix. The way that 'wait' actions are processed within the transition function seems to cause issues with how the Simulator determines how much time has passed. Wait actions don't actually advance time, which is their entire intended purpose. Right now, 'wait' actions are incompatible with the Simulator. It is not entirely clear to me if this is actually a bug with the `transition` function, so we may need more tests to investigate.
 
+
+**Complex Goals**
+- [ ] The live visualization doesn't handle the new goal function and still expects the 'goal_fluents' to be passed. We should fix that.
