@@ -9,9 +9,11 @@ Benchmarks are automatically registered when decorated.
 from . import basic_planning
 from . import movie_night
 from . import multi_object_search
+from . import or_vs_and_goals
 
 __all__ = [
     "basic_planning",
     "movie_night",
     "multi_object_search",
+    "or_vs_and_goals",
 ]
