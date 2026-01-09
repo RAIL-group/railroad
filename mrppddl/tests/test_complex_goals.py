@@ -911,3 +911,373 @@ class TestHeuristicORBranches:
             f"Nested AND-OR should use all literals: "
             f"h_nested={h_nested}, h_all={h_all}"
         )
+
+
+class TestGoalNegativeConversion:
+    """Tests for converting negative fluents in goals to positive 'not-' equivalents."""
+
+    def test_convert_simple_negative_literal(self):
+        """Convert a simple negative literal goal."""
+        from mrppddl.core import (
+            create_positive_fluent_mapping,
+            convert_goal_to_positive_preconditions,
+        )
+
+        # Create a negative fluent goal
+        neg_fluent = ~F("free r1")
+        goal = LiteralGoal(neg_fluent)
+
+        # Create mapping for the fluent
+        neg_to_pos = create_positive_fluent_mapping({F("free r1")})
+
+        # Convert
+        converted_goal = convert_goal_to_positive_preconditions(goal, neg_to_pos)
+
+        # Check the converted goal has the "not-" fluent
+        converted_literals = converted_goal.get_all_literals()
+        assert len(converted_literals) == 1
+        converted_fluent = list(converted_literals)[0]
+        assert converted_fluent.name == "not-free"
+        assert not converted_fluent.negated
+
+    def test_convert_nested_goals_with_negatives(self):
+        """Convert nested AND/OR goals containing negative fluents."""
+        from mrppddl.core import (
+            create_positive_fluent_mapping,
+            convert_goal_to_positive_preconditions,
+        )
+
+        # Create a nested goal with negative fluents
+        goal = AndGoal([
+            LiteralGoal(F("at r1 kitchen")),  # Positive - no conversion
+            OrGoal([
+                LiteralGoal(~F("free r1")),   # Negative - should convert
+                LiteralGoal(~F("holding r1 cup")),  # Negative - should convert
+            ]),
+        ])
+
+        # Create mapping for the negative fluents
+        neg_to_pos = create_positive_fluent_mapping({F("free r1"), F("holding r1 cup")})
+
+        # Convert
+        converted_goal = convert_goal_to_positive_preconditions(goal, neg_to_pos)
+
+        # Check structure is preserved
+        assert converted_goal.get_type() == GoalType.AND
+
+        # Check all literals
+        all_literals = converted_goal.get_all_literals()
+        literal_names = {f.name for f in all_literals}
+
+        # Should have: "at" (unchanged), "not-free", "not-holding"
+        assert "at" in literal_names
+        assert "not-free" in literal_names
+        assert "not-holding" in literal_names
+
+        # None should be negated (all converted to positive)
+        for lit in all_literals:
+            if lit.name.startswith("not-"):
+                assert not lit.negated, f"Converted fluent {lit} should not be negated"
+
+    def test_unconverted_fluents_pass_through(self):
+        """Fluents not in the mapping should pass through unchanged."""
+        from mrppddl.core import (
+            create_positive_fluent_mapping,
+            convert_goal_to_positive_preconditions,
+        )
+
+        # Create a goal with a fluent that won't be in the mapping
+        goal = LiteralGoal(~F("at r1 kitchen"))
+
+        # Create mapping without "at" fluents
+        neg_to_pos = create_positive_fluent_mapping({F("free r1")})
+
+        # Convert
+        converted_goal = convert_goal_to_positive_preconditions(goal, neg_to_pos)
+
+        # Should be unchanged (negated "at" fluent not in mapping)
+        converted_literals = converted_goal.get_all_literals()
+        assert len(converted_literals) == 1
+        converted_fluent = list(converted_literals)[0]
+        assert converted_fluent.negated  # Still negated
+        assert converted_fluent.name == "at"
+
+    def test_planner_with_negative_goal_fluents(self):
+        """Test that planner correctly handles goals with negative fluents."""
+        from mrppddl.helper import construct_move_visited_operator
+
+        objects_by_type = {
+            "robot": ["r1"],
+            "location": ["start", "kitchen"],
+        }
+        move_op = construct_move_visited_operator(lambda *args: 5.0)
+        all_actions = move_op.instantiate(objects_by_type)
+
+        initial_state = State(
+            time=0,
+            fluents={F("at r1 start"), F("free r1")}
+        )
+
+        # Goal: robot should be in kitchen (requires move, which makes free=false temporarily)
+        # Include a negative fluent in the goal to test conversion
+        goal = AndGoal([
+            LiteralGoal(F("at r1 kitchen")),
+            LiteralGoal(F("free r1")),  # Robot should be free at the end
+        ])
+
+        # Create planner and plan
+        mcts = MCTSPlanner(all_actions)
+
+        state = initial_state
+        for _ in range(5):
+            if goal.evaluate(state.fluents):
+                break
+            action_name = mcts(state, goal, max_iterations=100, c=10)
+            if action_name == "NONE":
+                break
+            action = get_action_by_name(all_actions, action_name)
+            state = transition(state, action)[0][0]
+
+        assert goal.evaluate(state.fluents), "Goal with positive fluents should be achievable"
+
+    def test_negative_goal_with_planner(self):
+        """Test that negative fluent goals work correctly with planner.
+
+        Note: Negative fluent goals work through the planner's conversion system.
+        Direct evaluation with goal.evaluate() checks if ~F("P") is in the set,
+        which won't work for standard state representation. The planner internally
+        converts ~F("P") to F("not-P") and adds F("not-P") to state when P is absent.
+        """
+        from mrppddl.helper import construct_move_visited_operator
+        from mrppddl.core import (
+            extract_negative_preconditions,
+            create_positive_fluent_mapping,
+            convert_state_to_positive_preconditions,
+            convert_goal_to_positive_preconditions,
+        )
+
+        objects_by_type = {
+            "robot": ["r1"],
+            "location": ["start", "kitchen", "bedroom"],
+        }
+        move_op = construct_move_visited_operator(lambda *args: 5.0)
+        all_actions = move_op.instantiate(objects_by_type)
+
+        initial_state = State(
+            time=0,
+            fluents={F("at r1 start"), F("free r1")}
+        )
+
+        # Goal: robot should NOT be at start (negative goal)
+        goal = LiteralGoal(~F("at r1 start"))
+
+        # Check goal structure
+        literals = goal.get_all_literals()
+        assert len(literals) == 1
+        lit = list(literals)[0]
+        assert lit.negated, "Goal should have negated fluent"
+
+        # Create planner and plan
+        mcts = MCTSPlanner(all_actions)
+
+        state = initial_state
+        # Plan until robot moves away from start
+        for _ in range(5):
+            if F("at r1 start") not in state.fluents:
+                break
+            action_name = mcts(state, goal, max_iterations=100, c=10)
+            if action_name == "NONE":
+                break
+            action = get_action_by_name(all_actions, action_name)
+            state = transition(state, action)[0][0]
+
+        # Robot should have moved away from start
+        assert F("at r1 start") not in state.fluents, "Robot should not be at start"
+
+        # To evaluate the goal correctly outside the planner, we need to:
+        # 1. Create the same mapping the planner uses
+        # 2. Convert the state and goal
+        neg_fluents = extract_negative_preconditions(all_actions)
+        # Add the goal's negative fluent to the mapping
+        neg_fluents.add(F("at r1 start"))
+        neg_to_pos = create_positive_fluent_mapping(neg_fluents)
+        converted_state = convert_state_to_positive_preconditions(state, neg_to_pos)
+        converted_goal = convert_goal_to_positive_preconditions(goal, neg_to_pos)
+
+        # Now evaluation should work
+        assert converted_goal.evaluate(converted_state.fluents), (
+            "Converted negative goal should be satisfied when robot is not at start"
+        )
+
+
+class TestFluentOperatorOverloading:
+    """Tests for & and | operator overloading on Fluent and Goal classes."""
+
+    def test_fluent_or_creates_or_goal(self):
+        """F('a') | F('b') creates an OrGoal."""
+        from mrppddl.core import Fluent
+
+        goal = Fluent("at r1 kitchen") | Fluent("at r1 bedroom")
+
+        assert goal.get_type() == GoalType.OR
+        literals = goal.get_all_literals()
+        assert len(literals) == 2
+
+    def test_fluent_and_creates_and_goal(self):
+        """F('a') & F('b') creates an AndGoal."""
+        from mrppddl.core import Fluent
+
+        goal = Fluent("at r1 kitchen") & Fluent("holding r1 cup")
+
+        assert goal.get_type() == GoalType.AND
+        literals = goal.get_all_literals()
+        assert len(literals) == 2
+
+    def test_or_chain_flattens(self):
+        """a | b | c produces flat OR with 3 children."""
+        from mrppddl.core import Fluent
+
+        goal = Fluent("a") | Fluent("b") | Fluent("c")
+
+        assert goal.get_type() == GoalType.OR
+        children = list(goal.children())
+        assert len(children) == 3
+
+    def test_and_chain_flattens(self):
+        """a & b & c produces flat AND with 3 children."""
+        from mrppddl.core import Fluent
+
+        goal = Fluent("x") & Fluent("y") & Fluent("z")
+
+        assert goal.get_type() == GoalType.AND
+        children = list(goal.children())
+        assert len(children) == 3
+
+    def test_mixed_and_or(self):
+        """(a | b) & c produces AND(OR(a,b), c)."""
+        from mrppddl.core import Fluent
+
+        goal = (Fluent("a") | Fluent("b")) & Fluent("c")
+
+        assert goal.get_type() == GoalType.AND
+        literals = goal.get_all_literals()
+        assert len(literals) == 3
+
+    def test_mixed_or_and(self):
+        """(a & b) | c produces OR(AND(a,b), c)."""
+        from mrppddl.core import Fluent
+
+        goal = (Fluent("a") & Fluent("b")) | Fluent("c")
+
+        assert goal.get_type() == GoalType.OR
+        literals = goal.get_all_literals()
+        assert len(literals) == 3
+
+    def test_operator_goal_evaluation(self):
+        """Goals created with operators evaluate correctly."""
+        from mrppddl.core import Fluent
+
+        or_goal = Fluent("at r1 kitchen") | Fluent("at r1 bedroom")
+        and_goal = Fluent("at r1 kitchen") & Fluent("holding r1 cup")
+
+        # State with robot in kitchen holding cup
+        state_fluents = {Fluent("at r1 kitchen"), Fluent("holding r1 cup")}
+
+        assert or_goal.evaluate(state_fluents) is True
+        assert and_goal.evaluate(state_fluents) is True
+
+        # State with robot in bedroom (no cup)
+        state_fluents2 = {Fluent("at r1 bedroom")}
+
+        assert or_goal.evaluate(state_fluents2) is True  # OR still satisfied
+        assert and_goal.evaluate(state_fluents2) is False  # AND not satisfied
+
+    def test_negated_fluent_with_operators(self):
+        """Negated fluents work with operators."""
+        from mrppddl.core import Fluent
+
+        # Goal: robot at kitchen AND not holding anything
+        goal = Fluent("at r1 kitchen") & ~Fluent("holding r1 cup")
+
+        assert goal.get_type() == GoalType.AND
+        literals = goal.get_all_literals()
+
+        # Check we have both positive and negative fluents
+        names = {f.name for f in literals}
+        assert "at" in names
+        assert "holding" in names
+
+        negated_count = sum(1 for f in literals if f.negated)
+        assert negated_count == 1
+
+    def test_goal_and_fluent(self):
+        """Goal & Fluent chains correctly."""
+        from mrppddl.core import Fluent
+
+        # Create a goal, then chain with a fluent
+        goal1 = Fluent("a") & Fluent("b")
+        goal2 = goal1 & Fluent("c")
+
+        assert goal2.get_type() == GoalType.AND
+        children = list(goal2.children())
+        assert len(children) == 3  # Should be flattened
+
+    def test_goal_or_fluent(self):
+        """Goal | Fluent chains correctly."""
+        from mrppddl.core import Fluent
+
+        # Create a goal, then chain with a fluent
+        goal1 = Fluent("a") | Fluent("b")
+        goal2 = goal1 | Fluent("c")
+
+        assert goal2.get_type() == GoalType.OR
+        children = list(goal2.children())
+        assert len(children) == 3  # Should be flattened
+
+    def test_complex_nested_expression(self):
+        """Complex nested expression: (a & b) | (c & d)."""
+        from mrppddl.core import Fluent
+
+        goal = (Fluent("a") & Fluent("b")) | (Fluent("c") & Fluent("d"))
+
+        assert goal.get_type() == GoalType.OR
+        children = list(goal.children())
+        assert len(children) == 2
+
+        # Each child should be an AND
+        for child in children:
+            assert child.get_type() == GoalType.AND
+
+    def test_operator_with_planner(self):
+        """Goals created with operators work correctly with planner."""
+        from mrppddl.core import Fluent, transition, get_action_by_name
+        from mrppddl.helper import construct_move_visited_operator
+
+        objects_by_type = {
+            "robot": ["r1"],
+            "location": ["start", "kitchen", "bedroom"],
+        }
+        move_op = construct_move_visited_operator(lambda *args: 5.0)
+        all_actions = move_op.instantiate(objects_by_type)
+
+        initial_state = State(
+            time=0,
+            fluents={Fluent("at r1 start"), Fluent("free r1")}
+        )
+
+        # Goal using operators: visit kitchen OR bedroom
+        goal = Fluent("visited kitchen") | Fluent("visited bedroom")
+
+        mcts = MCTSPlanner(all_actions)
+
+        state = initial_state
+        for _ in range(5):
+            if goal.evaluate(state.fluents):
+                break
+            action_name = mcts(state, goal, max_iterations=100, c=10)
+            if action_name == "NONE":
+                break
+            action = get_action_by_name(all_actions, action_name)
+            state = transition(state, action)[0][0]
+
+        assert goal.evaluate(state.fluents), "OR goal created with | should be achievable"

@@ -9,7 +9,17 @@ from rich.text import Text
 
 import re
 from time import sleep, perf_counter
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Union
+
+from mrppddl._bindings import (
+    Goal,
+    LiteralGoal,
+    AndGoal,
+    OrGoal,
+    GoalType,
+    goal_from_fluent_set,
+    Fluent,
+)
 
 
 def split_markdown_flat(text: str) -> List[Dict[str, str]]:
@@ -64,12 +74,34 @@ class PlannerDashboard:
       └──────────────────────────┴───────────────┘
     """
 
-    def __init__(self, goal_fluents, initial_heuristic=None, console=None):
+    def __init__(
+        self,
+        goal: Union[Set[Fluent], Goal],
+        initial_heuristic=None,
+        console=None,
+    ):
+        """Initialize the planner dashboard.
+
+        Args:
+            goal: Either a set of goal fluents (for backward compatibility)
+                  or a Goal object (AndGoal, OrGoal, LiteralGoal, etc.)
+            initial_heuristic: Initial heuristic value for progress tracking
+            console: Optional Rich console for output
+        """
         if console:
             self.console = console
         else:
             self.console = Console(force_terminal=True, record=True)
-        self.goal_fluents = list(goal_fluents)
+
+        # Normalize goal input to a Goal object
+        if isinstance(goal, set):
+            # Convert fluent set to Goal object for uniform handling
+            self.goal = goal_from_fluent_set(goal)
+            self.goal_fluents = list(goal)
+        else:
+            self.goal = goal
+            self.goal_fluents = list(goal.get_all_literals())
+
         self.num_goals = len(self.goal_fluents)
         self.initial_heuristic = initial_heuristic
         self._start_time = perf_counter()
@@ -174,6 +206,10 @@ class PlannerDashboard:
             "Goals reached",
             f"{self._count_achieved_goals(sim_state)}/{self.num_goals}",
         )
+        # Show overall goal satisfaction for complex goals
+        goal_satisfied = self._is_goal_satisfied(sim_state)
+        status_str = "[green]✓ SATISFIED[/green]" if goal_satisfied else "[yellow]IN PROGRESS[/yellow]"
+        meta.add_row("Goal Status", status_str)
         if step_index is not None:
             meta.add_row("Step", str(step_index))
         if last_action_name is not None:
@@ -268,7 +304,92 @@ class PlannerDashboard:
         return self.layout
 
     def _count_achieved_goals(self, sim_state) -> int:
-        return sum(1 for g in self.goal_fluents if g in sim_state.fluents)
+        """Count how many goal literals are achieved."""
+        return self.goal.goal_count(sim_state.fluents)
+
+    def _is_goal_satisfied(self, sim_state) -> bool:
+        """Check if the overall goal is satisfied."""
+        return self.goal.evaluate(sim_state.fluents)
+
+    def _get_best_branch_progress(self, sim_state) -> tuple[int, int, str]:
+        """Get progress for the best satisfying path through the goal.
+
+        For OR goals: shows progress on the branch closest to completion.
+        For AND goals: sums progress across children, using best branch for each OR child.
+        For AND(OR, OR, ...): shows combined progress on the optimal path.
+
+        Returns:
+            (achieved, total, label) where label describes the branch type
+        """
+        achieved, total = self._compute_best_path_progress(self.goal, sim_state.fluents)
+
+        # Generate a descriptive label
+        goal_type = self.goal.get_type()
+        if goal_type == GoalType.OR:
+            label = "Best branch"
+        elif goal_type == GoalType.AND and self._has_or_children(self.goal):
+            label = "Best path"
+        else:
+            label = "All goals"
+
+        return achieved, total, label
+
+    def _compute_best_path_progress(self, goal, fluents) -> tuple[int, int]:
+        """Recursively compute best-path progress through a goal tree.
+
+        For OR: returns progress of best child (highest completion ratio)
+        For AND: sums best-path progress of all children
+        For LITERAL: returns (1, 1) if satisfied, (0, 1) if not
+        """
+        goal_type = goal.get_type()
+
+        if goal_type == GoalType.LITERAL:
+            satisfied = goal.evaluate(fluents)
+            return (1, 1) if satisfied else (0, 1)
+
+        elif goal_type == GoalType.TRUE_GOAL:
+            return (1, 1)
+
+        elif goal_type == GoalType.FALSE_GOAL:
+            return (0, 1)
+
+        elif goal_type == GoalType.OR:
+            # Find the child with best completion ratio
+            best_achieved, best_total = 0, 1
+
+            for child in goal.children():
+                achieved, total = self._compute_best_path_progress(child, fluents)
+                if total > 0 and (achieved / total) > (best_achieved / best_total):
+                    best_achieved, best_total = achieved, total
+
+            return best_achieved, best_total
+
+        elif goal_type == GoalType.AND:
+            # Sum progress across all children (using best path for each)
+            total_achieved, total_count = 0, 0
+
+            for child in goal.children():
+                achieved, total = self._compute_best_path_progress(child, fluents)
+                total_achieved += achieved
+                total_count += total
+
+            return total_achieved, total_count
+
+        else:
+            # Unknown goal type - fall back to literal count
+            return goal.goal_count(fluents), len(goal.get_all_literals())
+
+    def _has_or_children(self, goal) -> bool:
+        """Check if a goal has any OR children (for labeling purposes)."""
+        goal_type = goal.get_type()
+        if goal_type == GoalType.OR:
+            return True
+        elif goal_type == GoalType.AND:
+            return any(
+                child.get_type() == GoalType.OR
+                for child in goal.children()
+            )
+        return False
 
     def _update_heuristic(self, heuristic_value: float | None):
         if self.heuristic_task_id is None:
@@ -306,6 +427,7 @@ class PlannerDashboard:
             "goals": {
                 str(g): bool(g in sim_state.fluents) for g in self.goal_fluents
             },
+            "goal_satisfied": self._is_goal_satisfied(sim_state),
             "tree_trace": tree_trace,
         }
         self.history.append(entry)
@@ -332,6 +454,10 @@ class PlannerDashboard:
             for g, ok in entry["goals"].items():
                 mark = "✓" if ok else "✗"
                 lines.append(f"   {mark} {g}")
+            # Show overall goal satisfaction
+            goal_status = entry.get("goal_satisfied", False)
+            status_mark = "✓ SATISFIED" if goal_status else "✗ NOT SATISFIED"
+            lines.append(f"## Overall Goal: {status_mark}")
             lines.append("\n")  # blank line between steps
         
         return "\n".join(lines)
@@ -355,10 +481,10 @@ class PlannerDashboard:
                 local_console.print(f"[bold red]{text}[/]")
 
         if final_state and actions_taken:
-            if len(set(self.goal_fluents) - set(final_state.fluents)):
-                local_console.rule("[bold red]Task Not Completed :: Execution Summary[/]")
-            else:
+            if self._is_goal_satisfied(final_state):
                 local_console.rule("[bold green]Success!! :: Execution Summary[/]")
+            else:
+                local_console.rule("[bold red]Task Not Completed :: Execution Summary[/]")
                 
             local_console.print(f"[bold red]Actions Taken (Num Actions: {len(actions_taken)})[/]", highlight=True)
             for i, action in enumerate(actions_taken, 1):
@@ -393,11 +519,13 @@ class PlannerDashboard:
         - left panel: active + goal fluents
         - right panel: MCTS trace
         """
-        achieved = self._count_achieved_goals(sim_state)
+        # Use best branch progress for OR goals
+        achieved, total, label = self._get_best_branch_progress(sim_state)
         self.progress.update(
             self.goal_task_id,
             completed=achieved,
-            extra=f"{int(achieved)}/{self.num_goals} goals",
+            total=total,
+            extra=f"{int(achieved)}/{total} ({label})",
         )
 
         if last_action_name:

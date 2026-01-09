@@ -88,10 +88,6 @@ def main():
         ]),
     ])
 
-    # For backward compatibility with is_goal_reached and ff_heuristic
-    goal_fluents = goal.get_all_literals()
-
-
     # Initial objects by type (robot only knows about some objects initially)
     objects_by_type = {
         "robot": ["robot1", "robot2"],
@@ -126,7 +122,7 @@ def main():
     # Dashboard
     # Use new ff_heuristic_goal for efficient Goal object support
     h_value = ff_heuristic_goal(initial_state, goal, sim.get_actions())
-    with PlannerDashboard(goal_fluents, initial_heuristic=h_value) as dashboard:
+    with PlannerDashboard(goal, initial_heuristic=h_value) as dashboard:
         # (Optional) initial dashboard update
         dashboard.update(sim_state=sim.state)
 

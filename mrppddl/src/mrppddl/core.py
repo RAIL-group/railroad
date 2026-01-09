@@ -14,8 +14,143 @@ except ImportError as e:
 
 from mrppddl._bindings import GroundedEffect, Fluent, Action, State
 from mrppddl._bindings import transition  # noqa: F401
+from mrppddl._bindings import LiteralGoal, AndGoal, OrGoal, Goal
 
 Num = Union[float, int]
+
+
+# =============================================================================
+# Operator overloading for Fluent class
+# =============================================================================
+# Add & and | operators to Fluent class for convenient goal construction.
+# This allows writing:  F("at r1 kitchen") | F("at r1 bedroom")
+# Instead of:          OrGoal([LiteralGoal(F("at r1 kitchen")), LiteralGoal(F("at r1 bedroom"))])
+
+
+def _fluent_and(self: Fluent, other: Union[Fluent, Goal]) -> Goal:
+    """Create an AndGoal from two fluents or a fluent and a goal.
+
+    Usage:
+        goal = F("at r1 kitchen") & F("holding r1 cup")
+        goal = existing_goal & F("free r1")
+    """
+    self_goal = LiteralGoal(self)
+
+    if isinstance(other, Fluent):
+        other_goal = LiteralGoal(other)
+        return AndGoal([self_goal, other_goal])
+    elif hasattr(other, 'get_type'):
+        # It's a Goal object
+        from mrppddl._bindings import GoalType
+        if other.get_type() == GoalType.AND:
+            # Flatten: self & AND(a, b) → AND(self, a, b)
+            return AndGoal([self_goal] + list(other.children()))
+        else:
+            return AndGoal([self_goal, other])
+    else:
+        return NotImplemented
+
+
+def _fluent_or(self: Fluent, other: Union[Fluent, Goal]) -> Goal:
+    """Create an OrGoal from two fluents or a fluent and a goal.
+
+    Usage:
+        goal = F("at r1 kitchen") | F("at r1 bedroom")
+        goal = existing_goal | F("at r1 den")
+    """
+    self_goal = LiteralGoal(self)
+
+    if isinstance(other, Fluent):
+        other_goal = LiteralGoal(other)
+        return OrGoal([self_goal, other_goal])
+    elif hasattr(other, 'get_type'):
+        # It's a Goal object
+        from mrppddl._bindings import GoalType
+        if other.get_type() == GoalType.OR:
+            # Flatten: self | OR(a, b) → OR(self, a, b)
+            return OrGoal([self_goal] + list(other.children()))
+        else:
+            return OrGoal([self_goal, other])
+    else:
+        return NotImplemented
+
+
+def _fluent_rand(self: Fluent, other: Union[Fluent, Goal]) -> Goal:
+    """Reverse and: other & self"""
+    if isinstance(other, Fluent):
+        return _fluent_and(other, self)
+    return NotImplemented
+
+
+def _fluent_ror(self: Fluent, other: Union[Fluent, Goal]) -> Goal:
+    """Reverse or: other | self"""
+    if isinstance(other, Fluent):
+        return _fluent_or(other, self)
+    return NotImplemented
+
+
+# Monkey-patch the Fluent class with operators
+Fluent.__and__ = _fluent_and
+Fluent.__or__ = _fluent_or
+Fluent.__rand__ = _fluent_rand
+Fluent.__ror__ = _fluent_ror
+
+
+# Also add operators to Goal class for chaining
+def _goal_and(self: Goal, other: Union[Fluent, Goal]) -> Goal:
+    """Chain an AndGoal with another fluent or goal."""
+    from mrppddl._bindings import GoalType
+
+    if isinstance(other, Fluent):
+        other_goal = LiteralGoal(other)
+    elif hasattr(other, 'get_type'):
+        other_goal = other
+    else:
+        return NotImplemented
+
+    # Flatten if possible
+    if self.get_type() == GoalType.AND:
+        children = list(self.children())
+        if isinstance(other_goal, Goal) and other_goal.get_type() == GoalType.AND:
+            children.extend(other_goal.children())
+        else:
+            children.append(other_goal)
+        return AndGoal(children)
+    else:
+        if isinstance(other_goal, Goal) and other_goal.get_type() == GoalType.AND:
+            return AndGoal([self] + list(other_goal.children()))
+        else:
+            return AndGoal([self, other_goal])
+
+
+def _goal_or(self: Goal, other: Union[Fluent, Goal]) -> Goal:
+    """Chain an OrGoal with another fluent or goal."""
+    from mrppddl._bindings import GoalType
+
+    if isinstance(other, Fluent):
+        other_goal = LiteralGoal(other)
+    elif hasattr(other, 'get_type'):
+        other_goal = other
+    else:
+        return NotImplemented
+
+    # Flatten if possible
+    if self.get_type() == GoalType.OR:
+        children = list(self.children())
+        if isinstance(other_goal, Goal) and other_goal.get_type() == GoalType.OR:
+            children.extend(other_goal.children())
+        else:
+            children.append(other_goal)
+        return OrGoal(children)
+    else:
+        if isinstance(other_goal, Goal) and other_goal.get_type() == GoalType.OR:
+            return OrGoal([self] + list(other_goal.children()))
+        else:
+            return OrGoal([self, other_goal])
+
+
+Goal.__and__ = _goal_and
+Goal.__or__ = _goal_or
 Binding = Dict[str, str]
 Bindable = Callable[[Binding], Num]
 OptCallable = Union[Num, Callable[..., float]]
@@ -416,3 +551,74 @@ def preprocess_actions_for_relaxed_planning(
     converted_state = convert_state_to_positive_preconditions(initial_state, neg_to_pos_mapping)
 
     return converted_actions, converted_state, neg_to_pos_mapping
+
+
+def convert_goal_to_positive_preconditions(
+    goal,  # Goal type from bindings
+    neg_to_pos_mapping: Dict[Fluent, Fluent]
+):
+    """Convert a Goal's negative fluents to positive "not-" equivalents.
+
+    This is necessary when using Goals with the MCTSPlanner, which converts
+    negative preconditions to positive forms internally. Without this conversion,
+    the heuristic function won't correctly evaluate goal literals.
+
+    Args:
+        goal: A Goal object (LiteralGoal, AndGoal, OrGoal, etc.)
+        neg_to_pos_mapping: Mapping from fluents to their "not-" versions
+
+    Returns:
+        A new Goal with converted fluents
+    """
+    from mrppddl._bindings import (
+        GoalType,
+        LiteralGoal,
+        AndGoal,
+        OrGoal,
+        TrueGoal,
+        FalseGoal,
+    )
+
+    goal_type = goal.get_type()
+
+    if goal_type == GoalType.TRUE_GOAL:
+        return TrueGoal()
+    elif goal_type == GoalType.FALSE_GOAL:
+        return FalseGoal()
+    elif goal_type == GoalType.LITERAL:
+        fluent = goal.fluent()
+        converted_fluent = _convert_fluent(fluent, neg_to_pos_mapping)
+        return LiteralGoal(converted_fluent)
+    elif goal_type == GoalType.AND:
+        converted_children = [
+            convert_goal_to_positive_preconditions(child, neg_to_pos_mapping)
+            for child in goal.children()
+        ]
+        return AndGoal(converted_children)
+    elif goal_type == GoalType.OR:
+        converted_children = [
+            convert_goal_to_positive_preconditions(child, neg_to_pos_mapping)
+            for child in goal.children()
+        ]
+        return OrGoal(converted_children)
+    else:
+        # Unknown goal type, return as-is
+        return goal
+
+
+def _convert_fluent(
+    fluent: Fluent,
+    neg_to_pos_mapping: Dict[Fluent, Fluent]
+) -> Fluent:
+    """Convert a single fluent using the negative-to-positive mapping.
+
+    Handles the conversion of negative fluents like ~F("P") to F("not-P").
+    """
+    if fluent.negated:
+        # Fluent is ~F("P") - we want F("not-P")
+        positive_fluent = ~fluent  # Get F("P")
+        if positive_fluent in neg_to_pos_mapping:
+            # Return F("not-P") instead of ~F("P")
+            return neg_to_pos_mapping[positive_fluent]
+    # No conversion needed
+    return fluent

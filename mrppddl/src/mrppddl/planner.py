@@ -11,6 +11,7 @@ from mrppddl.core import (
     convert_action_to_positive_preconditions,
     convert_action_effects,
     convert_state_to_positive_preconditions,
+    convert_goal_to_positive_preconditions,
 )
 
 
@@ -93,9 +94,12 @@ class MCTSPlanner(_MCTSPlannerCpp):
                 converted_state, goal, max_iterations, max_depth, c, heuristic_multiplier
             )
         else:
-            # Goal object - use plan_with_goal method
+            # Goal object - convert negative fluents and use plan_with_goal method
+            converted_goal = convert_goal_to_positive_preconditions(
+                goal, self._neg_to_pos_mapping
+            )
             return super().plan_with_goal(
-                converted_state, goal, max_iterations, max_depth, c
+                converted_state, converted_goal, max_iterations, max_depth, c
             )
 
 
