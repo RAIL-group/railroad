@@ -20,6 +20,7 @@ from mrppddl._bindings import (
     goal_from_fluent_set,
     Fluent,
 )
+from mrppddl.core import format_goal, get_best_branch, get_satisfied_branch
 
 
 def split_markdown_flat(text: str) -> List[Dict[str, str]]:
@@ -230,22 +231,29 @@ class PlannerDashboard:
             else:
                 active_table.add_row(str(f))
 
-        # Goal fluents with status
+        # Goal structure display
         goals_table = Table(
             show_header=True,
             header_style="bold cyan",
             box=None,
             pad_edge=False,
         )
-        goals_table.add_column("Goal Fluent")
-        goals_table.add_column("Status", justify="center")
+        goals_table.add_column("Goal Structure")
 
-        for g in self.goal_fluents:
-            achieved = g in sim_state.fluents
-            if achieved:
-                goals_table.add_row(f"[green]{g}[/green]", "[green]✓[/green]")
-            else:
-                goals_table.add_row(f"[red]{g}[/red]", "[red]✗[/red]")
+        # Show full goal with colored fluents
+        full_goal_str = format_goal(self.goal, compact=True)
+        goals_table.add_row("[bold]Full Goal:[/bold]")
+        for line in full_goal_str.split('\n'):
+            goals_table.add_row(self._colorize_goal_line(line, sim_state.fluents))
+
+        # Show best branch being pursued (if different from full goal)
+        best_branch = get_best_branch(self.goal, sim_state.fluents)
+        if best_branch != self.goal:
+            best_branch_str = format_goal(best_branch, compact=True)
+            goals_table.add_row("")  # blank line
+            goals_table.add_row("[bold]Best Path:[/bold]")
+            for line in best_branch_str.split('\n'):
+                goals_table.add_row(self._colorize_goal_line(line, sim_state.fluents))
 
         # Display the most recent actions
         actions_table = Table(
@@ -302,6 +310,22 @@ class PlannerDashboard:
     def renderable(self):
         """Expose the root layout so it can be passed to Live()."""
         return self.layout
+
+    def _colorize_goal_line(self, line: str, fluents) -> str:
+        """Colorize a goal line based on whether literals are satisfied."""
+        # Match fluent patterns like (predicate args...)
+        def colorize_match(match):
+            fluent_str = match.group(0)
+            # Try to find this fluent in the current state
+            # Check if any fluent in the state matches this string representation
+            for f in fluents:
+                if str(f) == fluent_str:
+                    return f"[green]{fluent_str}[/green]"
+            return f"[red]{fluent_str}[/red]"
+
+        # Pattern to match fluents: (name args...) or (not name args...)
+        pattern = r'\([^()]+\)'
+        return re.sub(pattern, colorize_match, line)
 
     def _count_achieved_goals(self, sim_state) -> int:
         """Count how many goal literals are achieved."""
@@ -489,12 +513,29 @@ class PlannerDashboard:
             local_console.print(f"[bold red]Actions Taken (Num Actions: {len(actions_taken)})[/]", highlight=True)
             for i, action in enumerate(actions_taken, 1):
                 local_console.print(f"  {i}. {action}", highlight=True)
-            # Check which goals were achieved
-            local_console.print("\n[bold red]Goal status:[/]")
-            for goal in self.goal_fluents:
-                achieved = goal in final_state.fluents
-                status = "✓" if achieved else "✗"
-                local_console.print(f"  {status} {goal}")
+
+            # Show full goal structure
+            local_console.print("\n[bold cyan]Full Goal:[/]")
+            full_goal_str = format_goal(self.goal, compact=True)
+            for line in full_goal_str.split('\n'):
+                local_console.print(f"  {self._colorize_goal_line(line, final_state.fluents)}")
+
+            # Show satisfied branch (if goal was met)
+            if self._is_goal_satisfied(final_state):
+                satisfied_branch = get_satisfied_branch(self.goal, final_state.fluents)
+                if satisfied_branch:
+                    local_console.print("\n[bold green]Satisfied Branch:[/]")
+                    satisfied_str = format_goal(satisfied_branch, compact=True)
+                    for line in satisfied_str.split('\n'):
+                        local_console.print(f"  [green]{line}[/green]")
+            else:
+                # Show best branch (closest to completion)
+                best_branch = get_best_branch(self.goal, final_state.fluents)
+                local_console.print("\n[bold yellow]Best Branch (incomplete):[/]")
+                best_str = format_goal(best_branch, compact=True)
+                for line in best_str.split('\n'):
+                    local_console.print(f"  {self._colorize_goal_line(line, final_state.fluents)}")
+
             local_console.print(f"\n[bold red]Total cost (time): {final_state.time:.1f} seconds [/]")
                 
 
