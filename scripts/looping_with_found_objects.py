@@ -3,7 +3,12 @@ Test MCTS looping behavior when objects are already found.
 
 This test reproduces the looping behavior observed in the full simulator,
 but uses only MCTS with a predefined state where objects have already been found.
+
+Uses the new Goal API for defining planning objectives.
 """
+
+from functools import reduce
+from operator import and_
 
 import numpy as np
 from mrppddl.core import Fluent as F, State
@@ -14,7 +19,7 @@ from environments.operators import (
     construct_pick_operator,
     construct_place_operator,
 )
-from mrppddl._bindings import ff_heuristic
+from mrppddl._bindings import ff_heuristic_goal
 
 
 def mcts_looping_with_found_objects():
@@ -47,13 +52,14 @@ def mcts_looping_with_found_objects():
     )
 
     # Goal: all items at their proper locations
-    goal_fluents = {
+    # Using Goal API: reduce(and_, [...]) creates an AndGoal
+    goal = reduce(and_, [
         F("at Knife kitchen"),
         F("at Mug kitchen"),
         F("at Clock bedroom"),
         F("at Pillow bedroom"),
         F("at Notebook office"),
-    }
+    ])
 
     # Define objects
     objects_by_type = {
@@ -83,17 +89,17 @@ def mcts_looping_with_found_objects():
 
     print(f"\nRunning MCTS planner...")
     for iteration in range(max_iterations):
-        h_value = ff_heuristic(current_state,
-                               goal_fluents,
+        h_value = ff_heuristic_goal(current_state,
+                               goal,
                                all_actions)
         print(f"\nH = {h_value}")
         # Check if goal reached
-        if all(g in current_state.fluents for g in goal_fluents):
+        if goal.evaluate(current_state.fluents):
             print(f"\n✓ GOAL REACHED after {iteration} steps!")
             break
 
         # Plan next action
-        action_name = planner(current_state, goal_fluents,
+        action_name = planner(current_state, goal,
                               max_iterations=40000, max_depth=20, c=1000)
 
         if action_name == 'NONE':
@@ -160,10 +166,10 @@ def mcts_looping_with_found_objects():
 
     # Goal status
     print(f"\nGoal status:")
-    for goal in goal_fluents:
-        achieved = goal in current_state.fluents
+    for fluent in goal.get_all_literals():
+        achieved = fluent in current_state.fluents
         status = "✓" if achieved else "✗"
-        print(f"  {status} {goal}")
+        print(f"  {status} {fluent}")
 
     print("=" * 70)
 

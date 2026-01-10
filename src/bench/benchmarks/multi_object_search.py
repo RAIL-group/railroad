@@ -9,13 +9,18 @@ This script demonstrates a more complex planning scenario where a robot must:
 
 The environment simulates a household with multiple rooms where items are
 disorganized and some items are missing entirely.
+
+Uses the new Goal API for defining planning objectives.
 """
+
+from functools import reduce
+from operator import and_
 
 import time
 import itertools
 import numpy as np
 from mrppddl.core import Fluent as F, State, get_action_by_name
-from mrppddl._bindings import ff_heuristic
+from mrppddl._bindings import ff_heuristic_goal
 from mrppddl.planner import MCTSPlanner
 from mrppddl.dashboard import PlannerDashboard
 import environments
@@ -129,13 +134,14 @@ def bench_multi_object_search(case: BenchmarkCase):
     initial_state = State(time=0, fluents=initial_fluents)
 
     # Define goal: all items at their proper locations
-    goal_fluents = {
+    # Using Goal API: reduce(and_, [...]) creates an AndGoal
+    goal = reduce(and_, [
         F("at Knife kitchen"),
         F("at Mug kitchen"),
         F("at Clock bedroom"),
         F("at Pillow bedroom"),
         F("at Notebook office"),
-    }
+    ])
 
     # Initial objects by type (robot only knows about some objects initially)
     objects_by_type = {
@@ -185,12 +191,12 @@ def bench_multi_object_search(case: BenchmarkCase):
 
     # Dashboard with recording console
     recording_console = Console(record=True, force_terminal=True, width=120)
-    h_value = ff_heuristic(initial_state, goal_fluents, sim.get_actions())
-    dashboard = PlannerDashboard(goal_fluents, initial_heuristic=h_value, console=recording_console)
+    h_value = ff_heuristic_goal(initial_state, goal, sim.get_actions())
+    dashboard = PlannerDashboard(goal, initial_heuristic=h_value, console=recording_console)
 
     for iteration in range(max_iterations):
         # Check if goal is reached
-        if sim.is_goal_reached(goal_fluents):
+        if goal.evaluate(sim.state.fluents):
             break
 
         # Get available actions
@@ -198,7 +204,7 @@ def bench_multi_object_search(case: BenchmarkCase):
 
         # Plan next action
         mcts = MCTSPlanner(all_actions)
-        action_name = mcts(sim.state, goal_fluents,
+        action_name = mcts(sim.state, goal,
                            max_iterations=case.mcts.iterations,
                            c=case.mcts.c,
                            max_depth=20,
@@ -234,7 +240,7 @@ def bench_multi_object_search(case: BenchmarkCase):
     html_output = recording_console.export_html(inline_styles=True)
 
     return {
-        "success": sim.is_goal_reached(goal_fluents),
+        "success": goal.evaluate(sim.state.fluents),
         "wall_time": time.perf_counter() - start_time,
         "plan_cost": float(sim.state.time),
         "actions_count": len(actions_taken),

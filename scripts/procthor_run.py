@@ -1,3 +1,12 @@
+"""
+ProcTHOR environment planning demonstration.
+
+Uses the new Goal API for defining planning objectives.
+"""
+
+from functools import reduce
+from operator import and_
+
 import pytest
 from common import Pose
 import environments
@@ -10,7 +19,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from environments import plotting, utils, SimulatedRobot
 from environments.core import EnvironmentInterface
-from mrppddl._bindings import ff_heuristic
+from mrppddl._bindings import ff_heuristic_goal
 from mrppddl.dashboard import PlannerDashboard
 
 
@@ -50,11 +59,8 @@ def main():
             },
     )
     # Task: Place all objects at random_location
-    goal_fluents = {F(f"at {obj} {to_loc}") for obj in objects}
-    # goal_fluents = {F(f'found {objects[0]}')}
-    # goal_fluents = {F(f'holding r1 {objects[0]}')}
-    # goal_fluents = {F(f"at {objects[0]} {to_loc}")}
-    # goal_fluents = {F(f"at {obj} {to_loc}") for obj in objects}
+    # Using Goal API: reduce(and_, [...]) creates an AndGoal
+    goal = reduce(and_, [F(f"at {obj} {to_loc}") for obj in objects])
 
     # Create operators
     move_time_fn = env.get_skills_cost_fn(skill_name='move')
@@ -81,14 +87,14 @@ def main():
     max_iterations = 60  # Limit iterations to avoid infinite loops
 
     # Dashboard
-    h_value = ff_heuristic(initial_state, goal_fluents, sim.get_actions())
-    with PlannerDashboard(goal_fluents, initial_heuristic=h_value) as dashboard:
+    h_value = ff_heuristic_goal(initial_state, goal, sim.get_actions())
+    with PlannerDashboard(goal, initial_heuristic=h_value) as dashboard:
         # (Optional) initial dashboard update
         dashboard.update(sim_state=sim.state)
 
         for iteration in range(max_iterations):
             # Check if goal is reached
-            if sim.is_goal_reached(goal_fluents):
+            if goal.evaluate(sim.state.fluents):
                 break
 
             # Get available actions
@@ -96,7 +102,7 @@ def main():
 
             # Plan next action
             mcts = MCTSPlanner(all_actions)
-            action_name = mcts(sim.state, goal_fluents, max_iterations=10000, c=300, max_depth=20)
+            action_name = mcts(sim.state, goal, max_iterations=10000, c=300, max_depth=20)
 
             if action_name == 'NONE':
                 dashboard.console.print("No more actions available. Goal may not be achievable.")
@@ -108,7 +114,7 @@ def main():
             actions_taken.append(action_name)
 
             tree_trace = mcts.get_trace_from_last_mcts_tree()
-            h_value = ff_heuristic(sim.state, goal_fluents, sim.get_actions())
+            h_value = ff_heuristic_goal(sim.state, goal, sim.get_actions())
             relevant_fluents = {
                 f for f in sim.state.fluents
                 if any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])

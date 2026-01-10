@@ -91,6 +91,34 @@ The repository is organized as a monorepo with several interdependent packages:
 - Effects happen at specified times (e.g., move takes time based on distance)
 - Effects can produce resulting fluents (additions/removals from state)
 
+#### Goals and the Goal API
+Goals specify planning objectives using complex logical expressions:
+
+```python
+from functools import reduce
+from operator import and_, or_
+from mrppddl.core import Fluent as F
+
+# AND goal: all conditions must be true
+goal = reduce(and_, [F("at robot1 kitchen"), F("found Knife")])
+
+# OR goal: at least one condition must be true
+goal = reduce(or_, [F("at robot1 kitchen"), F("at robot1 bedroom")])
+
+# Negated goal: condition must be FALSE
+goal = ~F("at Book table")  # Book must NOT be at table
+
+# "None" pattern: no objects at location
+goal = reduce(and_, [~F(f"at {obj} table") for obj in objects])
+```
+
+Key points:
+- Use `reduce(and_, [...])` for "all" conditions, `reduce(or_, [...])` for "any"
+- Use `~F(...)` for negative conditions (must be FALSE)
+- MCTSPlanner handles negative goal fluents via automatic mapping conversion
+- Use `ff_heuristic_goal` for heuristic computation with Goal objects
+- Use `goal.evaluate(state.fluents)` to check if goal is satisfied
+
 ## Testing Strategy
 
 Tests are organized by component:
@@ -115,11 +143,14 @@ The typical flow:
 1. Define environment with locations and objects
 2. Create operators using helpers from `mrppddl.helper`
 3. Instantiate actions from operators with `operator.instantiate(objects_by_type)`
-4. Run planner with initial state and goal fluents
-5. Execute actions in simulator (see `environments.Simulator` for execution wrapper)
+4. Define goal using the Goal API: `goal = reduce(and_, [F(...), F(...)])`
+5. Run planner with initial state and goal: `planner(state, goal, ...)`
+6. Execute actions in simulator (see `environments.Simulator` for execution wrapper)
 
 ## Common Gotchas
 
 - **Negative Preconditions**: MCTSPlanner automatically converts them - no manual handling needed
+- **Negative Goals**: MCTSPlanner also handles negative goal fluents automatically by extending the mapping
+- **Goal API**: Use `reduce(and_, [...])` or `reduce(or_, [...])` from `functools` and `operator` modules
 - **Resource Downloads**: ProcTHOR auto-downloads resources on first import. Large downloads may take time
 - **Cache**: ProcTHOR caches scenes in `resources/procthor-10k/cache/` for faster loading

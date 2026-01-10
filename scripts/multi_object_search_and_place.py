@@ -9,11 +9,16 @@ This script demonstrates a more complex planning scenario where a robot must:
 
 The environment simulates a household with multiple rooms where items are
 disorganized and some items are missing entirely.
+
+Uses the new Goal API for defining planning objectives.
 """
+
+from functools import reduce
+from operator import and_
 
 import numpy as np
 from mrppddl.core import Fluent as F, State, get_action_by_name
-from mrppddl._bindings import ff_heuristic
+from mrppddl._bindings import ff_heuristic_goal
 from mrppddl.planner import MCTSPlanner
 from mrppddl.dashboard import PlannerDashboard
 import environments
@@ -63,13 +68,14 @@ def main():
     )
 
     # Define goal: all items at their proper locations
-    goal_fluents = {
-        F("at", "Knife", "kitchen"),
-        F("at", "Mug", "kitchen"),
-        F("at", "Clock", "bedroom"),
-        F("at", "Pillow", "bedroom"),
-        F("at", "Notebook", "office"),
-    }
+    # Using Goal API: reduce(and_, [...]) creates an AndGoal
+    goal = reduce(and_, [
+        F("at Knife kitchen"),
+        F("at Mug kitchen"),
+        F("at Clock bedroom"),
+        F("at Pillow bedroom"),
+        F("at Notebook office"),
+    ])
 
     # Initial objects by type (robot only knows about some objects initially)
     objects_by_type = {
@@ -105,14 +111,14 @@ def main():
     max_iterations = 60  # Limit iterations to avoid infinite loops
 
     # Dashboard
-    h_value = ff_heuristic(initial_state, goal_fluents, sim.get_actions())
-    with PlannerDashboard(goal_fluents, initial_heuristic=h_value) as dashboard:
+    h_value = ff_heuristic_goal(initial_state, goal, sim.get_actions())
+    with PlannerDashboard(goal, initial_heuristic=h_value) as dashboard:
         # (Optional) initial dashboard update
         dashboard.update(sim_state=sim.state)
 
         for iteration in range(max_iterations):
             # Check if goal is reached
-            if sim.is_goal_reached(goal_fluents):
+            if goal.evaluate(sim.state.fluents):
                 break
 
             # Get available actions
@@ -120,7 +126,7 @@ def main():
 
             # Plan next action
             mcts = MCTSPlanner(all_actions)
-            action_name = mcts(sim.state, goal_fluents, max_iterations=4000, c=300, max_depth=20)
+            action_name = mcts(sim.state, goal, max_iterations=4000, c=300, max_depth=20)
 
             if action_name == 'NONE':
                 dashboard.console.print("No more actions available. Goal may not be achievable.")

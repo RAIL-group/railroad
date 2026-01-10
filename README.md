@@ -31,23 +31,27 @@ uv sync
 ### Basic PDDL Planning Example
 
 ```python
-from mrppddl.core import Fluent, State
+from functools import reduce
+from operator import and_
+
+from mrppddl.core import Fluent as F, State
 from mrppddl.helper import construct_move_operator, construct_search_operator
 from mrppddl.planner import MCTSPlanner
 
 # Define initial state
 initial_state = State(fluents={
-    Fluent("at robot1 bedroom"),
-    Fluent("at robot2 kitchen"),
-    Fluent("free robot1"),
-    Fluent("free robot2"),
+    F("at robot1 bedroom"),
+    F("at robot2 kitchen"),
+    F("free robot1"),
+    F("free robot2"),
 })
 
-# Define goal
-goal_fluents = {
-    Fluent("found Knife"),
-    Fluent("found Notebook"),
-}
+# Define goal using the Goal API
+# reduce(and_, [...]) creates an AndGoal that requires ALL fluents to be true
+goal = reduce(and_, [
+    F("found Knife"),
+    F("found Notebook"),
+])
 
 # Define available objects and locations
 objects_by_type = {
@@ -68,7 +72,7 @@ actions = move_op.instantiate(objects_by_type) + search_op.instantiate(objects_b
 
 # Run MCTS planner
 planner = MCTSPlanner(actions)
-next_action_name = planner(initial_state, goal_fluents, max_iterations=10000, c=10)
+next_action_name = planner(initial_state, goal, max_iterations=10000, c=10)
 
 print(f"Next action to execute: {next_action_name}")
 ```
@@ -161,6 +165,78 @@ uv sync --reinstall-package mrppddl
 - **State** is a set of fluents representing the current world state
 - Use `~Fluent(...)` for negation
 
+### Goals and the Goal API
+
+Goals specify what conditions must be satisfied to complete planning. The system supports complex goal expressions using Python operators.
+
+#### Basic Goal Types
+
+```python
+from functools import reduce
+from operator import and_, or_
+from mrppddl.core import Fluent as F
+
+# Single literal goal
+goal = F("at robot1 kitchen")
+
+# AND goal: all conditions must be true
+goal = reduce(and_, [F("at robot1 kitchen"), F("found Knife")])
+
+# OR goal: at least one condition must be true
+goal = reduce(or_, [F("at robot1 kitchen"), F("at robot1 bedroom")])
+
+# Negated goal: condition must be FALSE
+goal = ~F("at Book table")  # Book must NOT be at table
+```
+
+#### Complex Goal Patterns
+
+```python
+# "Clear the table" - remove all objects from a location
+objects_on_table = ["Book", "Mug", "Vase"]
+goal = reduce(and_, [~F(f"at {obj} table") for obj in objects_on_table])
+
+# "Move any object to destination"
+objects = ["Book", "Mug"]
+goal = reduce(or_, [F(f"at {obj} shelf") for obj in objects])
+
+# Nested goals with AND and OR
+from mrppddl._bindings import AndGoal, OrGoal, LiteralGoal
+goal = AndGoal([
+    OrGoal([LiteralGoal(F("at Remote den")), LiteralGoal(F("at Plate den"))]),
+    OrGoal([LiteralGoal(F("at Cookie den")), LiteralGoal(F("at Couch den"))]),
+])
+```
+
+#### Goal Methods
+
+```python
+# Check if goal is satisfied
+if goal.evaluate(current_state.fluents):
+    print("Goal achieved!")
+
+# Get all literal fluents in the goal
+all_literals = goal.get_all_literals()
+
+# Get goal type
+from mrppddl._bindings import GoalType
+goal_type = goal.get_type()  # GoalType.AND, GoalType.OR, GoalType.LITERAL, etc.
+```
+
+#### Using Goals with Planners
+
+```python
+from mrppddl.planner import MCTSPlanner
+from mrppddl._bindings import ff_heuristic_goal
+
+# Plan with goal object
+planner = MCTSPlanner(actions)
+action_name = planner(state, goal, max_iterations=1000, c=10)
+
+# Compute heuristic for goal
+h_value = ff_heuristic_goal(state, goal, actions)
+```
+
 ### Effects and Timing
 
 - Effects can happen at different times (e.g., movement takes 5 seconds)
@@ -228,6 +304,6 @@ If you use this code in your research, please cite:
 
 **Complex Goals**
 - [ ] The live visualization doesn't handle the new goal function and still expects the 'goal_fluents' to be passed. We should fix that.
-- [ ] I also want to be able to handle 'any' and 'all' and 'none' conditions in the goals. To do some of these, I may need to pass the set of available objects, but I think that's okay.
-- [ ] The trick with some of the negative conditions will be to handle the 'mapping' correctly. I need to be sure that's handled in the new implementation and add some test for it. At the moment, I don't think those are handled correctly, but are important for getting a good value out of the heuristic function.
-- [ ] It would also be nice to be able to use python built-ins to specify goal functions: 'and' and 'or' should be able to do most of the basics. It would be a bit 'abuse of notation' to overload the 'and' operator for two fluents, but I think that might be okay for usability.
+- [X] I also want to be able to handle 'any' and 'all' and 'none' conditions in the goals. To do some of these, I may need to pass the set of available objects, but I think that's okay. *Implemented: Use `reduce(and_, [...])` for all, `reduce(or_, [...])` for any, `reduce(and_, [~F(...) for ...])` for none.*
+- [X] The trick with some of the negative conditions will be to handle the 'mapping' correctly. I need to be sure that's handled in the new implementation and add some test for it. At the moment, I don't think those are handled correctly, but are important for getting a good value out of the heuristic function. *Fixed: MCTSPlanner dynamically extends the mapping when goals with negative fluents are encountered.*
+- [X] It would also be nice to be able to use python built-ins to specify goal functions: 'and' and 'or' should be able to do most of the basics. It would be a bit 'abuse of notation' to overload the 'and' operator for two fluents, but I think that might be okay for usability. *Implemented: Use `&` and `|` operators on Fluent, or `reduce(and_, [...])` and `reduce(or_, [...])`.*

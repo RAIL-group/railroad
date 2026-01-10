@@ -9,11 +9,16 @@ This script demonstrates a more complex planning scenario where a robot must:
 
 The environment simulates a household with multiple rooms where items are
 disorganized and some items are missing entirely.
+
+Uses the new Goal API for defining planning objectives.
 """
+
+from functools import reduce
+from operator import and_
 
 import numpy as np
 from mrppddl.core import Fluent as F, State, get_action_by_name
-from mrppddl._bindings import ff_heuristic
+from mrppddl._bindings import ff_heuristic_goal
 from mrppddl.planner import MCTSPlanner
 import environments
 from environments import Simulator
@@ -129,13 +134,14 @@ def main():
     )
 
     # Define goal: all items at their proper locations
-    goal_fluents = {
-        F("at", "Knife", "kitchen"),
-        F("at", "Mug", "kitchen"),
-        F("at", "Clock", "bedroom"),
-        F("at", "Pillow", "bedroom"),
-        F("at", "Notebook", "office"),
-    }
+    # Using Goal API: reduce(and_, [...]) creates an AndGoal
+    goal = reduce(and_, [
+        F("at Knife kitchen"),
+        F("at Mug kitchen"),
+        F("at Clock bedroom"),
+        F("at Pillow bedroom"),
+        F("at Notebook office"),
+    ])
 
     # Initial objects by type (robot only knows about some objects initially)
     objects_by_type = {
@@ -178,7 +184,7 @@ def main():
 
     for iteration in range(max_iterations):
         # Check if goal is reached
-        if sim.is_goal_reached(goal_fluents):
+        if goal.evaluate(sim.state.fluents):
             print("\n" + "=" * 70)
             print("GOAL REACHED!")
             print("=" * 70)
@@ -190,7 +196,7 @@ def main():
 
         # Plan next action
         mcts = MCTSPlanner(all_actions)
-        action_name = mcts(sim.state, goal_fluents, max_iterations=10000, c=1.414, max_depth=20)
+        action_name = mcts(sim.state, goal, max_iterations=10000, c=1.414, max_depth=20)
 
         if action_name == 'NONE':
             print("\n" + "=" * 70)
@@ -237,10 +243,10 @@ def main():
 
     # Check which goals were achieved
     print("Goal status:")
-    for goal in goal_fluents:
-        achieved = goal in sim.state.fluents
+    for fluent in goal.get_all_literals():
+        achieved = fluent in sim.state.fluents
         status = "✓" if achieved else "✗"
-        print(f"  {status} {goal}")
+        print(f"  {status} {fluent}")
     print()
 
     print("=" * 70)

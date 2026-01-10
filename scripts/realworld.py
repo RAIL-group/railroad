@@ -1,3 +1,12 @@
+"""
+Real-world robot planning demonstration.
+
+Uses the new Goal API for defining planning objectives.
+"""
+
+from functools import reduce
+from operator import and_
+
 import itertools
 import roslibpy
 import environments
@@ -107,14 +116,15 @@ if __name__ == '__main__':
 
     move_op = construct_move_visited_operator(move_time=env.get_move_cost_fn())
     planning_loop = PlanningLoop(initial_state, objects_by_type, [move_op], env)
-    goal_fluents = {F("visited t1"), F("visited t2"), F("visited t3")}
-    # goal_fluents = {F("visited roomA"), F("visited roomC"), F("visited roomE")}
+    # Goal: Visit all target locations
+    # Using Goal API: reduce(and_, [...]) creates an AndGoal
+    goal = reduce(and_, [F("visited t1"), F("visited t2"), F("visited t3")])
 
     actions_taken = []
     for _ in range(1000):
         all_actions = planning_loop.get_actions()
         mcts = MCTSPlanner(all_actions)
-        action_name = mcts(planning_loop.state, goal_fluents, max_iterations=20000, c=10)
+        action_name = mcts(planning_loop.state, goal, max_iterations=20000, c=10)
         if action_name != 'NONE':
             action = get_action_by_name(all_actions, action_name)
             print(action_name)
@@ -124,7 +134,7 @@ if __name__ == '__main__':
         else:
             print("No action.")
 
-        if planning_loop.is_goal_reached(goal_fluents):
+        if goal.evaluate(planning_loop.state.fluents):
             print("Goal reached!")
             break
     client.terminate()

@@ -2,7 +2,11 @@
 Example benchmark: Basic single-robot planning tasks.
 
 Demonstrates benchmark registration and parametrization.
+Uses the new Goal API for defining planning objectives.
 """
+
+from functools import reduce
+from operator import and_
 
 from bench import benchmark, BenchmarkCase
 from mrppddl.core import Fluent as F, State, get_action_by_name
@@ -47,7 +51,8 @@ def bench_single_robot_nav(case: BenchmarkCase):
     )
 
     # Define goal: visit the last location
-    goal_fluents = {F(f"at robot1 loc{num_locations - 1}")}
+    # Using Goal API: Single fluent creates a LiteralGoal
+    goal = F(f"at robot1 loc{num_locations - 1}")
 
     # Create operators
     move_time_fn = env.get_skills_cost_fn('move')
@@ -74,12 +79,12 @@ def bench_single_robot_nav(case: BenchmarkCase):
 
     max_steps = 100
     for iteration in range(max_steps):
-        if sim.is_goal_reached(goal_fluents):
+        if goal.evaluate(sim.state.fluents):
             break
 
         action_name = planner(
             sim.state,
-            goal_fluents,
+            goal,
             max_iterations=case.mcts.iterations,
             c=100
         )
@@ -95,7 +100,7 @@ def bench_single_robot_nav(case: BenchmarkCase):
 
     # Return metrics
     return {
-        "success": sim.is_goal_reached(goal_fluents),
+        "success": goal.evaluate(sim.state.fluents),
         "wall_time": wall_time,
         "plan_cost": float(sim.state.time),
         "actions_count": len(actions_taken),

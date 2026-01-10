@@ -9,7 +9,12 @@ This script demonstrates a more complex planning scenario where a robot must:
 
 The environment simulates a household with multiple rooms where items are
 disorganized and some items are missing entirely.
+
+Uses the new Goal API for defining planning objectives.
 """
+
+from functools import reduce
+from operator import and_
 
 import time
 import itertools
@@ -20,7 +25,7 @@ from mrppddl.dashboard import PlannerDashboard
 import environments
 from environments.core import EnvironmentInterface as Simulator
 from environments import SimpleEnvironment
-from mrppddl._bindings import ff_heuristic
+from mrppddl._bindings import ff_heuristic_goal
 from rich.console import Console
 
 from bench import benchmark, BenchmarkCase
@@ -73,12 +78,13 @@ def bench_movie_night(case: BenchmarkCase):
     initial_state = State(time=0, fluents=initial_fluents)
 
     # Define goal: all items at their proper locations
-    goal_fluents = {
+    # Using Goal API: reduce(and_, [...]) creates an AndGoal
+    goal = reduce(and_, [
         F("at Remote den"),
         F("at Plate den"),
         F("at Cookie den"),
         F("at Couch den"),
-    }
+    ])
 
     # Initial objects by type (robot only knows about some objects initially)
     objects_by_type = {
@@ -128,12 +134,12 @@ def bench_movie_night(case: BenchmarkCase):
 
     # Dashboard with recording console
     recording_console = Console(record=True, force_terminal=True, width=120)
-    h_value = ff_heuristic(initial_state, goal_fluents, sim.get_actions())
-    dashboard = PlannerDashboard(goal_fluents, initial_heuristic=h_value, console=recording_console)
+    h_value = ff_heuristic_goal(initial_state, goal, sim.get_actions())
+    dashboard = PlannerDashboard(goal, initial_heuristic=h_value, console=recording_console)
 
     for iteration in range(max_iterations):
         # Check if goal is reached
-        if sim.is_goal_reached(goal_fluents):
+        if goal.evaluate(sim.state.fluents):
             break
 
         # Get available actions
@@ -141,7 +147,7 @@ def bench_movie_night(case: BenchmarkCase):
 
         # Plan next action
         mcts = MCTSPlanner(all_actions)
-        action_name = mcts(sim.state, goal_fluents, 
+        action_name = mcts(sim.state, goal, 
                             max_iterations=case.mcts.iterations,
                             c=case.mcts.c,
                             max_depth=20)
@@ -156,7 +162,7 @@ def bench_movie_night(case: BenchmarkCase):
         actions_taken.append(action_name)
 
         tree_trace = mcts.get_trace_from_last_mcts_tree()
-        h_value = ff_heuristic(sim.state, goal_fluents, sim.get_actions())
+        h_value = ff_heuristic_goal(sim.state, goal, sim.get_actions())
         relevant_fluents = {
             f for f in sim.state.fluents
             if any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
@@ -175,7 +181,7 @@ def bench_movie_night(case: BenchmarkCase):
     html_output = recording_console.export_html(inline_styles=True)
 
     return {
-        "success": sim.is_goal_reached(goal_fluents),
+        "success": goal.evaluate(sim.state.fluents),
         "wall_time": time.perf_counter() - start_time,
         "plan_cost": float(sim.state.time),
         "actions_count": len(actions_taken),
