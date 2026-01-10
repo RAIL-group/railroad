@@ -100,13 +100,19 @@ public:
   }
 };
 
-// LiteralGoal: A single fluent that must be true
+// LiteralGoal: A single fluent that must be true (or absent if negated)
 class LiteralGoal : public GoalBase {
 public:
   explicit LiteralGoal(Fluent fluent) : fluent_(std::move(fluent)) {}
 
   bool evaluate(const std::unordered_set<Fluent> &fluents) const override {
-    return fluents.count(fluent_) > 0;
+    if (fluent_.is_negated()) {
+      // For negative fluent ~P, check that P is NOT in state
+      return fluents.count(fluent_.invert()) == 0;
+    } else {
+      // For positive fluent P, check that P is in state
+      return fluents.count(fluent_) > 0;
+    }
   }
 
   GoalType get_type() const override { return GoalType::LITERAL; }

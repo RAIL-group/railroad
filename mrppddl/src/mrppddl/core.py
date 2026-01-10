@@ -306,6 +306,64 @@ def extract_negative_preconditions(actions: List[Action]) -> Set[Fluent]:
     return negative_fluents
 
 
+def extract_negative_goal_fluents(goal: Goal) -> Set[Fluent]:
+    """Extract all negative fluents from a Goal object.
+
+    This is needed to extend the negative-to-positive mapping to include
+    goal fluents, not just action precondition fluents.
+
+    Args:
+        goal: A Goal object (LiteralGoal, AndGoal, OrGoal, etc.)
+
+    Returns:
+        Set of positive Fluent objects that appear negated in the goal.
+        For example, if goal has ~F("at Book table"), returns {F("at Book table")}.
+    """
+    from mrppddl._bindings import GoalType
+
+    negative_fluents = set()
+    goal_type = goal.get_type()
+
+    if goal_type == GoalType.LITERAL:
+        fluent = goal.fluent()
+        if fluent.negated:
+            # Return the positive form
+            negative_fluents.add(~fluent)
+    elif goal_type in (GoalType.AND, GoalType.OR):
+        for child in goal.children():
+            negative_fluents.update(extract_negative_goal_fluents(child))
+
+    return negative_fluents
+
+
+def extract_all_negative_fluents(
+    actions: List[Action] = None,
+    goal: Goal = None
+) -> Set[Fluent]:
+    """Extract negative fluents from actions and/or goals.
+
+    This unified function collects all fluents that appear in negated form,
+    either as negative preconditions in actions or as negative literals in goals.
+    The returned fluents are in positive form (ready for mapping creation).
+
+    Args:
+        actions: Optional list of Action objects
+        goal: Optional Goal object
+
+    Returns:
+        Set of positive Fluent objects that appear negated in actions/goals.
+    """
+    negative_fluents = set()
+
+    if actions:
+        negative_fluents.update(extract_negative_preconditions(actions))
+
+    if goal:
+        negative_fluents.update(extract_negative_goal_fluents(goal))
+
+    return negative_fluents
+
+
 def create_positive_fluent_mapping(negative_fluents: Set[Fluent]) -> Dict[Fluent, Fluent]:
     """Create mapping from negative fluents to their positive "not-" versions.
 
