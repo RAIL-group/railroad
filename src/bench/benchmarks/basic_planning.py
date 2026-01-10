@@ -2,11 +2,7 @@
 Example benchmark: Basic single-robot planning tasks.
 
 Demonstrates benchmark registration and parametrization.
-Uses the new Goal API for defining planning objectives.
 """
-
-from functools import reduce
-from operator import and_
 
 from bench import benchmark, BenchmarkCase
 from mrppddl.core import Fluent as F, State, get_action_by_name
