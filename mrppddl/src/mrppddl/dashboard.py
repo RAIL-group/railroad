@@ -307,15 +307,27 @@ class PlannerDashboard:
 
     def _colorize_goal_line(self, line: str, fluents) -> str:
         """Colorize a goal line based on whether literals are satisfied."""
-        # Match fluent patterns like (predicate args...)
+        # Build a set of fluent strings for faster lookup
+        fluent_strs = {str(f) for f in fluents}
+
         def colorize_match(match):
             fluent_str = match.group(0)
-            # Try to find this fluent in the current state
-            # Check if any fluent in the state matches this string representation
-            for f in fluents:
-                if str(f) == fluent_str:
+
+            # Check if this is a negated fluent like "(not at Book table)"
+            if fluent_str.startswith("(not "):
+                # Extract the positive fluent: "(not at Book table)" -> "(at Book table)"
+                positive_fluent_str = "(" + fluent_str[5:]
+                # Negative goal is satisfied if the positive fluent is NOT in the state
+                if positive_fluent_str not in fluent_strs:
                     return f"[green]{fluent_str}[/green]"
-            return f"[red]{fluent_str}[/red]"
+                else:
+                    return f"[red]{fluent_str}[/red]"
+            else:
+                # Positive fluent: satisfied if it IS in the state
+                if fluent_str in fluent_strs:
+                    return f"[green]{fluent_str}[/green]"
+                else:
+                    return f"[red]{fluent_str}[/red]"
 
         # Pattern to match fluents: (name args...) or (not name args...)
         pattern = r'\([^()]+\)'
