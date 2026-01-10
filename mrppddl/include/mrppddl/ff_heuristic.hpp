@@ -21,8 +21,6 @@ struct FFForwardResult {
   std::unordered_map<Fluent, const Action*> fact_to_action;
   std::unordered_map<const Action*, double> action_to_duration;
   std::unordered_map<Fluent, double> fact_to_probability;
-  // Track which fluents can be deleted by reachable actions (for negative goals)
-  std::unordered_map<Fluent, const Action*> deletable_fluent_to_action;
   double dtime;   // Time delta from relaxed transition
   bool valid;     // false if relaxed transition failed
 };
@@ -92,17 +90,6 @@ FFForwardResult ff_forward_phase(
         }
       }
       result.action_to_duration[a] = duration;
-
-      // Track which fluents this action can delete (for negative goal support)
-      for (const auto& eff : a->effects()) {
-        for (const auto& deleted_fluent : eff->flipped_neg_fluents()) {
-          // Record that this action can delete this fluent
-          if (result.deletable_fluent_to_action.find(deleted_fluent) ==
-              result.deletable_fluent_to_action.end()) {
-            result.deletable_fluent_to_action[deleted_fluent] = a;
-          }
-        }
-      }
     }
 
     newly_added = std::move(next_new);
@@ -116,7 +103,8 @@ FFForwardResult ff_forward_phase(
 }
 
 // Backward cost computation given forward results and goal fluents
-// Handles both positive fluents (must be achieved) and negative fluents (must be absent)
+// Note: Negative goals should already be converted to positive equivalents
+// by the Python layer before calling the heuristic.
 double ff_backward_cost(
     const FFForwardResult &forward,
     const std::unordered_set<Fluent> &goal_fluents) {
@@ -130,60 +118,22 @@ double ff_backward_cost(
     return 0.0;
   }
 
-  // Separate positive and negative goal fluents
-  std::unordered_set<Fluent> positive_goals;
-  std::unordered_set<Fluent> negative_goals;
-
+  // Check reachability of all goal fluents
   for (const auto& gf : goal_fluents) {
-    if (gf.is_negated()) {
-      negative_goals.insert(gf);
-    } else {
-      positive_goals.insert(gf);
-    }
-  }
-
-  // Check reachability of positive goal fluents
-  for (const auto& gf : positive_goals) {
     if (!forward.known_fluents.count(gf)) {
       return std::numeric_limits<double>::infinity();
     }
   }
 
-  // Handle negative goal fluents:
-  // A negative goal ~P is satisfied if P is not in the state.
-  // In relaxed planning, we never delete fluents, so:
-  // - If P is not in initial_fluents, ~P is already satisfied (cost 0)
-  // - If P is in initial_fluents, we need an action that deletes P
-  std::unordered_set<Fluent> negative_goals_needing_delete;
-  for (const auto& neg_gf : negative_goals) {
-    Fluent positive_fluent = neg_gf.invert();  // Get P from ~P
-
-    // If P is not in initial state, ~P is already satisfied
-    if (!forward.initial_fluents.count(positive_fluent)) {
-      continue;  // This negative goal is free
-    }
-
-    // P is in initial state - we need to delete it
-    // Check if any reachable action can delete this fluent
-    auto it = forward.deletable_fluent_to_action.find(positive_fluent);
-    if (it == forward.deletable_fluent_to_action.end()) {
-      // No reachable action can delete this fluent
-      return std::numeric_limits<double>::infinity();
-    }
-
-    // Mark this fluent as needing deletion - we'll add the delete action's cost
-    negative_goals_needing_delete.insert(positive_fluent);
-  }
-
-  // Create a simple goal check function for ablation (positive goals only)
-  auto check_goal = [&positive_goals](const std::unordered_set<Fluent>& fluents) {
-    for (const auto& gf : positive_goals) {
+  // Create a simple goal check function for ablation
+  auto check_goal = [&goal_fluents](const std::unordered_set<Fluent>& fluents) {
+    for (const auto& gf : goal_fluents) {
       if (!fluents.count(gf)) return false;
     }
     return true;
   };
 
-  // Determine required fluents via ablation (for positive goals)
+  // Determine required fluents via ablation
   std::unordered_set<Fluent> required_fluents;
   for (const auto &f : forward.known_fluents) {
     std::unordered_set<Fluent> test_set(forward.known_fluents);
@@ -198,30 +148,6 @@ double ff_backward_cost(
   std::unordered_set<const Action *> used_actions;
   double total_duration = 0.0;
 
-  // First, add delete actions for negative goals
-  for (const auto& fluent_to_delete : negative_goals_needing_delete) {
-    auto it = forward.deletable_fluent_to_action.find(fluent_to_delete);
-    if (it != forward.deletable_fluent_to_action.end()) {
-      const Action* delete_action = it->second;
-      if (!used_actions.count(delete_action)) {
-        used_actions.insert(delete_action);
-
-        // Add delete action's duration
-        auto dur_it = forward.action_to_duration.find(delete_action);
-        double duration = (dur_it != forward.action_to_duration.end()) ? dur_it->second : 0.0;
-        total_duration += duration;
-
-        // Add delete action's preconditions to needed set
-        for (const Fluent& p : delete_action->pos_preconditions()) {
-          if (!forward.initial_fluents.count(p)) {
-            needed.insert(p);
-          }
-        }
-      }
-    }
-  }
-
-  // Then, backward plan for positive goals and delete action preconditions
   while (!needed.empty()) {
     Fluent f = *needed.begin();
     needed.erase(needed.begin());

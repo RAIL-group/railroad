@@ -147,11 +147,14 @@ class TestNegativeGoalHeuristic:
         assert goal.evaluate(state_partial.fluents) is False
 
     def test_ff_heuristic_with_negative_goal(self):
-        """Test ff_heuristic with negative goals.
+        """Test ff_heuristic with negative goals after conversion.
 
-        Negative goals (e.g., NOT at Book table) are now properly handled.
-        The heuristic finds actions that delete the positive fluent and
-        computes the cost to reach those actions.
+        Negative goals (e.g., NOT at Book table) must be converted to positive
+        equivalents before calling the heuristic. The conversion flow is:
+        1. Extract negative fluents from the goal
+        2. Create a mapping to positive equivalents
+        3. Convert actions, state, and goal using the mapping
+        4. Call ff_heuristic with converted inputs
         """
         objects_by_type = {
             "robot": ["r1"],
@@ -176,9 +179,30 @@ class TestNegativeGoalHeuristic:
         # Negative goal: Book NOT at table
         goal = LiteralGoal(~F("at Book table"))
 
-        h_value = ff_heuristic(initial_state, goal, all_actions)
+        # Extract negative fluents and create mapping
+        from mrppddl.core import extract_negative_goal_fluents
+        negative_fluents = extract_negative_goal_fluents(goal)
 
-        print(f"Heuristic for negative goal: {h_value}")
+        # Also include negatives from action preconditions
+        neg_from_actions = extract_negative_preconditions(all_actions)
+        all_negative_fluents = negative_fluents | neg_from_actions
+
+        neg_to_pos_mapping = create_positive_fluent_mapping(all_negative_fluents)
+
+        # Convert actions, state, and goal
+        converted_actions = []
+        for action in all_actions:
+            action_with_preconds = convert_action_to_positive_preconditions(action, neg_to_pos_mapping)
+            from mrppddl.core import convert_action_effects
+            action_converted = convert_action_effects(action_with_preconds, neg_to_pos_mapping)
+            converted_actions.append(action_converted)
+
+        converted_state = convert_state_to_positive_preconditions(initial_state, neg_to_pos_mapping)
+        converted_goal = convert_goal_to_positive_preconditions(goal, neg_to_pos_mapping)
+
+        h_value = ff_heuristic(converted_state, converted_goal, converted_actions)
+
+        print(f"Heuristic for negative goal (after conversion): {h_value}")
         # The goal is achievable by picking up the book
         # Heuristic should return a finite positive value
         assert h_value < float('inf'), \
