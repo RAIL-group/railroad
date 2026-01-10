@@ -78,11 +78,19 @@ def main():
     # Define goal: all items at their proper locations
     # Using new Goal objects (complex goal support)
     goal = AndGoal([
+        OrGoal([
             LiteralGoal(F("at Remote den")),
             LiteralGoal(F("at Plate den")),
+        ]), OrGoal([
             LiteralGoal(F("at Cookie den")),
             LiteralGoal(F("at Couch den")),
+        ]),
     ])
+    # Equivalent to the above
+    goal = (
+        (F("at Remote den") | F("at Plate den"))
+        & (F("at Cookie den") | F("at Couch den"))
+    )
 
     # Initial objects by type (robot only knows about some objects initially)
     objects_by_type = {
