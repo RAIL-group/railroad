@@ -1,4 +1,7 @@
 import pytest
+from functools import reduce
+from operator import and_
+
 from mrppddl.core import (
     Fluent,
     Operator,
@@ -11,7 +14,8 @@ from mrppddl.core import (
     convert_action_to_positive_preconditions,
     convert_action_effects,
 )
-from mrppddl._bindings import ff_heuristic, Action, GroundedEffect, GoalFn
+from mrppddl._bindings import Action, GroundedEffect
+from mrppddl.core import ff_heuristic, LiteralGoal
 
 F = Fluent
 
@@ -255,13 +259,11 @@ def test_simple_move_and_pick():
     )
 
     # Goal: robot is holding the box
-    goal_fluents = {F("holding r1 box")}
-
-    def is_goal(state):
-        return all(gf in state.fluents for gf in goal_fluents)
+    goal_fluent = F("holding r1 box")
+    goal = LiteralGoal(goal_fluent)
 
     # Test that goal is not satisfied initially
-    assert not is_goal(initial_state)
+    assert not goal.evaluate(initial_state.fluents)
 
     # Execute plan manually to verify it works
     state = initial_state
@@ -280,7 +282,7 @@ def test_simple_move_and_pick():
     assert state.time == 7.0
 
     # Verify goal is satisfied
-    assert is_goal(state)
+    assert goal.evaluate(state.fluents)
 
 
 def test_ff_heuristic_move_and_pick():
@@ -317,10 +319,10 @@ def test_ff_heuristic_move_and_pick():
     )
 
     # Goal: robot is holding the box
-    goal_fluents = {F("holding r1 box")}
+    goal = F("holding r1 box")
 
     # Compute FF heuristic
-    h_value = ff_heuristic(initial_state, goal_fluents, all_actions)
+    h_value = ff_heuristic(initial_state, goal, all_actions)
 
     # Expected cost: move (5.0) + pick (2.0) = 7.0
     # This assumes the heuristic properly handles the negative precondition ~F("hand_full")
@@ -357,10 +359,10 @@ def test_ff_heuristic_already_at_goal():
     )
 
     # Goal: robot is holding the box
-    goal_fluents = {F("holding r1 box")}
+    goal = F("holding r1 box")
 
     # Compute FF heuristic
-    h_value = ff_heuristic(initial_state, goal_fluents, all_actions)
+    h_value = ff_heuristic(initial_state, goal, all_actions)
 
     # Expected cost: only pick (2.0), no move needed
     assert h_value == 2.0, f"Expected heuristic value 2.0, got {h_value}"
@@ -409,10 +411,10 @@ def test_ff_heuristic_with_hand_full():
     )
 
     # Goal: robot is holding the box
-    goal_fluents = {F("holding r1 box")}
+    goal = F("holding r1 box")
 
     # Compute FF heuristic with converted actions and state
-    h_value = ff_heuristic(converted_state, goal_fluents, converted_actions)
+    h_value = ff_heuristic(converted_state, goal, converted_actions)
 
     # Expected cost: place dummy_obj (2.0) + pick box (2.0) = 4.0
     # The heuristic MUST recognize that place is needed before pick
@@ -552,10 +554,10 @@ def test_ff_heuristic_with_probabilistic_search(find_prob):
     )
 
     # Goal: pencil at garbagecan_5
-    goal_fluents = {F("at pencil_17 garbagecan_5")}
+    goal = F("at pencil_17 garbagecan_5")
 
     # Compute FF heuristic
-    h_value = ff_heuristic(initial_state, goal_fluents, all_actions)
+    h_value = ff_heuristic(initial_state, goal, all_actions)
 
     # The heuristic should return a finite value, not infinity
     # Before the fix, this would return inf because the heuristic only
@@ -635,36 +637,30 @@ def test_convert_state_with_upcoming_effects():
     assert ~F("not-found obj") in success_effect.resulting_fluents
 
 
-def test_goal_fn_goal_count():
-    """Test GoalFn's goal_count method counts how many goal fluents are achieved."""
-    # Create a goal function with 3 goal fluents
-    goal_fluents = {
-        F("at robot kitchen"),
-        F("holding robot cup"),
-        F("clean cup")
-    }
-
-    goal_fn = GoalFn(goal_fluents)
+def test_goal_goal_count():
+    """Test Goal's goal_count method counts how many goal fluents are achieved."""
+    # Create a goal with 3 goal fluents using the new Goal API
+    goal = F("at robot kitchen") & F("holding robot cup") & F("clean cup")
 
     # Test case 1: No goals achieved
     active_fluents_0 = {F("at robot bedroom"), F("free robot")}
-    assert goal_fn.goal_count(active_fluents_0) == 0
-    assert not goal_fn(active_fluents_0)
+    assert goal.goal_count(active_fluents_0) == 0
+    assert not goal.evaluate(active_fluents_0)
 
     # Test case 2: 1 goal achieved
     active_fluents_1 = {F("at robot kitchen"), F("free robot")}
-    assert goal_fn.goal_count(active_fluents_1) == 1
-    assert not goal_fn(active_fluents_1)
+    assert goal.goal_count(active_fluents_1) == 1
+    assert not goal.evaluate(active_fluents_1)
 
     # Test case 3: 2 goals achieved
     active_fluents_2 = {F("at robot kitchen"), F("holding robot cup"), F("dirty cup")}
-    assert goal_fn.goal_count(active_fluents_2) == 2
-    assert not goal_fn(active_fluents_2)
+    assert goal.goal_count(active_fluents_2) == 2
+    assert not goal.evaluate(active_fluents_2)
 
     # Test case 4: All 3 goals achieved
     active_fluents_3 = {F("at robot kitchen"), F("holding robot cup"), F("clean cup")}
-    assert goal_fn.goal_count(active_fluents_3) == 3
-    assert goal_fn(active_fluents_3)
+    assert goal.goal_count(active_fluents_3) == 3
+    assert goal.evaluate(active_fluents_3)
 
     # Test case 5: All goals achieved plus extra fluents
     active_fluents_4 = {
@@ -674,5 +670,5 @@ def test_goal_fn_goal_count():
         F("visited bedroom"),
         F("searched drawer")
     }
-    assert goal_fn.goal_count(active_fluents_4) == 3
-    assert goal_fn(active_fluents_4)
+    assert goal.goal_count(active_fluents_4) == 3
+    assert goal.evaluate(active_fluents_4)

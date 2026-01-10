@@ -1,5 +1,5 @@
 import numpy as np
-from mrppddl.core import Fluent as F, State, get_action_by_name
+from mrppddl.core import Fluent as F, State, get_action_by_name, LiteralGoal
 from mrppddl.planner import MCTSPlanner
 import environments
 from environments import SimpleEnvironment
@@ -268,11 +268,7 @@ def test_no_oscillation_pick_place_move_search():
     )
 
     # Check3: goal function
-    goal_fluents = {
-        # F("at teddybear_6 garbagecan_5"),   # works
-        F("at pencil_17 garbagecan_5"),  # used to osccillate before fix
-        # F("at pencil_17 bed_2"),  # used to osccillate before fix
-    }
+    goal = LiteralGoal(F("at pencil_17 garbagecan_5"))  # used to oscillate before fix
 
     env = TestEnvironment(locations=OTHER_LOCATIONS,
                           objects_at_locations=OTHER_OBJECTS_AT_LOCATIONS, robot_locations=robot_locations)
@@ -298,7 +294,7 @@ def test_no_oscillation_pick_place_move_search():
     import time
     for _ in range(15):
         t1 = time.time()
-        action_name = mcts(sim.state, goal_fluents, max_iterations=2000, c=20)
+        action_name = mcts(sim.state, goal, max_iterations=2000, c=20)
         t2 = time.time()
         print(f'Planning time: {t2 - t1:.2f} seconds')
         print(f'{action_name=}')
@@ -308,9 +304,9 @@ def test_no_oscillation_pick_place_move_search():
             # print(sim.state.fluents)
             actions_taken.append(action_name)
 
-        if sim.is_goal_reached(goal_fluents):
+        if goal.evaluate(sim.state.fluents):
             print("Goal reached!")
             break
 
     print(f"Actions taken: {actions_taken}")
-    assert sim.is_goal_reached(goal_fluents)
+    assert goal.evaluate(sim.state.fluents)

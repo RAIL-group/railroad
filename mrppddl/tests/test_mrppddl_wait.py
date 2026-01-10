@@ -1,4 +1,7 @@
 import pytest
+from functools import reduce
+from operator import and_
+
 from mrppddl.core import (
     Fluent,
     State,
@@ -86,11 +89,11 @@ def test_planner_mcts_move_visit_wait_multirobot(initial_fluents):
     move_op = construct_move_visited_operator(lambda *args: 5.0 + random.random())
     wait_op = construct_wait_operator()
     all_actions = move_op.instantiate(objects_by_type) + wait_op.instantiate(objects_by_type)
-    
+
 
     # Initial state
     initial_state = State(time=0, fluents=initial_fluents)
-    goal_fluents = {
+    goal = reduce(and_, [
         F("at r1 start"),
         F("at r2 start"),
         F("at r3 start"),
@@ -99,27 +102,24 @@ def test_planner_mcts_move_visit_wait_multirobot(initial_fluents):
         F("visited c"),
         F("visited d"),
         F("visited e"),
-    }
-    all_actions = get_usable_actions(initial_state, goal_fluents, all_actions)
-
-    def is_goal(state):
-        return all(gf in state.fluents for gf in goal_fluents)
+    ])
+    all_actions = get_usable_actions(initial_state, goal, all_actions)
 
     state = initial_state
     mcts = MCTSPlanner(all_actions)
     for _ in range(25):
-        if is_goal(state):
+        if goal.evaluate(state.fluents):
             print("Goal found!")
             break
-        action_name = mcts(state, goal_fluents, 10000, c=5)
+        action_name = mcts(state, goal, 10000, c=5)
         if action_name == "NONE":
             break
         action = get_action_by_name(all_actions, action_name)
 
         state = transition(state, action)[0][0]
-            
-        print(action_name, state, is_goal(state))
-    assert is_goal(state)
+
+        print(action_name, state, goal.evaluate(state.fluents))
+    assert goal.evaluate(state.fluents)
 
 
 def test_couch_carry_with_wait():
@@ -543,19 +543,12 @@ def test_couch_carry_with_operators_and_planner():
         }
     )
 
-    # Goal state
-    goal_fluents = {
-        F("at couch1 l4"),
-        F("on-floor couch1"),
-    }
+    # Goal
+    goal = F("at couch1 l4") & F("on-floor couch1")
 
     # Filter to only usable actions
-    usable_actions = get_usable_actions(initial_state, goal_fluents, all_actions)
+    usable_actions = get_usable_actions(initial_state, goal, all_actions)
     print(f"Usable actions: {len(usable_actions)}")
-
-    # Define goal test
-    def is_goal(state):
-        return all(gf in state.fluents for gf in goal_fluents)
 
     # Run MCTS planner
     state = initial_state
@@ -570,7 +563,7 @@ def test_couch_carry_with_operators_and_planner():
 
     max_steps = 20
     for step in range(max_steps):
-        if is_goal(state):
+        if goal.evaluate(state.fluents):
             print(f"\n{'='*60}")
             print("GOAL ACHIEVED!")
             print(f"{'='*60}")
@@ -579,7 +572,7 @@ def test_couch_carry_with_operators_and_planner():
         # Get next action from MCTS
         action_name = mcts(
             state,
-            goal_fluents,
+            goal,
             max_iterations=5000,
             max_depth=20,
             c=100
@@ -605,7 +598,7 @@ def test_couch_carry_with_operators_and_planner():
                 print(f"    {fluent_str}")
 
     # Verify goal was achieved
-    assert is_goal(state), f"Goal not achieved after {max_steps} steps"
+    assert goal.evaluate(state.fluents), f"Goal not achieved after {max_steps} steps"
     print(f"\nFinal time: {state.time} seconds")
 
     # Verify both robots are free at the end

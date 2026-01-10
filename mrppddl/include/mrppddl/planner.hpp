@@ -104,31 +104,9 @@ inline std::vector<Action> reconstruct_path(const CameFromMap &came_from,
   return path;
 }
 
-inline std::function<bool(const std::unordered_set<Fluent> &)>
-make_goal_test(const std::unordered_set<Fluent> &goal_fluents) {
-  return [&goal_fluents](const std::unordered_set<Fluent> &fluents) {
-    for (const auto &f : goal_fluents) {
-      if (!fluents.count(f)) {
-        return false;
-      }
-    }
-    return true;
-  };
-}
-
-bool is_goal_dbg(const std::unordered_set<Fluent> &fluents,
-                 const std::unordered_set<Fluent> &goal_fluents) {
-  for (const auto &gf : goal_fluents) {
-    if (!fluents.count(gf)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 inline std::optional<std::vector<Action>>
 astar(const State &start_state, const std::vector<Action> &all_actions,
-      const std::unordered_set<Fluent> &goal_fluents,
+      const GoalPtr &goal,
       HeuristicFn heuristic_fn = nullptr) {
   std::priority_queue<QueueEntry, std::vector<QueueEntry>, std::greater<>>
       open_heap;
@@ -136,9 +114,10 @@ astar(const State &start_state, const std::vector<Action> &all_actions,
   std::unordered_map<std::size_t, std::pair<std::size_t, const Action *>>
       came_from;
 
-  auto is_goal_fn = GoalFn(goal_fluents);
   FFMemory ff_memory;
-  heuristic_fn = make_ff_heuristic(is_goal_fn, all_actions, &ff_memory);
+  heuristic_fn = [&goal, &all_actions, &ff_memory](const State& s) -> double {
+    return ff_heuristic(s, goal.get(), all_actions, &ff_memory);
+  };
 
   int counter = 0;
   open_heap.emplace(0.0, start_state);
@@ -154,7 +133,7 @@ astar(const State &start_state, const std::vector<Action> &all_actions,
       continue;
     closed_set.insert(current.hash());
 
-    if (is_goal_fn(current.fluents())) {
+    if (goal->evaluate(current.fluents())) {
       std::cerr << "Goal reached!! count: " << counter << std::endl;
       return std::nullopt; // no path found
                            // return reconstruct_path(came_from, current);
@@ -332,245 +311,13 @@ void print_best_path(std::ostream& os, const MCTSDecisionNode* node, HeuristicFn
 
 // ---------------------- MCTS core ----------------------
 
-// Adapter class to use GoalBase with the same interface as GoalFn
-class GoalAdapter {
-public:
-  explicit GoalAdapter(const GoalBase* goal) : goal_(goal) {}
-
-  bool operator()(const std::unordered_set<Fluent> &fluents) const {
-    return goal_->evaluate(fluents);
-  }
-
-  int goal_count(const std::unordered_set<Fluent> &fluents) const {
-    return goal_->goal_count(fluents);
-  }
-
-  // For FF heuristic - get literals if pure conjunction
-  std::unordered_set<Fluent> get_all_literals() const {
-    return goal_->get_all_literals();
-  }
-
-  bool is_pure_conjunction() const {
-    return goal_->is_pure_conjunction();
-  }
-
-private:
-  const GoalBase* goal_;
-};
-
-// Forward declaration of mcts with GoalAdapter
-inline std::string mcts_impl(const State &root_state,
-                        const std::vector<Action> &all_actions_base,
-                        const GoalAdapter &is_goal_fn, FFMemory *ff_memory,
-                        int max_iterations, int max_depth,
-                        double c,
-                        std::string* out_tree_trace);
-
-// Original mcts signature (uses GoalFn)
-inline std::string mcts(const State &root_state,
-                        const std::vector<Action> &all_actions_base,
-                        const GoalFn &is_goal_fn, FFMemory *ff_memory,
-                        int max_iterations = 1000, int max_depth = 20,
-                        double c = std::sqrt(2.0),
-                        std::string* out_tree_trace = nullptr,
-                        double heuristic_multiplier = 5.0) {
-  // RNG (thread_local is convenient if you run this in parallel later)
-  static thread_local std::mt19937 rng{std::random_device{}()};
-
-  auto all_actions = get_usable_actions(root_state, all_actions_base);
-
-  // Root node
-  auto root = std::make_unique<MCTSDecisionNode>(root_state.copy_and_zero_out_time());
-  root->untried_actions = get_next_actions(root_state, all_actions);
-  auto heuristic_fn = make_ff_heuristic(is_goal_fn, all_actions, ff_memory);
-  std::bernoulli_distribution do_extra_exploration(PROB_EXTRA_EXPLORE);
-
-  for (int it = 0; it < max_iterations; ++it) {
-    bool is_node_goal = false;
-    bool is_node_unsolvable = false;
-    bool did_need_relaxed_transition = false;
-
-    #ifdef MRPPDDL_USE_PYBIND
-    // Only used when building the Python extension
-    if (PyErr_CheckSignals() != 0) {
-	throw pybind11::error_already_set();
-    }
-    #endif
-    MCTSDecisionNode *node = root.get();
-    int depth = 0;
-    double accumulated_extra_cost = 0.0;
-
-    // ---------------- Selection ----------------
-    while (depth < max_depth) {
-      // if (heuristic_fn && heuristic_fn(node->state) > 1e10) {
-      // 	is_node_unsolvable = true;
-      //   break;
-      // }
-      // if (node->children.size() + node->untried_actions.size() == 0) {
-      // 	if (node->state.upcoming_effects().size()) {
-      // 	  node->state = transition(node->state, nullptr, true)[0].second;
-      // 	  did_need_relaxed_transition = true;
-      // 	} else {
-      // 	  is_node_unsolvable = true;
-      // 	  break;
-      // 	}
-      // }
-      if (!node->untried_actions.empty())
-        break;
-      if (node->children.empty())
-        break;
-      if (is_goal_fn(node->state.fluents())) {
-	is_node_goal = true;
-        break;
-      }
-
-      // choose action / chance node with best UCB
-      MCTSChanceNode *best_chance = nullptr;
-      double best_score = -std::numeric_limits<double>::infinity();
-
-      for (auto &kv : node->children) {
-        MCTSChanceNode *cn = kv.second.get();
-        double score = ucb_score(node->visits, *cn, c);
-        if (score > best_score) {
-          best_score = score;
-          best_chance = cn;
-        }
-      }
-
-      if (!best_chance || best_chance->children.empty())
-        break;
-
-      // Accumulate the extra cost of the selected action
-      accumulated_extra_cost += best_chance->action->extra_cost();
-
-      // sample a successor decision node according to outcome weights
-      std::size_t idx = sample_index(best_chance->outcome_weights, rng);
-      node = best_chance->children[idx].get();
-      ++depth;
-    }
-
-    // ---------------- Expansion ----------------
-    // FIXME: used to also include !is_node_unsolvable, but
-    // this created failures that shouldn't have existed.
-    if (!node->untried_actions.empty() && !is_node_goal) {
-      const Action *action = node->untried_actions.back();
-      node->untried_actions.pop_back();
-
-      // Accumulate the extra cost of the expanded action
-      accumulated_extra_cost += action->extra_cost();
-
-      auto outcomes = transition(node->state, action);
-      if (!outcomes.empty()) {
-        auto chance_node = std::make_unique<MCTSChanceNode>(action, node);
-        auto *chance_raw = chance_node.get();
-        node->children.emplace(action, std::move(chance_node));
-
-        chance_raw->children.reserve(outcomes.size());
-        chance_raw->outcome_weights.reserve(outcomes.size());
-
-        for (auto &[succ, prob] : outcomes) {
-          if (prob <= 0.0)
-            continue;
-          auto child_decision =
-              std::make_unique<MCTSDecisionNode>(succ, chance_raw);
-          child_decision->untried_actions =
-              get_next_actions(child_decision->state, all_actions);
-          chance_raw->outcome_weights.push_back(prob);
-          chance_raw->children.push_back(std::move(child_decision));
-        }
-
-        // If all outcomes had prob 0 -> skip this iteration
-        if (chance_raw->children.empty())
-          continue;
-
-        // Move to one sampled child
-        std::size_t idx = sample_index(chance_raw->outcome_weights, rng);
-        node = chance_raw->children[idx].get();
-        ++depth;
-      }
-    }
-
-    // ---------------- Simulation / Evaluation ----------------
-    // Your Python code uses: reward = -time - heuristic (bounded).
-    double reward;
-    double h = 0.0;
-    int goal_count = is_goal_fn.goal_count(node->state.fluents());
-    if (is_goal_fn(node->state.fluents())) {
-      reward = -node->state.time() + SUCCESS_REWARD + 0 * goal_count - accumulated_extra_cost;
-    } else {
-      h = heuristic_fn ? heuristic_fn(node->state) : 0.0;
-      if (h > 1e10) {
-        h = HEURISTIC_CANNOT_FIND_GOAL_PENALTY;
-      } else {
-	h = h;
-      }
-      if (did_need_relaxed_transition)
-	h += 100;
-
-      reward = -node->state.time() - h * heuristic_multiplier + 0 * goal_count - accumulated_extra_cost;
-    }
-
-    // ---------------- Backpropagation ----------------
-    backpropagate(node, reward);
-  }
-
-  // ----> Generate tree trace <----
-  std::ostringstream tree_trace_stream;
-  tree_trace_stream << std::fixed << std::setprecision(2);
-  print_best_path(tree_trace_stream, root.get(), heuristic_fn, 20 /* max depth to print */);
-
-  if (out_tree_trace) {
-    *out_tree_trace = tree_trace_stream.str();
-  }
-
-  // --------------- Extract a (very) shallow policy ---------------
-  MCTSResult result;
-  result.root = std::move(root);
-
-  if (!result.root->children.empty()) {
-    const Action *best_action = nullptr;
-    double best_q = -std::numeric_limits<double>::infinity();
-    int most_visits = 0;
-
-    for (auto &kv : result.root->children) {
-      MCTSChanceNode *cn = kv.second.get();
-      if (cn->visits == 0)
-        continue;
-      if (cn->visits > most_visits) {
-	most_visits = cn->visits;
-	best_action = kv.first;
-      }
-    }
-
-    if (best_action) {
-      return best_action->name();
-      result.policy.emplace(result.root->state.hash(), best_action);
-    }
-  }
-
-  return "NONE";
-
-  // return result.best_action();
-  // return best_action;
-}
-
-// mcts overload that accepts GoalBase directly
+// mcts that accepts GoalBase directly
 inline std::string mcts(const State &root_state,
                         const std::vector<Action> &all_actions_base,
                         const GoalBase* goal, FFMemory *ff_memory,
                         int max_iterations = 1000, int max_depth = 20,
                         double c = std::sqrt(2.0),
                         std::string* out_tree_trace = nullptr) {
-  // For pure conjunctions, use the existing efficient path
-  if (goal->is_pure_conjunction()) {
-    auto goal_fn = GoalFn(goal->get_all_literals());
-    return mcts(root_state, all_actions_base, goal_fn, ff_memory,
-                max_iterations, max_depth, c, out_tree_trace);
-  }
-
-  // For complex goals (with OR), use the efficient heuristic
-  // that runs forward phase once and computes min cost over OR branches
-
   // RNG
   static thread_local std::mt19937 rng{std::random_device{}()};
 
@@ -582,7 +329,7 @@ inline std::string mcts(const State &root_state,
 
   // Use efficient heuristic that handles OR branches properly
   HeuristicFn heuristic_fn = [goal, all_actions, ff_memory](const State& s) -> double {
-    return ff_heuristic_for_goal(s, goal, all_actions, ff_memory);
+    return ff_heuristic(s, goal, all_actions, ff_memory);
   };
   std::bernoulli_distribution do_extra_exploration(PROB_EXTRA_EXPLORE);
 
@@ -729,26 +476,8 @@ public:
   explicit MCTSPlanner(std::vector<Action> all_actions)
       : all_actions_(std::move(all_actions)) {}
 
-  // Call operator: planner(initial_state, goal_fluents) → string
+  // Call operator: planner(initial_state, goal) → string
 
-  std::string operator()(const State &root_state,
-                         const std::unordered_set<Fluent> &goal_fluents,
-                         int max_iterations, int max_depth, double c,
-                         double heuristic_multiplier = 5.0) {
-    auto is_goal_fn = GoalFn(goal_fluents);
-    return mcts(root_state, all_actions_, is_goal_fn, &ff_memory_,
-                max_iterations, max_depth, c, &last_mcts_tree_trace_, heuristic_multiplier);
-  }
-
-  std::string operator()(const State &root_state,
-                         const std::unordered_set<Fluent> &goal_fluents,
-                         double heuristic_multiplier = 5.0) {
-    auto is_goal_fn = GoalFn(goal_fluents);
-    return mcts(root_state, all_actions_, is_goal_fn, &ff_memory_,
-                max_iterations, max_depth, c, &last_mcts_tree_trace_, heuristic_multiplier);
-  }
-
-  // Overload that accepts GoalPtr (complex goals)
   std::string operator()(const State &root_state,
                          const GoalPtr &goal,
                          int max_iterations, int max_depth, double c) {

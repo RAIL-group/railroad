@@ -43,8 +43,7 @@ from mrppddl._bindings import (
     OrGoal,
     TrueGoal,
     FalseGoal,
-    goal_from_fluent_set,
-    ff_heuristic_goal,
+    ff_heuristic,
 )
 
 from mrppddl.planner import MCTSPlanner, get_usable_actions
@@ -427,16 +426,17 @@ class TestBranchAccess:
         assert len(lits) == 3
         assert F("a") in lits and F("b") in lits and F("c") in lits
 
-    def test_goal_from_fluent_set(self):
-        fluents = {F("a"), F("b"), F("c")}
-        goal = goal_from_fluent_set(fluents)
+    def test_goal_from_operator_and(self):
+        """Test creating a goal using the & operator."""
+        goal = F("a") & F("b") & F("c")
 
         assert goal.is_pure_conjunction() is True
         assert goal.evaluate({F("a"), F("b"), F("c")}) is True
         assert goal.evaluate({F("a"), F("b")}) is False
 
     def test_goal_from_single_fluent(self):
-        goal = goal_from_fluent_set({F("a")})
+        """Test creating a goal from a single fluent using LiteralGoal."""
+        goal = LiteralGoal(F("a"))
         assert goal.get_type() == GoalType.LITERAL
         assert goal.evaluate({F("a")}) is True
 
@@ -597,8 +597,20 @@ class TestPlannerWithGoals:
 
         mcts = MCTSPlanner(all_actions)
         state = initial_state
+
+        for _ in range(15):
+            if goal.evaluate(state.fluents):
+                break
+            action_name = mcts(state, goal, max_iterations=400, c=10)
+            if action_name == "NONE":
+                break
+            action = get_action_by_name(all_actions, action_name)
+            state = transition(state, action)[0][0]
+
+        assert goal.evaluate(state.fluents), "Negated literal goal should become satisfied after moving away"
+
     def test_ff_heuristic_with_goal_object(self):
-        """Test ff_heuristic_goal function with Goal objects."""
+        """Test ff_heuristic function with Goal objects."""
         objects_by_type = {
             "robot": ["r1"],
             "location": ["start", "a", "b"],
@@ -618,21 +630,10 @@ class TestPlannerWithGoals:
         ])
 
         # Compute heuristic
-        h_value = ff_heuristic_goal(initial_state, goal, all_actions)
+        h_value = ff_heuristic(initial_state, goal, all_actions)
 
         # Heuristic should be positive (need to visit 2 locations)
         assert h_value > 0, f"Heuristic should be positive, got {h_value}"
-
-        for _ in range(15):
-            if goal.evaluate(state.fluents):
-                break
-            action_name = mcts(state, goal, max_iterations=400, c=10)
-            if action_name == "NONE":
-                break
-            action = get_action_by_name(all_actions, action_name)
-            state = transition(state, action)[0][0]
-
-        assert goal.evaluate(state.fluents), "Negated literal goal should become satisfied after moving away"
 
 
 # -----------------------------
@@ -659,9 +660,9 @@ class TestHeuristicORBranches:
 
         or_goal = OrGoal([LiteralGoal(F("visited near")), LiteralGoal(F("visited far"))])
 
-        h_near = ff_heuristic_goal(initial_state, LiteralGoal(F("visited near")), all_actions)
-        h_far = ff_heuristic_goal(initial_state, LiteralGoal(F("visited far")), all_actions)
-        h_or = ff_heuristic_goal(initial_state, or_goal, all_actions)
+        h_near = ff_heuristic(initial_state, LiteralGoal(F("visited near")), all_actions)
+        h_far = ff_heuristic(initial_state, LiteralGoal(F("visited far")), all_actions)
+        h_or = ff_heuristic(initial_state, or_goal, all_actions)
 
         assert h_or == min(h_near, h_far), f"h_or={h_or}, h_near={h_near}, h_far={h_far}"
 
@@ -672,7 +673,7 @@ class TestHeuristicORBranches:
 
         initial_state = State(time=0, fluents={F("at r1 start"), F("free r1")})
 
-        h_value = ff_heuristic_goal(initial_state, TrueGoal(), all_actions)
+        h_value = ff_heuristic(initial_state, TrueGoal(), all_actions)
         assert h_value == 0.0
 
     def test_false_goal_returns_infinity(self):
@@ -682,7 +683,7 @@ class TestHeuristicORBranches:
 
         initial_state = State(time=0, fluents={F("at r1 start"), F("free r1")})
 
-        h_value = ff_heuristic_goal(initial_state, FalseGoal(), all_actions)
+        h_value = ff_heuristic(initial_state, FalseGoal(), all_actions)
         assert math.isinf(h_value)
 
     def test_or_with_unreachable_branch_uses_reachable_branch(self):
@@ -697,7 +698,7 @@ class TestHeuristicORBranches:
             LiteralGoal(F("visited nonexistent")),  # no such location/actions
         ])
 
-        h_value = ff_heuristic_goal(initial_state, or_goal, all_actions)
+        h_value = ff_heuristic(initial_state, or_goal, all_actions)
         assert not math.isinf(h_value)
 
     def test_and_with_nested_or_is_min_of_and_branches(self):
@@ -716,9 +717,9 @@ class TestHeuristicORBranches:
         and_ab = AndGoal([LiteralGoal(F("visited a")), LiteralGoal(F("visited b"))])
         and_ac = AndGoal([LiteralGoal(F("visited a")), LiteralGoal(F("visited c"))])
 
-        h_nested = ff_heuristic_goal(initial_state, nested, all_actions)
-        h_ab = ff_heuristic_goal(initial_state, and_ab, all_actions)
-        h_ac = ff_heuristic_goal(initial_state, and_ac, all_actions)
+        h_nested = ff_heuristic(initial_state, nested, all_actions)
+        h_ab = ff_heuristic(initial_state, and_ab, all_actions)
+        h_ac = ff_heuristic(initial_state, and_ac, all_actions)
 
         assert h_nested == min(h_ab, h_ac), f"h_nested={h_nested}, h_ab={h_ab}, h_ac={h_ac}"
 

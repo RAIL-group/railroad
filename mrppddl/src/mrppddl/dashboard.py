@@ -17,7 +17,6 @@ from mrppddl._bindings import (
     AndGoal,
     OrGoal,
     GoalType,
-    goal_from_fluent_set,
     Fluent,
 )
 from mrppddl.helper import format_goal, get_best_branch, get_satisfied_branch
@@ -95,13 +94,8 @@ class PlannerDashboard:
             self.console = Console(force_terminal=True, record=True)
 
         # Normalize goal input to a Goal object
-        if isinstance(goal, set):
-            # Convert fluent set to Goal object for uniform handling
-            self.goal = goal_from_fluent_set(goal)
-            self.goal_fluents = list(goal)
-        else:
-            self.goal = goal
-            self.goal_fluents = list(goal.get_all_literals())
+        self.goal = goal
+        self.goal_fluents = list(goal.get_all_literals())
 
         self.num_goals = len(self.goal_fluents)
         self.initial_heuristic = initial_heuristic

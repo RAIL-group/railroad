@@ -23,7 +23,7 @@ from mrppddl.dashboard import PlannerDashboard
 import environments
 from environments.core import EnvironmentInterface
 from environments import SimpleEnvironment
-from mrppddl._bindings import ff_heuristic_goal
+from mrppddl.core import ff_heuristic
 
 # Fancy error handling; shows local vars
 from rich.traceback import install
@@ -114,7 +114,7 @@ def main():
     max_iterations = 40  # Limit iterations to avoid infinite loops
 
     # Dashboard
-    h_value = ff_heuristic_goal(initial_state, goal, sim.get_actions())
+    h_value = ff_heuristic(initial_state, goal, sim.get_actions())
     with PlannerDashboard(goal, initial_heuristic=h_value) as dashboard:
         # Initial dashboard update
         dashboard.update(sim_state=sim.state)
@@ -142,7 +142,7 @@ def main():
             actions_taken.append(action_name)
 
             tree_trace = mcts.get_trace_from_last_mcts_tree()
-            h_value = ff_heuristic_goal(sim.state, goal, sim.get_actions())
+            h_value = ff_heuristic(sim.state, goal, sim.get_actions())
             relevant_fluents = {
                 f for f in sim.state.fluents
                 if any(keyword in f.name for keyword in ["at", "holding", "found"])

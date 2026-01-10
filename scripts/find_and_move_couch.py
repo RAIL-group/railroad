@@ -22,7 +22,7 @@ from mrppddl.dashboard import PlannerDashboard
 import environments
 from environments.core import EnvironmentInterface
 from environments import SimpleEnvironment
-from mrppddl._bindings import ff_heuristic, ff_heuristic_goal, AndGoal, LiteralGoal, OrGoal
+from mrppddl._bindings import ff_heuristic, AndGoal, LiteralGoal, OrGoal
 
 # Fancy error handling; shows local vars
 from rich.traceback import install
@@ -78,14 +78,10 @@ def main():
     # Define goal: all items at their proper locations
     # Using new Goal objects (complex goal support)
     goal = AndGoal([
-        OrGoal([
             LiteralGoal(F("at Remote den")),
             LiteralGoal(F("at Plate den")),
-        ]),
-        OrGoal([
             LiteralGoal(F("at Cookie den")),
             LiteralGoal(F("at Couch den")),
-        ]),
     ])
 
     # Initial objects by type (robot only knows about some objects initially)
@@ -120,8 +116,7 @@ def main():
     max_iterations = 60  # Limit iterations to avoid infinite loops
 
     # Dashboard
-    # Use new ff_heuristic_goal for efficient Goal object support
-    h_value = ff_heuristic_goal(initial_state, goal, sim.get_actions())
+    h_value = ff_heuristic(initial_state, goal, sim.get_actions())
     with PlannerDashboard(goal, initial_heuristic=h_value) as dashboard:
         # (Optional) initial dashboard update
         dashboard.update(sim_state=sim.state)
@@ -134,7 +129,7 @@ def main():
             # Get available actions
             all_actions = sim.get_actions()
 
-            # Plan next action using Goal object
+            # Plan next action
             mcts = MCTSPlanner(all_actions)
             action_name = mcts(sim.state, goal, max_iterations=4000, c=300, max_depth=20)
 
@@ -148,7 +143,7 @@ def main():
             actions_taken.append(action_name)
 
             tree_trace = mcts.get_trace_from_last_mcts_tree()
-            h_value = ff_heuristic_goal(sim.state, goal, sim.get_actions())
+            h_value = ff_heuristic(sim.state, goal, sim.get_actions())
             relevant_fluents = {
                 f for f in sim.state.fluents
                 if any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])

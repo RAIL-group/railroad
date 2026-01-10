@@ -76,6 +76,20 @@ public:
   // - TRUE/FALSE: 0
   int goal_count(const FluentSet& fluents) const { return satisfied_leaf_count(fluents); }
 
+  // Get DNF (Disjunctive Normal Form) branches.
+  // Returns a vector of fluent sets where:
+  // - Each FluentSet is a pure conjunction (all fluents must hold)
+  // - The vector represents OR of these conjunctions
+  // - Empty vector means unsatisfiable (FalseGoal)
+  // - Vector with empty set means trivially satisfied (TrueGoal)
+  // Result is cached for efficiency.
+  const std::vector<FluentSet>& get_dnf_branches() const {
+    if (!cached_dnf_branches_) {
+      cached_dnf_branches_ = compute_dnf_branches();
+    }
+    return *cached_dnf_branches_;
+  }
+
   // Structural equality (never hash-only).
   virtual bool equals(const GoalBase& other) const = 0;
 
@@ -98,9 +112,11 @@ public:
 protected:
   virtual std::size_t compute_hash() const = 0;
   virtual int satisfied_leaf_count(const FluentSet& fluents) const = 0;
+  virtual std::vector<FluentSet> compute_dnf_branches() const = 0;
 
   // Cache is safe because goals are immutable after construction.
   mutable std::optional<std::size_t> cached_hash_;
+  mutable std::optional<std::vector<FluentSet>> cached_dnf_branches_;
 };
 
 // Forward declarations for factories used by normalize().
@@ -131,6 +147,11 @@ protected:
   }
 
   int satisfied_leaf_count(const FluentSet&) const override { return 0; }
+
+  std::vector<FluentSet> compute_dnf_branches() const override {
+    // One branch with no requirements (trivially satisfied)
+    return {{}};
+  }
 };
 
 // FalseGoal: never satisfied
@@ -156,6 +177,11 @@ protected:
   }
 
   int satisfied_leaf_count(const FluentSet&) const override { return 0; }
+
+  std::vector<FluentSet> compute_dnf_branches() const override {
+    // No valid branches (unsatisfiable)
+    return {};
+  }
 };
 
 // LiteralGoal: leaf fluent that must hold (or must not hold if negated)
@@ -206,6 +232,11 @@ protected:
 
   int satisfied_leaf_count(const FluentSet& fluents) const override {
     return evaluate(fluents) ? 1 : 0;
+  }
+
+  std::vector<FluentSet> compute_dnf_branches() const override {
+    // One branch with this single literal
+    return {{fluent_}};
   }
 
 private:
@@ -283,6 +314,47 @@ protected:
     return sum;
   }
 
+  std::vector<FluentSet> compute_dnf_branches() const override {
+    // AND distributes over OR: AND(A, OR(B,C)) -> [{A,B}, {A,C}]
+    // Start with a single empty branch
+    std::vector<FluentSet> result = {{}};
+
+    for (const auto& child : children_) {
+      const auto& child_branches = child->get_dnf_branches();
+
+      if (child_branches.empty()) {
+        // Child is unsatisfiable (FalseGoal) - entire AND is unsatisfiable
+        return {};
+      }
+
+      if (child_branches.size() == 1) {
+        // Single branch from child - add its fluents to all current branches
+        for (auto& branch : result) {
+          for (const auto& fluent : child_branches[0]) {
+            branch.insert(fluent);
+          }
+        }
+      } else {
+        // Multiple branches from child (OR) - distribute via Cartesian product
+        std::vector<FluentSet> new_result;
+        new_result.reserve(result.size() * child_branches.size());
+
+        for (const auto& existing_branch : result) {
+          for (const auto& child_branch : child_branches) {
+            FluentSet combined = existing_branch;
+            for (const auto& fluent : child_branch) {
+              combined.insert(fluent);
+            }
+            new_result.push_back(std::move(combined));
+          }
+        }
+        result = std::move(new_result);
+      }
+    }
+
+    return result;
+  }
+
 private:
   std::vector<GoalPtr> children_;
 };
@@ -348,6 +420,20 @@ protected:
     int best = 0;
     for (const auto& child : children_) best = std::max(best, child->goal_count(fluents));
     return best;
+  }
+
+  std::vector<FluentSet> compute_dnf_branches() const override {
+    // OR: union of branches from all children
+    std::vector<FluentSet> result;
+
+    for (const auto& child : children_) {
+      const auto& child_branches = child->get_dnf_branches();
+      for (const auto& branch : child_branches) {
+        result.push_back(branch);
+      }
+    }
+
+    return result;
   }
 
 private:

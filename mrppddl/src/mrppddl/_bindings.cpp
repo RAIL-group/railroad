@@ -291,25 +291,16 @@ PYBIND11_MODULE(_bindings, m) {
   m.def("get_next_actions", &get_next_actions, py::arg("state"),
         py::arg("all_actions"),
         "Return list of applicable actions for at least one free robot");
-  m.def("get_usable_actions", &get_usable_actions_fluent_list, py::arg("input_state"),
-	py::arg("goal_fluents"), py::arg("all_actions"));
+  m.def("get_usable_actions",
+        [](const State &input_state, const std::vector<Action> &all_actions) {
+          return get_usable_actions(input_state, all_actions);
+        },
+        py::arg("input_state"), py::arg("all_actions"),
+        "Get actions usable from the given state via forward reachability");
 
-  m.def("make_goal_test", &mrppddl::make_goal_test,
-        "Construct a goal-checking function", py::arg("goal_fluents"));
   m.def("astar", &astar, py::arg("start_state"), py::arg("all_actions"),
-        py::arg("is_goal_state"), py::arg("heuristic_fn") = nullptr,
+        py::arg("goal"), py::arg("heuristic_fn") = nullptr,
         "Run A* search and return the action path");
-
-  py::class_<GoalFn>(m, "GoalFn")
-      .def(py::init<const std::unordered_set<Fluent> &>(),
-           py::arg("goal_fluents"),
-           "Create a goal function from a set of goal fluents")
-      .def("__call__", &GoalFn::operator(),
-           py::arg("fluents"),
-           "Check if all goal fluents are present in the given set")
-      .def("goal_count", &GoalFn::goal_count,
-           py::arg("active_fluents"),
-           "Count how many goal fluents are present in the active set");
 
   // Complex Goal classes
   py::enum_<GoalType>(m, "GoalType")
@@ -328,6 +319,8 @@ PYBIND11_MODULE(_bindings, m) {
            "Return normalized form of this goal")
       .def("get_all_literals", &GoalBase::get_all_literals,
            "Get all literal fluents in this goal")
+      .def("get_dnf_branches", &GoalBase::get_dnf_branches,
+           "Get DNF branches: list of fluent sets (OR of ANDs)")
       .def("is_pure_conjunction", &GoalBase::is_pure_conjunction,
            "Check if this is a pure conjunction of literals")
       .def("children", &GoalBase::children,
@@ -354,24 +347,11 @@ PYBIND11_MODULE(_bindings, m) {
   py::class_<OrGoal, GoalBase, std::shared_ptr<OrGoal>>(m, "OrGoal")
       .def(py::init<std::vector<GoalPtr>>(), py::arg("children"));
 
-  // Factory functions for goals
-  m.def("goal_from_fluent_set", &goal_from_fluent_set, py::arg("fluents"),
-        "Create a goal from a set of fluents (implicit AND)");
 
   py::class_<MCTSPlanner>(m, "MCTSPlanner")
       .def(py::init<std::vector<Action>>(), py::arg("all_actions"))
       .def(
           "__call__",
-          [](MCTSPlanner &self, const State &s,
-             const std::unordered_set<Fluent> &goal_fluents, int max_iterations,
-             int max_depth, double c, double heuristic_multiplier) {
-            return self(s, goal_fluents, max_iterations, max_depth, c, heuristic_multiplier);
-          },
-          py::arg("state"), py::arg("goal_fluents"),
-          py::arg("max_iterations") = 1000, py::arg("max_depth") = 20,
-          py::arg("c") = 1.414, py::arg("heuristic_multiplier") = 5.0)
-      .def(
-          "plan_with_goal",
           [](MCTSPlanner &self, const State &s,
              const GoalPtr &goal, int max_iterations,
              int max_depth, double c) {
@@ -384,21 +364,11 @@ PYBIND11_MODULE(_bindings, m) {
       .def("get_trace_from_last_mcts_tree", &MCTSPlanner::get_trace_from_last_mcts_tree,
            "Get the tree trace from the most recent MCTS planning call");
 
-  // ff_heuristic with fluent set (original)
-  m.def("ff_heuristic",
-        [](const State &state, const std::unordered_set<Fluent> &goal_fluents,
-           const std::vector<Action> &all_actions) {
-	  auto goal_fn = GoalFn(goal_fluents);
-          return ff_heuristic(state, &goal_fn, all_actions);
-        },
-        "Compute FF heuristic value for a state",
-        py::arg("state"), py::arg("goal_fluents"), py::arg("all_actions"));
-
   // ff_heuristic with Goal object
-  m.def("ff_heuristic_goal",
+  m.def("ff_heuristic",
         [](const State &state, const GoalPtr &goal,
            const std::vector<Action> &all_actions) {
-          return ff_heuristic_for_goal(state, goal.get(), all_actions);
+          return ff_heuristic(state, goal.get(), all_actions);
         },
         "Compute FF heuristic value for a state with a Goal object",
         py::arg("state"), py::arg("goal"), py::arg("all_actions"));

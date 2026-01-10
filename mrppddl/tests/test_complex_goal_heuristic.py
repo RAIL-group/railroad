@@ -22,11 +22,11 @@ from mrppddl.core import (
     convert_action_effects,
 )
 from mrppddl._bindings import (
-    ff_heuristic_goal,
     LiteralGoal,
     AndGoal,
     GoalType,
 )
+from mrppddl.core import ff_heuristic
 
 
 def construct_pick_operator(pick_time_fn):
@@ -147,7 +147,7 @@ class TestNegativeGoalHeuristic:
         assert goal.evaluate(state_partial.fluents) is False
 
     def test_ff_heuristic_with_negative_goal(self):
-        """Test ff_heuristic_goal with negative goals.
+        """Test ff_heuristic with negative goals.
 
         Negative goals (e.g., NOT at Book table) are now properly handled.
         The heuristic finds actions that delete the positive fluent and
@@ -176,7 +176,7 @@ class TestNegativeGoalHeuristic:
         # Negative goal: Book NOT at table
         goal = LiteralGoal(~F("at Book table"))
 
-        h_value = ff_heuristic_goal(initial_state, goal, all_actions)
+        h_value = ff_heuristic(initial_state, goal, all_actions)
 
         print(f"Heuristic for negative goal: {h_value}")
         # The goal is achievable by picking up the book
@@ -307,7 +307,7 @@ class TestNegativeGoalHeuristic:
         print(f"Goal satisfied initially: {goal.evaluate(initial_state.fluents)}")
 
         # Compute heuristic
-        h_value = ff_heuristic_goal(initial_state, goal, all_actions)
+        h_value = ff_heuristic(initial_state, goal, all_actions)
         print(f"Heuristic value: {h_value}")
 
         # The pick action removes F("at ?o ?loc") when picking up object
@@ -477,7 +477,7 @@ class TestNegativeGoalSolutions:
         # Reframed goal: use positive "not-at" fluent
         goal = LiteralGoal(F("not-at Book table"))
 
-        h_value = ff_heuristic_goal(initial_state, goal, all_actions)
+        h_value = ff_heuristic(initial_state, goal, all_actions)
         print(f"\nReframed goal heuristic: {h_value}")
 
         # This should work because "not-at Book table" is added by pick action

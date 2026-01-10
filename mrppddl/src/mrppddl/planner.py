@@ -1,20 +1,63 @@
-from typing import List, Set, Dict, Union
-from mrppddl._bindings import astar, get_usable_actions  # noqa
+from typing import List, Dict, Union, Set
+from mrppddl._bindings import astar  # noqa
+from mrppddl._bindings import get_usable_actions as _get_usable_actions_cpp
 from mrppddl._bindings import MCTSPlanner as _MCTSPlannerCpp
 from mrppddl._bindings import Action, State, Fluent
-from mrppddl._bindings import GoalType, goal_from_fluent_set  # noqa: F401
+from mrppddl._bindings import GoalType  # noqa: F401
 # Import Goal as the base class (it's called "Goal" in bindings, maps to GoalBase in C++)
-from mrppddl._bindings import Goal
+from mrppddl._bindings import Goal, LiteralGoal
+
+
+def _normalize_goal(goal: Union[Goal, Fluent]) -> Goal:
+    """Normalize goal input to a Goal object.
+
+    If a raw Fluent is passed, automatically wraps it in a LiteralGoal.
+    This provides a convenient API where users can pass either:
+        - A Goal object: F("a") & F("b"), AndGoal([...]), etc.
+        - A single Fluent: F("visited a")
+
+    Args:
+        goal: Either a Goal object or a single Fluent
+
+    Returns:
+        A Goal object (LiteralGoal if input was a Fluent)
+    """
+    if isinstance(goal, Fluent):
+        return LiteralGoal(goal)
+    return goal
 from mrppddl.core import (
     extract_negative_preconditions,
     extract_negative_goal_fluents,
-    extract_all_negative_fluents,
     create_positive_fluent_mapping,
     convert_action_to_positive_preconditions,
     convert_action_effects,
     convert_state_to_positive_preconditions,
     convert_goal_to_positive_preconditions,
 )
+
+
+def get_usable_actions(
+    state: State,
+    goal: Union[Goal, Fluent],
+    all_actions: List[Action],
+) -> List[Action]:
+    """Get actions usable from the given state via forward reachability.
+
+    Args:
+        state: The current state
+        goal: Goal for the planning problem. Can be:
+            - A Goal object: F("a") & F("b"), AndGoal([...]), etc.
+            - A single Fluent: F("visited a") (auto-wrapped to LiteralGoal)
+        all_actions: List of all available actions
+
+    Returns:
+        List of actions that are reachable from the state
+    """
+    # Normalize goal (wrap Fluent in LiteralGoal if needed)
+    goal = _normalize_goal(goal)
+    # The goal parameter is kept for API compatibility but the C++ implementation
+    # now computes reachability independent of the goal
+    return _get_usable_actions_cpp(state, all_actions)
 
 
 class MCTSPlanner:
@@ -30,7 +73,8 @@ class MCTSPlanner:
 
     Usage:
         mcts = MCTSPlanner(all_actions)
-        action_name = mcts(state, goal_fluents, max_iterations=1000, c=1.414)
+        goal = F("visited a") & F("visited b")  # Use Goal API
+        action_name = mcts(state, goal, max_iterations=1000, c=1.414)
     """
 
     def __init__(self, actions: List[Action]):
@@ -106,53 +150,44 @@ class MCTSPlanner:
     def __call__(
         self,
         state: State,
-        goal: Union[Set[Fluent], Goal],
+        goal: Union[Goal, Fluent],
         max_iterations: int = 1000,
         max_depth: int = 100,
         c: float = 1.414,
-        heuristic_multiplier: float = 5.0,
     ) -> str:
         """Run MCTS planning to find the next action.
 
         Args:
             state: Current state (will be automatically converted)
-            goal: Goal to achieve. Can be either:
-                - Set[Fluent]: Traditional fluent set (implicit AND)
-                - Goal: Complex goal object (supports AND, OR, etc.)
+            goal: Goal to achieve. Can be:
+                - A Goal object: F("a") & F("b"), AndGoal([...]), etc.
+                - A single Fluent: F("visited a") (auto-wrapped to LiteralGoal)
             max_iterations: Maximum number of MCTS iterations
             max_depth: Maximum depth for rollouts
             c: Exploration constant for UCB1
-            heuristic_multiplier: Multiplier for heuristic in reward calculation
 
         Returns:
             Name of the selected action as a string
         """
-        # Handle both goal types
-        if isinstance(goal, set):
-            # Traditional fluent set - convert state and use original method
-            converted_state = convert_state_to_positive_preconditions(
-                state, self._current_mapping
-            )
-            return self._cpp_planner(
-                converted_state, goal, max_iterations, max_depth, c, heuristic_multiplier
-            )
-        else:
-            # Goal object - ensure mapping includes goal's negative fluents
-            self._ensure_mapping_includes_goal(goal)
+        # Normalize goal (wrap Fluent in LiteralGoal if needed)
+        goal = _normalize_goal(goal)
 
-            # Convert state with (possibly extended) mapping
-            converted_state = convert_state_to_positive_preconditions(
-                state, self._current_mapping
-            )
+        # Ensure mapping includes goal's negative fluents
+        self._ensure_mapping_includes_goal(goal)
 
-            # Convert goal with (possibly extended) mapping
-            converted_goal = convert_goal_to_positive_preconditions(
-                goal, self._current_mapping
-            )
+        # Convert state with (possibly extended) mapping
+        converted_state = convert_state_to_positive_preconditions(
+            state, self._current_mapping
+        )
 
-            return self._cpp_planner.plan_with_goal(
-                converted_state, converted_goal, max_iterations, max_depth, c
-            )
+        # Convert goal with (possibly extended) mapping
+        converted_goal = convert_goal_to_positive_preconditions(
+            goal, self._current_mapping
+        )
+
+        return self._cpp_planner(
+            converted_state, converted_goal, max_iterations, max_depth, c
+        )
 
     def get_trace_from_last_mcts_tree(self):
         """Get trace from the last MCTS tree (delegates to C++ planner)."""

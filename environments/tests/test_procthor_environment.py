@@ -3,7 +3,7 @@ import environments
 import environments.procthor
 from mrppddl.planner import MCTSPlanner
 import random
-from mrppddl.core import Fluent as F, State, get_action_by_name
+from mrppddl.core import Fluent as F, State, get_action_by_name, LiteralGoal
 import procthor
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -92,12 +92,12 @@ def test_procthor_move_and_search():
 
     all_actions = sim.get_actions()
     mcts = MCTSPlanner(all_actions)
-    goal_fluents = {F(f"found {env.target_object}")}
-    print(f"Goal fluents: {goal_fluents}")
+    goal = LiteralGoal(F(f"found {env.target_object}"))
+    print(f"Goal: {goal}")
 
     actions_taken = []
     for _ in range(15):
-        action_name = mcts(sim.state, goal_fluents, max_iterations=1000, c=10)
+        action_name = mcts(sim.state, goal, max_iterations=1000, c=10)
         print(f'{action_name=}')
         if action_name != 'NONE':
             action = get_action_by_name(all_actions, action_name)
@@ -105,7 +105,7 @@ def test_procthor_move_and_search():
             print(sim.state.fluents)
             actions_taken.append(action_name)
 
-        if sim.is_goal_reached(goal_fluents):
+        if goal.evaluate(sim.state.fluents):
             print("Goal reached!")
             break
 
@@ -174,11 +174,7 @@ def test_procthor_move_search_pick_place():
         },
     )
     # Task: Place all objects at random_location
-    # goal_fluents = {F(f"at {obj} {to_loc}") for obj in env.all_objects}
-    # goal_fluents = {F(f'found {objects[0]}')}
-    # goal_fluents = {F(f'holding r1 {objects[0]}')}
-    goal_fluents = {F(f"at {objects[0]} {to_loc}")}
-    # goal_fluents = {F(f"at {obj} {to_loc}") for obj in objects}
+    goal = LiteralGoal(F(f"at {objects[0]} {to_loc}"))
 
     move_time_fn = env.get_skills_cost_fn(skill_name='move')
     search_time = env.get_skills_cost_fn(skill_name='search')
@@ -197,7 +193,7 @@ def test_procthor_move_search_pick_place():
     mcts = MCTSPlanner(all_actions)
     actions_taken = []
     for _ in range(500):
-        action_name = mcts(sim.state, goal_fluents, max_iterations=2000, c=10)
+        action_name = mcts(sim.state, goal, max_iterations=2000, c=10)
         print(f'{action_name=}')
         if action_name != 'NONE':
             action = get_action_by_name(all_actions, action_name)
@@ -205,7 +201,7 @@ def test_procthor_move_search_pick_place():
             print(sim.state.fluents)
             actions_taken.append(action_name)
 
-        if sim.is_goal_reached(goal_fluents):
+        if goal.evaluate(sim.state.fluents):
             print("Goal reached!")
             break
 

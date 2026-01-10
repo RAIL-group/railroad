@@ -15,6 +15,26 @@ except ImportError as e:
 from mrppddl._bindings import GroundedEffect, Fluent, Action, State
 from mrppddl._bindings import transition  # noqa: F401
 from mrppddl._bindings import LiteralGoal, AndGoal, OrGoal, Goal
+from mrppddl._bindings import ff_heuristic as _ff_heuristic_cpp
+
+
+def ff_heuristic(state: State, goal: Union[Goal, Fluent], all_actions: List[Action]) -> float:
+    """Compute FF heuristic value for a state.
+
+    Args:
+        state: The current state
+        goal: Goal to achieve. Can be:
+            - A Goal object: F("a") & F("b"), AndGoal([...]), etc.
+            - A single Fluent: F("visited a") (auto-wrapped to LiteralGoal)
+        all_actions: List of all available actions
+
+    Returns:
+        Heuristic value (estimated cost to reach goal)
+    """
+    # Normalize goal (wrap Fluent in LiteralGoal if needed)
+    if isinstance(goal, Fluent):
+        goal = LiteralGoal(goal)
+    return _ff_heuristic_cpp(state, goal, all_actions)
 
 Num = Union[float, int]
 
