@@ -27,72 +27,11 @@ from mrppddl._bindings import (
     GoalType,
 )
 from mrppddl.core import ff_heuristic
-
-
-def construct_pick_operator(pick_time_fn):
-    """Construct a simple pick operator for testing."""
-    return Operator(
-        name="pick",
-        parameters=[("?r", "robot"), ("?o", "object"), ("?loc", "location")],
-        preconditions=[
-            F("free ?r"),
-            F("at ?r ?loc"),
-            F("at ?o ?loc"),
-            F("found ?o"),
-        ],
-        effects=[
-            Effect(
-                time=(pick_time_fn, ["?r", "?o", "?loc"]),
-                resulting_fluents={
-                    F("holding ?r ?o"),
-                    ~F("free ?r"),
-                    ~F("at ?o ?loc"),
-                },
-            )
-        ],
-    )
-
-
-def construct_place_operator(place_time_fn):
-    """Construct a simple place operator for testing."""
-    return Operator(
-        name="place",
-        parameters=[("?r", "robot"), ("?o", "object"), ("?loc", "location")],
-        preconditions=[
-            F("holding ?r ?o"),
-            F("at ?r ?loc"),
-        ],
-        effects=[
-            Effect(
-                time=(place_time_fn, ["?r", "?o", "?loc"]),
-                resulting_fluents={
-                    F("free ?r"),
-                    ~F("holding ?r ?o"),
-                    F("at ?o ?loc"),
-                },
-            )
-        ],
-    )
-
-
-def construct_move_operator(move_time_fn):
-    """Construct a simple move operator for testing."""
-    return Operator(
-        name="move",
-        parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
-        preconditions=[
-            F("at ?r ?from"),
-        ],
-        effects=[
-            Effect(
-                time=(move_time_fn, ["?r", "?from", "?to"]),
-                resulting_fluents={
-                    F("at ?r ?to"),
-                    ~F("at ?r ?from"),
-                },
-            )
-        ],
-    )
+from environments.operators import (
+    construct_move_operator_nonblocking,
+    construct_pick_operator_nonblocking,
+    construct_place_operator_nonblocking,
+)
 
 
 class TestNegativeGoalHeuristic:
@@ -162,8 +101,8 @@ class TestNegativeGoalHeuristic:
             "object": ["Book"],
         }
 
-        pick_op = construct_pick_operator(lambda *args: 1.0)
-        move_op = construct_move_operator(lambda *args: 1.0)
+        pick_op = construct_pick_operator_nonblocking(1.0)
+        move_op = construct_move_operator_nonblocking(1.0)
         all_actions = pick_op.instantiate(objects_by_type) + move_op.instantiate(objects_by_type)
 
         initial_state = State(
@@ -172,7 +111,6 @@ class TestNegativeGoalHeuristic:
                 F("free r1"),
                 F("at r1 table"),
                 F("at Book table"),
-                F("found Book"),
             }
         )
 
@@ -217,7 +155,7 @@ class TestNegativeGoalHeuristic:
             "object": ["Book"],
         }
 
-        pick_op = construct_pick_operator(lambda *args: 1.0)
+        pick_op = construct_pick_operator_nonblocking(1.0)
         all_actions = pick_op.instantiate(objects_by_type)
 
         # Extract negative preconditions from actions
@@ -251,8 +189,8 @@ class TestNegativeGoalHeuristic:
             "object": ["Book"],
         }
 
-        pick_op = construct_pick_operator(lambda *args: 1.0)
-        move_op = construct_move_operator(lambda *args: 1.0)
+        pick_op = construct_pick_operator_nonblocking(1.0)
+        move_op = construct_move_operator_nonblocking(1.0)
         all_actions = pick_op.instantiate(objects_by_type) + move_op.instantiate(objects_by_type)
 
         initial_state = State(
@@ -261,7 +199,6 @@ class TestNegativeGoalHeuristic:
                 F("free r1"),
                 F("at r1 table"),
                 F("at Book table"),
-                F("found Book"),
             }
         )
 
@@ -293,9 +230,9 @@ class TestNegativeGoalHeuristic:
             "object": ["Book", "Mug"],
         }
 
-        pick_op = construct_pick_operator(lambda *args: 1.0)
-        place_op = construct_place_operator(lambda *args: 1.0)
-        move_op = construct_move_operator(lambda *args: 1.0)
+        pick_op = construct_pick_operator_nonblocking(1.0)
+        place_op = construct_place_operator_nonblocking(1.0)
+        move_op = construct_move_operator_nonblocking(1.0)
         all_actions = (
             pick_op.instantiate(objects_by_type) +
             place_op.instantiate(objects_by_type) +
@@ -309,8 +246,6 @@ class TestNegativeGoalHeuristic:
                 F("at r1 table"),
                 F("at Book table"),
                 F("at Mug table"),
-                F("found Book"),
-                F("found Mug"),
             }
         )
 
@@ -365,9 +300,9 @@ class TestMCTSPlannerWithNegativeGoals:
             "object": ["Book"],
         }
 
-        pick_op = construct_pick_operator(lambda *args: 1.0)
-        move_op = construct_move_operator(lambda *args: 1.0)
-        place_op = construct_place_operator(lambda *args: 1.0)
+        pick_op = construct_pick_operator_nonblocking(1.0)
+        move_op = construct_move_operator_nonblocking(1.0)
+        place_op = construct_place_operator_nonblocking(1.0)
         all_actions = (
             pick_op.instantiate(objects_by_type) +
             move_op.instantiate(objects_by_type) +
@@ -380,7 +315,6 @@ class TestMCTSPlannerWithNegativeGoals:
                 F("free r1"),
                 F("at r1 table"),
                 F("at Book table"),
-                F("found Book"),
             }
         )
 
@@ -409,9 +343,9 @@ class TestMCTSPlannerWithNegativeGoals:
             "object": ["Book", "Mug"],
         }
 
-        pick_op = construct_pick_operator(lambda *args: 1.0)
-        move_op = construct_move_operator(lambda *args: 1.0)
-        place_op = construct_place_operator(lambda *args: 1.0)
+        pick_op = construct_pick_operator_nonblocking(1.0)
+        move_op = construct_move_operator_nonblocking(1.0)
+        place_op = construct_place_operator_nonblocking(1.0)
         all_actions = (
             pick_op.instantiate(objects_by_type) +
             move_op.instantiate(objects_by_type) +
@@ -425,8 +359,6 @@ class TestMCTSPlannerWithNegativeGoals:
                 F("at r1 table"),
                 F("at Book table"),
                 F("at Mug table"),
-                F("found Book"),
-                F("found Mug"),
             }
         )
 
@@ -462,30 +394,32 @@ class TestNegativeGoalSolutions:
         }
 
         # Modified pick operator that also adds a "not-at" fluent
+        # (This must be custom since the standard pick operator doesn't add this fluent)
         pick_op_with_not_at = Operator(
             name="pick",
-            parameters=[("?r", "robot"), ("?o", "object"), ("?loc", "location")],
+            parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
             preconditions=[
-                F("free ?r"),
                 F("at ?r ?loc"),
-                F("at ?o ?loc"),
-                F("found ?o"),
+                F("free ?r"),
+                F("at ?obj ?loc"),
+                ~F("hand-full ?r"),
             ],
             effects=[
+                Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?obj ?loc")}),
                 Effect(
                     time=1.0,
                     resulting_fluents={
-                        F("holding ?r ?o"),
-                        ~F("free ?r"),
-                        ~F("at ?o ?loc"),
+                        F("free ?r"),
+                        F("holding ?r ?obj"),
+                        F("hand-full ?r"),
                         # Add positive fluent to track "not at location"
-                        F("not-at ?o ?loc"),
+                        F("not-at ?obj ?loc"),
                     },
-                )
+                ),
             ],
         )
 
-        move_op = construct_move_operator(lambda *args: 1.0)
+        move_op = construct_move_operator_nonblocking(1.0)
         all_actions = pick_op_with_not_at.instantiate(objects_by_type) + move_op.instantiate(objects_by_type)
 
         initial_state = State(
@@ -494,7 +428,6 @@ class TestNegativeGoalSolutions:
                 F("free r1"),
                 F("at r1 table"),
                 F("at Book table"),
-                F("found Book"),
             }
         )
 
