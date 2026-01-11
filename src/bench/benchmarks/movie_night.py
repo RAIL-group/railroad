@@ -13,9 +13,6 @@ disorganized and some items are missing entirely.
 Uses the new Goal API for defining planning objectives.
 """
 
-from functools import reduce
-from operator import and_
-
 import time
 import itertools
 import numpy as np
@@ -79,12 +76,12 @@ def bench_movie_night(case: BenchmarkCase):
 
     # Define goal: all items at their proper locations
     # Using Goal API: reduce(and_, [...]) creates an AndGoal
-    goal = reduce(and_, [
-        F("at Remote den"),
-        F("at Plate den"),
-        F("at Cookie den"),
-        F("at Couch den"),
-    ])
+    goal = (
+        F("at Remote den") &
+        F("at Plate den") &
+        F("at Cookie den") &
+        F("at Couch den")
+    )
 
     # Initial objects by type (robot only knows about some objects initially)
     objects_by_type = {
