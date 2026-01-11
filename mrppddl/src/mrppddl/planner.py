@@ -1,6 +1,6 @@
 from typing import List, Dict, Union, Set
 from mrppddl._bindings import astar  # noqa
-from mrppddl._bindings import get_usable_actions as _get_usable_actions_cpp
+from mrppddl._bindings import get_usable_actions  # noqa: F401
 from mrppddl._bindings import MCTSPlanner as _MCTSPlannerCpp
 from mrppddl._bindings import Action, State, Fluent
 from mrppddl._bindings import GoalType  # noqa: F401
@@ -36,28 +36,6 @@ from mrppddl.core import (
 )
 
 
-def get_usable_actions(
-    state: State,
-    goal: Union[Goal, Fluent],
-    all_actions: List[Action],
-) -> List[Action]:
-    """Get actions usable from the given state via forward reachability.
-
-    Args:
-        state: The current state
-        goal: Goal for the planning problem. Can be:
-            - A Goal object: F("a") & F("b"), AndGoal([...]), etc.
-            - A single Fluent: F("visited a") (auto-wrapped to LiteralGoal)
-        all_actions: List of all available actions
-
-    Returns:
-        List of actions that are reachable from the state
-    """
-    # Normalize goal (wrap Fluent in LiteralGoal if needed)
-    goal = _normalize_goal(goal)
-    # The goal parameter is kept for API compatibility but the C++ implementation
-    # now computes reachability independent of the goal
-    return _get_usable_actions_cpp(state, all_actions)
 
 
 class MCTSPlanner:

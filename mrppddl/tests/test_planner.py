@@ -32,7 +32,7 @@ def test_pruning_unavailable_actions():
     initial_state = State(time=0, fluents={F("at r1 start"), F("free r1"),
                                         F("visited start")}, )
     num_actions_before = len(all_actions)
-    all_actions = get_usable_actions(initial_state, goal, all_actions)
+    all_actions = get_usable_actions(initial_state, all_actions)
 
     assert len(all_actions) < num_actions_before
 
@@ -82,7 +82,7 @@ def test_planner_mcts_move_visit_multirobot(initial_fluents):
     ])
 
     state = initial_state
-    all_actions = get_usable_actions(initial_state, goal, all_actions)
+    all_actions = get_usable_actions(initial_state, all_actions)
     mcts = MCTSPlanner(all_actions)
     for _ in range(15):
         if goal.evaluate(state.fluents):

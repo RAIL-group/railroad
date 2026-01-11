@@ -91,7 +91,7 @@ def bench_or_vs_and_goals(case: BenchmarkCase):
     heuristic_time = time.perf_counter() - heuristic_start
 
     # Get usable actions
-    usable_actions = get_usable_actions(initial_state, goal.get_all_literals(), all_actions)
+    usable_actions = get_usable_actions(initial_state, all_actions)
 
     # Create planner
     mcts = MCTSPlanner(usable_actions)

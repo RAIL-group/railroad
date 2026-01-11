@@ -540,8 +540,8 @@ class TestPlannerWithGoals:
 
         goal = AndGoal([LiteralGoal(F("visited a")), LiteralGoal(F("visited b"))])
 
-        # Prune actions using all literals (safe for pure conjunctions).
-        all_actions = get_usable_actions(initial_state, goal.get_all_literals(), all_actions)
+        # Prune actions using forward reachability.
+        all_actions = get_usable_actions(initial_state, all_actions)
 
         mcts = MCTSPlanner(all_actions)
         state = initial_state
@@ -566,9 +566,8 @@ class TestPlannerWithGoals:
 
         goal = OrGoal([LiteralGoal(F("visited a")), LiteralGoal(F("visited b"))])
 
-        # Note: get_all_literals() is an OR-union; pruning may be overly aggressive
-        # in some domains. If this becomes flaky, remove pruning for OR goals.
-        all_actions = get_usable_actions(initial_state, goal.get_all_literals(), all_actions)
+        # Prune actions using forward reachability.
+        all_actions = get_usable_actions(initial_state, all_actions)
 
         mcts = MCTSPlanner(all_actions)
         state = initial_state

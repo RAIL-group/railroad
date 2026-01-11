@@ -103,7 +103,7 @@ def test_planner_mcts_move_visit_wait_multirobot(initial_fluents):
         F("visited d"),
         F("visited e"),
     ])
-    all_actions = get_usable_actions(initial_state, goal, all_actions)
+    all_actions = get_usable_actions(initial_state, all_actions)
 
     state = initial_state
     mcts = MCTSPlanner(all_actions)
@@ -547,7 +547,7 @@ def test_couch_carry_with_operators_and_planner():
     goal = F("at couch1 l4") & F("on-floor couch1")
 
     # Filter to only usable actions
-    usable_actions = get_usable_actions(initial_state, goal, all_actions)
+    usable_actions = get_usable_actions(initial_state, all_actions)
     print(f"Usable actions: {len(usable_actions)}")
 
     # Run MCTS planner
