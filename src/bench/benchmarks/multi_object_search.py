@@ -281,7 +281,7 @@ def bench_multi_object_search_varied_goals(case: BenchmarkCase):
 bench_multi_object_search_varied_goals.add_cases([
     { "goal": goal}
     for goal in [
-            LiteralGoal(F("at Knife kitchen")),
+            F("at Knife kitchen"),
             F("at Knife kitchen") & F("at Mug kitchen"),
             F("at Knife kitchen") | F("at Mug kitchen"),
             F("at Knife kitchen") | (F("at Mug kitchen") & F("at Clock bedroom")),

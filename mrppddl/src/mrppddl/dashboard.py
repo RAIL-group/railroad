@@ -76,15 +76,15 @@ class PlannerDashboard:
 
     def __init__(
         self,
-        goal: Union[Set[Fluent], Goal],
+        goal: Union[Goal, Fluent],
         initial_heuristic=None,
         console=None,
     ):
         """Initialize the planner dashboard.
 
         Args:
-            goal: Either a set of goal fluents (for backward compatibility)
-                  or a Goal object (AndGoal, OrGoal, LiteralGoal, etc.)
+            goal: A Goal object (AndGoal, OrGoal, LiteralGoal, etc.),
+                  or a bare Fluent (which will be wrapped in LiteralGoal)
             initial_heuristic: Initial heuristic value for progress tracking
             console: Optional Rich console for output
         """
@@ -94,6 +94,9 @@ class PlannerDashboard:
             self.console = Console(force_terminal=True, record=True)
 
         # Normalize goal input to a Goal object
+        # Wrap bare Fluent with LiteralGoal for better user experience
+        if isinstance(goal, Fluent):
+            goal = LiteralGoal(goal)
         self.goal = goal
         self.goal_fluents = list(goal.get_all_literals())
 

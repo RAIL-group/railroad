@@ -116,6 +116,40 @@ Fluent.__rand__ = _fluent_rand
 Fluent.__ror__ = _fluent_ror
 
 
+def _fluent_evaluate(self: Fluent, fluents) -> bool:
+    """Evaluate whether this fluent is satisfied by the given fluent set.
+
+    This allows bare Fluent objects to be used interchangeably with Goal objects.
+
+    Usage:
+        fluent = F("at robot kitchen")
+        if fluent.evaluate(state.fluents):
+            print("Goal reached!")
+    """
+    return LiteralGoal(self).evaluate(fluents)
+
+
+def _fluent_get_all_literals(self: Fluent):
+    """Return all literals in this goal (just this fluent).
+
+    This allows bare Fluent objects to be used interchangeably with Goal objects.
+    """
+    return LiteralGoal(self).get_all_literals()
+
+
+def _fluent_goal_count(self: Fluent, fluents) -> int:
+    """Count how many goal literals are satisfied.
+
+    For a single fluent, returns 1 if satisfied, 0 otherwise.
+    """
+    return LiteralGoal(self).goal_count(fluents)
+
+
+Fluent.evaluate = _fluent_evaluate
+Fluent.get_all_literals = _fluent_get_all_literals
+Fluent.goal_count = _fluent_goal_count
+
+
 # Also add operators to Goal class for chaining
 def _goal_and(self: Goal, other: Union[Fluent, Goal]) -> Goal:
     """Chain an AndGoal with another fluent or goal."""
