@@ -13,7 +13,7 @@ Key findings:
 from bench import benchmark, BenchmarkCase
 from mrppddl.core import Fluent as F, State, get_action_by_name, transition
 from mrppddl.planner import MCTSPlanner, get_usable_actions
-from mrppddl._bindings import AndGoal, OrGoal, LiteralGoal, ff_heuristic_goal
+from mrppddl._bindings import AndGoal, OrGoal, LiteralGoal, ff_heuristic
 from mrppddl.helper import construct_move_visited_operator
 import time
 
@@ -87,7 +87,7 @@ def bench_or_vs_and_goals(case: BenchmarkCase):
 
     # Measure heuristic computation
     heuristic_start = time.perf_counter()
-    h_initial = ff_heuristic_goal(initial_state, goal, all_actions)
+    h_initial = ff_heuristic(initial_state, goal, all_actions)
     heuristic_time = time.perf_counter() - heuristic_start
 
     # Get usable actions
@@ -203,12 +203,12 @@ def bench_or_branch_selection(case: BenchmarkCase):
     or_goal = OrGoal(target_literals)
 
     # Compute OR heuristic
-    h_or = ff_heuristic_goal(initial_state, or_goal, all_actions)
+    h_or = ff_heuristic(initial_state, or_goal, all_actions)
 
     # Compute heuristic for each individual branch
     individual_heuristics = []
     for i, literal in enumerate(target_literals):
-        h_branch = ff_heuristic_goal(initial_state, literal, all_actions)
+        h_branch = ff_heuristic(initial_state, literal, all_actions)
         individual_heuristics.append(h_branch)
 
     # OR heuristic should equal the minimum branch heuristic

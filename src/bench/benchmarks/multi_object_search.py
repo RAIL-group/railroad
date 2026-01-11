@@ -19,8 +19,7 @@ from operator import and_
 import time
 import itertools
 import numpy as np
-from mrppddl.core import Fluent as F, State, get_action_by_name
-from mrppddl._bindings import ff_heuristic_goal
+from mrppddl.core import Fluent as F, State, get_action_by_name, ff_heuristic
 from mrppddl.planner import MCTSPlanner
 from mrppddl.dashboard import PlannerDashboard
 import environments
@@ -89,13 +88,7 @@ class HouseholdEnvironment(environments.BaseEnvironment):
         self._ground_truth[location][object_type].add(obj)
 
 
-@benchmark(
-    name="multi_object_search",
-    description="Find 5 objects and bring them to where they belong.",
-    tags=["multi-agent", "search"],
-    timeout=120.0,
-)
-def bench_multi_object_search(case: BenchmarkCase):
+def bench_multi_object_search_base(case: BenchmarkCase):
     # Define locations with coordinates (for move cost calculation)
     locations = {
         "start_loc": np.array([-5, -5]),
@@ -113,6 +106,7 @@ def bench_multi_object_search(case: BenchmarkCase):
         "office": {"object": set()},  # Empty
         "start_loc": {"object": set()},  # Empty
     }
+
 
     # Initialize environment
     robot_locations = {f"robot{ii+1}": "start_loc" for ii in range(case.num_robots)}
@@ -133,15 +127,7 @@ def bench_multi_object_search(case: BenchmarkCase):
 
     initial_state = State(time=0, fluents=initial_fluents)
 
-    # Define goal: all items at their proper locations
-    # Using Goal API: reduce(and_, [...]) creates an AndGoal
-    goal = reduce(and_, [
-        F("at Knife kitchen"),
-        F("at Mug kitchen"),
-        F("at Clock bedroom"),
-        F("at Pillow bedroom"),
-        F("at Notebook office"),
-    ])
+    goal = case.goal
 
     # Initial objects by type (robot only knows about some objects initially)
     objects_by_type = {
@@ -191,7 +177,7 @@ def bench_multi_object_search(case: BenchmarkCase):
 
     # Dashboard with recording console
     recording_console = Console(record=True, force_terminal=True, width=120)
-    h_value = ff_heuristic_goal(initial_state, goal, sim.get_actions())
+    h_value = ff_heuristic(initial_state, goal, sim.get_actions())
     dashboard = PlannerDashboard(goal, initial_heuristic=h_value, console=recording_console)
 
     for iteration in range(max_iterations):
@@ -250,12 +236,26 @@ def bench_multi_object_search(case: BenchmarkCase):
 
 
 # Register parameter combinations
+@benchmark(
+    name="multi_object_search",
+    description="Find 5 objects and bring them to where they belong.",
+    tags=["multi-agent", "search"],
+    timeout=120.0,
+)
+def bench_multi_object_search(case: BenchmarkCase):
+    return bench_multi_object_search_base(case)
+
 bench_multi_object_search.add_cases([
     {
         "mcts.iterations": iterations,
         "mcts.c": c,
         "mcts.h_mult": h_mult,
         "num_robots": num_robots,
+        "goal": (F("at Knife kitchen") &
+                 F("at Mug kitchen") &
+                 F("at Clock bedroom") &
+                 F("at Pillow bedroom") &
+                 F("at Notebook office")),
     }
     for c, num_robots, h_mult, iterations in itertools.product(
         [100, 300],                 # mcts.c

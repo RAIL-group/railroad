@@ -25,7 +25,7 @@ from mrppddl.dashboard import PlannerDashboard
 import environments
 from environments.core import EnvironmentInterface as Simulator
 from environments import SimpleEnvironment
-from mrppddl._bindings import ff_heuristic_goal
+from mrppddl.core import ff_heuristic
 from rich.console import Console
 
 from bench import benchmark, BenchmarkCase
@@ -134,7 +134,7 @@ def bench_movie_night(case: BenchmarkCase):
 
     # Dashboard with recording console
     recording_console = Console(record=True, force_terminal=True, width=120)
-    h_value = ff_heuristic_goal(initial_state, goal, sim.get_actions())
+    h_value = ff_heuristic(initial_state, goal, sim.get_actions())
     dashboard = PlannerDashboard(goal, initial_heuristic=h_value, console=recording_console)
 
     for iteration in range(max_iterations):
@@ -162,7 +162,7 @@ def bench_movie_night(case: BenchmarkCase):
         actions_taken.append(action_name)
 
         tree_trace = mcts.get_trace_from_last_mcts_tree()
-        h_value = ff_heuristic_goal(sim.state, goal, sim.get_actions())
+        h_value = ff_heuristic(sim.state, goal, sim.get_actions())
         relevant_fluents = {
             f for f in sim.state.fluents
             if any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])

@@ -331,21 +331,68 @@ PYBIND11_MODULE(_bindings, m) {
       .def("__hash__", &GoalBase::hash);
 
   py::class_<TrueGoal, GoalBase, std::shared_ptr<TrueGoal>>(m, "TrueGoal")
-      .def(py::init<>());
+      .def(py::init<>())
+      .def(py::pickle(
+          [](const TrueGoal &) {
+            return py::make_tuple();  // No state needed
+          },
+          [](py::tuple t) {
+            if (t.size() != 0)
+              throw std::runtime_error("Invalid state for TrueGoal!");
+            return std::make_shared<TrueGoal>();
+          }));
 
   py::class_<FalseGoal, GoalBase, std::shared_ptr<FalseGoal>>(m, "FalseGoal")
-      .def(py::init<>());
+      .def(py::init<>())
+      .def(py::pickle(
+          [](const FalseGoal &) {
+            return py::make_tuple();  // No state needed
+          },
+          [](py::tuple t) {
+            if (t.size() != 0)
+              throw std::runtime_error("Invalid state for FalseGoal!");
+            return std::make_shared<FalseGoal>();
+          }));
 
   py::class_<LiteralGoal, GoalBase, std::shared_ptr<LiteralGoal>>(m, "LiteralGoal")
       .def(py::init<Fluent>(), py::arg("fluent"))
       .def("fluent", &LiteralGoal::fluent,
-           "Get the fluent for this literal goal");
+           "Get the fluent for this literal goal")
+      .def(py::pickle(
+          [](const LiteralGoal &g) {
+            return py::make_tuple(g.fluent());
+          },
+          [](py::tuple t) {
+            if (t.size() != 1)
+              throw std::runtime_error("Invalid state for LiteralGoal!");
+            return std::make_shared<LiteralGoal>(t[0].cast<Fluent>());
+          }));
 
   py::class_<AndGoal, GoalBase, std::shared_ptr<AndGoal>>(m, "AndGoal")
-      .def(py::init<std::vector<GoalPtr>>(), py::arg("children"));
+      .def(py::init<std::vector<GoalPtr>>(), py::arg("children"))
+      .def(py::pickle(
+          [](const AndGoal &g) {
+            return py::make_tuple(py::cast(g.children()));
+          },
+          [](py::tuple t) {
+            if (t.size() != 1)
+              throw std::runtime_error("Invalid state for AndGoal!");
+            auto children = t[0].cast<std::vector<GoalPtr>>();
+            return std::make_shared<AndGoal>(std::move(children));
+          }));
 
   py::class_<OrGoal, GoalBase, std::shared_ptr<OrGoal>>(m, "OrGoal")
-      .def(py::init<std::vector<GoalPtr>>(), py::arg("children"));
+      .def(py::init<std::vector<GoalPtr>>(), py::arg("children"))
+      .def(py::pickle(
+          [](const OrGoal &g) {
+            return py::make_tuple(py::cast(g.children()));
+          },
+          [](py::tuple t) {
+            if (t.size() != 1)
+              throw std::runtime_error("Invalid state for OrGoal!");
+            auto children = t[0].cast<std::vector<GoalPtr>>();
+            return std::make_shared<OrGoal>(std::move(children));
+          }));
 
 
   py::class_<MCTSPlanner>(m, "MCTSPlanner")
@@ -354,12 +401,12 @@ PYBIND11_MODULE(_bindings, m) {
           "__call__",
           [](MCTSPlanner &self, const State &s,
              const GoalPtr &goal, int max_iterations,
-             int max_depth, double c) {
-            return self(s, goal, max_iterations, max_depth, c);
+             int max_depth, double c, double heuristic_multiplier) {
+            return self(s, goal, max_iterations, max_depth, c, heuristic_multiplier);
           },
           py::arg("state"), py::arg("goal"),
           py::arg("max_iterations") = 1000, py::arg("max_depth") = 20,
-          py::arg("c") = 1.414,
+          py::arg("c") = 1.414, py::arg("heuristic_multiplier") = 5.0,
           "Plan with a Goal object (supports complex AND/OR goals)")
       .def("get_trace_from_last_mcts_tree", &MCTSPlanner::get_trace_from_last_mcts_tree,
            "Get the tree trace from the most recent MCTS planning call");

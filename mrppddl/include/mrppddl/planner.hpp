@@ -317,6 +317,7 @@ inline std::string mcts(const State &root_state,
                         const GoalBase* goal, FFMemory *ff_memory,
                         int max_iterations = 1000, int max_depth = 20,
                         double c = std::sqrt(2.0),
+                        double heuristic_multiplier = HEURISTIC_MULTIPLIER,
                         std::string* out_tree_trace = nullptr) {
   // RNG
   static thread_local std::mt19937 rng{std::random_device{}()};
@@ -429,7 +430,7 @@ inline std::string mcts(const State &root_state,
       if (did_need_relaxed_transition)
         h += 100;
 
-      reward = -node->state.time() - h * HEURISTIC_MULTIPLIER + 0 * goal_count_val - accumulated_extra_cost;
+      reward = -node->state.time() - h * heuristic_multiplier + 0 * goal_count_val - accumulated_extra_cost;
     }
 
     // ---------------- Backpropagation ----------------
@@ -477,18 +478,15 @@ public:
       : all_actions_(std::move(all_actions)) {}
 
   // Call operator: planner(initial_state, goal) → string
-
   std::string operator()(const State &root_state,
                          const GoalPtr &goal,
-                         int max_iterations, int max_depth, double c) {
+                         int max_iterations = 1000,
+                         int max_depth = 20,
+                         double c = std::sqrt(2.0),
+                         double heuristic_multiplier = HEURISTIC_MULTIPLIER) {
     return mcts(root_state, all_actions_, goal.get(), &ff_memory_,
-                max_iterations, max_depth, c, &last_mcts_tree_trace_);
-  }
-
-  std::string operator()(const State &root_state,
-                         const GoalPtr &goal) {
-    return mcts(root_state, all_actions_, goal.get(), &ff_memory_,
-                max_iterations, max_depth, c, &last_mcts_tree_trace_);
+                max_iterations, max_depth, c, heuristic_multiplier,
+                &last_mcts_tree_trace_);
   }
 
   void clear_cache() { ff_memory_.clear(); }
@@ -498,11 +496,6 @@ public:
   const std::string& get_trace_from_last_mcts_tree() const {
     return last_mcts_tree_trace_;
   }
-
-  // Public configuration parameters
-  int max_iterations = 1000;
-  int max_depth = 20;
-  double c = std::sqrt(2.0);
 
 private:
   std::vector<Action> all_actions_;
