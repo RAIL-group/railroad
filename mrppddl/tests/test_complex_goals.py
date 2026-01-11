@@ -50,50 +50,7 @@ from mrppddl.planner import MCTSPlanner, get_usable_actions
 
 F = Fluent
 
-
-# -----------------------------
-# Helpers (for robust debugging)
-# -----------------------------
-
-def _fluent_sig(f: Fluent):
-    """
-    Stable signature for a Fluent across pybind boundaries.
-    Avoid relying on __repr__/__str__ formatting if possible.
-    """
-    if hasattr(f, "name") and hasattr(f, "negated"):
-        # Some bindings expose arguments as .args or .arguments; tolerate either.
-        args = getattr(f, "args", None)
-        if args is None:
-            args = getattr(f, "arguments", None)
-        args_t = tuple(args) if args is not None else ()
-        return (f.name, bool(f.negated), args_t)
-    # Fallback: string form
-    return str(f)
-
-
-def _goal_sig(goal):
-    """
-    Pure-Python structural signature to help debug failures.
-    Not a substitute for testing __eq__ binding, but useful for assertions and messages.
-    """
-    t = goal.get_type()
-
-    if t == GoalType.LITERAL:
-        lits = list(goal.get_all_literals())
-        assert len(lits) == 1
-        return (t, _fluent_sig(lits[0]))
-
-    if t in (GoalType.TRUE_GOAL, GoalType.FALSE_GOAL):
-        return (t,)
-
-    # AND / OR
-    child_sigs = [_goal_sig(c) for c in list(goal.children())]
-    # Treat children as an unordered multiset for signature comparisons.
-    # (Normalization should canonicalize order, but sorting here prevents brittle failures.)
-    child_sigs_sorted = tuple(sorted(child_sigs))
-    return (t, child_sigs_sorted)
-
-
+# Helper
 def _run_mcts_until(goal, initial_state, all_actions, max_steps=30, max_iterations=800):
     """Helper to run MCTS until goal is satisfied or max_steps reached."""
     mcts = MCTSPlanner(all_actions)
@@ -305,7 +262,7 @@ class TestNormalization:
         n2 = n1.normalize()
 
         # This asserts the pybind exposes structural __eq__.
-        assert n1 == n2, f"Expected normalize() to be idempotent; sig1={_goal_sig(n1)} sig2={_goal_sig(n2)}"
+        assert n1 == n2, "Expected normalize() to be idempotent"
 
     def test_canonical_ordering_strict_structural_equality(self):
         a = LiteralGoal(F("a"))
