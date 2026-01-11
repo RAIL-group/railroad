@@ -332,6 +332,7 @@ PYBIND11_MODULE(_bindings, m) {
 
   py::class_<TrueGoal, GoalBase, std::shared_ptr<TrueGoal>>(m, "TrueGoal")
       .def(py::init<>())
+      .def("__repr__", [](const TrueGoal &) { return "TrueGoal()"; })
       .def(py::pickle(
           [](const TrueGoal &) {
             return py::make_tuple();  // No state needed
@@ -344,6 +345,7 @@ PYBIND11_MODULE(_bindings, m) {
 
   py::class_<FalseGoal, GoalBase, std::shared_ptr<FalseGoal>>(m, "FalseGoal")
       .def(py::init<>())
+      .def("__repr__", [](const FalseGoal &) { return "FalseGoal()"; })
       .def(py::pickle(
           [](const FalseGoal &) {
             return py::make_tuple();  // No state needed
@@ -358,6 +360,18 @@ PYBIND11_MODULE(_bindings, m) {
       .def(py::init<Fluent>(), py::arg("fluent"))
       .def("fluent", &LiteralGoal::fluent,
            "Get the fluent for this literal goal")
+      .def("__repr__", [](const LiteralGoal &g) {
+        std::ostringstream oss;
+        const Fluent& f = g.fluent();
+        oss << "(";
+        if (f.is_negated()) oss << "not ";
+        oss << f.name();
+        for (const auto &arg : f.args()) {
+          oss << " " << arg;
+        }
+        oss << ")";
+        return oss.str();
+      })
       .def(py::pickle(
           [](const LiteralGoal &g) {
             return py::make_tuple(g.fluent());
@@ -370,6 +384,18 @@ PYBIND11_MODULE(_bindings, m) {
 
   py::class_<AndGoal, GoalBase, std::shared_ptr<AndGoal>>(m, "AndGoal")
       .def(py::init<std::vector<GoalPtr>>(), py::arg("children"))
+      .def("__repr__", [](const AndGoal &g) {
+        std::ostringstream oss;
+        oss << "(";
+        bool first = true;
+        for (const auto& child : g.children()) {
+          if (!first) oss << " & ";
+          first = false;
+          oss << py::repr(py::cast(child)).cast<std::string>();
+        }
+        oss << ")";
+        return oss.str();
+      })
       .def(py::pickle(
           [](const AndGoal &g) {
             return py::make_tuple(py::cast(g.children()));
@@ -383,6 +409,18 @@ PYBIND11_MODULE(_bindings, m) {
 
   py::class_<OrGoal, GoalBase, std::shared_ptr<OrGoal>>(m, "OrGoal")
       .def(py::init<std::vector<GoalPtr>>(), py::arg("children"))
+      .def("__repr__", [](const OrGoal &g) {
+        std::ostringstream oss;
+        oss << "(";
+        bool first = true;
+        for (const auto& child : g.children()) {
+          if (!first) oss << " | ";
+          first = false;
+          oss << py::repr(py::cast(child)).cast<std::string>();
+        }
+        oss << ")";
+        return oss.str();
+      })
       .def(py::pickle(
           [](const OrGoal &g) {
             return py::make_tuple(py::cast(g.children()));

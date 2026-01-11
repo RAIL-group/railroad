@@ -13,13 +13,11 @@ disorganized and some items are missing entirely.
 Uses the new Goal API for defining planning objectives.
 """
 
-from functools import reduce
-from operator import and_
-
 import time
 import itertools
 import numpy as np
 from mrppddl.core import Fluent as F, State, get_action_by_name, ff_heuristic
+from mrppddl._bindings import LiteralGoal
 from mrppddl.planner import MCTSPlanner
 from mrppddl.dashboard import PlannerDashboard
 import environments
@@ -243,6 +241,11 @@ def bench_multi_object_search_base(case: BenchmarkCase):
     timeout=120.0,
 )
 def bench_multi_object_search(case: BenchmarkCase):
+    case.goal = (F("at Knife kitchen") &
+                 F("at Mug kitchen") &
+                 F("at Clock bedroom") &
+                 F("at Pillow bedroom") &
+                 F("at Notebook office"))
     return bench_multi_object_search_base(case)
 
 bench_multi_object_search.add_cases([
@@ -251,11 +254,6 @@ bench_multi_object_search.add_cases([
         "mcts.c": c,
         "mcts.h_mult": h_mult,
         "num_robots": num_robots,
-        "goal": (F("at Knife kitchen") &
-                 F("at Mug kitchen") &
-                 F("at Clock bedroom") &
-                 F("at Pillow bedroom") &
-                 F("at Notebook office")),
     }
     for c, num_robots, h_mult, iterations in itertools.product(
         [100, 300],                 # mcts.c
@@ -263,4 +261,30 @@ bench_multi_object_search.add_cases([
         [1, 2, 5],                  # mcts.h_mult
         [400, 1000, 4000],          # mcts.iterations
     )
+])
+
+# Register parameter combinations for varied goals
+@benchmark(
+    name="multi_object_search_varied_goals",
+    description="Different goals for the object search example.",
+    tags=["multi-agent", "search"],
+    timeout=120.0,
+)
+def bench_multi_object_search_varied_goals(case: BenchmarkCase):
+    # Add fixed parameters to the case (won't show in case name)
+    case.params["mcts.c"] = 100
+    case.params["mcts.iterations"] = 1000
+    case.params["mcts.h_mult"] = 2
+    case.params["num_robots"] = 2
+    return bench_multi_object_search_base(case)
+
+bench_multi_object_search_varied_goals.add_cases([
+    { "goal": goal}
+    for goal in [
+            LiteralGoal(F("at Knife kitchen")),
+            F("at Knife kitchen") & F("at Mug kitchen"),
+            F("at Knife kitchen") | F("at Mug kitchen"),
+            F("at Knife kitchen") | (F("at Mug kitchen") & F("at Clock bedroom")),
+
+    ]
 ])
