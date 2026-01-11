@@ -17,8 +17,7 @@ from functools import reduce
 from operator import and_
 
 import numpy as np
-from mrppddl.core import Fluent as F, State, get_action_by_name
-from mrppddl._bindings import ff_heuristic_goal
+from mrppddl.core import Fluent as F, State, get_action_by_name, ff_heuristic
 from mrppddl.planner import MCTSPlanner
 from mrppddl.dashboard import PlannerDashboard
 import environments
@@ -69,13 +68,13 @@ def main():
 
     # Define goal: all items at their proper locations
     # Using Goal API: reduce(and_, [...]) creates an AndGoal
-    goal = reduce(and_, [
-        F("at Knife kitchen"),
-        F("at Mug kitchen"),
-        F("at Clock bedroom"),
-        F("at Pillow bedroom"),
-        F("at Notebook office"),
-    ])
+    goal = (
+        F("at Knife kitchen") &
+        F("at Mug kitchen") &
+        F("at Clock bedroom") &
+        F("at Pillow bedroom") &
+        F("at Notebook office")
+    )
 
     # Initial objects by type (robot only knows about some objects initially)
     objects_by_type = {
@@ -111,7 +110,7 @@ def main():
     max_iterations = 60  # Limit iterations to avoid infinite loops
 
     # Dashboard
-    h_value = ff_heuristic_goal(initial_state, goal, sim.get_actions())
+    h_value = ff_heuristic(initial_state, goal, sim.get_actions())
     with PlannerDashboard(goal, initial_heuristic=h_value) as dashboard:
         # (Optional) initial dashboard update
         dashboard.update(sim_state=sim.state)
