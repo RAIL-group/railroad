@@ -554,7 +554,7 @@ def create_sweep_figure(
         avg_wall_time = np.mean(wall_times) if wall_times else None
 
         # Build hover text
-        hover_parts = ["<b>Summary Statistics</b>"]
+        hover_parts = ["<b>Summary Statistics</b>", f"<b>{param_val}</b>"]
         if avg_plan_cost is not None:
             hover_parts.append(f"Avg Plan Cost: {avg_plan_cost:.2f}")
         if success_rate is not None:
