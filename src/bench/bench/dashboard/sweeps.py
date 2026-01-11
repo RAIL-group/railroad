@@ -44,12 +44,13 @@ class SweepAnalysis:
     intercept: Optional[float] # Linear fit intercept
 
 
-def identify_sweep_parameters(df: pd.DataFrame) -> list[str]:
+def identify_sweep_parameters(df: pd.DataFrame, include_categorical: bool = True) -> list[str]:
     """
-    Identify which params.* columns have >1 unique value and are numeric-convertible.
+    Identify which params.* columns have >1 unique value.
 
     Args:
         df: DataFrame with params.* columns
+        include_categorical: Whether to include non-numeric (categorical) parameters
 
     Returns:
         List of parameter names suitable for sweeps (excluding benchmark_name,
@@ -74,10 +75,20 @@ def identify_sweep_parameters(df: pd.DataFrame) -> list[str]:
             pd.to_numeric(df[col], errors='raise')
             sweep_params.append(col)
         except (ValueError, TypeError):
-            # Skip non-numeric parameters
-            continue
+            # Include categorical parameters if requested
+            if include_categorical:
+                sweep_params.append(col)
 
     return sweep_params
+
+
+def is_numeric_parameter(df: pd.DataFrame, param: str) -> bool:
+    """Check if a parameter column is numeric."""
+    try:
+        pd.to_numeric(df[param], errors='raise')
+        return True
+    except (ValueError, TypeError):
+        return False
 
 
 def find_sweep_groups(
@@ -112,6 +123,9 @@ def find_sweep_groups(
 
     groups = []
 
+    # Check if parameter is numeric
+    is_numeric = is_numeric_parameter(df, sweep_param)
+
     # Group by fixed parameters
     if fixed_param_cols:
         grouped = df.groupby(fixed_param_cols, dropna=False)
@@ -123,18 +137,28 @@ def find_sweep_groups(
         if len(group_df) < min_group_size:
             continue
 
-        # Convert sweep_param to numeric and sort
-        sweep_values = pd.to_numeric(group_df[sweep_param], errors='coerce')
-        valid_mask = ~sweep_values.isna()
+        if is_numeric:
+            # Convert sweep_param to numeric and sort
+            sweep_values = pd.to_numeric(group_df[sweep_param], errors='coerce')
+            valid_mask = ~sweep_values.isna()
 
-        if valid_mask.sum() < min_group_size:
-            continue
+            if valid_mask.sum() < min_group_size:
+                continue
 
-        group_df_valid = group_df[valid_mask].copy()
-        sweep_values_valid = sweep_values[valid_mask]
+            group_df_valid = group_df[valid_mask].copy()
+            sweep_values_valid = sweep_values[valid_mask]
 
-        # Sort by sweep parameter
-        sort_idx = sweep_values_valid.argsort()
+            # Sort by sweep parameter value
+            sort_idx = sweep_values_valid.argsort()
+            param_values = sweep_values_valid.iloc[sort_idx].tolist()
+        else:
+            # Categorical parameter - use string representation and sort alphabetically
+            group_df_valid = group_df.copy()
+            sweep_values_str = group_df_valid[sweep_param].astype(str)
+
+            # Sort by string value for consistent ordering
+            sort_idx = sweep_values_str.argsort()
+            param_values = group_df_valid[sweep_param].iloc[sort_idx].tolist()
 
         # Extract fixed params dict
         if fixed_param_cols:
@@ -155,7 +179,7 @@ def find_sweep_groups(
         groups.append(SweepGroup(
             sweep_param=sweep_param,
             fixed_params=fixed_params,
-            param_values=sweep_values_valid.iloc[sort_idx].tolist(),
+            param_values=param_values,
             plan_costs=plan_costs,
             run_ids=run_ids,
             success_mask=success,
@@ -174,7 +198,7 @@ def compute_sweep_correlation(groups: list[SweepGroup]) -> tuple:
         groups: List of SweepGroup objects
 
     Returns:
-        (correlation, slope, intercept) - None values if insufficient data
+        (correlation, slope, intercept) - None values if insufficient data or non-numeric params
     """
     all_x = []
     all_y = []
@@ -192,10 +216,16 @@ def compute_sweep_correlation(groups: list[SweepGroup]) -> tuple:
     if len(all_x) < 2:
         return None, None, None
 
-    # Compute Pearson correlation
-    x_arr = np.array(all_x)
+    # Check if x values are numeric
+    try:
+        x_arr = np.array(all_x, dtype=float)
+    except (ValueError, TypeError):
+        # Non-numeric parameter - can't compute correlation
+        return None, None, None
+
     y_arr = np.array(all_y)
 
+    # Compute Pearson correlation
     correlation = np.corrcoef(x_arr, y_arr)[0, 1]
 
     # Linear fit
@@ -348,20 +378,32 @@ def create_sweep_figure(
             else:
                 data_by_param[param_val]["failed"].append(display_cost)
 
-    # Sort parameter values
-    sorted_params = sorted(data_by_param.keys())
+    # Determine if parameter values are numeric
+    param_values_list = list(data_by_param.keys())
+    is_numeric_param = all(isinstance(v, (int, float)) and not np.isnan(v) for v in param_values_list)
 
-    # Check if log scale should be used
-    use_log = should_use_log_scale(sorted_params)
-
-    # Compute dx for jitter on failed/timeout runs
-    if len(sorted_params) > 1:
-        if use_log:
-            dx = np.log10(sorted_params[-1]) - np.log10(sorted_params[0])
+    if is_numeric_param:
+        # Sort numerically
+        sorted_params = sorted(data_by_param.keys())
+        # Check if log scale should be used
+        use_log = should_use_log_scale(sorted_params)
+        # Use actual values for x-axis
+        param_to_x = {p: p for p in sorted_params}
+        # Compute dx for jitter on failed/timeout runs
+        if len(sorted_params) > 1:
+            if use_log:
+                dx = np.log10(sorted_params[-1]) - np.log10(sorted_params[0])
+            else:
+                dx = sorted_params[-1] - sorted_params[0]
         else:
-            dx = sorted_params[-1] - sorted_params[0]
+            dx = 1.0
     else:
-        dx = 1.0
+        # Categorical parameter - sort by string representation
+        sorted_params = sorted(data_by_param.keys(), key=lambda x: str(x))
+        use_log = False
+        # Use index-based positioning for x-axis
+        param_to_x = {p: i for i, p in enumerate(sorted_params)}
+        dx = 1.0  # Fixed spacing for categorical
 
     # Create violin plot for each parameter value
     mean_x = []
@@ -372,11 +414,12 @@ def create_sweep_figure(
         success_costs = param_data["success"]
         failed_costs = param_data["failed"]
         timeout_costs = param_data["timeout"]
+        x_pos = param_to_x[param_val]
 
         # Create vertical violin plot for successful runs
         if success_costs:
             fig.add_trace(go.Violin(
-                x=[param_val] * len(success_costs),
+                x=[x_pos] * len(success_costs),
                 y=success_costs,
                 name=str(param_val),
                 fillcolor=VIOLIN_FILL,
@@ -399,12 +442,12 @@ def create_sweep_figure(
 
             # Calculate mean from successful runs only
             mean_cost = np.mean(success_costs)
-            mean_x.append(param_val)
+            mean_x.append(x_pos)
             mean_y.append(mean_cost)
 
             # Add mean marker
             fig.add_trace(go.Scatter(
-                x=[param_val],
+                x=[x_pos],
                 y=[mean_cost],
                 mode="markers",
                 marker=dict(
@@ -420,7 +463,7 @@ def create_sweep_figure(
         # Add failed runs as X markers
         if failed_costs:
             # Apply jitter to x position
-            x_jittered = [param_val + np.random.uniform(-0.01 * dx, 0.01 * dx) for _ in failed_costs]
+            x_jittered = [x_pos + np.random.uniform(-0.01 * dx, 0.01 * dx) for _ in failed_costs]
             fig.add_trace(go.Violin(
                 x=x_jittered,
                 y=failed_costs,
@@ -446,7 +489,7 @@ def create_sweep_figure(
 
         # Add timeout runs as diamond markers
         if timeout_costs:
-            x_jittered = [param_val + np.random.uniform(-0.01 * dx, 0.01 * dx) for _ in timeout_costs]
+            x_jittered = [x_pos + np.random.uniform(-0.01 * dx, 0.01 * dx) for _ in timeout_costs]
             fig.add_trace(go.Violin(
                 x=x_jittered,
                 y=timeout_costs,
@@ -519,7 +562,7 @@ def create_sweep_figure(
         if avg_wall_time is not None:
             hover_parts.append(f"Avg Wall Time: {avg_wall_time:.2f}s")
 
-        hover_x.append(param_val)
+        hover_x.append(param_to_x[param_val])
         hover_y.append(hover_y_pos)
         hover_text.append("<br>".join(hover_parts))
 
@@ -543,13 +586,19 @@ def create_sweep_figure(
         ))
 
     # Prepare tick labels with success rate annotations
+    tickvals = []
     ticktext = []
     for param_val in sorted_params:
         param_data = data_by_param[param_val]
         n_success = len(param_data["success"])
         n_total = n_success + len(param_data["failed"]) + len(param_data["timeout"])
         success_pct = (n_success / n_total * 100) if n_total > 0 else 0
-        ticktext.append(f"{param_val}<br><sub>{n_success}/{n_total}<br>({success_pct:.0f}%)</sub>")
+        # For categorical params, truncate long labels
+        label = str(param_val)
+        if not is_numeric_param and len(label) > 40:
+            label = label[:37] + "..."
+        tickvals.append(param_to_x[param_val])
+        ticktext.append(f"{label}<br><sub>{n_success}/{n_total}<br>({success_pct:.0f}%)</sub>")
 
     # Layout
     param_display = analysis.param_name.replace("params.", "")
@@ -594,7 +643,7 @@ def create_sweep_figure(
         gridcolor=GRID_COLOR,
         gridwidth=GRID_WIDTH,
         color=TEXT_COLOR,
-        tickvals=sorted_params,
+        tickvals=tickvals,
         ticktext=ticktext,
         tickfont=dict(size=FONT_SIZE - 1, family=FONT_FAMILY, color=TEXT_COLOR),  # Slightly smaller for compactness
         title_font=dict(size=FONT_SIZE, family=FONT_FAMILY, color=TEXT_COLOR),
