@@ -17,37 +17,22 @@ using FFMemory = std::unordered_map<std::size_t, double>;
 // Result of the forward relaxed reachability phase (goal-independent)
 struct FFForwardResult {
   std::unordered_set<Fluent> known_fluents;      // All reachable fluents
-  std::unordered_set<Fluent> initial_fluents;    // Fluents at t=0 (after relaxed transition)
+  std::unordered_set<Fluent> initial_fluents;    // Fluents at t=0 (input to forward phase)
   std::unordered_map<Fluent, const Action*> fact_to_action;
   std::unordered_map<const Action*, double> action_to_duration;
   std::unordered_map<Fluent, double> fact_to_probability;
-  double dtime;   // Time delta from relaxed transition
-  bool valid;     // false if relaxed transition failed
 };
 
 // Forward relaxed reachability phase - goal independent
-// Extracts the forward loop from ff_heuristic for reuse
+// Takes initial fluents (after relaxed transition) and computes reachability
+// The caller is responsible for doing the relaxed transition first
 FFForwardResult ff_forward_phase(
-    const State &input_state,
+    const std::unordered_set<Fluent> &initial_fluents,
     const std::vector<Action> &all_actions) {
 
   FFForwardResult result;
-  result.valid = false;
-  result.dtime = 0.0;
-
-  const double t0 = input_state.time();
-
-  // Step 1: Relaxed transition
-  auto relaxed_result = transition(input_state, nullptr, true);
-  if (relaxed_result.empty()) {
-    return result;  // invalid
-  }
-  State relaxed = relaxed_result[0].first;
-
-  result.dtime = relaxed.time() - t0;
-  result.initial_fluents = std::unordered_set<Fluent>(
-      relaxed.fluents().begin(), relaxed.fluents().end());
-  result.known_fluents = result.initial_fluents;
+  result.initial_fluents = initial_fluents;
+  result.known_fluents = initial_fluents;
 
   std::unordered_set<Fluent> newly_added = result.known_fluents;
   std::unordered_set<const Action *> visited_actions;
@@ -98,7 +83,6 @@ FFForwardResult ff_forward_phase(
     }
   }
 
-  result.valid = true;
   return result;
 }
 
@@ -108,10 +92,6 @@ FFForwardResult ff_forward_phase(
 double ff_backward_cost(
     const FFForwardResult &forward,
     const std::unordered_set<Fluent> &goal_fluents) {
-
-  if (!forward.valid) {
-    return std::numeric_limits<double>::infinity();
-  }
 
   // Empty goal set means trivially satisfied (TrueGoal)
   if (goal_fluents.empty()) {
@@ -178,12 +158,19 @@ double ff_backward_cost(
 // Get usable actions via forward relaxed reachability
 const std::vector<Action> get_usable_actions(const State &input_state,
 					     const std::vector<Action> &all_actions) {
-  // Use ff_forward_phase to get all reachable actions
-  auto forward = ff_forward_phase(input_state, all_actions);
-
-  if (!forward.valid) {
+  // Step 1: Relaxed transition
+  auto relaxed_result = transition(input_state, nullptr, true);
+  if (relaxed_result.empty()) {
     return {};
   }
+  State relaxed = relaxed_result[0].first;
+
+  // Get initial fluents from relaxed state
+  std::unordered_set<Fluent> initial_fluents(
+      relaxed.fluents().begin(), relaxed.fluents().end());
+
+  // Use ff_forward_phase to get all reachable fluents
+  auto forward = ff_forward_phase(initial_fluents, all_actions);
 
   // Collect all actions whose preconditions are satisfied by known fluents
   // This is simpler and more reliable than tracking specific action contributions
@@ -216,7 +203,7 @@ inline const std::vector<std::unordered_set<Fluent>>& extract_or_branches(const 
 }
 
 // FF heuristic for complex goals with OR branches
-// Runs forward phase ONCE, then computes backward cost for each branch
+// Does relaxed transition first, then uses memoization to avoid recomputation
 inline double ff_heuristic(const State &input_state,
                            const GoalBase *goal,
                            const std::vector<Action> &all_actions,
@@ -232,11 +219,29 @@ inline double ff_heuristic(const State &input_state,
     return std::numeric_limits<double>::infinity();
   }
 
-  // Run forward phase ONCE
-  auto forward = ff_forward_phase(input_state, all_actions);
-  if (!forward.valid) {
+  const double t0 = input_state.time();
+
+  // Step 1: Relaxed transition
+  auto relaxed_result = transition(input_state, nullptr, true);
+  if (relaxed_result.empty()) {
     return std::numeric_limits<double>::infinity();
   }
+  State relaxed = relaxed_result[0].first;
+
+  double dtime = relaxed.time() - t0;
+
+  // Memoization check: use hash of relaxed state (with time=0)
+  relaxed.set_time(0);
+  if (ff_memory && ff_memory->count(relaxed.hash())) {
+    return dtime + ff_memory->at(relaxed.hash());
+  }
+
+  // Get initial fluents from relaxed state
+  std::unordered_set<Fluent> initial_fluents(
+      relaxed.fluents().begin(), relaxed.fluents().end());
+
+  // Run forward phase
+  auto forward = ff_forward_phase(initial_fluents, all_actions);
 
   // Extract branches based on goal structure
   auto branches = extract_or_branches(goal);
@@ -250,12 +255,16 @@ inline double ff_heuristic(const State &input_state,
   for (const auto& branch_fluents : branches) {
     double backward_cost = ff_backward_cost(forward, branch_fluents);
     if (backward_cost < std::numeric_limits<double>::infinity()) {
-      double total = forward.dtime + backward_cost;
-      min_cost = std::min(min_cost, total);
+      min_cost = std::min(min_cost, backward_cost);
     }
   }
 
-  return min_cost;
+  // Store in memory (memoize the cost AFTER relaxed transition)
+  if (ff_memory) {
+    (*ff_memory)[relaxed.hash()] = min_cost;
+  }
+
+  return dtime + min_cost;
 }
 
 } // namespace mrppddl
