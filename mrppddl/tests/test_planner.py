@@ -1,6 +1,3 @@
-from functools import reduce
-from operator import and_
-
 from mrppddl.core import Fluent, State, transition, get_action_by_name
 from mrppddl.helper import construct_move_visited_operator
 from mrppddl.helper import construct_search_operator
@@ -21,13 +18,6 @@ def test_pruning_unavailable_actions():
     random.seed(8616)
     move_op = construct_move_visited_operator(lambda *args: 5.0 + random.random())
     all_actions = move_op.instantiate(objects_by_type)
-    goal = reduce(and_, [
-        F("visited a"),
-        F("visited b"),
-        F("visited c"),
-        F("visited d"),
-        F("visited e"),
-    ])
 
     initial_state = State(time=0, fluents={F("at r1 start"), F("free r1"),
                                         F("visited start")}, )
@@ -73,13 +63,13 @@ def test_planner_mcts_move_visit_multirobot(initial_fluents):
 
     # Initial state
     initial_state = State(time=0, fluents=initial_fluents)
-    goal = reduce(and_, [
-        F("visited a"),
-        F("visited b"),
-        F("visited c"),
-        F("visited d"),
-        F("visited e"),
-    ])
+    goal = (
+        F("visited a") &
+        F("visited b") &
+        F("visited c") &
+        F("visited d") &
+        F("visited e")
+    )
 
     state = initial_state
     all_actions = get_usable_actions(initial_state, all_actions)
@@ -170,7 +160,6 @@ def test_basic_planning():
         "robot": ["r1"],
         "location": ["start", "a", "b"],
     }
-    random.seed(42)
     move_op = construct_move_visited_operator(lambda *args: 5.0)
     all_actions = move_op.instantiate(objects_by_type)
 

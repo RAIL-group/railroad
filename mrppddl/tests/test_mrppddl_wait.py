@@ -1,6 +1,4 @@
 import pytest
-from functools import reduce
-from operator import and_
 
 from mrppddl.core import (
     Fluent,
@@ -93,16 +91,16 @@ def test_planner_mcts_move_visit_wait_multirobot(initial_fluents):
 
     # Initial state
     initial_state = State(time=0, fluents=initial_fluents)
-    goal = reduce(and_, [
-        F("at r1 start"),
-        F("at r2 start"),
-        F("at r3 start"),
-        F("visited a"),
-        F("visited b"),
-        F("visited c"),
-        F("visited d"),
-        F("visited e"),
-    ])
+    goal = (
+        F("at r1 start") &
+        F("at r2 start") &
+        F("at r3 start") &
+        F("visited a") &
+        F("visited b") &
+        F("visited c") &
+        F("visited d") &
+        F("visited e") &
+    )
     all_actions = get_usable_actions(initial_state, all_actions)
 
     state = initial_state

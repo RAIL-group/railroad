@@ -1,6 +1,4 @@
 import pytest
-from functools import reduce
-from operator import and_
 
 from mrppddl.core import (
     Fluent,
