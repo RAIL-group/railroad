@@ -64,18 +64,10 @@ def main():
             # Robot free and starts in living room
             F("free robot1"),
             F("at robot1 living_room"),
-            # All locations are revealed (simplified scenario)
-            F("revealed living_room"),
-            F("revealed kitchen"),
-            F("revealed table"),
-            F("revealed shelf"),
-            # Objects are on the table and found
+            # Objects are on the table
             F("at Book table"),
             F("at Mug table"),
             F("at Vase table"),
-            F("found Book"),
-            F("found Mug"),
-            F("found Vase"),
         },
     )
 
@@ -99,13 +91,12 @@ def main():
     move_op = environments.operators.construct_move_operator(move_time_fn)
     pick_op = environments.operators.construct_pick_operator(pick_time)
     place_op = environments.operators.construct_place_operator(place_time)
-    no_op = environments.operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
 
     # Create simulator
     sim = EnvironmentInterface(
         initial_state,
         objects_by_type,
-        [no_op, pick_op, place_op, move_op],
+        [pick_op, place_op, move_op],
         env
     )
 
