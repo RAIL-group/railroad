@@ -99,7 +99,7 @@ def test_planner_mcts_move_visit_wait_multirobot(initial_fluents):
         F("visited b") &
         F("visited c") &
         F("visited d") &
-        F("visited e") &
+        F("visited e")
     )
     all_actions = get_usable_actions(initial_state, all_actions)
 

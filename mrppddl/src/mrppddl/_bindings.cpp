@@ -321,8 +321,6 @@ PYBIND11_MODULE(_bindings, m) {
            "Get all literal fluents in this goal")
       .def("get_dnf_branches", &GoalBase::get_dnf_branches,
            "Get DNF branches: list of fluent sets (OR of ANDs)")
-      .def("is_pure_conjunction", &GoalBase::is_pure_conjunction,
-           "Check if this is a pure conjunction of literals")
       .def("children", &GoalBase::children,
            "Get children (for AND/OR goals)")
       .def("goal_count", &GoalBase::goal_count, py::arg("fluents"),

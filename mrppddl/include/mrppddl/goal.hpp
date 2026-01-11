@@ -60,9 +60,6 @@ public:
   // Leaf literal set (syntactic union of all literals appearing anywhere under this goal).
   virtual FluentSet get_all_literals() const = 0;
 
-  // True iff the expression contains no OR anywhere.
-  virtual bool is_pure_conjunction() const = 0;
-
   // Children (for AND/OR goals).
   virtual const std::vector<GoalPtr>& children() const {
     static const std::vector<GoalPtr> empty;
@@ -130,7 +127,6 @@ public:
   GoalType get_type() const override { return GoalType::TRUE_GOAL; }
   GoalPtr normalize() const override { return make_true_goal(); }
   FluentSet get_all_literals() const override { return {}; }
-  bool is_pure_conjunction() const override { return true; }
 
   bool equals(const GoalBase& other) const override {
     return other.get_type() == GoalType::TRUE_GOAL;
@@ -161,7 +157,6 @@ public:
   GoalType get_type() const override { return GoalType::FALSE_GOAL; }
   GoalPtr normalize() const override { return make_false_goal(); }
   FluentSet get_all_literals() const override { return {}; }
-  bool is_pure_conjunction() const override { return true; }
 
   bool equals(const GoalBase& other) const override {
     return other.get_type() == GoalType::FALSE_GOAL;
@@ -206,8 +201,6 @@ public:
   }
 
   FluentSet get_all_literals() const override { return {fluent_}; }
-
-  bool is_pure_conjunction() const override { return true; }
 
   const Fluent& fluent() const { return fluent_; }
 
@@ -269,13 +262,6 @@ public:
       result.insert(s.begin(), s.end());
     }
     return result;
-  }
-
-  bool is_pure_conjunction() const override {
-    for (const auto& child : children_) {
-      if (!child->is_pure_conjunction()) return false;
-    }
-    return true;
   }
 
   const std::vector<GoalPtr>& children() const override { return children_; }
@@ -383,8 +369,6 @@ public:
     }
     return result;
   }
-
-  bool is_pure_conjunction() const override { return false; }
 
   const std::vector<GoalPtr>& children() const override { return children_; }
 

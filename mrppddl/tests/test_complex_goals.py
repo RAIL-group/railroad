@@ -392,21 +392,6 @@ class TestNormalization:
 class TestBranchAccess:
     """Verify heuristic can access goal structure, and goal_count semantics are correct."""
 
-    def test_literal_is_pure_conjunction(self):
-        assert LiteralGoal(F("a")).is_pure_conjunction() is True
-
-    def test_and_of_literals_is_pure_conjunction(self):
-        goal = AndGoal([LiteralGoal(F("a")), LiteralGoal(F("b")), LiteralGoal(F("c"))])
-        assert goal.is_pure_conjunction() is True
-
-    def test_or_is_not_pure_conjunction(self):
-        goal = OrGoal([LiteralGoal(F("a")), LiteralGoal(F("b"))])
-        assert goal.is_pure_conjunction() is False
-
-    def test_and_with_nested_or_is_not_pure_conjunction(self):
-        goal = AndGoal([LiteralGoal(F("a")), OrGoal([LiteralGoal(F("b")), LiteralGoal(F("c"))])])
-        assert goal.is_pure_conjunction() is False
-
     def test_or_exposes_children(self):
         goal = OrGoal([
             AndGoal([LiteralGoal(F("toast")), LiteralGoal(F("coffee"))]),
@@ -430,7 +415,6 @@ class TestBranchAccess:
         """Test creating a goal using the & operator."""
         goal = F("a") & F("b") & F("c")
 
-        assert goal.is_pure_conjunction() is True
         assert goal.evaluate({F("a"), F("b"), F("c")}) is True
         assert goal.evaluate({F("a"), F("b")}) is False
 
