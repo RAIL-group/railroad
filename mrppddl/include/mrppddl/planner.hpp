@@ -250,16 +250,15 @@ void print_best_path(std::ostream& os, const MCTSDecisionNode* node, HeuristicFn
     double time_cost = node->state.time();
 
     // Indent for readability
-    for (int i = 0; i < current_depth; ++i) os << "  ";
+    for (int i = 0; i < current_depth; ++i) os << " ";
 
-    os << "[D:" << current_depth << "] "
+    os << "D:" << current_depth << "|="
        << "visits=" << node->visits << ", "
        << "Q=" << q_value << ", "
        << "g=" << time_cost << ", "
        << "h=" << h_value << ", "
        << "g+h=" << time_cost + h_value << ", "
-       << "untried=" << node->untried_actions.size() << ", "
-       << "children=" << node->children.size()
+       << "|A|=" << node->children.size()
        << std::endl;
 
     if (node->children.empty()) {
@@ -286,8 +285,8 @@ void print_best_path(std::ostream& os, const MCTSDecisionNode* node, HeuristicFn
     }
 
     // Print the action taken
-    for (int i = 0; i < current_depth; ++i) os << "  ";
-    os << "  └── Action: " << best_chance_node->action->name()
+    for (int i = 0; i < current_depth; ++i) os << " ";
+    os << "   └── Action: " << best_chance_node->action->name()
        << " (visits=" << best_chance_node->visits 
        << ")" << std::endl;
 
