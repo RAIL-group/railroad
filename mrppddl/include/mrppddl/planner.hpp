@@ -258,7 +258,7 @@ void print_best_path(std::ostream& os, const MCTSDecisionNode* node, HeuristicFn
        << "g=" << time_cost << ", "
        << "h=" << h_value << ", "
        << "g+h=" << time_cost + h_value << ", "
-       << "|A|=" << node->children.size()
+       << "#A=" << node->children.size()
        << std::endl;
 
     if (node->children.empty()) {
