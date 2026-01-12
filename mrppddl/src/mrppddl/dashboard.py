@@ -309,7 +309,12 @@ class PlannerDashboard:
         return self.layout
 
     def _colorize_goal_line(self, line: str, fluents) -> str:
-        """Colorize a goal line based on whether literals are satisfied."""
+        """Colorize a goal line based on whether literals are satisfied.
+
+        Uses both color AND a checkmark (✓) for accessibility:
+        - ✓ (green) for satisfied goals
+        - (red) for unsatisfied goals
+        """
         # Build a set of fluent strings for faster lookup
         fluent_strs = {str(f) for f in fluents}
 
@@ -322,15 +327,15 @@ class PlannerDashboard:
                 positive_fluent_str = "(" + fluent_str[5:]
                 # Negative goal is satisfied if the positive fluent is NOT in the state
                 if positive_fluent_str not in fluent_strs:
-                    return f"[green]{fluent_str}[/green]"
+                    return f"[green]✓{fluent_str}[/green]"
                 else:
-                    return f"[red]{fluent_str}[/red]"
+                    return f"[red] {fluent_str}[/red]"
             else:
                 # Positive fluent: satisfied if it IS in the state
                 if fluent_str in fluent_strs:
-                    return f"[green]{fluent_str}[/green]"
+                    return f"[green]✓{fluent_str}[/green]"
                 else:
-                    return f"[red]{fluent_str}[/red]"
+                    return f"[red] {fluent_str}[/red]"
 
         # Pattern to match fluents: (name args...) or (not name args...)
         pattern = r'\([^()]+\)'
@@ -536,7 +541,7 @@ class PlannerDashboard:
                     local_console.print("\n[bold green]Satisfied Branch:[/]")
                     satisfied_str = format_goal(satisfied_branch, compact=True)
                     for line in satisfied_str.split('\n'):
-                        local_console.print(f"  [green]{line}[/green]")
+                        local_console.print(f"  {self._colorize_goal_line(line, final_state.fluents)}")
             else:
                 # Show best branch (closest to completion)
                 best_branch = get_best_branch(self.goal, final_state.fluents)
