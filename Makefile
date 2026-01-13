@@ -21,6 +21,7 @@ rebuild-cpp: clean-cpp  ## Rebuild C++ Modules
 .PHONY: clean clean-cpp clean-python clean-venv
 clean-cpp:  ## Remove C++-specific build artifacts
 	@rm -rf packages/mrppddl/build packages/mrppddl/src/mrppddl/*cpython*
+	@rm -rf packages/mrppddl/src/mrppddl/*.so
 	@touch packages/mrppddl/src/mrppddl/_bindings.cpp  # Trigger rebuild when needed
 
 clean-python:  ## Remove Python temporary artifacts
