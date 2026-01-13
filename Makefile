@@ -28,7 +28,7 @@ clean-python:  ## Remove Python temporary artifacts
 	@find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	@find . -type f -name "*.pyo" -delete 2>/dev/null || true
 	@find . -type d -name "*.egg-info" -exec rm -rf {} + 2>/dev/null || true
-	@rm -rf .pytest_cache .mypy_cache .pytype .coverage htmlcov .eggs dist build
+	@rm -rf .pytest_cache .mypy_cache .pytype .coverage htmlcov .eggs dist build src/*/build
 
 clean-venv:  ## Remove virtualenv directory 'venv'
 	@rm -rf .venv
