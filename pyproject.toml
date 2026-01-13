@@ -36,6 +36,7 @@ dependencies = [
     "dash>=3.3.0",
     "dash-bootstrap-components>=1.6.0",
     "ty>=0.0.12",
+    "pyrobosim>=4.3.3",
 ]
 
 [tool.uv.sources]
