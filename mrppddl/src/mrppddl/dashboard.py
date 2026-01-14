@@ -9,7 +9,7 @@ from rich.text import Text
 
 import re
 from time import sleep, perf_counter
-from typing import List, Dict, Set, Union
+from typing import List, Dict, Set, Union, Tuple
 
 from mrppddl._bindings import (
     Goal,
@@ -62,6 +62,61 @@ def split_markdown_flat(text: str) -> List[Dict[str, str]]:
     return items
 
 
+def render_timeline(actions: List[Tuple[str, float]], robots: Set[str],
+                    width: int = 50, end_time: float = None) -> str:
+    """Render Braille timeline. Each robot uses 2 vertical dots; 2 robots per row."""
+    if not actions or not robots:
+        return ""
+    L, R, B = [0x01, 0x02, 0x04, 0x40], [0x08, 0x10, 0x20, 0x80], 0x2800  # braille dots
+
+    # Build events: (robot, time, index) for each robot in each action
+    events = []
+    for i, (act, t) in enumerate(actions):
+        parts = act.split()
+        involved = [r for r in robots if r in parts]
+        if not involved and len(parts) >= 2 and parts[1].startswith("robot"):
+            involved = [parts[1]]
+        events.extend((r, t, i + 1) for r in involved)
+    if not events:
+        return ""
+
+    min_t, max_t = 0.0, end_time if end_time else max(e[1] for e in events)
+    if max_t <= min_t:
+        max_t = min_t + 1.0
+    pos = lambda t: int((t - min_t) / (max_t - min_t) * (width * 2 - 1))
+
+    robots_list = sorted(robots)
+    nw = max(len(r) for r in robots_list)  # name width
+    lines = [f"{' ' * nw} |{min_t:.1f}{' ' * (width - len(f'{min_t:.1f}') - len(f'{max_t:.1f}'))}{max_t:.1f}|"]
+
+    # Braille rows (2 robots per row)
+    for i in range(0, len(robots_list), 2):
+        chunk = robots_list[i:i + 2]
+        chars = [B] * width
+        for ri, robot in enumerate(chunk):
+            slot = ri * 2
+            for r, t, _ in events:
+                if r == robot:
+                    ci, sub = pos(t) // 2, pos(t) % 2
+                    if 0 <= ci < width:
+                        chars[ci] |= (L if sub == 0 else R)[slot] | (L if sub == 0 else R)[slot + 1]
+        lines.append(f"{','.join(r.replace('robot', 'r') for r in chunk):>{nw}} |{''.join(chr(c) for c in chars)}|")
+
+    # Label rows
+    for robot in robots_list:
+        labels, counts = [" "] * width, {}
+        for r, t, idx in events:
+            if r == robot:
+                ci = pos(t) // 2
+                if 0 <= ci < width:
+                    counts.setdefault(ci, []).append(idx)
+        for ci, idxs in counts.items():
+            labels[ci] = str(idxs[0] % 10) if len(idxs) == 1 else "+"
+        lines.append(f"{robot:>{nw}}  {''.join(labels)} ")
+
+    return "\n".join(lines)
+
+
 class PlannerDashboard:
     """
     Rich-based dashboard for the robot task planner.
@@ -103,9 +158,16 @@ class PlannerDashboard:
         self.num_goals = len(self.goal_fluents)
         self.initial_heuristic = initial_heuristic
         self._start_time = perf_counter()
-        self.actions_taken = list()
+
+        # Actions stored as (action_name, start_time) tuples
+        self.actions_taken: List[Tuple[str, float]] = []
+        self._last_state_time: float = 0.0  # Track previous state time for action start
+
+        # Track known robots from (free NAME) fluents
+        self.known_robots: Set[str] = set()
 
         self.history: list[dict] = []
+
         # Root layout
         self.layout = self._make_layout()
 
@@ -252,23 +314,34 @@ class PlannerDashboard:
             for line in best_branch_str.split('\n'):
                 goals_table.add_row(self._colorize_goal_line(line, sim_state.fluents))
 
-        # Display the most recent actions
+        # Actions section: header, timeline, then action list
         actions_table = Table(
             show_header=True,
             header_style="bold cyan",
             box=None,
             pad_edge=False,
         )
-        actions_table.add_column("#", justify="right")
-        actions_table.add_column("Recently Selected Actions")
+        actions_table.add_column("Actions Taken")
+
+        # Timeline visualization (no separate header)
+        max_by_actions = 6 * max(2, len(self.actions_taken))
+        timeline_width = min(max_by_actions, max(20, (self.console.width * 2 // 5) - 15))
+        timeline_str = render_timeline(
+            self.actions_taken, self.known_robots,
+            width=timeline_width, end_time=sim_state.time
+        )
+        if timeline_str:
+            for line in timeline_str.split('\n'):
+                actions_table.add_row(line)
+            actions_table.add_row("")  # blank line before action list
+
+        # Action list
         if self.actions_taken:
-            for num, action in reversed(list(enumerate(self.actions_taken))):
-                actions_table.add_row(str(num), action)
-            pass
+            for num, (action, time) in reversed(list(enumerate(self.actions_taken))):
+                actions_table.add_row(f"{num}: {action}")
         else:
-            actions_table.add_row("---", "[italic]No actions selected yet.[/]")
-            pass
-        
+            actions_table.add_row("[italic]No actions selected yet.[/]")
+
         # Combine meta + subtables into one grid
         container = Table.grid(padding=1)
         container.add_row(meta)
@@ -523,8 +596,23 @@ class PlannerDashboard:
                 local_console.rule("[bold green]Success!! :: Execution Summary[/]")
             else:
                 local_console.rule("[bold red]Task Not Completed :: Execution Summary[/]")
-                
-            local_console.print(f"[bold red]Actions Taken (Num Actions: {len(actions_taken)})[/]", highlight=True)
+
+            # Actions section: header, timeline, then action list
+            local_console.print(f"[bold cyan]Actions Taken ({len(actions_taken)})[/]")
+
+            # Timeline (no separate label)
+            max_by_actions = 6 * max(2, len(self.actions_taken))
+            timeline_width = min(max_by_actions, max(20, local_console.width - 15))
+            timeline_str = render_timeline(
+                self.actions_taken, self.known_robots,
+                width=timeline_width, end_time=final_state.time
+            )
+            if timeline_str:
+                for line in timeline_str.split('\n'):
+                    local_console.print(f"  {line}")
+                local_console.print()  # blank line
+
+            # Action list
             for i, action in enumerate(actions_taken, 1):
                 local_console.print(f"  {i}. {action}", highlight=True)
 
@@ -551,7 +639,7 @@ class PlannerDashboard:
                     local_console.print(f"  {self._colorize_goal_line(line, final_state.fluents)}")
 
             local_console.print(f"\n[bold red]Total cost (time): {final_state.time:.1f} seconds [/]")
-                
+
 
     def save_history(self, path: str):
         """Save the history to a plain-text log file."""
@@ -574,6 +662,13 @@ class PlannerDashboard:
         - left panel: active + goal fluents
         - right panel: MCTS trace
         """
+        # Extract robots from (free NAME) fluents
+        for fluent in sim_state.fluents:
+            fluent_str = str(fluent)
+            if fluent_str.startswith("(free ") and fluent_str.endswith(")"):
+                robot_name = fluent_str[6:-1].strip()
+                self.known_robots.add(robot_name)
+
         # Use best branch progress for OR goals
         achieved, total, label = self._get_best_branch_progress(sim_state)
         self.progress.update(
@@ -584,7 +679,11 @@ class PlannerDashboard:
         )
 
         if last_action_name:
-            self.actions_taken.append(last_action_name)
+            # Record action with its START time (before execution)
+            self.actions_taken.append((last_action_name, self._last_state_time))
+
+        # Update last state time for next action's start time
+        self._last_state_time = sim_state.time
 
         # Heuristic (optional)
         self._update_heuristic(heuristic_value)
