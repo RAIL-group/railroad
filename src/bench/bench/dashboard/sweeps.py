@@ -513,8 +513,8 @@ def create_sweep_figure(
                 showlegend=False,
             ))
 
-    # Add line connecting means
-    if len(mean_x) > 1:
+    # Add line connecting means (only for numeric parameters where order is meaningful)
+    if len(mean_x) > 1 and is_numeric_param:
         fig.add_trace(go.Scatter(
             x=mean_x,  # Use actual numeric values
             y=mean_y,

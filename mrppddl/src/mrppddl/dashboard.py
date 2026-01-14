@@ -71,6 +71,8 @@ def action_color(action: str) -> str:
         return "green"
     elif act == "search":
         return "yellow"
+    elif act == "no-op":
+        return "gray"
     return "white"
 
 
@@ -359,7 +361,7 @@ class PlannerDashboard:
 
         # Action list (with color coding)
         if self.actions_taken:
-            for num, (action, time) in reversed(list(enumerate(self.actions_taken))):
+            for num, (action, time) in reversed(list(enumerate(self.actions_taken, 1))):
                 color = action_color(action)
                 actions_table.add_row(f"[{color}]{num}[/]: {action}")
         else:
