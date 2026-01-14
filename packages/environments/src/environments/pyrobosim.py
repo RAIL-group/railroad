@@ -3,6 +3,9 @@ import functools
 from pyrobosim.core.yaml_utils import WorldYamlLoader
 from .environments import BaseEnvironment, SkillStatus
 import time
+import matplotlib.pyplot as plt
+from pyrobosim.gui.world_canvas import WorldCanvas
+from pyrobosim.gui.options import WorldCanvasOptions
 
 
 def run_async(func):
@@ -22,6 +25,7 @@ def run_async(func):
 class PyRoboSimEnv(BaseEnvironment):
     def __init__(self, world_file: str):
         self.world = WorldYamlLoader().from_file(world_file)
+        self.canvas = MatplotlibWorldCanvas(self.world)
         self.locations = self.world.get_location_names()
         self.robots = {robot.name: robot for robot in self.world.robots}
         self.is_robot_assigned = {robot: False for robot in self.robots}
@@ -116,3 +120,63 @@ class PyRoboSimEnv(BaseEnvironment):
         self.is_no_op_running[robot_name] = True
         time.sleep(self.get_skills_time_fn('no_op')(robot_name))
         self.is_no_op_running[robot_name] = False
+
+
+class MatplotlibWorldCanvas(WorldCanvas):
+    class MockSignal:
+        def __init__(self, callback):
+            self.callback = callback
+
+        def emit(self, *args, **kwargs):
+            self.callback()
+
+    class MockMainWindow:
+        def get_current_robot(self):
+            return None
+
+    def __init__(self, world):
+        self.world = world
+        self.options = WorldCanvasOptions()
+        self.main_window = self.MockMainWindow()
+        self.fig, self.axes = plt.subplots(
+            dpi=self.options.dpi,
+            tight_layout=True
+        )
+        plt.ion()
+
+        # Hijack the signals BEFORE calling any methods like show()
+        # This prevents the "Signal source has been deleted" error
+        self.draw_signal = self.MockSignal(self.draw_signal_callback)
+        # Add other signals as needed to prevent attribute errors
+        self.show_robots_signal = self.MockSignal(self.show_robots)
+        self.show_planner_and_path_signal = self.MockSignal(lambda: None)
+
+        # Manually initialize the artist lists inherited from WorldCanvas
+        self.robot_bodies = []
+        self.robot_dirs = []
+        self.robot_lengths = []
+        self.robot_texts = []
+        self.robot_sensor_artists = []
+        self.obj_patches = []
+        self.obj_texts = []
+        self.hallway_patches = []
+        self.room_patches = []
+        self.room_texts = []
+        self.location_patches = []
+        self.location_texts = []
+        self.path_planner_artists = {"graph": [], "path": []}
+
+        self.show()
+        self.axes.autoscale()
+        self.axes.axis("equal")
+
+    def draw_signal_callback(self):
+        """Replacement for the Qt signal execution."""
+        if hasattr(self, "fig"):
+            self.fig.canvas.draw_idle()
+
+    def update(self):
+        """Updates the world visualization in a loop."""
+        self.show()
+        self.fig.canvas.draw_idle()
+        plt.pause(self.options.animation_dt)
