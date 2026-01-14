@@ -62,12 +62,25 @@ def split_markdown_flat(text: str) -> List[Dict[str, str]]:
     return items
 
 
+def action_color(action: str) -> str:
+    """Return Rich color name based on action type."""
+    act = action.split()[0] if action else ""
+    if act == "move":
+        return "blue"
+    elif act in ("pick", "place"):
+        return "green"
+    elif act == "search":
+        return "yellow"
+    return "white"
+
+
 def render_timeline(actions: List[Tuple[str, float]], robots: Set[str],
                     width: int = 50, end_time: float = None) -> str:
     """Render Braille timeline. Each robot uses 2 vertical dots; 2 robots per row."""
     if not actions or not robots:
         return ""
     L, R, B = [0x01, 0x02, 0x04, 0x40], [0x08, 0x10, 0x20, 0x80], 0x2800  # braille dots
+    actions_list = list(actions)  # for indexing by action index
 
     # Build events: (robot, time, index) for each robot in each action
     events = []
@@ -102,17 +115,26 @@ def render_timeline(actions: List[Tuple[str, float]], robots: Set[str],
                         chars[ci] |= (L if sub == 0 else R)[slot] | (L if sub == 0 else R)[slot + 1]
         lines.append(f"{','.join(r.replace('robot', 'r') for r in chunk):>{nw}} |{''.join(chr(c) for c in chars)}|")
 
-    # Label rows
+    # Label rows (with color coding)
     for robot in robots_list:
-        labels, counts = [" "] * width, {}
+        label_parts = []
+        counts = {}
         for r, t, idx in events:
             if r == robot:
                 ci = pos(t) // 2
                 if 0 <= ci < width:
                     counts.setdefault(ci, []).append(idx)
-        for ci, idxs in counts.items():
-            labels[ci] = str(idxs[0] % 10) if len(idxs) == 1 else "+"
-        lines.append(f"{robot:>{nw}}  {''.join(labels)} ")
+        last_ci = -1
+        for ci in sorted(counts.keys()):
+            label_parts.append(" " * (ci - last_ci - 1))  # spaces before
+            idxs = counts[ci]
+            idx = idxs[0]
+            color = action_color(actions_list[idx - 1][0])
+            char = str(idx % 10) if len(idxs) == 1 else "+"
+            label_parts.append(f"[{color}]{char}[/]")
+            last_ci = ci
+        label_parts.append(" " * (width - last_ci - 1))  # trailing spaces
+        lines.append(f"{robot:>{nw}}  {''.join(label_parts)} ")
 
     return "\n".join(lines)
 
@@ -335,10 +357,11 @@ class PlannerDashboard:
                 actions_table.add_row(line)
             actions_table.add_row("")  # blank line before action list
 
-        # Action list
+        # Action list (with color coding)
         if self.actions_taken:
             for num, (action, time) in reversed(list(enumerate(self.actions_taken))):
-                actions_table.add_row(f"{num}: {action}")
+                color = action_color(action)
+                actions_table.add_row(f"[{color}]{num}[/]: {action}")
         else:
             actions_table.add_row("[italic]No actions selected yet.[/]")
 
@@ -612,9 +635,10 @@ class PlannerDashboard:
                     local_console.print(f"  {line}")
                 local_console.print()  # blank line
 
-            # Action list
+            # Action list (with color coding)
             for i, action in enumerate(actions_taken, 1):
-                local_console.print(f"  {i}. {action}", highlight=True)
+                color = action_color(action)
+                local_console.print(f"  [{color}]{i}[/]. {action}")
 
             # Show full goal structure
             local_console.print("\n[bold cyan]Full Goal:[/]")
