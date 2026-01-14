@@ -223,10 +223,10 @@ class PlannerDashboard:
         # Initial panels
         self.layout["progress"].update(self._build_progress_panel())
         self.layout["status"].update(
-            Panel("Initializing... running first planning step.", title="State", border_style="green")
+            Panel("Initializing... running first planning step.", title=Text("State", style="bold"), border_style="dark_red")
         )
         self.layout["debug"].update(
-            Panel("No trace yet.", title="MCTS Trace", border_style="magenta")
+            Panel("No trace yet.", title=Text("MCTS Trace", style="bold default"), border_style="dark_red")
         )
 
     def __enter__(self):
@@ -286,14 +286,8 @@ class PlannerDashboard:
         meta = Table.grid(padding=(0, 1))
         meta.add_row("Cost", f"{sim_state.time:.1f}")
         meta.add_row("Elapsed Time", f"{perf_counter() - self._start_time:,.2f}")
-        meta.add_row(
-            "Goals reached",
-            f"{self._count_achieved_goals(sim_state)}/{self.num_goals}",
-        )
+
         # Show overall goal satisfaction for complex goals
-        goal_satisfied = self._is_goal_satisfied(sim_state)
-        status_str = "[green]✓ SATISFIED[/green]" if goal_satisfied else "[yellow]IN PROGRESS[/yellow]"
-        meta.add_row("Goal Status", status_str)
         if step_index is not None:
             meta.add_row("Step", str(step_index))
         if last_action_name is not None:
@@ -302,7 +296,7 @@ class PlannerDashboard:
         # Active fluents
         active_table = Table(
             show_header=True,
-            header_style="bold cyan",
+            header_style="bold blue",
             box=None,
             pad_edge=False,
         )
@@ -317,7 +311,7 @@ class PlannerDashboard:
         # Goal structure display
         goals_table = Table(
             show_header=True,
-            header_style="bold cyan",
+            header_style="bold blue",
             box=None,
             pad_edge=False,
         )
@@ -325,7 +319,6 @@ class PlannerDashboard:
 
         # Show full goal with colored fluents
         full_goal_str = format_goal(self.goal, compact=True)
-        goals_table.add_row("[bold]Full Goal:[/bold]")
         for line in full_goal_str.split('\n'):
             goals_table.add_row(self._colorize_goal_line(line, sim_state.fluents))
 
@@ -334,14 +327,14 @@ class PlannerDashboard:
         if best_branch != self.goal:
             best_branch_str = format_goal(best_branch, compact=True)
             goals_table.add_row("")  # blank line
-            goals_table.add_row("[bold]Best Path:[/bold]")
+            goals_table.add_row("[italic]Best Path Through Goal:[/italic]")
             for line in best_branch_str.split('\n'):
                 goals_table.add_row(self._colorize_goal_line(line, sim_state.fluents))
 
         # Actions section: header, timeline, then action list
         actions_table = Table(
             show_header=True,
-            header_style="bold cyan",
+            header_style="bold blue",
             box=None,
             pad_edge=False,
         )
@@ -376,8 +369,8 @@ class PlannerDashboard:
 
         return Panel(
             container,
-            title="State",
-            border_style="green",
+            title=Text("State", style="bold default"),
+            border_style="dark_red",
         )
 
     def _build_trace_panel(self, sim_state, trace_text: str) -> Panel:
@@ -392,14 +385,14 @@ class PlannerDashboard:
         )
         return Panel(
             content,
-            title="MCTS Tree Trace",
-            border_style="magenta",
+            title=Text("MCTS Tree Trace", style="bold default"),
+            border_style="dark_red",
             highlight=True,
         )
 
     def _build_progress_panel(self) -> Panel:
         # Just the single shared Progress instance
-        return Panel(self.progress, title="Planner Progress", border_style="cyan")
+        return Panel(self.progress, title=Text("Planner Progress", style="bold default"), border_style="dark_red")
 
     @property
     def renderable(self):
@@ -623,7 +616,7 @@ class PlannerDashboard:
                 local_console.rule("[bold red]Task Not Completed :: Execution Summary[/]")
 
             # Actions section: header, timeline, then action list
-            local_console.print(f"[bold cyan]Actions Taken ({len(actions_taken)})[/]")
+            local_console.print(f"[bold blue]Actions Taken ({len(actions_taken)})[/]")
 
             # Timeline (no separate label)
             max_by_actions = 6 * max(2, len(self.actions_taken))
@@ -643,7 +636,7 @@ class PlannerDashboard:
                 local_console.print(f"  [{color}]{i}[/]. {action}")
 
             # Show full goal structure
-            local_console.print("\n[bold cyan]Full Goal:[/]")
+            local_console.print("\n[bold blue]Full Goal:[/]")
             full_goal_str = format_goal(self.goal, compact=True)
             for line in full_goal_str.split('\n'):
                 local_console.print(f"  {self._colorize_goal_line(line, final_state.fluents)}")
