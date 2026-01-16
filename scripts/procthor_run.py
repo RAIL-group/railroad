@@ -131,6 +131,37 @@ def main():
     # Print the full dashboard history to the console (optional)
     dashboard.print_history(sim.state, actions_taken)
 
+    # Plotting
+    robot_poses_dict = utils.extract_robot_poses(actions_taken, robot_locations, env.locations)
+
+    robots_data = {}
+    total_cost = 0
+
+    for robot_name, poses in robot_poses_dict.items():
+        cost, trajectory = utils.compute_cost_and_trajectory(env.grid, poses, 1.0)
+        robots_data[robot_name] = (poses, trajectory)
+        total_cost += cost
+
+    plt.figure(figsize=(16, 8))
+
+    # Subplot 1: Actual topdown image
+    ax1 = plt.subplot(1, 2, 1)
+
+    top_down_image = env.thor_interface.get_top_down_image(orthographic=True)
+    ax1.imshow(top_down_image)
+    ax1.axis('off')
+    ax1.set_title("Top-down View")
+
+    # Subplot 2: Multi-robot trajectory
+    ax2 = plt.subplot(1, 2, 2)
+    plotting.plot_multi_robot_trajectories(ax2, env.grid, robots_data, env.known_graph)
+    ax2.set_title(f"Multi Robot Trajectory Cost: {total_cost:.1f}")
+
+    figpath = Path(args.save_dir) / f'procthor_run_{args.current_seed}.png'
+    figpath.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(figpath, dpi=300)
+    print(f"Saved plot to {figpath}")
+
 
 if __name__ == "__main__":
     main()
