@@ -138,7 +138,8 @@ def main():
     total_cost = 0
 
     for robot_name, poses in robot_poses_dict.items():
-        cost, trajectory = utils.compute_cost_and_trajectory(env.grid, poses, 1.0)
+        cost, trajectory = utils.compute_cost_and_trajectory(
+            env.grid, poses, 1.0, use_robot_model=True)
         robots_data[robot_name] = (poses, trajectory)
         total_cost += cost
 
