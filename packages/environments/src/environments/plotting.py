@@ -4,18 +4,73 @@ import procthor
 from pathlib import Path
 
 
-def plot_grid_with_robot_trajectory(ax, grid, robot_all_poses, trajectory, graph):
+import numpy as np
+from matplotlib.collections import LineCollection
+import matplotlib.cm as cm
+
+
+import numpy as np
+from matplotlib.collections import LineCollection
+import matplotlib.cm as cm
+
+
+def plot_grid(ax, grid):
     plotting_grid = procthor.plotting.make_plotting_grid(grid.T)
-    ax.imshow(plotting_grid)
-    ax.plot(trajectory[0], trajectory[1])
-    ax.text(robot_all_poses[0].x, robot_all_poses[0].y, '0 - ROBOT', color='brown', size=4)
+    ax.imshow(plotting_grid, cmap='gray', origin='upper')
+
+
+def plot_single_robot_trajectory(ax, robot_all_poses, trajectory, graph, robot_name, color_map_name='viridis', robot_id=0):
+    # trajectory is likely (2, N)
+    x = trajectory[0]
+    y = trajectory[1]
+
+    points = np.array([x, y]).T.reshape(-1, 1, 2)
+    segments = np.concatenate([points[:-1], points[1:]], axis=1)
+
+    # Create a continuous norm to map from data points to colors
+    norm = plt.Normalize(0, len(x))
+    lc = LineCollection(segments, cmap=color_map_name, norm=norm)
+
+    # Set the values used for colormapping
+    lc.set_array(np.arange(len(x)))
+    lc.set_linewidth(2)
+    ax.add_collection(lc)
+
+    # Use a distinct color for text that stands out (simpler than matching gradient)
+    text_color = 'brown'
+
+    # Add a marker for the start
+    if len(robot_all_poses) > 0:
+        ax.text(robot_all_poses[0].x, robot_all_poses[0].y, f'{robot_id} - {robot_name}', color=text_color, size=4, weight='bold')
+
     for i, pose in enumerate(robot_all_poses[1:]):
         idx = graph.get_node_idx_by_position([pose.x, pose.y])
         if idx is not None:
             name = graph.get_node_name_by_idx(idx)
-            ax.text(pose.x, pose.y, f'{i + 1} - {name}', color='brown', size=4)
+            ax.text(pose.x, pose.y, f'{i + 1} - {name}', color=text_color, size=4, weight='bold')
         else:
             print(f'Plotting warning: No node found in graph for pose [{pose.x:.2f}, {pose.y:.2f}]')
+
+
+def plot_grid_with_robot_trajectory(ax, grid, robot_all_poses, trajectory, graph, cmap_name='viridis'):
+    """Backward compatibility wrapper for single robot."""
+    plot_grid(ax, grid)
+    plot_single_robot_trajectory(ax, robot_all_poses, trajectory, graph, "ROBOT", cmap_name)
+
+
+def plot_multi_robot_trajectories(ax, grid, robots_data, graph):
+    """
+    robots_data: dict mapping robot_name -> (poses, trajectory)
+    """
+    plot_grid(ax, grid)
+
+    # Predefined colormaps for different robots to be distinct
+    # Viridis-like (perceptually uniform sequential) colormaps
+    colormaps = ['viridis', 'plasma', 'inferno', 'magma', 'cividis', 'spring', 'summer', 'autumn', 'winter', 'cool']
+
+    for i, (robot_name, (poses, trajectory)) in enumerate(robots_data.items()):
+        cmap = colormaps[i % len(colormaps)]
+        plot_single_robot_trajectory(ax, poses, trajectory, graph, robot_name, cmap, robot_id=i)
 
 
 def save_navigation_video(trajectory, thor_interface, video_file_path, fig_title):
