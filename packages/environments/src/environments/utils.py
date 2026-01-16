@@ -71,3 +71,41 @@ def compute_cost_and_dijkstra_trajectory(grid, path):
             trajectory = np.concatenate((trajectory, robot_path), axis=1)
 
     return total_cost, trajectory
+
+
+def extract_robot_poses(
+    actions: list[str],
+    initial_locations: dict[str, str],
+    location_coords: dict[str, tuple[float, float]]
+) -> dict[str, list]:
+    from common import Pose  # Import locally to avoid circular imports if any
+
+    robot_poses = {}
+
+    # Initialize with start poses
+    for robot_name, start_loc in initial_locations.items():
+        if start_loc in location_coords:
+            robot_poses[robot_name] = [Pose(*location_coords[start_loc])]
+        else:
+             # Handle cases where location might be 'start' or similar if mapped differently
+             # assuming location_coords has 'start' if it's a valid key
+             pass
+
+    for action in actions:
+        if not action.startswith('move'):
+            continue
+
+        parts = action.split()
+        if len(parts) == 4: # move robot from to
+            robot_name = parts[1]
+            to_loc = parts[3]
+
+            if robot_name not in robot_poses:
+                # Should have been initialized, but safe fallback or error?
+                # If distinct robot names are used that weren't in initial_locations
+                pass
+
+            if to_loc in location_coords:
+                robot_poses[robot_name].append(Pose(*location_coords[to_loc]))
+
+    return robot_poses
