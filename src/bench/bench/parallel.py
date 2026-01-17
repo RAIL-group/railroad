@@ -190,7 +190,7 @@ class ParallelExecutor:
                 # Submit all tasks at once
                 futures = {}
                 for task in plan.tasks:
-                    future = executor.submit(_execute_task_worker, task, mlflow_uri)
+                    future = executor.submit(_execute_task_worker, task, mlflow_uri)  # type: ignore[arg-type]
                     futures[future] = task
 
                 # Mark first batch as running (up to num_workers)

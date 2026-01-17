@@ -64,9 +64,9 @@ def build_content_layout(
     experiment_name: str,
     figures: list[dict],
     df: pd.DataFrame,
-    metadata: dict = None,
-    summary: dict = None,
-    sweep_plots_by_benchmark: dict = None,
+    metadata: dict | None = None,
+    summary: dict | None = None,
+    sweep_plots_by_benchmark: dict | None = None,
 ) -> list:
     """
     Build the content layout with all graphs and data sample.

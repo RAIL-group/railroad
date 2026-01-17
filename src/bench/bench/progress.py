@@ -18,15 +18,13 @@ from .plan import ExecutionPlan, Task, TaskStatus
 class StatusBarColumn(BarColumn):
     """Custom bar column that changes color based on task status."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self):
         super().__init__(
-            *args,
             complete_style="blue",  # Default in-progress color
             finished_style="green",  # Default finished color
-            **kwargs
         )
 
-    def render(self, task: ProgressTask) -> RenderableType:
+    def render(self, task: "ProgressTask"):
         """Render bar with dynamic color based on status."""
         # Check if task has failure status
         has_failures = task.fields.get("has_failures", False)

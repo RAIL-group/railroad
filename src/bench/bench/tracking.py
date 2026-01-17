@@ -70,13 +70,13 @@ class MLflowTracker:
             self.experiment_name = name
 
             # Create or get existing experiment
-            experiment = mlflow.get_experiment_by_name(name)
+            experiment = mlflow.get_experiment_by_name(name)  # type: ignore[possibly-missing-attribute]
             if experiment:
                 self.experiment_id = experiment.experiment_id
             else:
                 # Convert metadata to string tags (MLflow only supports string tags)
                 tags = {k: str(v) for k, v in metadata.items()}
-                self.experiment_id = mlflow.create_experiment(
+                self.experiment_id = mlflow.create_experiment(  # type: ignore[possibly-missing-attribute]
                     name=name,
                     tags=tags,
                 )
@@ -92,7 +92,7 @@ class MLflowTracker:
         Args:
             task: Completed task with results
         """
-        with mlflow.start_run(run_name=task.id) as run:
+        with mlflow.start_run(run_name=task.id) as run:  # type: ignore[possibly-missing-attribute]
             # Log parameters (inputs)
             params = {
                 "benchmark_name": task.benchmark_name,
@@ -103,7 +103,7 @@ class MLflowTracker:
             for key, value in task.params.items():
                 params[str(key)] = str(value)
 
-            mlflow.log_params(params)
+            mlflow.log_params(params)  # type: ignore[possibly-missing-attribute]
 
             # Log tags
             tags = {
@@ -113,7 +113,7 @@ class MLflowTracker:
             for i, tag in enumerate(task.tags):
                 tags[f"tag_{i}"] = tag
 
-            mlflow.set_tags(tags)
+            mlflow.set_tags(tags)  # type: ignore[possibly-missing-attribute]
 
             # Log metrics (outputs)
             metrics = {}
@@ -127,7 +127,7 @@ class MLflowTracker:
                         metrics[key] = float(value)
                     elif isinstance(value, str) and len(value) < 500:
                         # Short strings can be logged as params
-                        mlflow.log_param(f"result_{key}", value)
+                        mlflow.log_param(f"result_{key}", value)  # type: ignore[possibly-missing-attribute]
                     else:
                         # Complex data goes to artifacts
                         artifacts[key] = value
@@ -141,13 +141,13 @@ class MLflowTracker:
                                 artifact_path = Path(tmpdir) / "log.html"
                                 with open(artifact_path, 'w') as f:
                                     f.write(str(value))
-                                mlflow.log_artifact(str(artifact_path))
+                                mlflow.log_artifact(str(artifact_path))  # type: ignore[possibly-missing-attribute]
                             else:
                                 # Regular artifacts as JSON
                                 artifact_path = Path(tmpdir) / f"{key}.json"
                                 with open(artifact_path, 'w') as f:
                                     json.dump(value, f, indent=2, default=str)
-                                mlflow.log_artifact(str(artifact_path))
+                                mlflow.log_artifact(str(artifact_path))  # type: ignore[possibly-missing-attribute]
 
             # Always log wall time and success status
             if task.wall_time is not None:
@@ -156,7 +156,7 @@ class MLflowTracker:
             metrics["success"] = 1.0 if task.status == TaskStatus.SUCCESS else 0.0
             metrics["timeout"] = 1.0 if task.status == TaskStatus.TIMEOUT else 0.0
 
-            mlflow.log_metrics(metrics)
+            mlflow.log_metrics(metrics)  # type: ignore[possibly-missing-attribute]
 
             # Log stdout/stderr as artifacts
             with tempfile.TemporaryDirectory() as tmpdir:
@@ -164,17 +164,17 @@ class MLflowTracker:
                     stdout_path = Path(tmpdir) / "stdout.txt"
                     with open(stdout_path, 'w') as f:
                         f.write(task.stdout)
-                    mlflow.log_artifact(str(stdout_path))
+                    mlflow.log_artifact(str(stdout_path))  # type: ignore[possibly-missing-attribute]
 
                 if task.stderr:
                     stderr_path = Path(tmpdir) / "stderr.txt"
                     with open(stderr_path, 'w') as f:
                         f.write(task.stderr)
-                    mlflow.log_artifact(str(stderr_path))
+                    mlflow.log_artifact(str(stderr_path))  # type: ignore[possibly-missing-attribute]
 
             # Log error message if failed
             if task.error:
-                mlflow.log_param("error_message", task.error[:500])  # Truncate if too long
+                mlflow.log_param("error_message", task.error[:500])  # type: ignore[possibly-missing-attribute]
 
     def log_summary(self, summary: Dict[str, Any]):
         """
@@ -183,7 +183,7 @@ class MLflowTracker:
         Args:
             summary: Summary statistics dictionary
         """
-        with mlflow.start_run(run_name="__summary__") as run:
+        with mlflow.start_run(run_name="__summary__") as run:  # type: ignore[possibly-missing-attribute]
             # Log all summary values as metrics
             metrics = {k: float(v) for k, v in summary.items() if isinstance(v, (int, float))}
-            mlflow.log_metrics(metrics)
+            mlflow.log_metrics(metrics)  # type: ignore[possibly-missing-attribute]

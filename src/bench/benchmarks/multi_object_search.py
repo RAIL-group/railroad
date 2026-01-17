@@ -129,9 +129,9 @@ def bench_multi_object_search_base(case: BenchmarkCase):
 
     # Initial objects by type (robot only knows about some objects initially)
     objects_by_type = {
-        "robot": robot_names,
-        "location": list(locations.keys()),
-        "object": objects_of_interest,  # Robot knows these objects exist
+        "robot": set(robot_names),
+        "location": set(locations.keys()),
+        "object": set(objects_of_interest),
     }
 
     # Create operators

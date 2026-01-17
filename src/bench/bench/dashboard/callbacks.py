@@ -35,7 +35,7 @@ def register_callbacks(app):
 
         if cache_key not in _artifact_cache:
             try:
-                local_path = mlflow.artifacts.download_artifacts(
+                local_path = mlflow.artifacts.download_artifacts(  # type: ignore[possibly-missing-attribute]
                     run_id=run_id,
                     artifact_path=filename,
                 )

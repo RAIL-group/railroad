@@ -55,8 +55,8 @@ def bench_single_robot_nav(case: BenchmarkCase):
     move_op = environments.operators.construct_move_operator(move_time_fn)
 
     objects_by_type = {
-        "robot": ["robot1"],
-        "location": list(locations.keys()),
+        "robot": {"robot1"},
+        "location": set(locations.keys()),
     }
 
     # Create simulator

@@ -137,7 +137,7 @@ def create_violin_trace(
         y=[case_label] * len(plan_costs),
         x=x_values,
         customdata=run_ids.tolist(),
-        name=case_label + config["name_suffix"],
+        name=case_label + str(config["name_suffix"]),
         orientation="h",
         fillcolor=config["fillcolor"],
         line=dict(color=config["line_color"], width=config["line_width"]),

@@ -46,6 +46,9 @@ environments = { path = "environments", editable = true }
 procthor = { path = "procthor", editable = true }
 bench = { path = "src/bench", editable = true }
 
+[tool.ty.environment]
+extra-paths = ["src/bench", "environments"]
+
 [tool.pytest.ini_options]
 filterwarnings = [
     "ignore:invalid escape sequence:SyntaxWarning"

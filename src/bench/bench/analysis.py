@@ -36,7 +36,7 @@ class BenchmarkAnalyzer:
         Returns:
             DataFrame with experiment names, IDs, and creation times
         """
-        experiments = mlflow.search_experiments()
+        experiments = mlflow.search_experiments()  # type: ignore[possibly-missing-attribute]
 
         df = pd.DataFrame([
             {
@@ -67,7 +67,7 @@ class BenchmarkAnalyzer:
         Raises:
             ValueError: If experiment not found
         """
-        experiment = mlflow.get_experiment_by_name(experiment_name)
+        experiment = mlflow.get_experiment_by_name(experiment_name)  # type: ignore[possibly-missing-attribute]
         if not experiment:
             raise ValueError(f"Experiment '{experiment_name}' not found")
 
@@ -155,16 +155,18 @@ class BenchmarkAnalyzer:
         Raises:
             ValueError: If experiment not found
         """
-        experiment = mlflow.get_experiment_by_name(experiment_name)
+        experiment = mlflow.get_experiment_by_name(experiment_name)  # type: ignore[possibly-missing-attribute]
         if not experiment:
             raise ValueError(f"Experiment '{experiment_name}' not found")
 
         # Search all runs except the summary run
-        runs = mlflow.search_runs(
+        runs = mlflow.search_runs(  # type: ignore[possibly-missing-attribute]
             experiment_ids=[experiment.experiment_id],
             filter_string="attributes.run_name != '__summary__'",
+            output_format="pandas",
         )
 
+        assert isinstance(runs, pd.DataFrame)
         return runs
 
     def aggregate_by_benchmark(self, df: pd.DataFrame) -> pd.DataFrame:
