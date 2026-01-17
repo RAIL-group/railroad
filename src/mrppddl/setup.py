@@ -66,7 +66,14 @@ class build_ext_and_stubgen(build_ext):
             raise RuntimeError(f"Stubgen did not produce expected file: {generated}")
 
         out_pyi.parent.mkdir(parents=True, exist_ok=True)
-        out_pyi.write_text(generated.read_text(encoding="utf-8"), encoding="utf-8")
+
+        # Post-process: pybind11-stubgen sometimes emits fully-qualified names
+        # like `mrppddl._bindings.Action` instead of just `Action`. Since we're
+        # inside the _bindings module, strip the prefix to avoid import errors.
+        stub_content = generated.read_text(encoding="utf-8")
+        stub_content = stub_content.replace("mrppddl._bindings.", "")
+
+        out_pyi.write_text(stub_content, encoding="utf-8")
 
 
 ext_modules = [
