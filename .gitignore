@@ -2,7 +2,9 @@
 __pycache__/
 *.py[oc]
 build/
-/mrppddl/src/mrppddl/*.so
+# Build artifacts from pybind11
+/src/mrppddl/src/mrppddl/*.so
+/src/mrppddl/src/mrppddl/_bindings.pyi
 dist/
 wheels/
 *.egg-info

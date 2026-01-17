@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64", "wheel", "pybind11"]
+requires = ["setuptools>=64", "wheel", "pybind11", "pybind11-stubgen"]
 build-backend = "setuptools.build_meta"
 
 [tool.uv]
