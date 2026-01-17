@@ -35,10 +35,11 @@ dependencies = [
     "mlflow>=2.19.0",
     "dash>=3.3.0",
     "dash-bootstrap-components>=1.6.0",
+    "ty>=0.0.12",
 ]
 
 [tool.uv.sources]
-mrppddl = { path = "mrppddl", editable = true }
+mrppddl = { path = "src/mrppddl", editable = true }
 common = { path = "common", editable = true }
 gridmap = { path = "gridmap", editable = true }
 environments = { path = "environments", editable = true }
