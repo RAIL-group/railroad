@@ -1,5 +1,5 @@
 # Re-import required dependencies due to kernel reset
-from typing import Callable, List, Tuple, Dict, Set, Union, Sequence
+from typing import Callable, List, Tuple, Dict, Set, Union, Sequence, cast
 import itertools
 
 try:
@@ -314,17 +314,22 @@ def get_action_by_name(actions: List[Action], name: str) -> Action:
 
 def get_next_actions(state: State, all_actions: List[Action]) -> List[Action]:
     # Step 1: Extract all `free(...)` fluents
-    free_robot_fluents = sorted([f for f in state.fluents if f.name == "free"], key=str)
+    free_robot_fluents: List[Fluent] = cast(
+        List[Fluent],
+        sorted([f for f in state.fluents if f.name == "free"], key=str),
+    )
     # neg_fluents = {~f for f in free_robot_fluents}
     neg_state = state.copy()
-    neg_state.update_fluents({~f for f in free_robot_fluents})
+    neg_fluents: Set[Fluent] = {~f for f in free_robot_fluents}
+    neg_state.update_fluents(neg_fluents)
 
     # Step 2: Check each robot individually
     for free_pred in free_robot_fluents:
         # Create a restricted version of the state
+        combined_fluents: Set[Fluent] = cast(Set[Fluent], neg_state.fluents | {free_pred})
         temp_state = State(
             time=state.time,
-            fluents=neg_state.fluents | {free_pred},
+            fluents=combined_fluents,
         )
 
         # Step 3: Check for applicable actions

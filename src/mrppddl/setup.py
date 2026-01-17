@@ -8,7 +8,7 @@ from pathlib import Path
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
 
-import pybind11  # pyright: ignore[reportMissingImports]
+import pybind11  # type: ignore[import-not-found]  # pyright: ignore[reportMissingImports]
 
 
 class get_pybind_include:

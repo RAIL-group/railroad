@@ -41,15 +41,15 @@ def split_markdown_flat(text: str) -> List[Dict[str, str]]:
         if m.start() > last_pos:
             block = text[last_pos:m.start()].strip("\n")
             if block.strip():
-                items.append(["text", block])
+                items.append({"type": "text", "text": block})
 
         hashes, heading_text = m.group(1), m.group(2).strip()
         level = len(hashes)
 
         if level == 1:
-            items.append(["h1", heading_text])
+            items.append({"type": "h1", "text": heading_text})
         elif level == 2:
-            items.append(["h2", heading_text])
+            items.append({"type": "h2", "text": heading_text})
 
         last_pos = m.end()
 
@@ -57,7 +57,7 @@ def split_markdown_flat(text: str) -> List[Dict[str, str]]:
     if last_pos < len(text):
         block = text[last_pos:].strip("\n")
         if block.strip():
-            items.append(["text", block])
+            items.append({"type": "text", "text": block})
 
     return items
 
@@ -206,7 +206,7 @@ class PlannerDashboard:
         self.goal_task_id = self.progress.add_task(
             "Goals",
             total=float(self.num_goals),
-            completed=0.0,
+            completed=0,
             extra="",  # no extra text initially
         )
 
@@ -216,7 +216,7 @@ class PlannerDashboard:
             self.heuristic_task_id = self.progress.add_task(
                 "Heuristic",
                 total=self.initial_heuristic,   # treat "total" as initial value
-                completed=0.0,                 # improvement from initial
+                completed=0,                   # improvement from initial
                 extra=f"h={self.initial_heuristic:.2f}",
             )
 
@@ -241,7 +241,7 @@ class PlannerDashboard:
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        if hasattr(self, "_live"):
+        if hasattr(self, "_live") and self._live is not None:
             self._live.__exit__(exc_type, exc, tb)
             self._live = None
 
@@ -376,7 +376,9 @@ class PlannerDashboard:
     def _build_trace_panel(self, sim_state, trace_text: str) -> Panel:
         def highlighted(text: str) -> Text:
             t = Text(text)
-            self.console.highlighter.highlight(t)
+            highlighter = self.console.highlighter
+            if highlighter is not None and hasattr(highlighter, "highlight"):
+                highlighter.highlight(t)  # type: ignore[union-attr]
             return t
         content = Group(
             highlighted(str(sim_state)),
@@ -525,6 +527,8 @@ class PlannerDashboard:
             return
         if heuristic_value is None:
             return
+        if self.initial_heuristic is None:
+            return
 
         h0 = self.initial_heuristic
         h_now = max(0.0, float(heuristic_value))
@@ -541,7 +545,7 @@ class PlannerDashboard:
         self,
         sim_state,
         relevant_fluents,
-        tree_trace: str,
+        tree_trace: str | None,
         step_index: int | None,
         last_action_name: str | None,
         heuristic_value: float | None,

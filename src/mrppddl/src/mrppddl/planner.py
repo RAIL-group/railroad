@@ -1,6 +1,6 @@
-from typing import List, Dict, Union, Set
-from mrppddl._bindings import astar  # noqa
-from mrppddl._bindings import get_usable_actions  # noqa: F401
+from typing import List, Dict, Union, SupportsFloat, SupportsInt
+from collections.abc import Set
+from mrppddl._bindings import astar, get_usable_actions  # noqa
 from mrppddl._bindings import MCTSPlanner as _MCTSPlannerCpp
 from mrppddl._bindings import Action, State, Fluent
 from mrppddl._bindings import GoalType  # noqa: F401
@@ -129,10 +129,10 @@ class MCTSPlanner:
         self,
         state: State,
         goal: Union[Goal, Fluent],
-        max_iterations: int = 1000,
-        max_depth: int = 100,
-        c: float = 1.414,
-        heuristic_multiplier: float = 5.0,
+        max_iterations: SupportsInt = 1000,
+        max_depth: SupportsInt = 100,
+        c: SupportsFloat = 1.414,
+        heuristic_multiplier: SupportsFloat = 5.0,
     ) -> str:
         """Run MCTS planning to find the next action.
 
