@@ -47,7 +47,7 @@ procthor = { path = "procthor", editable = true }
 bench = { path = "src/bench", editable = true }
 
 [tool.ty.environment]
-extra-paths = ["src/bench", "environments"]
+extra-paths = ["src/bench", "environments", "common", "procthor", "gridmap", "src/mrppddl/src"]
 
 [tool.pytest.ini_options]
 filterwarnings = [

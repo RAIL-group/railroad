@@ -1,5 +1,5 @@
 # Re-import required dependencies due to kernel reset
-from typing import Callable, List, Tuple, Dict, Set, Union, Sequence, cast
+from typing import Callable, List, Tuple, Dict, Set, Union, Sequence, Collection, cast
 import itertools
 
 try:
@@ -276,7 +276,7 @@ class Operator:
         self.effects = effects
         self.extra_cost = extra_cost
 
-    def instantiate(self, objects_by_type: Dict[str, List[str]]) -> List[Action]:
+    def instantiate(self, objects_by_type: Dict[str, Collection[str]]) -> List[Action]:
         grounded_actions = []
         domains = [objects_by_type[typ] for _, typ in self.parameters]
         for assignment in itertools.product(*domains):

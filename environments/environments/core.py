@@ -5,14 +5,14 @@ from mrppddl.core import Fluent as F, State
 from mrppddl.core import transition
 from mrppddl.core import Operator
 from .environments import BaseEnvironment, SkillStatus
-from typing import Dict, Set, List
+from typing import Dict, Set, List, Collection
 
 
 class EnvironmentInterface():
     def __init__(
             self,
             initial_state: State,
-            objects_by_type: Dict[str, Set[str]],
+            objects_by_type: Dict[str, Collection[str]],
             operators: List[Operator],
             environment: BaseEnvironment):
         self._state = initial_state
