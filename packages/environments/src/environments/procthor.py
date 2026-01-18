@@ -8,11 +8,13 @@ SKILLS_TIME = {
     'robot1': {
         'pick': 15,
         'place': 15,
-        'search': 15},
+        'search': 15,
+        'no_op': 100},  # TODO: adjust aftering checking the distance costs
     'robot2': {
         'pick': 10,
         'place': 10,
-        'search': 10}
+        'search': 10,
+        'no_op': 100}
 }
 
 
