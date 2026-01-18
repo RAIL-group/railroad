@@ -1,17 +1,18 @@
 import pytest
-from common import Pose
-import environments
-import environments.procthor
-from mrppddl.planner import MCTSPlanner
 import random
-from mrppddl.core import Fluent as F, State, get_action_by_name, LiteralGoal
-import procthor
 import matplotlib.pyplot as plt
 from pathlib import Path
+from functools import reduce
+
+import procthor
+import environments
+import environments.procthor
+from common import Pose
+from mrppddl.planner import MCTSPlanner
+from mrppddl.core import Fluent as F, State, get_action_by_name, LiteralGoal
 from environments import plotting, utils
 from environments.core import EnvironmentInterface
 from environments.utils import extract_robot_poses
-from functools import reduce
 from operator import and_
 
 
@@ -112,14 +113,19 @@ def test_single_robot_plotting():
     print(f"Saved plot to {figpath}")
     assert goal.evaluate(sim.state.fluents)
 
-# known-fluents
-truth_fluents = {
-    F("at watch_81 tvstand_18"),
-    F("at egg_55 fridge_12"),
-}
-# parameterize the nex test to once run test with known fluents and once without
-@pytest.mark.parametrize("known_fluents", [set(), truth_fluents])
-def test_multi_robot_plotting(known_fluents):
+
+@pytest.mark.parametrize(
+    "given_fluents", [
+        set(),  # first input is unknown fluents
+        {
+            F("found watch_81"),
+            F("found egg_55"),
+            F("at watch_81 tvstand_18"),
+            F("at egg_55 fridge_12"),
+        },  # second input is known fluents
+    ]
+)
+def test_multi_robot_plotting(given_fluents):
     args = get_args()
     args.num_robots = 2
     robot_locations = {'robot1': 'start', 'robot2': 'start'}
@@ -137,7 +143,7 @@ def test_multi_robot_plotting(known_fluents):
             F("revealed start"),
             F("at robot1 start"), F("free robot1"),
             F("at robot2 start"), F("free robot2"),
-        } | known_fluents,
+        } | given_fluents,
     )
 
     # Create operators
@@ -174,7 +180,7 @@ def test_multi_robot_plotting(known_fluents):
         if goal.evaluate(sim.state.fluents):
             print("Goal reached!")
             break
-    if len(known_fluents) > 0:
+    if len(given_fluents) > 0:
         settings = 'known'
     else:
         settings = 'unknown'
