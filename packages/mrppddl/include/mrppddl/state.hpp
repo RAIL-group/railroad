@@ -53,7 +53,8 @@ public:
   State copy() const { return State(time_, fluents_, upcoming_effects_); }
 
   bool
-  update_with_effect(const std::shared_ptr<const GroundedEffect> &new_effect) {
+  update_with_effect(const std::shared_ptr<const GroundedEffect> &new_effect,
+                     bool relax = false) {
     cached_hash_ = std::nullopt;
     bool freed_robot = false;
     for (const auto &f : new_effect->pos_fluents()) {
@@ -62,8 +63,10 @@ public:
       }
       fluents_.insert(f);
     }
-    for (const auto &f : new_effect->flipped_neg_fluents()) {
-      fluents_.erase(f);
+    if (!relax) {
+      for (const auto &f : new_effect->flipped_neg_fluents()) {
+        fluents_.erase(f);
+      }
     }
     return freed_robot;
   }
@@ -214,7 +217,7 @@ inline void advance_to_terminal(State state, double prob,
       state.set_time(scheduled_time);
     }
     state.pop_effect();
-    any_free_robots = state.update_with_effect(effect);
+    any_free_robots = state.update_with_effect(effect, relax);
 
     if (effect->is_probabilistic()) {
       for (const auto &branch : effect->prob_effects()) {

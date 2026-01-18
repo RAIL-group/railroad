@@ -174,6 +174,44 @@ class MCTSPlanner:
         """Get trace from the last MCTS tree (delegates to C++ planner)."""
         return self._cpp_planner.get_trace_from_last_mcts_tree()
 
+    def heuristic(self, state: State, goal: Union[Goal, Fluent]) -> float:
+        """Compute FF heuristic using converted state/goal/actions.
+
+        This method computes the FF heuristic with proper conversion of
+        negative preconditions to positive equivalents, matching the
+        internal heuristic used by the MCTS planner.
+
+        Args:
+            state: Current state (will be automatically converted)
+            goal: Goal to achieve. Can be:
+                - A Goal object: F("a") & F("b"), AndGoal([...]), etc.
+                - A single Fluent: F("visited a") (auto-wrapped to LiteralGoal)
+
+        Returns:
+            Heuristic value (estimated cost to reach goal)
+        """
+        from mrppddl._bindings import ff_heuristic as _ff_heuristic_cpp
+
+        # Normalize goal (wrap Fluent in LiteralGoal if needed)
+        goal = _normalize_goal(goal)
+
+        # Ensure mapping includes goal's negative fluents
+        self._ensure_mapping_includes_goal(goal)
+
+        # Convert state with (possibly extended) mapping
+        converted_state = convert_state_to_positive_preconditions(
+            state, self._current_mapping
+        )
+
+        # Convert goal with (possibly extended) mapping
+        converted_goal = convert_goal_to_positive_preconditions(
+            goal, self._current_mapping
+        )
+
+        return _ff_heuristic_cpp(
+            converted_state, converted_goal, self._converted_actions
+        )
+
 
 def reconstruct_path(came_from, current):
     path = []
