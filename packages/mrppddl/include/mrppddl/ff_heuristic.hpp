@@ -54,6 +54,11 @@ FFForwardResult ff_forward_phase(
   result.initial_fluents = initial_fluents;
   result.known_fluents = initial_fluents;
 
+  // Initialize expected costs for initial fluents
+  for (const auto& f : initial_fluents) {
+    result.expected_cost[f] = 0.0;
+  }
+
   std::unordered_set<Fluent> newly_added = result.known_fluents;
   std::unordered_set<const Action *> visited_actions;
   std::unordered_set<const Action *> all_actions_set;
@@ -80,6 +85,11 @@ FFForwardResult ff_forward_phase(
         if (succ_prob <= 0.0) continue;
 
         for (const auto &f : succ_state.fluents()) {
+          // Always record this as an achiever for f
+          result.achievers_by_fluent[f].push_back({
+              a, 0.0, duration, succ_prob  // reach_cost computed in phase 2
+          });
+
           if (!result.known_fluents.count(f)) {
             result.known_fluents.insert(f);
             next_new.insert(f);
