@@ -22,6 +22,7 @@ def get_args():
     args.current_seed = 7005
     args.resolution = 0.05
     args.save_dir = './data/test_logs'
+    random.seed(args.current_seed)
     return args
 
 def test_single_robot_plotting():
@@ -114,7 +115,7 @@ def test_single_robot_plotting():
     assert goal.evaluate(sim.state.fluents)
 
 
-def test_multi_robot_unknown_plotting(given_fluents):
+def test_multi_robot_unknown_plotting():
     args = get_args()
     args.num_robots = 2
     robot_locations = {'robot1': 'start', 'robot2': 'start'}
@@ -146,26 +147,29 @@ def test_multi_robot_unknown_plotting(given_fluents):
     search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
     pick_op = environments.operators.construct_pick_operator(pick_time)
     place_op = environments.operators.construct_place_operator(place_time)
-    no_op = environments.operators.construct_no_op_operator(no_op_time=no_op_time, extra_cost=100.0)
+    no_op = environments.operators.construct_no_op_operator(no_op_time=no_op_time, extra_cost=5000.0)
 
     sim = EnvironmentInterface(init_state, objects_by_type,
                                [search_op, move_op, pick_op, place_op, no_op], env)
 
     all_actions = sim.get_actions()
     mcts = MCTSPlanner(all_actions)
-
     goal = reduce(and_, [F("at egg_55 safe_19"), F("at watch_81 fridge_12")])
     print(f"Goal: {goal}")
 
+    consecutive_no_op = 0
     actions_taken = []
     # Increase iterations/steps for multi-robot to actually do something
-    for _ in range(20):
+    for _ in range(60):
         action_name = mcts(sim.state, goal, max_iterations=20000, c=10)
         if action_name != 'NONE':
             action = get_action_by_name(all_actions, action_name)
             sim.advance(action)
             actions_taken.append(action_name)
-
+            if action_name.split(' ')[0] == 'no_op':
+                consecutive_no_op += 1
+            if consecutive_no_op > 4:
+                break
         if goal.evaluate(sim.state.fluents):
             print("Goal reached!")
             break
@@ -196,7 +200,7 @@ def test_multi_robot_unknown_plotting(given_fluents):
 
     plotting.plot_multi_robot_trajectories(ax, env.grid, robots_data, env.known_graph)
 
-    plt.title(f"Multi Robot Trajectory Cost: {total_cost:.1f}")
+    plt.title(f"Multi Robot Trajectory Cost: {total_cost:.1f}\nGoal: {goal}")
 
     figpath = Path(args.save_dir) / f'test_visualization_unknown_multi_robot_{args.current_seed}.png'
     figpath.parent.mkdir(parents=True, exist_ok=True)
@@ -287,7 +291,7 @@ def test_multi_robot_known_plotting():
 
     plotting.plot_multi_robot_trajectories(ax, env.grid, robots_data, env.known_graph)
 
-    plt.title(f"Multi Robot Trajectory Cost: {total_cost:.1f}")
+    plt.title(f"Multi Robot Trajectory Cost: {total_cost:.1f}\nGoal: {goal}")
 
     figpath = Path(args.save_dir) / f'test_visualization_known_multi_robot_{args.current_seed}.png'
     figpath.parent.mkdir(parents=True, exist_ok=True)
