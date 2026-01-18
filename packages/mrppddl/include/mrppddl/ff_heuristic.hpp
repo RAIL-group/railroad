@@ -212,54 +212,18 @@ double ff_backward_cost(
     }
   }
 
-  // Create a simple goal check function for ablation
-  auto check_goal = [&goal_fluents](const std::unordered_set<Fluent>& fluents) {
-    for (const auto& gf : goal_fluents) {
-      if (!fluents.count(gf)) return false;
-    }
-    return true;
-  };
+  // Sum expected costs of goal fluents (relaxed: no double-counting prevention)
+  double total_cost = 0.0;
+  for (const auto& gf : goal_fluents) {
+    if (forward.initial_fluents.count(gf)) continue;
 
-  // Determine required fluents via ablation
-  std::unordered_set<Fluent> required_fluents;
-  for (const auto &f : forward.known_fluents) {
-    std::unordered_set<Fluent> test_set(forward.known_fluents);
-    test_set.erase(f);
-    if (!check_goal(test_set)) {
-      required_fluents.insert(f);
+    auto it = forward.expected_cost.find(gf);
+    if (it != forward.expected_cost.end()) {
+      total_cost += it->second;
     }
   }
 
-  // Backward relaxed plan
-  std::unordered_set<Fluent> needed = required_fluents;
-  std::unordered_set<const Action *> used_actions;
-  double total_duration = 0.0;
-
-  while (!needed.empty()) {
-    Fluent f = *needed.begin();
-    needed.erase(needed.begin());
-
-    if (forward.initial_fluents.count(f)) continue;
-
-    auto it = forward.fact_to_action.find(f);
-    if (it == forward.fact_to_action.end()) continue;
-
-    const Action *a = it->second;
-    if (used_actions.count(a)) continue;
-    used_actions.insert(a);
-
-    auto dur_it = forward.action_to_duration.find(a);
-    double base_duration = (dur_it != forward.action_to_duration.end()) ? dur_it->second : 0.0;
-    total_duration += base_duration;
-
-    for (const Fluent &p : a->pos_preconditions()) {
-      if (!forward.initial_fluents.count(p)) {
-        needed.insert(p);
-      }
-    }
-  }
-
-  return total_duration;
+  return total_cost;
 }
 
 // Get usable actions via forward relaxed reachability
@@ -372,6 +336,9 @@ inline double ff_heuristic(const State &input_state,
 
   // Run forward phase
   auto forward = ff_forward_phase(initial_fluents, all_actions);
+
+  // Compute expected costs via Bellman iteration
+  compute_expected_costs(forward);
 
   // Extract branches based on goal structure
   auto branches = extract_or_branches(goal);
