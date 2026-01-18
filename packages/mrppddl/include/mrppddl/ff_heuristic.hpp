@@ -14,6 +14,22 @@ namespace mrppddl {
 using HeuristicFn = std::function<double(const State &)>;
 using FFMemory = std::unordered_map<std::size_t, double>;
 
+// Information about an action that can achieve a fluent
+struct ProbabilisticAchiever {
+    const Action* action;
+    double reach_cost;      // Cost to satisfy preconditions
+    double action_cost;     // Duration/cost of action itself
+    double probability;     // Probability of achieving target fluent (1.0 for deterministic)
+
+    double total_cost() const { return reach_cost + action_cost; }
+
+    // Efficiency for ordering: higher = try first
+    double efficiency() const {
+        double c = total_cost();
+        return (c > 1e-9) ? probability / c : probability * 1e9;
+    }
+};
+
 // Result of the forward relaxed reachability phase (goal-independent)
 struct FFForwardResult {
   std::unordered_set<Fluent> known_fluents;      // All reachable fluents

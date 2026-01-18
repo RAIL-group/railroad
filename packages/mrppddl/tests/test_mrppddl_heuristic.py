@@ -635,6 +635,32 @@ def test_convert_state_with_upcoming_effects():
     assert ~F("not-found obj") in success_effect.resulting_fluents
 
 
+def test_expected_cost_single_achiever():
+    """With one probabilistic achiever, expected cost = reach + action cost."""
+    # Single search action with p=0.5, cost=10
+    search_op = construct_search_operator(find_prob=0.5, search_cost=10.0)
+
+    objects_by_type = {
+        "robot": ["r1"],
+        "location": ["loc1"],
+        "object": ["obj1"],
+    }
+
+    all_actions = list(search_op.instantiate(objects_by_type))
+
+    initial_state = State(
+        time=0,
+        fluents={F("at r1 loc1"), F("free r1")}
+    )
+
+    goal = F("found obj1")
+    h_value = ff_heuristic(initial_state, goal, all_actions)
+
+    # With single one-shot achiever: E[cost] = action_cost (not divided by p)
+    # because we can only try once
+    assert h_value == 10.0, f"Expected 10.0, got {h_value}"
+
+
 def test_goal_goal_count():
     """Test Goal's goal_count method counts how many goal fluents are achieved."""
     # Create a goal with 3 goal fluents using the new Goal API
