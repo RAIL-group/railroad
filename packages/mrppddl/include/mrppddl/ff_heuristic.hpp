@@ -37,6 +37,10 @@ struct FFForwardResult {
   std::unordered_map<Fluent, const Action*> fact_to_action;
   std::unordered_map<const Action*, double> action_to_duration;
   std::unordered_map<Fluent, double> fact_to_probability;
+
+  // New fields for expected cost computation
+  std::unordered_map<Fluent, std::vector<ProbabilisticAchiever>> achievers_by_fluent;
+  std::unordered_map<Fluent, double> expected_cost;  // V(f) values from Bellman iteration
 };
 
 // Forward relaxed reachability phase - goal independent
