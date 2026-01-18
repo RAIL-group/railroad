@@ -14,7 +14,7 @@ This project uses `uv` as the package manager and build tool. The build system a
 
 - **Run all tests**: `uv run pytest`
 - **Run tests matching filter**: `uv run pytest -vk <filter>`
-- **Type checking**: `uv run pyright -w mrppddl/src/mrppddl mrppddl/tests` (currently not working)
+- **Type checking**: `uv run ty check src` (covers `src/` packages; more coverage coming later)
 - **Run benchmarks**: `uv run benchmarks-run` (use `--dry-run` to preview, `-k <filter>` to filter)
 - **Launch benchmark dashboard**: `uv run benchmarks-dashboard`
 

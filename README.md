@@ -123,7 +123,8 @@ uv run pytest -vk search
 ### Type Checking
 
 ```bash
-uv run pyright -w mrppddl/src/mrppddl mrppddl/tests
+# Type check src/ packages (more coverage coming later)
+uv run ty check src
 ```
 
 ### Running Benchmarks
