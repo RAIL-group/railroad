@@ -1,5 +1,5 @@
 # Re-import required dependencies due to kernel reset
-from typing import Callable, List, Tuple, Dict, Set, Union, Sequence, Collection, cast
+from typing import Callable, List, Tuple, Dict, Set, Union, Sequence, Collection, Optional, cast
 import itertools
 
 try:
@@ -37,174 +37,6 @@ def ff_heuristic(state: State, goal: Union[Goal, Fluent], all_actions: List[Acti
     return _ff_heuristic_cpp(state, goal, all_actions)
 
 Num = Union[float, int]
-
-
-# =============================================================================
-# Operator overloading for Fluent class
-# =============================================================================
-# Add & and | operators to Fluent class for convenient goal construction.
-# This allows writing:  F("at r1 kitchen") | F("at r1 bedroom")
-# Instead of:          OrGoal([LiteralGoal(F("at r1 kitchen")), LiteralGoal(F("at r1 bedroom"))])
-
-
-def _fluent_and(self: Fluent, other: Union[Fluent, Goal]) -> Goal:
-    """Create an AndGoal from two fluents or a fluent and a goal.
-
-    Usage:
-        goal = F("at r1 kitchen") & F("holding r1 cup")
-        goal = existing_goal & F("free r1")
-    """
-    self_goal = LiteralGoal(self)
-
-    if isinstance(other, Fluent):
-        other_goal = LiteralGoal(other)
-        return AndGoal([self_goal, other_goal])
-    elif hasattr(other, 'get_type'):
-        # It's a Goal object
-        from mrppddl._bindings import GoalType
-        if other.get_type() == GoalType.AND:
-            # Flatten: self & AND(a, b) → AND(self, a, b)
-            return AndGoal([self_goal] + list(other.children()))
-        else:
-            return AndGoal([self_goal, other])
-    else:
-        return NotImplemented
-
-
-def _fluent_or(self: Fluent, other: Union[Fluent, Goal]) -> Goal:
-    """Create an OrGoal from two fluents or a fluent and a goal.
-
-    Usage:
-        goal = F("at r1 kitchen") | F("at r1 bedroom")
-        goal = existing_goal | F("at r1 den")
-    """
-    self_goal = LiteralGoal(self)
-
-    if isinstance(other, Fluent):
-        other_goal = LiteralGoal(other)
-        return OrGoal([self_goal, other_goal])
-    elif hasattr(other, 'get_type'):
-        # It's a Goal object
-        from mrppddl._bindings import GoalType
-        if other.get_type() == GoalType.OR:
-            # Flatten: self | OR(a, b) → OR(self, a, b)
-            return OrGoal([self_goal] + list(other.children()))
-        else:
-            return OrGoal([self_goal, other])
-    else:
-        return NotImplemented
-
-
-def _fluent_rand(self: Fluent, other: Union[Fluent, Goal]) -> Goal:
-    """Reverse and: other & self"""
-    if isinstance(other, Fluent):
-        return _fluent_and(other, self)
-    return NotImplemented
-
-
-def _fluent_ror(self: Fluent, other: Union[Fluent, Goal]) -> Goal:
-    """Reverse or: other | self"""
-    if isinstance(other, Fluent):
-        return _fluent_or(other, self)
-    return NotImplemented
-
-
-# Monkey-patch the Fluent class with operators
-Fluent.__and__ = _fluent_and
-Fluent.__or__ = _fluent_or
-Fluent.__rand__ = _fluent_rand
-Fluent.__ror__ = _fluent_ror
-
-
-def _fluent_evaluate(self: Fluent, fluents) -> bool:
-    """Evaluate whether this fluent is satisfied by the given fluent set.
-
-    This allows bare Fluent objects to be used interchangeably with Goal objects.
-
-    Usage:
-        fluent = F("at robot kitchen")
-        if fluent.evaluate(state.fluents):
-            print("Goal reached!")
-    """
-    return LiteralGoal(self).evaluate(fluents)
-
-
-def _fluent_get_all_literals(self: Fluent):
-    """Return all literals in this goal (just this fluent).
-
-    This allows bare Fluent objects to be used interchangeably with Goal objects.
-    """
-    return LiteralGoal(self).get_all_literals()
-
-
-def _fluent_goal_count(self: Fluent, fluents) -> int:
-    """Count how many goal literals are satisfied.
-
-    For a single fluent, returns 1 if satisfied, 0 otherwise.
-    """
-    return LiteralGoal(self).goal_count(fluents)
-
-
-Fluent.evaluate = _fluent_evaluate
-Fluent.get_all_literals = _fluent_get_all_literals
-Fluent.goal_count = _fluent_goal_count
-
-
-# Also add operators to Goal class for chaining
-def _goal_and(self: Goal, other: Union[Fluent, Goal]) -> Goal:
-    """Chain an AndGoal with another fluent or goal."""
-    from mrppddl._bindings import GoalType
-
-    if isinstance(other, Fluent):
-        other_goal = LiteralGoal(other)
-    elif hasattr(other, 'get_type'):
-        other_goal = other
-    else:
-        return NotImplemented
-
-    # Flatten if possible
-    if self.get_type() == GoalType.AND:
-        children = list(self.children())
-        if isinstance(other_goal, Goal) and other_goal.get_type() == GoalType.AND:
-            children.extend(other_goal.children())
-        else:
-            children.append(other_goal)
-        return AndGoal(children)
-    else:
-        if isinstance(other_goal, Goal) and other_goal.get_type() == GoalType.AND:
-            return AndGoal([self] + list(other_goal.children()))
-        else:
-            return AndGoal([self, other_goal])
-
-
-def _goal_or(self: Goal, other: Union[Fluent, Goal]) -> Goal:
-    """Chain an OrGoal with another fluent or goal."""
-    from mrppddl._bindings import GoalType
-
-    if isinstance(other, Fluent):
-        other_goal = LiteralGoal(other)
-    elif hasattr(other, 'get_type'):
-        other_goal = other
-    else:
-        return NotImplemented
-
-    # Flatten if possible
-    if self.get_type() == GoalType.OR:
-        children = list(self.children())
-        if isinstance(other_goal, Goal) and other_goal.get_type() == GoalType.OR:
-            children.extend(other_goal.children())
-        else:
-            children.append(other_goal)
-        return OrGoal(children)
-    else:
-        if isinstance(other_goal, Goal) and other_goal.get_type() == GoalType.OR:
-            return OrGoal([self] + list(other_goal.children()))
-        else:
-            return OrGoal([self, other_goal])
-
-
-Goal.__and__ = _goal_and
-Goal.__or__ = _goal_or
 
 
 Binding = Dict[str, str]
@@ -383,7 +215,7 @@ def extract_negative_goal_fluents(goal: Goal) -> Set[Fluent]:
     negative_fluents = set()
     goal_type = goal.get_type()
 
-    if goal_type == GoalType.LITERAL:
+    if isinstance(goal, LiteralGoal):
         fluent = goal.fluent()
         if fluent.negated:
             # Return the positive form

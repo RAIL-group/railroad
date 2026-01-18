@@ -273,7 +273,7 @@ class TestNormalization:
         g2 = AndGoal([c, b, a]).normalize()
         g3 = AndGoal([b, a, c]).normalize()
 
-        assert g1 == g2 == g3, f"Canonical ordering failed: sig1={_goal_sig(g1)} sig2={_goal_sig(g2)} sig3={_goal_sig(g3)}"
+        assert g1 == g2 == g3, "Canonical ordering failed"
 
     def test_example_from_design_doc(self):
         # Input: AND(table_set, AND(toast_ready, TRUE), OR(FALSE, coffee_ready))

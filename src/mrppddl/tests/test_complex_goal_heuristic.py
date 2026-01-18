@@ -21,6 +21,7 @@ from mrppddl.core import (
     convert_action_effects,
 )
 from mrppddl._bindings import (
+    Goal,
     LiteralGoal,
     GoalType,
 )
@@ -60,7 +61,7 @@ class TestNegativeGoalHeuristic:
         goal = reduce(and_, [~F(f"at {obj} table") for obj in objects])
 
         # Verify goal structure
-        assert goal.get_type() == GoalType.AND
+        assert isinstance(goal, Goal) and goal.get_type() == GoalType.AND
 
         # State where all objects are at table - goal NOT satisfied
         state_all_on_table = State(

@@ -5,7 +5,7 @@ Provides decorator-based API for registering benchmarks with cases.
 Benchmarks are automatically registered when decorated.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Any, Callable, List, Optional
 import inspect
 from pathlib import Path
@@ -78,22 +78,43 @@ class BenchmarkCase:
     Parameters can be accessed in two ways:
     1. Dictionary style: case.params["mcts.iterations"]
     2. Dot notation: case.mcts.iterations
+
+    Dynamic attributes can be set and retrieved via dot notation:
+        case.goal = some_goal  # stored in extra, not logged
+        goal = case.goal       # retrieved from extra
     """
     benchmark_name: str
     case_idx: int
     repeat_idx: int
     params: Dict[str, Any]
+    extra: Dict[str, Any] = field(default_factory=dict, repr=False)
+
+    # Class-level set of dataclass field names (not stored in extra)
+    _FIELDS = {'benchmark_name', 'case_idx', 'repeat_idx', 'params', 'extra'}
+
+    def __setattr__(self, name: str, value: Any):
+        """Store unknown attributes in extra dict (not logged)."""
+        # Allow setting dataclass fields normally
+        if name in BenchmarkCase._FIELDS:
+            object.__setattr__(self, name, value)
+        else:
+            # Store in extra for dynamic attributes
+            self.extra[name] = value
 
     def __getattr__(self, name: str):
         """
-        Enable dot notation access to parameters.
+        Enable dot notation access to extra and params.
 
-        Supports both direct parameters and nested parameters with dots.
+        Priority: extra > params > nested params
         Example: case.mcts.iterations accesses params["mcts.iterations"]
         """
         # Avoid infinite recursion by checking if we're looking for private attrs
         if name.startswith('_'):
             raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+
+        # Check extra first (dynamic attributes)
+        if name in self.extra:
+            return self.extra[name]
 
         # Try direct parameter access
         if name in self.params:

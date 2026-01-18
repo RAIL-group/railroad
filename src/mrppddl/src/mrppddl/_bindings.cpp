@@ -55,7 +55,80 @@ PYBIND11_MODULE(_bindings, m) {
         }
         oss << ")";
         return oss.str();
-      });
+      })
+      // Operators for goal construction: F("a") & F("b") -> AndGoal
+      .def("__and__", [](const Fluent &self, const py::object &other) -> GoalPtr {
+        auto self_goal = std::make_shared<LiteralGoal>(self);
+        if (py::isinstance<Fluent>(other)) {
+          auto other_goal = std::make_shared<LiteralGoal>(other.cast<Fluent>());
+          return std::make_shared<AndGoal>(std::vector<GoalPtr>{self_goal, other_goal});
+        }
+        // Try cast to GoalPtr - works for Goal and all subclasses
+        try {
+          auto other_goal = other.cast<GoalPtr>();
+          if (other_goal->get_type() == GoalType::AND) {
+            // Flatten: self & AND(a, b) -> AND(self, a, b)
+            std::vector<GoalPtr> children = {self_goal};
+            for (const auto &child : other_goal->children()) {
+              children.push_back(child);
+            }
+            return std::make_shared<AndGoal>(std::move(children));
+          }
+          return std::make_shared<AndGoal>(std::vector<GoalPtr>{self_goal, other_goal});
+        } catch (const py::cast_error&) {
+          throw py::type_error("unsupported operand type for &");
+        }
+      })
+      .def("__or__", [](const Fluent &self, const py::object &other) -> GoalPtr {
+        auto self_goal = std::make_shared<LiteralGoal>(self);
+        if (py::isinstance<Fluent>(other)) {
+          auto other_goal = std::make_shared<LiteralGoal>(other.cast<Fluent>());
+          return std::make_shared<OrGoal>(std::vector<GoalPtr>{self_goal, other_goal});
+        }
+        // Try cast to GoalPtr - works for Goal and all subclasses
+        try {
+          auto other_goal = other.cast<GoalPtr>();
+          if (other_goal->get_type() == GoalType::OR) {
+            // Flatten: self | OR(a, b) -> OR(self, a, b)
+            std::vector<GoalPtr> children = {self_goal};
+            for (const auto &child : other_goal->children()) {
+              children.push_back(child);
+            }
+            return std::make_shared<OrGoal>(std::move(children));
+          }
+          return std::make_shared<OrGoal>(std::vector<GoalPtr>{self_goal, other_goal});
+        } catch (const py::cast_error&) {
+          throw py::type_error("unsupported operand type for |");
+        }
+      })
+      .def("__rand__", [](const Fluent &self, const py::object &other) -> GoalPtr {
+        // Reverse and: other & self (when other doesn't define __and__)
+        if (py::isinstance<Fluent>(other)) {
+          auto other_goal = std::make_shared<LiteralGoal>(other.cast<Fluent>());
+          auto self_goal = std::make_shared<LiteralGoal>(self);
+          return std::make_shared<AndGoal>(std::vector<GoalPtr>{other_goal, self_goal});
+        }
+        throw py::type_error("unsupported operand type for &");
+      })
+      .def("__ror__", [](const Fluent &self, const py::object &other) -> GoalPtr {
+        // Reverse or: other | self (when other doesn't define __or__)
+        if (py::isinstance<Fluent>(other)) {
+          auto other_goal = std::make_shared<LiteralGoal>(other.cast<Fluent>());
+          auto self_goal = std::make_shared<LiteralGoal>(self);
+          return std::make_shared<OrGoal>(std::vector<GoalPtr>{other_goal, self_goal});
+        }
+        throw py::type_error("unsupported operand type for |");
+      })
+      // Goal-like methods for Fluent (delegate to LiteralGoal)
+      .def("evaluate", [](const Fluent &self, const std::unordered_set<Fluent> &fluents) {
+        return LiteralGoal(self).evaluate(fluents);
+      }, py::arg("fluents"), "Check if this fluent is satisfied by given fluents")
+      .def("get_all_literals", [](const Fluent &self) {
+        return LiteralGoal(self).get_all_literals();
+      }, "Get all literal fluents (just this fluent)")
+      .def("goal_count", [](const Fluent &self, const std::unordered_set<Fluent> &fluents) {
+        return LiteralGoal(self).goal_count(fluents);
+      }, py::arg("fluents"), "Count how many goal literals are achieved (0 or 1)");
 
   // GroundedEffect
   py::class_<GroundedEffect, std::shared_ptr<GroundedEffect>>(m,
@@ -326,7 +399,68 @@ PYBIND11_MODULE(_bindings, m) {
       .def("goal_count", &GoalBase::goal_count, py::arg("fluents"),
            "Count how many goal literals are achieved")
       .def("__eq__", &GoalBase::operator==)
-      .def("__hash__", &GoalBase::hash);
+      .def("__hash__", &GoalBase::hash)
+      // Operators for goal chaining
+      .def("__and__", [](const GoalPtr &self, const py::object &other) -> GoalPtr {
+        GoalPtr other_goal;
+        if (py::isinstance<Fluent>(other)) {
+          other_goal = std::make_shared<LiteralGoal>(other.cast<Fluent>());
+        } else {
+          // Try cast to GoalPtr - works for Goal and all subclasses (AndGoal, OrGoal, etc.)
+          try {
+            other_goal = other.cast<GoalPtr>();
+          } catch (const py::cast_error&) {
+            throw py::type_error("unsupported operand type for &");
+          }
+        }
+        // Flatten if possible
+        std::vector<GoalPtr> children;
+        if (self->get_type() == GoalType::AND) {
+          for (const auto &child : self->children()) {
+            children.push_back(child);
+          }
+        } else {
+          children.push_back(self);
+        }
+        if (other_goal->get_type() == GoalType::AND) {
+          for (const auto &child : other_goal->children()) {
+            children.push_back(child);
+          }
+        } else {
+          children.push_back(other_goal);
+        }
+        return std::make_shared<AndGoal>(std::move(children));
+      })
+      .def("__or__", [](const GoalPtr &self, const py::object &other) -> GoalPtr {
+        GoalPtr other_goal;
+        if (py::isinstance<Fluent>(other)) {
+          other_goal = std::make_shared<LiteralGoal>(other.cast<Fluent>());
+        } else {
+          // Try cast to GoalPtr - works for Goal and all subclasses (AndGoal, OrGoal, etc.)
+          try {
+            other_goal = other.cast<GoalPtr>();
+          } catch (const py::cast_error&) {
+            throw py::type_error("unsupported operand type for |");
+          }
+        }
+        // Flatten if possible
+        std::vector<GoalPtr> children;
+        if (self->get_type() == GoalType::OR) {
+          for (const auto &child : self->children()) {
+            children.push_back(child);
+          }
+        } else {
+          children.push_back(self);
+        }
+        if (other_goal->get_type() == GoalType::OR) {
+          for (const auto &child : other_goal->children()) {
+            children.push_back(child);
+          }
+        } else {
+          children.push_back(other_goal);
+        }
+        return std::make_shared<OrGoal>(std::move(children));
+      });
 
   py::class_<TrueGoal, GoalBase, std::shared_ptr<TrueGoal>>(m, "TrueGoal")
       .def(py::init<>())
