@@ -228,8 +228,8 @@ def extract_negative_goal_fluents(goal: Goal) -> Set[Fluent]:
 
 
 def extract_all_negative_fluents(
-    actions: List[Action] = None,
-    goal: Goal = None
+    actions: Optional[List[Action]] = None,
+    goal: Optional[Goal] = None
 ) -> Set[Fluent]:
     """Extract negative fluents from actions and/or goals.
 

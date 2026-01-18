@@ -9,7 +9,7 @@ from rich.text import Text
 
 import re
 from time import sleep, perf_counter
-from typing import List, Dict, Set, Union, Tuple
+from typing import List, Dict, Set, Union, Tuple, Optional
 
 from mrppddl._bindings import (
     Goal,
@@ -77,7 +77,7 @@ def action_color(action: str) -> str:
 
 
 def render_timeline(actions: List[Tuple[str, float]], robots: Set[str],
-                    width: int = 50, end_time: float = None) -> str:
+                    width: int = 50, end_time: Optional[float] = None) -> str:
     """Render Braille timeline. Each robot uses 2 vertical dots; 2 robots per row."""
     if not actions or not robots:
         return ""
