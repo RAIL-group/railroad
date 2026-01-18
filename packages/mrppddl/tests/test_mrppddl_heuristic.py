@@ -661,6 +661,71 @@ def test_expected_cost_single_achiever():
     assert h_value == 10.0, f"Expected 10.0, got {h_value}"
 
 
+def test_expected_cost_multiple_achievers():
+    """Multiple achievers should produce expected cost based on optimal ordering."""
+    # Two search locations with different probabilities and costs
+    # Location A: p=0.3, cost=7  -> efficiency = 0.043
+    # Location B: p=0.5, cost=6  -> efficiency = 0.083 (try first)
+    #
+    # Optimal order: B first, then A
+    # E[cost] = 6 + (1-0.5) * 7 = 6 + 3.5 = 9.5
+
+    move_op = construct_move_operator(move_cost=0.0)  # Free movement
+    search_op_a = Operator(
+        name="search_a",
+        parameters=[("?r", "robot")],
+        preconditions=[F("at ?r locA"), F("free ?r"), ~F("searched locA"), ~F("found obj")],
+        effects=[
+            Effect(time=0, resulting_fluents={~F("free ?r")}),
+            Effect(
+                time=7.0,
+                resulting_fluents={F("free ?r"), F("searched locA")},
+                prob_effects=[
+                    (0.3, [Effect(time=0, resulting_fluents={F("found obj")})]),
+                    (0.7, [])
+                ]
+            )
+        ]
+    )
+    search_op_b = Operator(
+        name="search_b",
+        parameters=[("?r", "robot")],
+        preconditions=[F("at ?r locB"), F("free ?r"), ~F("searched locB"), ~F("found obj")],
+        effects=[
+            Effect(time=0, resulting_fluents={~F("free ?r")}),
+            Effect(
+                time=6.0,
+                resulting_fluents={F("free ?r"), F("searched locB")},
+                prob_effects=[
+                    (0.5, [Effect(time=0, resulting_fluents={F("found obj")})]),
+                    (0.5, [])
+                ]
+            )
+        ]
+    )
+
+    objects_by_type = {
+        "robot": ["r1"],
+        "location": ["start", "locA", "locB"],
+    }
+
+    all_actions = []
+    all_actions.extend(move_op.instantiate(objects_by_type))
+    all_actions.extend(search_op_a.instantiate(objects_by_type))
+    all_actions.extend(search_op_b.instantiate(objects_by_type))
+
+    initial_state = State(
+        time=0,
+        fluents={F("at r1 start"), F("free r1")}
+    )
+
+    goal = F("found obj")
+    h_value = ff_heuristic(initial_state, goal, all_actions)
+
+    # Expected: 6 + 0.5 * 7 = 9.5
+    assert abs(h_value - 9.5) < 0.01, f"Expected ~9.5, got {h_value}"
+
+
 def test_goal_goal_count():
     """Test Goal's goal_count method counts how many goal fluents are achieved."""
     # Create a goal with 3 goal fluents using the new Goal API

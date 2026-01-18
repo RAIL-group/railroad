@@ -3,6 +3,7 @@
 #include "mrppddl/core.hpp"
 #include "mrppddl/state.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <optional>
 #include <unordered_map>
@@ -114,6 +115,82 @@ FFForwardResult ff_forward_phase(
   }
 
   return result;
+}
+
+// Compute expected costs for fluents using Bellman-style iteration
+inline void compute_expected_costs(FFForwardResult& result) {
+  // Initialize: V(f) = 0 for initial, +infinity otherwise
+  for (const auto& [f, achievers] : result.achievers_by_fluent) {
+    if (!result.initial_fluents.count(f)) {
+      result.expected_cost[f] = std::numeric_limits<double>::infinity();
+    }
+  }
+
+  bool changed = true;
+  int iteration = 0;
+  const int MAX_ITERATIONS = 100;
+  const double TOLERANCE = 1e-9;
+
+  while (changed && iteration < MAX_ITERATIONS) {
+    changed = false;
+    iteration++;
+
+    for (auto& [f, achievers] : result.achievers_by_fluent) {
+      if (result.initial_fluents.count(f)) continue;
+
+      // Update reach_cost for each achiever from precondition costs
+      for (auto& achiever : achievers) {
+        double max_prec_cost = 0.0;
+        for (const auto& prec : achiever.action->pos_preconditions()) {
+          auto it = result.expected_cost.find(prec);
+          if (it != result.expected_cost.end()) {
+            max_prec_cost = std::max(max_prec_cost, it->second);
+          }
+        }
+        achiever.reach_cost = max_prec_cost;
+      }
+
+      // Compute D(f) - min cost from deterministic achievers (p >= 1.0 - epsilon)
+      double D_f = std::numeric_limits<double>::infinity();
+      for (const auto& achiever : achievers) {
+        if (achiever.probability >= 1.0 - TOLERANCE) {
+          D_f = std::min(D_f, achiever.total_cost());
+        }
+      }
+
+      // Compute E(f) - expected cost from probabilistic achievers
+      // Sort by efficiency (p/cost) descending
+      std::vector<ProbabilisticAchiever> prob_achievers;
+      for (const auto& a : achievers) {
+        if (a.probability > TOLERANCE && a.probability < 1.0 - TOLERANCE) {
+          prob_achievers.push_back(a);
+        }
+      }
+
+      double E_f = std::numeric_limits<double>::infinity();
+      if (!prob_achievers.empty()) {
+        std::sort(prob_achievers.begin(), prob_achievers.end(),
+            [](const ProbabilisticAchiever& a, const ProbabilisticAchiever& b) {
+              return a.efficiency() > b.efficiency();
+            });
+
+        // E(f) = sum_{t} [ prod_{j<t}(1-p_j) * C_t ]
+        E_f = 0.0;
+        double prob_all_failed = 1.0;
+        for (const auto& achiever : prob_achievers) {
+          E_f += prob_all_failed * achiever.total_cost();
+          prob_all_failed *= (1.0 - achiever.probability);
+        }
+      }
+
+      // V(f) = min(D(f), E(f))
+      double new_cost = std::min(D_f, E_f);
+      if (std::abs(new_cost - result.expected_cost[f]) > TOLERANCE) {
+        result.expected_cost[f] = new_cost;
+        changed = true;
+      }
+    }
+  }
 }
 
 // Backward cost computation given forward results and goal fluents
