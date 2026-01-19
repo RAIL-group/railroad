@@ -26,7 +26,7 @@ class PyRoboSimEnv(BaseEnvironment):
     def __init__(self, world_file: str):
         self.world = WorldYamlLoader().from_file(world_file)
         self.canvas = MatplotlibWorldCanvas(self.world)
-        self.locations = self.world.get_location_names()
+        self.locations = {loc.name: loc.pose for loc in self.world.locations + self.world.rooms}
         self.robots = {robot.name: robot for robot in self.world.robots}
         self.is_robot_assigned = {robot: False for robot in self.robots}
         self.is_no_op_running = {robot: False for robot in self.robots}
@@ -66,19 +66,18 @@ class PyRoboSimEnv(BaseEnvironment):
             raise ValueError(f"Skill '{skill_name}' not recognized.")
         time.sleep(0.1)  # Give some time for the skill to start
 
-    def get_skills_time_fn(self, skill_name: str):
+    def get_skills_cost_fn(self, skill_name: str):
         if skill_name == 'move':
             return self._get_move_cost_fn()
         else:
             def get_skill_time(robot_name, *args, **kwargs):
-                return 5.0  # TODO: Get skills time from pyrobosim
+                return 1.0  # TODO: Get skills time from pyrobosim
             return get_skill_time
 
     def _get_move_cost_fn(self):
         def get_move_time(robot, loc_from, loc_to):
-            from_pose = self.world.get_location_by_name(loc_from).pose
-            to_pose = self.world.get_location_by_name(loc_to).pose
-            plan = self.robots[robot].path_planner.plan_path(from_pose, to_pose)
+            from_pose = self.locations[loc_from]
+            to_pose = self.locations[loc_to]
             if plan is None:
                 return float('inf')
             return plan.length / 1.0  # robot velocity = 1.0
@@ -113,12 +112,13 @@ class PyRoboSimEnv(BaseEnvironment):
 
     @run_async
     def _search(self, robot_name):
-        self.robots[robot_name].detect_objects()
+        # self.robots[robot_name].detect_objects()
+        pass
 
     @run_async
     def _no_op(self, robot_name):
         self.is_no_op_running[robot_name] = True
-        time.sleep(self.get_skills_time_fn('no_op')(robot_name))
+        time.sleep(self.get_skills_cost_fn('no_op')(robot_name))
         self.is_no_op_running[robot_name] = False
 
 
