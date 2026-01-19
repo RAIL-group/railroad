@@ -37,8 +37,8 @@ def main():
     args = get_args()
     args.current_seed = 4001
     robot_locations = {
-        'robot1': 'start',
-        'robot2': 'start',
+        'robot1': 'start_loc',
+        'robot2': 'start_loc',
     }
     env = environments.procthor.ProcTHOREnvironment(args, robot_locations=robot_locations)
     objects = ['teddybear_6', 'pencil_17']
@@ -53,9 +53,9 @@ def main():
     initial_state = State(
             time=0,
             fluents={
-                F("revealed start"),
-                F("at robot1 start"), F("free robot1"),
-                F("at robot2 start"), F("free robot2"),
+                F("revealed start_loc"),
+                F("at robot1 start_loc"), F("free robot1"),
+                F("at robot2 start_loc"), F("free robot2"),
             },
     )
     # Task: Place all objects at random_location
@@ -67,7 +67,16 @@ def main():
     search_time = env.get_skills_cost_fn(skill_name='search')
     pick_time = env.get_skills_cost_fn(skill_name='pick')
     place_time = env.get_skills_cost_fn(skill_name='place')
-    object_find_prob = lambda r, l, o: 1.0
+    # Build mapping of object -> actual location from the known graph
+    object_locations = {}
+    for container_idx in env.known_graph.container_indices:
+        location_name = f"{env.known_graph.get_node_name_by_idx(container_idx)}_{container_idx}"
+        object_idxs = env.known_graph.get_adjacent_nodes_idx(container_idx, filter_by_type=3)
+        for obj_idx in object_idxs:
+            obj_name = f'{env.known_graph.get_node_name_by_idx(obj_idx)}_{obj_idx}'
+            object_locations[obj_name] = location_name
+
+    object_find_prob = lambda r, l, o: 0.8 if object_locations.get(o) == l else 0.1
     move_op = environments.operators.construct_move_operator(move_time_fn)
     search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
     pick_op = environments.operators.construct_pick_operator(pick_time)
@@ -102,7 +111,7 @@ def main():
 
             # Plan next action
             mcts = MCTSPlanner(all_actions)
-            action_name = mcts(sim.state, goal, max_iterations=10000, c=300, max_depth=20)
+            action_name = mcts(sim.state, goal, max_iterations=10000, c=300, max_depth=20, heuristic_multiplier=2)
 
             if action_name == 'NONE':
                 dashboard.console.print("No more actions available. Goal may not be achievable.")

@@ -69,7 +69,7 @@ class ProcTHOREnvironment(BaseEnvironment):
         return {'object': object_names}
 
     def _get_location_to_coordinates_dict(self):
-        loc_to_coords = {'start': self.start_coords}
+        loc_to_coords = {'start_loc': self.start_coords}
         for container_idx in self.known_graph.container_indices:
             loc_name = self.known_graph.get_node_name_by_idx(container_idx)
             coords = self.known_graph.get_node_position_by_idx(container_idx)
