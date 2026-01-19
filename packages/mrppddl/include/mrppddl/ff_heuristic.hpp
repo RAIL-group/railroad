@@ -18,16 +18,17 @@ using FFMemory = std::unordered_map<std::size_t, double>;
 // Information about an action that can achieve a fluent
 struct ProbabilisticAchiever {
     const Action* action;
-    double reach_cost;      // Cost to satisfy preconditions
-    double action_cost;     // Duration/cost of action itself
+    double wait_cost;       // Time until preconditions satisfied (MAX of precondition costs)
+    double exec_cost;       // Duration of action execution itself
     double probability;     // Probability of achieving target fluent (1.0 for deterministic)
 
-    double total_cost() const { return reach_cost + action_cost; }
+    // Total cost for a single attempt (wait + execute)
+    double attempt_cost() const { return wait_cost + exec_cost; }
 
     // Efficiency for ordering: higher = try first
+    // Use probability / exec_cost since wait_cost is paid regardless
     double efficiency() const {
-        double c = total_cost();
-        return (c > 1e-9) ? probability / c : probability * 1e9;
+        return (exec_cost > 1e-9) ? probability / exec_cost : probability * 1e9;
     }
 };
 
@@ -39,9 +40,10 @@ struct FFForwardResult {
   std::unordered_map<const Action*, double> action_to_duration;
   std::unordered_map<Fluent, double> fact_to_probability;
 
-  // New fields for expected cost computation
+  // Fields for expected cost computation
   std::unordered_map<Fluent, std::vector<ProbabilisticAchiever>> achievers_by_fluent;
-  std::unordered_map<Fluent, double> expected_cost;  // V(f) values from Bellman iteration
+  std::unordered_map<Fluent, double> expected_cost;  // D(f) - optimistic cost
+  std::unordered_map<Fluent, double> probabilistic_delta;  // delta(f) = E_attempt - D for probabilistic fluents
 };
 
 // Forward relaxed reachability phase - goal independent
@@ -88,7 +90,7 @@ FFForwardResult ff_forward_phase(
         for (const auto &f : succ_state.fluents()) {
           // Always record this as an achiever for f
           result.achievers_by_fluent[f].push_back({
-              a, 0.0, duration, succ_prob  // reach_cost computed in phase 2
+              a, 0.0, duration, succ_prob  // wait_cost=0 (computed in phase 2), exec_cost=duration
           });
 
           if (!result.known_fluents.count(f)) {
@@ -117,19 +119,28 @@ FFForwardResult ff_forward_phase(
   return result;
 }
 
-// Compute expected costs for fluents using Bellman-style iteration
-inline void compute_expected_costs(FFForwardResult& result) {
-  // Initialize: V(f) = 0 for initial, +infinity otherwise
+// Compute expected costs using delta-based approach (no circular dependencies)
+// Phase 1: Compute D(f) for all fluents (optimistic, treating all achievers as deterministic)
+// Phase 2: For probabilistic fluents, compute delta = E_attempt - D_best
+// The total expected cost = D(goal) + sum of deltas on extraction path
+inline void compute_expected_costs(FFForwardResult& result, bool debug = false) {
+  const double TOLERANCE = 1e-9;
+  const int MAX_ITERATIONS = 100;
+
+  // Initialize: D(f) = 0 for initial, +infinity otherwise
   for (const auto& [f, achievers] : result.achievers_by_fluent) {
     if (!result.initial_fluents.count(f)) {
       result.expected_cost[f] = std::numeric_limits<double>::infinity();
     }
   }
 
+  // Track which fluents have deterministic achievers available
+  std::unordered_set<Fluent> has_det_achiever;
+
+  // Phase 1: Compute D(f) for all fluents using fixed-point iteration
+  // D is the optimistic cost using deterministic achievers (or best probabilistic if none)
   bool changed = true;
   int iteration = 0;
-  const int MAX_ITERATIONS = 100;
-  const double TOLERANCE = 1e-9;
 
   while (changed && iteration < MAX_ITERATIONS) {
     changed = false;
@@ -138,7 +149,7 @@ inline void compute_expected_costs(FFForwardResult& result) {
     for (auto& [f, achievers] : result.achievers_by_fluent) {
       if (result.initial_fluents.count(f)) continue;
 
-      // Update reach_cost for each achiever from precondition costs
+      // Update wait_cost for each achiever using current D values
       for (auto& achiever : achievers) {
         double max_prec_cost = 0.0;
         for (const auto& prec : achiever.action->pos_preconditions()) {
@@ -147,53 +158,109 @@ inline void compute_expected_costs(FFForwardResult& result) {
             max_prec_cost = std::max(max_prec_cost, it->second);
           }
         }
-        achiever.reach_cost = max_prec_cost;
+        achiever.wait_cost = max_prec_cost;
       }
 
-      // Compute D(f) - min cost from deterministic achievers (p >= 1.0 - epsilon)
-      double D_f = std::numeric_limits<double>::infinity();
+      // D(f) = min of deterministic achievers (p >= 1.0)
+      // If no deterministic achievers, use best probabilistic (highest p, then lowest cost)
+      double D_det = std::numeric_limits<double>::infinity();
+      double D_prob = std::numeric_limits<double>::infinity();
+      double best_prob = 0.0;
+
       for (const auto& achiever : achievers) {
+        double cost = achiever.wait_cost + achiever.exec_cost;
         if (achiever.probability >= 1.0 - TOLERANCE) {
-          D_f = std::min(D_f, achiever.total_cost());
+          D_det = std::min(D_det, cost);
+        } else if (achiever.probability > TOLERANCE) {
+          // For probabilistic, prefer higher probability, then lower cost
+          if (achiever.probability > best_prob ||
+              (achiever.probability >= best_prob - TOLERANCE && cost < D_prob)) {
+            D_prob = cost;
+            best_prob = achiever.probability;
+          }
         }
       }
 
-      // Compute E(f) - expected cost from probabilistic achievers
-      // Sort by efficiency (p/cost) descending
-      std::vector<ProbabilisticAchiever> prob_achievers;
-      for (const auto& a : achievers) {
-        if (a.probability > TOLERANCE && a.probability < 1.0 - TOLERANCE) {
-          prob_achievers.push_back(a);
+      // Determine which value to use
+      double D_f;
+      bool use_det = D_det < std::numeric_limits<double>::infinity();
+
+      if (use_det) {
+        D_f = D_det;
+        // If we're switching from prob to det, force update
+        bool was_prob = !has_det_achiever.count(f) &&
+                        result.expected_cost[f] < std::numeric_limits<double>::infinity();
+        if (was_prob) {
+          has_det_achiever.insert(f);
+          result.expected_cost[f] = D_f;
+          changed = true;
+          continue;
         }
+        has_det_achiever.insert(f);
+      } else {
+        D_f = D_prob;
       }
 
-      double E_f = std::numeric_limits<double>::infinity();
-      if (!prob_achievers.empty()) {
-        std::sort(prob_achievers.begin(), prob_achievers.end(),
-            [](const ProbabilisticAchiever& a, const ProbabilisticAchiever& b) {
-              return a.efficiency() > b.efficiency();
-            });
-
-        // E(f) = sum_{t} [ prod_{j<t}(1-p_j) * C_t ]
-        E_f = 0.0;
-        double prob_all_failed = 1.0;
-        for (const auto& achiever : prob_achievers) {
-          E_f += prob_all_failed * achiever.total_cost();
-          prob_all_failed *= (1.0 - achiever.probability);
-        }
-      }
-
-      // V(f) = min(D(f), E(f))
-      double new_cost = std::min(D_f, E_f);
-      if (std::abs(new_cost - result.expected_cost[f]) > TOLERANCE) {
-        result.expected_cost[f] = new_cost;
+      if (D_f < result.expected_cost[f] - TOLERANCE) {
+        result.expected_cost[f] = D_f;
         changed = true;
       }
+    }
+  }
+
+  // Phase 2: For probabilistic fluents, compute delta = E_attempt - D_best
+  // delta represents the expected additional cost due to probabilistic uncertainty
+  for (auto& [f, achievers] : result.achievers_by_fluent) {
+    if (result.initial_fluents.count(f)) continue;
+
+    // Collect probabilistic achievers
+    std::vector<ProbabilisticAchiever> prob_achievers;
+    for (const auto& a : achievers) {
+      if (a.probability > TOLERANCE && a.probability < 1.0 - TOLERANCE) {
+        prob_achievers.push_back(a);
+      }
+    }
+
+    if (prob_achievers.empty()) continue;  // Only deterministic achievers
+
+    // Sort by efficiency (probability / exec_cost) - DESCENDING order
+    std::sort(prob_achievers.begin(), prob_achievers.end(),
+        [](const ProbabilisticAchiever& a, const ProbabilisticAchiever& b) {
+          return a.efficiency() > b.efficiency();
+        });
+
+    // Compute E_attempt: expected cost of trying achievers in order
+    // Uses D for wait_cost (computed in Phase 1), avoiding circular dependencies
+    double E_attempt = 0.0;
+    double prob_all_failed = 1.0;
+    double time = 0.0;
+
+    for (const auto& achiever : prob_achievers) {
+      double dtime = std::max(achiever.wait_cost - time, 0.0);
+      double this_attempt_cost = dtime + achiever.exec_cost;
+
+      E_attempt += prob_all_failed * this_attempt_cost;
+      prob_all_failed *= (1.0 - achiever.probability);
+      time = std::max(time, achiever.wait_cost);
+    }
+
+    // D_best for probabilistic achievers (the optimistic cost)
+    double D_prob_best = std::numeric_limits<double>::infinity();
+    for (const auto& a : prob_achievers) {
+      D_prob_best = std::min(D_prob_best, a.wait_cost + a.exec_cost);
+    }
+
+    // delta = E_attempt - D_best (extra cost due to probabilistic uncertainty)
+    // If all attempts fail, that's "bad luck" - no additional penalty
+    double delta = E_attempt - D_prob_best;
+    if (delta > TOLERANCE) {
+      result.probabilistic_delta[f] = delta;
     }
   }
 }
 
 // Backward cost computation given forward results and goal fluents
+// Extracts the relaxed plan and sums D(f) + deltas for probabilistic fluents
 // Note: Negative goals should already be converted to positive equivalents
 // by the Python layer before calling the heuristic.
 double ff_backward_cost(
@@ -212,14 +279,48 @@ double ff_backward_cost(
     }
   }
 
-  // Sum expected costs of goal fluents (relaxed: no double-counting prevention)
+  // Extract the relaxed plan: BFS from goals back to initial fluents
+  // Track which fluents are on the extraction path
+  std::unordered_set<Fluent> on_path;
+  std::unordered_set<Fluent> frontier = goal_fluents;
+
+  while (!frontier.empty()) {
+    std::unordered_set<Fluent> next_frontier;
+
+    for (const auto& f : frontier) {
+      if (on_path.count(f) || forward.initial_fluents.count(f)) continue;
+      on_path.insert(f);
+
+      // Add preconditions of the achieving action to the frontier
+      auto action_it = forward.fact_to_action.find(f);
+      if (action_it != forward.fact_to_action.end()) {
+        for (const auto& prec : action_it->second->pos_preconditions()) {
+          next_frontier.insert(prec);
+        }
+      }
+    }
+
+    frontier = std::move(next_frontier);
+  }
+
+  // Sum D(goal fluents) + deltas for all probabilistic fluents on path
   double total_cost = 0.0;
+
+  // Add D cost for goal fluents (this is the optimistic cost)
   for (const auto& gf : goal_fluents) {
     if (forward.initial_fluents.count(gf)) continue;
 
     auto it = forward.expected_cost.find(gf);
     if (it != forward.expected_cost.end()) {
       total_cost += it->second;
+    }
+  }
+
+  // Add probabilistic deltas for all fluents on the extraction path
+  for (const auto& f : on_path) {
+    auto delta_it = forward.probabilistic_delta.find(f);
+    if (delta_it != forward.probabilistic_delta.end()) {
+      total_cost += delta_it->second;
     }
   }
 
@@ -279,6 +380,99 @@ const std::vector<Action> get_usable_actions(const State &input_state,
   return feasible_actions;
 }
 
+// Compute relaxed expected costs for all reachable fluents from a given state
+// Returns a map from fluent to expected cost (0 for initial fluents, computed for others)
+inline std::unordered_map<Fluent, double> get_relaxed_expected_costs(
+    const State &input_state,
+    const std::vector<Action> &all_actions) {
+
+  // Step 1: Relaxed transition
+  auto relaxed_result = transition(input_state, nullptr, true);
+  if (relaxed_result.empty()) {
+    return {};
+  }
+  State relaxed = relaxed_result[0].first;
+
+  // Get initial fluents from relaxed state
+  std::unordered_set<Fluent> initial_fluents(
+      relaxed.fluents().begin(), relaxed.fluents().end());
+
+  // Run forward phase
+  auto forward = ff_forward_phase(initial_fluents, all_actions);
+
+  // Compute expected costs via Bellman iteration
+  compute_expected_costs(forward);
+
+  return forward.expected_cost;
+}
+
+// Debug function: Get achiever information for a fluent
+// Returns vector of tuples: (action_name, wait_cost, exec_cost, probability)
+inline std::vector<std::tuple<std::string, double, double, double>> get_achievers_for_fluent(
+    const State &input_state,
+    const Fluent &fluent,
+    const std::vector<Action> &all_actions) {
+
+  std::vector<std::tuple<std::string, double, double, double>> achiever_info;
+
+  // Step 1: Relaxed transition
+  auto relaxed_result = transition(input_state, nullptr, true);
+  if (relaxed_result.empty()) {
+    return achiever_info;
+  }
+  State relaxed = relaxed_result[0].first;
+
+  // Get initial fluents from relaxed state
+  std::unordered_set<Fluent> initial_fluents(
+      relaxed.fluents().begin(), relaxed.fluents().end());
+
+  // Run forward phase
+  auto forward = ff_forward_phase(initial_fluents, all_actions);
+
+  // Compute expected costs via Bellman iteration
+  compute_expected_costs(forward);
+
+  // Get achievers for the target fluent
+  auto it = forward.achievers_by_fluent.find(fluent);
+  if (it != forward.achievers_by_fluent.end()) {
+    for (const auto& achiever : it->second) {
+      achiever_info.emplace_back(
+          achiever.action->name(),
+          achiever.wait_cost,
+          achiever.exec_cost,
+          achiever.probability);
+    }
+  }
+
+  return achiever_info;
+}
+
+// Get the relaxed expected cost for a single fluent
+// Returns infinity if fluent is unreachable, 0 if already true, otherwise the computed cost
+inline double get_relaxed_expected_cost(
+    const State &input_state,
+    const Fluent &fluent,
+    const std::vector<Action> &all_actions) {
+
+  auto costs = get_relaxed_expected_costs(input_state, all_actions);
+
+  auto it = costs.find(fluent);
+  if (it != costs.end()) {
+    return it->second;
+  }
+
+  // Fluent not found - check if it's in initial state (cost 0) or unreachable
+  auto relaxed_result = transition(input_state, nullptr, true);
+  if (!relaxed_result.empty()) {
+    const auto& relaxed_fluents = relaxed_result[0].first.fluents();
+    if (relaxed_fluents.count(fluent)) {
+      return 0.0;
+    }
+  }
+
+  return std::numeric_limits<double>::infinity();
+}
+
 } // namespace mrppddl
 
 // Include goal.hpp here to get the full definition of GoalBase
@@ -315,14 +509,20 @@ inline double ff_heuristic(const State &input_state,
 
   const double t0 = input_state.time();
 
-  // Step 1: Relaxed transition
+  // Step 1: Relaxed transition for FLUENTS (union of all possible outcomes)
   auto relaxed_result = transition(input_state, nullptr, true);
   if (relaxed_result.empty()) {
     return std::numeric_limits<double>::infinity();
   }
   State relaxed = relaxed_result[0].first;
 
-  double dtime = relaxed.time() - t0;
+  // Step 2: Non-relaxed transition for TIME (first action completion)
+  // This gives a better lower bound since we can act again as soon as any robot finishes
+  auto nonrelaxed_result = transition(input_state, nullptr, false);
+  double dtime = 0.0;
+  if (!nonrelaxed_result.empty()) {
+    dtime = nonrelaxed_result[0].first.time() - t0;
+  }
 
   // Memoization check: use hash of relaxed state (with time=0)
   relaxed.set_time(0);
