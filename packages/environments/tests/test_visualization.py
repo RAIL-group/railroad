@@ -73,7 +73,7 @@ def test_single_robot_plotting():
 
     actions_taken = []
     for _ in range(50):
-        action_name = mcts(sim.state, goal, max_iterations=10000, c=10)
+        action_name = mcts(sim.state, goal, max_iterations=4000, c=300, heuristic_multiplier=2)
         if action_name != 'NONE':
             action = get_action_by_name(all_actions, action_name)
             sim.advance(action)
@@ -147,7 +147,7 @@ def test_multi_robot_unknown_plotting():
     search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
     pick_op = environments.operators.construct_pick_operator(pick_time)
     place_op = environments.operators.construct_place_operator(place_time)
-    no_op = environments.operators.construct_no_op_operator(no_op_time=no_op_time, extra_cost=5000.0)
+    no_op = environments.operators.construct_no_op_operator(no_op_time=no_op_time, extra_cost=100.0)
 
     sim = EnvironmentInterface(init_state, objects_by_type,
                                [search_op, move_op, pick_op, place_op, no_op], env)
@@ -161,7 +161,7 @@ def test_multi_robot_unknown_plotting():
     actions_taken = []
     # Increase iterations/steps for multi-robot to actually do something
     for _ in range(60):
-        action_name = mcts(sim.state, goal, max_iterations=20000, c=10)
+        action_name = mcts(sim.state, goal, max_iterations=4000, c=300, heuristic_multiplier=2)
         if action_name != 'NONE':
             action = get_action_by_name(all_actions, action_name)
             sim.advance(action)
@@ -255,7 +255,7 @@ def test_multi_robot_known_plotting():
     actions_taken = []
     # Increase iterations/steps for multi-robot to actually do something
     for _ in range(20):
-        action_name = mcts(sim.state, goal, max_iterations=10000, c=10)
+        action_name = mcts(sim.state, goal, max_iterations=4000, c=300, heuristic_multiplier=2)
         if action_name != 'NONE':
             action = get_action_by_name(all_actions, action_name)
             sim.advance(action)
