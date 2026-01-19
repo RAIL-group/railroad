@@ -6,6 +6,8 @@ import time
 import matplotlib.pyplot as plt
 from pyrobosim.gui.world_canvas import WorldCanvas
 from pyrobosim.gui.options import WorldCanvasOptions
+from pyrobosim.utils.knowledge import query_to_entity, graph_node_from_entity
+
 
 
 def run_async(func):
@@ -26,7 +28,11 @@ class PyRoboSimEnv(BaseEnvironment):
     def __init__(self, world_file: str):
         self.world = WorldYamlLoader().from_file(world_file)
         self.canvas = MatplotlibWorldCanvas(self.world)
-        self.locations = {loc.name: loc.pose for loc in self.world.locations + self.world.rooms}
+        self.initial_robot_locations = {
+            f"{r.name}_loc": r.pose for r in self.world.robots
+        }
+        self.locations = {loc.name: loc.pose for loc in self.world.locations}
+        self.locations.update(self.initial_robot_locations)
         self.robots = {robot.name: robot for robot in self.world.robots}
         self.is_robot_assigned = {robot: False for robot in self.robots}
         self.is_no_op_running = {robot: False for robot in self.robots}
@@ -74,11 +80,38 @@ class PyRoboSimEnv(BaseEnvironment):
                 return 1.0  # TODO: Get skills time from pyrobosim
             return get_skill_time
 
+
+    def _get_feasible_pose_from_location_for_robot(self, robot, location_name):
+            if location_name in self.initial_robot_locations:
+                return self.initial_robot_locations[location_name]
+
+            entity = query_to_entity(
+                self.world,
+                location_name,
+                mode="location",
+                robot=robot,
+                resolution_strategy="nearest",
+            )
+            if entity is None:
+                raise ValueError(f"Could not find entity for location '{location_name}'.")
+
+            goal_node = graph_node_from_entity(self.world, entity, robot=robot)
+            if goal_node is None:
+                raise ValueError(f"Could not find graph node associated with location '{location_name}'.")
+            goal = goal_node.pose
+            return goal
+
     def _get_move_cost_fn(self):
         def get_move_time(robot, loc_from, loc_to):
-            from_pose = self.locations[loc_from]
-            to_pose = self.locations[loc_to]
+            # Get feasible poses for the robot at the from and to locations
+            from_pose = self._get_feasible_pose_from_location_for_robot(self.robots[robot], loc_from)
+            to_pose = self._get_feasible_pose_from_location_for_robot(self.robots[robot], loc_to)
+
             plan = self.robots[robot].path_planner.plan(from_pose, to_pose)
+
+            # Clear the latest path to avoid showing in the plot
+            self.robots[robot].path_planner.latest_path = None
+
             if plan is None:
                 return float('inf')
             return plan.length / 1.0  # robot velocity = 1.0
@@ -97,7 +130,8 @@ class PyRoboSimEnv(BaseEnvironment):
 
     def stop_robot(self, robot_name: str):
         self.is_robot_assigned[robot_name] = False
-        self.robots[robot_name].cancel_actions()
+        if self.robots[robot_name].is_busy():
+            self.robots[robot_name].cancel_actions()
 
     @run_async
     def _pick(self, robot_name, object_name):
