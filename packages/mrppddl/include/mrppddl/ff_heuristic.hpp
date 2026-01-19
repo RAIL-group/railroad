@@ -258,25 +258,46 @@ inline double get_or_compute_delta(const FFForwardResult& forward, const Fluent&
     return 0.0;
   }
 
-  // Sort by efficiency (probability / exec_cost) - DESCENDING order
+  // Helper lambda to compute E_attempt for a given ordering of achievers
+  auto compute_E_attempt = [](const std::vector<ProbabilisticAchiever>& ordered_achievers) {
+    double E_attempt = 0.0;
+    double prob_all_failed = 1.0;
+    double time = 0.0;
+
+    for (const auto& achiever : ordered_achievers) {
+      double dtime = std::max(achiever.wait_cost - time, 0.0);
+      double this_attempt_cost = dtime + achiever.exec_cost;
+
+      E_attempt += prob_all_failed * this_attempt_cost;
+      prob_all_failed *= (1.0 - achiever.probability);
+      time = std::max(time, achiever.wait_cost);
+    }
+    return E_attempt;
+  };
+
+  // Try multiple orderings and pick the minimum E_attempt
+  double min_E_attempt = std::numeric_limits<double>::infinity();
+
+  // Ordering 1: Sort by efficiency (probability / exec_cost) - DESCENDING
   std::sort(prob_achievers.begin(), prob_achievers.end(),
       [](const ProbabilisticAchiever& a, const ProbabilisticAchiever& b) {
         return a.efficiency() > b.efficiency();
       });
+  min_E_attempt = std::min(min_E_attempt, compute_E_attempt(prob_achievers));
 
-  // Compute E_attempt: expected cost of trying achievers in order
-  double E_attempt = 0.0;
-  double prob_all_failed = 1.0;
-  double time = 0.0;
+  // Ordering 2: Sort by probability - DESCENDING (highest probability first)
+  std::sort(prob_achievers.begin(), prob_achievers.end(),
+      [](const ProbabilisticAchiever& a, const ProbabilisticAchiever& b) {
+        return a.probability > b.probability;
+      });
+  min_E_attempt = std::min(min_E_attempt, compute_E_attempt(prob_achievers));
 
-  for (const auto& achiever : prob_achievers) {
-    double dtime = std::max(achiever.wait_cost - time, 0.0);
-    double this_attempt_cost = dtime + achiever.exec_cost;
-
-    E_attempt += prob_all_failed * this_attempt_cost;
-    prob_all_failed *= (1.0 - achiever.probability);
-    time = std::max(time, achiever.wait_cost);
-  }
+  // Ordering 3: Sort by attempt_cost - ASCENDING (lowest cost first)
+  std::sort(prob_achievers.begin(), prob_achievers.end(),
+      [](const ProbabilisticAchiever& a, const ProbabilisticAchiever& b) {
+        return a.attempt_cost() < b.attempt_cost();
+      });
+  min_E_attempt = std::min(min_E_attempt, compute_E_attempt(prob_achievers));
 
   // D_best for probabilistic achievers (the optimistic cost)
   double D_prob_best = std::numeric_limits<double>::infinity();
@@ -285,7 +306,7 @@ inline double get_or_compute_delta(const FFForwardResult& forward, const Fluent&
   }
 
   // delta = E_attempt - D_best (extra cost due to probabilistic uncertainty)
-  double delta = E_attempt - D_prob_best;
+  double delta = min_E_attempt - D_prob_best;
   if (delta < TOLERANCE) {
     delta = 0.0;
   }
