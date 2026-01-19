@@ -27,7 +27,7 @@ def get_args():
 
 def test_single_robot_plotting():
     args = get_args()
-    robot_locations = {'robot1': 'start'}
+    robot_locations = {'robot1': 'start_loc'}
     env = environments.procthor.ProcTHOREnvironment(args, robot_locations)
 
     objects_by_type = {
@@ -40,8 +40,8 @@ def test_single_robot_plotting():
     init_state = State(
         time=0,
         fluents={
-            F("revealed start"),
-            F("at robot1 start"), F("free robot1"),
+            F("revealed start_loc"),
+            F("at robot1 start_loc"), F("free robot1"),
         },
     )
 
@@ -118,7 +118,7 @@ def test_single_robot_plotting():
 def test_multi_robot_unknown_plotting():
     args = get_args()
     args.num_robots = 2
-    robot_locations = {'robot1': 'start', 'robot2': 'start'}
+    robot_locations = {'robot1': 'start_loc', 'robot2': 'start_loc'}
     env = environments.procthor.ProcTHOREnvironment(args, robot_locations)
 
     objects_by_type = {
@@ -130,9 +130,9 @@ def test_multi_robot_unknown_plotting():
     init_state = State(
         time=0,
         fluents={
-            F("revealed start"),
-            F("at robot1 start"), F("free robot1"),
-            F("at robot2 start"), F("free robot2"),
+            F("revealed start_loc"),
+            F("at robot1 start_loc"), F("free robot1"),
+            F("at robot2 start_loc"), F("free robot2"),
         }
     )
 
@@ -212,7 +212,7 @@ def test_multi_robot_unknown_plotting():
 def test_multi_robot_known_plotting():
     args = get_args()
     args.num_robots = 2
-    robot_locations = {'robot1': 'start', 'robot2': 'start'}
+    robot_locations = {'robot1': 'start_loc', 'robot2': 'start_loc'}
     env = environments.procthor.ProcTHOREnvironment(args, robot_locations)
 
     objects_by_type = {
@@ -224,9 +224,9 @@ def test_multi_robot_known_plotting():
     init_state = State(
         time=0,
         fluents={
-            F("revealed start"),
-            F("at robot1 start"), F("free robot1"),
-            F("at robot2 start"), F("free robot2"),
+            F("revealed start_loc"),
+            F("at robot1 start_loc"), F("free robot1"),
+            F("at robot2 start_loc"), F("free robot2"),
             F("at watch_81 tvstand_18"),
             F("at egg_55 fridge_12"),
         }

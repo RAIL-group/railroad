@@ -22,7 +22,7 @@ def get_args():
 
 def test_procthor_add_remove_objects():
     args = get_args()
-    robot_locations = {'robot1': 'start'}
+    robot_locations = {'robot1': 'start_loc'}
     env = environments.procthor.ProcTHOREnvironment(args, robot_locations)
 
     # pick a random object
@@ -51,7 +51,7 @@ def test_procthor_add_remove_objects():
         assert object_name != obj1
 
     # place it at another random location
-    loc2 = random.choice(list(env.locations.keys() - {'start', loc1}))
+    loc2 = random.choice(list(env.locations.keys() - {'start_loc', loc1}))
     loc2_idx = int(loc2.split('_')[1])
     loc2_obj_idxs = env.partial_graph.get_adjacent_nodes_idx(loc2_idx, filter_by_type=3)
     assert len(loc2_obj_idxs) == 0  # nothing is there in loc2 yet
@@ -64,7 +64,7 @@ def test_procthor_add_remove_objects():
 
 def test_procthor_move_and_search():
     args = get_args()
-    robot_locations = {'robot1': 'start'}
+    robot_locations = {'robot1': 'start_loc'}
     env = environments.procthor.ProcTHOREnvironment(args, robot_locations)
 
     objects_by_type = {
@@ -76,8 +76,8 @@ def test_procthor_move_and_search():
     init_state = State(
         time=0,
         fluents={
-            F("revealed start"),
-            F("at robot1 start"), F("free robot1"),
+            F("revealed start_loc"),
+            F("at robot1 start_loc"), F("free robot1"),
         },
     )
 
@@ -111,7 +111,7 @@ def test_procthor_move_and_search():
 
     print(f"Actions taken: {actions_taken}")
 
-    robot_all_poses = [Pose(*env.locations['start'])]
+    robot_all_poses = [Pose(*env.locations['start_loc'])]
     for action in actions_taken:
         if not action.startswith('move'):
             continue
@@ -155,7 +155,7 @@ def test_procthor_move_and_search():
 def test_procthor_move_search_pick_place():
     args = get_args()
     args.current_seed = 4001
-    robot_locations = {'robot1': 'start'}
+    robot_locations = {'robot1': 'start_loc'}
     env = environments.procthor.ProcTHOREnvironment(args, robot_locations)
     objects = ['teddybear_6', 'pencil_17']
     to_loc = 'garbagecan_5'
@@ -169,8 +169,8 @@ def test_procthor_move_search_pick_place():
     init_state = State(
         time=0,
         fluents={
-            F("revealed start"),
-            F("at robot1 start"), F("free robot1"),
+            F("revealed start_loc"),
+            F("at robot1 start_loc"), F("free robot1"),
         },
     )
     # Task: Place all objects at random_location
@@ -207,7 +207,7 @@ def test_procthor_move_search_pick_place():
 
     print(f"Actions taken: {actions_taken}")
 
-    robot_all_poses = [Pose(*env.locations['start'])]
+    robot_all_poses = [Pose(*env.locations['start_loc'])]
     for action in actions_taken:
         if not action.startswith('move'):
             continue
