@@ -43,7 +43,14 @@ struct FFForwardResult {
   // Fields for expected cost computation
   std::unordered_map<Fluent, std::vector<ProbabilisticAchiever>> achievers_by_fluent;
   std::unordered_map<Fluent, double> expected_cost;  // D(f) - optimistic cost
-  std::unordered_map<Fluent, double> probabilistic_delta;  // delta(f) = E_attempt - D for probabilistic fluents
+
+  // Fluents that have at least one probabilistic achiever (p < 1.0)
+  // Used to skip delta computation for purely deterministic fluents
+  std::unordered_set<Fluent> has_probabilistic_achiever;
+
+  // Lazily computed delta(f) = E_attempt - D for probabilistic fluents
+  // Mutable so it can be populated on-demand during const backward extraction
+  mutable std::unordered_map<Fluent, double> probabilistic_delta;
 };
 
 // Forward relaxed reachability phase - goal independent
@@ -93,6 +100,11 @@ FFForwardResult ff_forward_phase(
               a, 0.0, duration, succ_prob  // wait_cost=0 (computed in phase 2), exec_cost=duration
           });
 
+          // Track fluents with probabilistic achievers for lazy delta computation
+          if (succ_prob < 1.0 - 1e-9) {
+            result.has_probabilistic_achiever.insert(f);
+          }
+
           if (!result.known_fluents.count(f)) {
             result.known_fluents.insert(f);
             next_new.insert(f);
@@ -119,11 +131,9 @@ FFForwardResult ff_forward_phase(
   return result;
 }
 
-// Compute expected costs using delta-based approach (no circular dependencies)
-// Phase 1: Compute D(f) for all fluents (optimistic, treating all achievers as deterministic)
-// Phase 2: For probabilistic fluents, compute delta = E_attempt - D_best
-// The total expected cost = D(goal) + sum of deltas on extraction path
-inline void compute_expected_costs(FFForwardResult& result, bool debug = false) {
+// Compute D(f) for all fluents (optimistic, treating all achievers as deterministic)
+// Deltas for probabilistic fluents are computed lazily during backward extraction
+inline void compute_expected_costs(FFForwardResult& result) {
   const double TOLERANCE = 1e-9;
   const int MAX_ITERATIONS = 100;
 
@@ -207,56 +217,82 @@ inline void compute_expected_costs(FFForwardResult& result, bool debug = false) 
       }
     }
   }
+}
 
-  // Phase 2: For probabilistic fluents, compute delta = E_attempt - D_best
-  // delta represents the expected additional cost due to probabilistic uncertainty
-  for (auto& [f, achievers] : result.achievers_by_fluent) {
-    if (result.initial_fluents.count(f)) continue;
+// Lazily compute delta for a single fluent (called during backward extraction)
+// Returns the delta value, caching it in forward.probabilistic_delta for reuse
+// Returns 0.0 if the fluent has no probabilistic achievers
+inline double get_or_compute_delta(const FFForwardResult& forward, const Fluent& f) {
+  const double TOLERANCE = 1e-9;
 
-    // Collect probabilistic achievers
-    std::vector<ProbabilisticAchiever> prob_achievers;
-    for (const auto& a : achievers) {
-      if (a.probability > TOLERANCE && a.probability < 1.0 - TOLERANCE) {
-        prob_achievers.push_back(a);
-      }
-    }
+  // Check cache first
+  auto cached_it = forward.probabilistic_delta.find(f);
+  if (cached_it != forward.probabilistic_delta.end()) {
+    return cached_it->second;
+  }
 
-    if (prob_achievers.empty()) continue;  // Only deterministic achievers
+  // Skip initial fluents
+  if (forward.initial_fluents.count(f)) {
+    return 0.0;
+  }
 
-    // Sort by efficiency (probability / exec_cost) - DESCENDING order
-    std::sort(prob_achievers.begin(), prob_achievers.end(),
-        [](const ProbabilisticAchiever& a, const ProbabilisticAchiever& b) {
-          return a.efficiency() > b.efficiency();
-        });
+  // Get achievers for this fluent
+  auto achievers_it = forward.achievers_by_fluent.find(f);
+  if (achievers_it == forward.achievers_by_fluent.end()) {
+    return 0.0;
+  }
 
-    // Compute E_attempt: expected cost of trying achievers in order
-    // Uses D for wait_cost (computed in Phase 1), avoiding circular dependencies
-    double E_attempt = 0.0;
-    double prob_all_failed = 1.0;
-    double time = 0.0;
+  const auto& achievers = achievers_it->second;
 
-    for (const auto& achiever : prob_achievers) {
-      double dtime = std::max(achiever.wait_cost - time, 0.0);
-      double this_attempt_cost = dtime + achiever.exec_cost;
-
-      E_attempt += prob_all_failed * this_attempt_cost;
-      prob_all_failed *= (1.0 - achiever.probability);
-      time = std::max(time, achiever.wait_cost);
-    }
-
-    // D_best for probabilistic achievers (the optimistic cost)
-    double D_prob_best = std::numeric_limits<double>::infinity();
-    for (const auto& a : prob_achievers) {
-      D_prob_best = std::min(D_prob_best, a.wait_cost + a.exec_cost);
-    }
-
-    // delta = E_attempt - D_best (extra cost due to probabilistic uncertainty)
-    // If all attempts fail, that's "bad luck" - no additional penalty
-    double delta = E_attempt - D_prob_best;
-    if (delta > TOLERANCE) {
-      result.probabilistic_delta[f] = delta;
+  // Collect probabilistic achievers only
+  std::vector<ProbabilisticAchiever> prob_achievers;
+  for (const auto& a : achievers) {
+    if (a.probability > TOLERANCE && a.probability < 1.0 - TOLERANCE) {
+      prob_achievers.push_back(a);
     }
   }
+
+  // No probabilistic achievers means delta = 0
+  if (prob_achievers.empty()) {
+    forward.probabilistic_delta[f] = 0.0;
+    return 0.0;
+  }
+
+  // Sort by efficiency (probability / exec_cost) - DESCENDING order
+  std::sort(prob_achievers.begin(), prob_achievers.end(),
+      [](const ProbabilisticAchiever& a, const ProbabilisticAchiever& b) {
+        return a.efficiency() > b.efficiency();
+      });
+
+  // Compute E_attempt: expected cost of trying achievers in order
+  double E_attempt = 0.0;
+  double prob_all_failed = 1.0;
+  double time = 0.0;
+
+  for (const auto& achiever : prob_achievers) {
+    double dtime = std::max(achiever.wait_cost - time, 0.0);
+    double this_attempt_cost = dtime + achiever.exec_cost;
+
+    E_attempt += prob_all_failed * this_attempt_cost;
+    prob_all_failed *= (1.0 - achiever.probability);
+    time = std::max(time, achiever.wait_cost);
+  }
+
+  // D_best for probabilistic achievers (the optimistic cost)
+  double D_prob_best = std::numeric_limits<double>::infinity();
+  for (const auto& a : prob_achievers) {
+    D_prob_best = std::min(D_prob_best, a.wait_cost + a.exec_cost);
+  }
+
+  // delta = E_attempt - D_best (extra cost due to probabilistic uncertainty)
+  double delta = E_attempt - D_prob_best;
+  if (delta < TOLERANCE) {
+    delta = 0.0;
+  }
+
+  // Cache and return
+  forward.probabilistic_delta[f] = delta;
+  return delta;
 }
 
 // Backward cost computation given forward results and goal fluents
@@ -316,11 +352,12 @@ double ff_backward_cost(
     }
   }
 
-  // Add probabilistic deltas for all fluents on the extraction path
+  // Lazily compute and add probabilistic deltas for fluents on the extraction path
+  // Only compute for fluents that have probabilistic achievers (skip purely deterministic)
+  // Results are cached in forward.probabilistic_delta for reuse across goal branches
   for (const auto& f : on_path) {
-    auto delta_it = forward.probabilistic_delta.find(f);
-    if (delta_it != forward.probabilistic_delta.end()) {
-      total_cost += delta_it->second;
+    if (forward.has_probabilistic_achiever.count(f)) {
+      total_cost += get_or_compute_delta(forward, f);
     }
   }
 
