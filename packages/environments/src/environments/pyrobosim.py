@@ -78,6 +78,7 @@ class PyRoboSimEnv(BaseEnvironment):
         def get_move_time(robot, loc_from, loc_to):
             from_pose = self.locations[loc_from]
             to_pose = self.locations[loc_to]
+            plan = self.robots[robot].path_planner.plan(from_pose, to_pose)
             if plan is None:
                 return float('inf')
             return plan.length / 1.0  # robot velocity = 1.0
