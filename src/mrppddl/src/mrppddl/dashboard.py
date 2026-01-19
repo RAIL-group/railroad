@@ -604,7 +604,9 @@ class PlannerDashboard:
             return
 
         split_text = split_markdown_flat(self.format_history_as_text())
-        for text_type, text in split_text:
+        for item in split_text:
+            text_type = item['type']
+            text = item['text']
             if text_type == 'text':
                 local_console.print(text)
             elif text_type == 'h1':
