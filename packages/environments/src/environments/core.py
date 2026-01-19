@@ -88,7 +88,7 @@ class EnvironmentInterface():
     def _any_free_robots(self):
         return any(f.name == "free" for f in self._state.fluents)
 
-    def advance(self, action, do_interrupt=True) -> State:
+    def advance(self, action, do_interrupt=True, loop_callback=None) -> State:
         # Check preconditions for safety (helps in debugging)
         if not self.state.satisfies_precondition(action):
             raise ValueError(f"Action preconditions not satisfied: {action.name} in state {self.state}")
@@ -130,6 +130,9 @@ class EnvironmentInterface():
             self.environment.time = self._state.time
 
             robot_free = self._any_free_robots()
+
+            if loop_callback is not None:
+                loop_callback()
 
         # interrupt ongoing actions if needed
         if do_interrupt:
