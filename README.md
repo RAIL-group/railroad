@@ -94,14 +94,15 @@ See `scripts/obf_door_example.py` for a complete example of planning and executi
 
 ## Project Structure
 
-The repository is organized as a monorepo with multiple packages in `packages/`:
+The repository is organized as a monorepo with the following structure:
 
-- **`mrppddl/`** - Core PDDL planning engine (C++ with Python bindings)
-- **`procthor/`** - ProcTHOR simulator interface and utilities
-- **`environments/`** - Environment abstractions and implementations
-- **`gridmap/`** - Occupancy grid mapping and planning utilities
-- **`common/`** - Shared utilities (Pose class, etc.)
-- **`bench/`** - Benchmarking harness with MLflow tracking and dashboard
+- **`packages/`** - All packages are located this directory:
+    - **`mrppddl/`** - Core PDDL planning engine (C++ with Python bindings)
+    - **`procthor/`** - ProcTHOR simulator interface and utilities
+    - **`environments/`** - Environment abstractions and implementations
+    - **`gridmap/`** - Occupancy grid mapping and planning utilities
+    - **`common/`** - Shared utilities (Pose class, etc.)
+    - **`bench/`** - Benchmarking harness with MLflow tracking and dashboard
 - **`scripts/`** - Example scripts and demonstrations
 - **`resources/`** - Downloaded resources (ProcTHOR data, models, etc.)
 
