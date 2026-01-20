@@ -94,14 +94,14 @@ See `scripts/obf_door_example.py` for a complete example of planning and executi
 
 ## Project Structure
 
-The repository is organized as a monorepo with multiple packages:
+The repository is organized as a monorepo with multiple packages in `packages/`:
 
 - **`mrppddl/`** - Core PDDL planning engine (C++ with Python bindings)
 - **`procthor/`** - ProcTHOR simulator interface and utilities
 - **`environments/`** - Environment abstractions and implementations
 - **`gridmap/`** - Occupancy grid mapping and planning utilities
 - **`common/`** - Shared utilities (Pose class, etc.)
-- **`src/bench/`** - Benchmarking harness with MLflow tracking and dashboard
+- **`bench/`** - Benchmarking harness with MLflow tracking and dashboard
 - **`scripts/`** - Example scripts and demonstrations
 - **`resources/`** - Downloaded resources (ProcTHOR data, models, etc.)
 
@@ -123,8 +123,8 @@ uv run pytest -vk search
 ### Type Checking
 
 ```bash
-# Type check src/ packages (more coverage coming later)
-uv run ty check src
+# Type check in `packages` dir (more coverage coming later)
+uv run ty check packages
 ```
 
 ### Running Benchmarks
@@ -296,7 +296,7 @@ If you use this code in your research, please cite:
 - [X] *Combine `get_usable_actions` with `ff_heuristic`* There is considerable duplicated code here and they really have the same functionality under the hood. Can I try passing a pointer for `visited_actions` to `ff_heuristic` and use that to return values if desired? Then the `get_usable_actions` function could just be a wrapper around it. Also, I can have `ff_heuristic` only optionally take in a goal function, since it isn't needed for determining which actions are reachable from some initial state.
 - [ ] **Feature** *Handle 'fluent outcome likelihood' correctly within the `ff_heuristic`.* Currently, the maximum probability of a fluent within `ff_heuristic.hpp` keeps only the most likley *per successor/outcome*. Instead, they should be aggregated on a per-action basis, to keep around the total probability of making that fluent true. (If one outcome is 60% likely and another is 40% likely but both have a fluent 'F' in their outcomes, it should register as 100% for that fluent.)
 - [ ] **Feature** *Keep only K-most-likely actions.* In previous work dealing with probabilistic outcomes, I would keep around only the K actions most likely to make that fluent true. To implement a similar functionality we can use the following steps: (1) determine which fluents are probabilistic and (2) for each fluent, determine which actions may result in that fluent as an outcome and then sort those and select the top-K of those, and (3) aggregate all of those actions in addition to all the deterministic actions. I will also write some tests for this purpose, to confirm that only probabilistic actions are limited.
-- [ ] **Feature** *Select the K-most-likely actions and the K-least-expensive-ways-to-get-a-fluent*. Let's say I have a fluent 'F'. I think we can use the heuristic calculation on a goal function that includes all the positive conditions for any action that has some probability of resulting in 'F' being true. We could use the result as an estimate of how much time it would take to complete that action. Then we could use both (1) cost-to-action + action-cost (a measure of how long it will then take to accomplish a particular fluent) and (2) the probability of making a particular fluent true. 
+- [ ] **Feature** *Select the K-most-likely actions and the K-least-expensive-ways-to-get-a-fluent*. Let's say I have a fluent 'F'. I think we can use the heuristic calculation on a goal function that includes all the positive conditions for any action that has some probability of resulting in 'F' being true. We could use the result as an estimate of how much time it would take to complete that action. Then we could use both (1) cost-to-action + action-cost (a measure of how long it will then take to accomplish a particular fluent) and (2) the probability of making a particular fluent true.
 - [ ] **Bug** *Fix issue with 'wait' actions and action pruning.* When I enable action pruning via 'get_usable_actions' in `mcts` in planner.hpp, the wait tests fail for some reason. I suspect something about the relaxed graph either means they are pruned and/or that the heuristic calculation is not quite right. *EDIT: this seems somewhat unreliable anyway. I will need to look into it. I think the heuristic is no longer quite right.*
 
 **Wait Actions**
