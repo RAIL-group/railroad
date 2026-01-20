@@ -170,7 +170,7 @@ def main():
     figpath = Path(args.save_dir) / f'procthor_run_{args.current_seed}.png'
     figpath.parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(figpath, dpi=300)
-    print(f"Saved plot to {figpath}")
+    dashboard.console.print(f"\nSaved plot to [yellow]{figpath.resolve()}[/yellow]")
 
 
 if __name__ == "__main__":
