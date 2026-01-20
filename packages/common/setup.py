@@ -3,6 +3,7 @@ from setuptools import setup, find_packages
 
 setup(name='common',
       version='1.0.0',
+      package_dir={"": "src"},
       description='Some shared resources for RAIL-core',
       license="MIT",
       author='Gregory J. Stein',

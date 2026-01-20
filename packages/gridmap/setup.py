@@ -2,6 +2,7 @@ from setuptools import setup, find_packages
 
 setup(name='gridmap',
       version='1.0.0',
+      package_dir={"": "src"},
       description='Methods for mapping and planning in grids.',
       license="MIT",
       author='Gregory J. Stein',

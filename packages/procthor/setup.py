@@ -3,6 +3,7 @@ from setuptools import setup, find_packages
 
 setup(name='procthor',
       version='1.0.0',
+      package_dir={"": "src"},
       description='Core code for interfacing with ProcTHOR environment',
       license="MIT",
       author='Raihan Islam Arnob',

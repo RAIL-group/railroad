@@ -3,6 +3,7 @@ from setuptools import setup, find_packages
 setup(
     name="bench",
     version="0.1.0",
+    package_dir={"": "src"},
     description="Benchmark harness for PDDL planning system",
     packages=find_packages(),
     python_requires=">=3.13",
