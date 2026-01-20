@@ -110,7 +110,7 @@ class Motion_Primitive_Robot(Robot):
             for i in range(self.num_primitives)
         ]
 
-    def move(self, motion_primitives, ind, stationary=False):
+    def move_primitive(self, motion_primitives, ind, stationary=False):
         if stationary:
             self.all_poses.append(self.all_poses[-1])
             return

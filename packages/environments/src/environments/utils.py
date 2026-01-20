@@ -97,7 +97,7 @@ def compute_cost_and_robot_trajectory(grid, path):
                                                             robot_path,
                                                             motion_primitives,
                                                             do_use_path=True)
-            robot.move(motion_primitives, np.argmin(costs))
+            robot.move_primitive(motion_primitives, np.argmin(costs))
             dist = Pose.cartesian_distance(robot.pose, next_pose)
             if dist <= 2.0:
                 reached = True
