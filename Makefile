@@ -20,8 +20,8 @@ rebuild-cpp: clean-cpp  ## Rebuild C++ Modules
 
 .PHONY: clean clean-cpp clean-python clean-venv
 clean-cpp:  ## Remove C++-specific build artifacts
-	@rm -rf mrppddl/build mrppddl/src/mrppddl/*cpython*
-	@touch mrppddl/src/mrppddl/_bindings.cpp  # Trigger rebuild when needed
+	@rm -rf packages/mrppddl/build packages/mrppddl/src/mrppddl/*cpython*
+	@touch packages/mrppddl/src/mrppddl/_bindings.cpp  # Trigger rebuild when needed
 
 clean-python:  ## Remove Python temporary artifacts
 	@find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
@@ -39,7 +39,7 @@ clean: clean-cpp clean-python clean-venv  ## Remove build artifacts, Python cach
 
 .PHONY: typecheck test
 typecheck:  ## Runs the typechecker via pyright
-	@uv run pyright -w mrppddl/src/mrppddl mrppddl/tests
+	@uv run ty check packages
 
 test:  ## Runs tests (limit scope via PYTEST_FILTER=filter)
 	@uv run pytest -vk $(PYTEST_FILTER)

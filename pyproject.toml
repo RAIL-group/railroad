@@ -39,15 +39,22 @@ dependencies = [
 ]
 
 [tool.uv.sources]
-mrppddl = { path = "src/mrppddl", editable = true }
-common = { path = "common", editable = true }
-gridmap = { path = "gridmap", editable = true }
-environments = { path = "environments", editable = true }
-procthor = { path = "procthor", editable = true }
-bench = { path = "src/bench", editable = true }
+mrppddl = { path = "packages/mrppddl", editable = true }
+common = { path = "packages/common", editable = true }
+gridmap = { path = "packages/gridmap", editable = true }
+environments = { path = "packages/environments", editable = true }
+procthor = { path = "packages/procthor", editable = true }
+bench = { path = "packages/bench", editable = true }
 
 [tool.ty.environment]
-extra-paths = ["src/bench", "environments", "common", "procthor", "gridmap", "src/mrppddl/src"]
+extra-paths = [
+    "packages/mrppddl/src",
+    "packages/common/src",
+    "packages/gridmap/src",
+    "packages/procthor/src",
+    "packages/environments/src",
+    "packages/bench/src",
+]
 
 [tool.pytest.ini_options]
 filterwarnings = [
