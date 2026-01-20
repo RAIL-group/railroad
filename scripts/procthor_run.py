@@ -169,8 +169,12 @@ def main():
 
     figpath = Path(args.save_dir) / f'procthor_run_{args.current_seed}.png'
     figpath.parent.mkdir(parents=True, exist_ok=True)
+
+    # Add ./ to relative paths, for easier CLI use
+    figpath_str = figpath if figpath.as_posix().startswith(("/", "./", "../")) else f"./{figpath}"
     plt.savefig(figpath, dpi=300)
-    dashboard.console.print(f"\nSaved plot to [yellow]{figpath.resolve()}[/yellow]")
+
+    dashboard.console.print(f"\nSaved plot to [yellow]{figpath_str}[/yellow]")
 
 
 if __name__ == "__main__":
