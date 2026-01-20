@@ -124,7 +124,7 @@ uv run pytest -vk search
 ### Type Checking
 
 ```bash
-# Type check in `packages` dir (more coverage coming later)
+# Type check in `packages` dir (currently only `mrppddl` and `bench` have type hints, more coverage coming later)
 uv run ty check packages
 ```
 
