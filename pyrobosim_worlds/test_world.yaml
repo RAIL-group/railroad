@@ -19,10 +19,47 @@ metadata:
     - $DATA/example_object_data_drink.yaml
 # ROBOTS
 robots:
-  - name: robot
+  - name: robot1
     radius: 0.1
     location: kitchen
     color: "#CC00CC"
+    pose:
+      position:
+        x: 0.0
+        y: 0.0
+    max_linear_velocity: 1.0
+    max_angular_velocity: 4.0
+    max_linear_acceleration: 2.5
+    max_angular_acceleration: 10.0
+    # Rapidly-expanding Random Tree (RRT) planner
+    path_planner:
+      type: astar
+      grid_resolution: 0.05
+      grid_inflation_radius: 0.15
+
+    # Linear motion path executor
+    path_executor:
+      type: constant_velocity
+      linear_velocity: 1.0
+      max_angular_velocity: 4.0
+      dt: 0.1
+      validate_during_execution: true
+      validation_dt: 0.5
+      validation_step_dist: 0.025
+
+    # Grasp generation
+    grasping:
+      generator: parallel_grasp
+      max_width: 0.175
+      depth: 0.1
+      height: 0.04
+      width_clearance: 0.01
+      depth_clearance: 0.01
+
+  - name: robot2
+    radius: 0.1
+    location: kitchen
+    color: "#00CC00"
     pose:
       position:
         x: 0.0

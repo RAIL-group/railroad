@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from pyrobosim.gui.world_canvas import WorldCanvas
 from pyrobosim.gui.options import WorldCanvasOptions
 from pyrobosim.utils.knowledge import query_to_entity, graph_node_from_entity
-
+from pyrobosim.navigation.visualization import plot_path_planner
 
 
 def run_async(func):
@@ -184,9 +184,10 @@ class MatplotlibWorldCanvas(WorldCanvas):
         self.draw_signal = self.MockSignal(self.draw_signal_callback)
         # Add other signals as needed to prevent attribute errors
         self.show_robots_signal = self.MockSignal(self.show_robots)
-        self.show_planner_and_path_signal = self.MockSignal(lambda: None)
+        self.show_planner_and_path_signal = self.MockSignal(self._show_all_paths)
 
         # Manually initialize the artist lists inherited from WorldCanvas
+        self.path_artists_storage = {}
         self.robot_bodies = []
         self.robot_dirs = []
         self.robot_lengths = []
@@ -202,6 +203,55 @@ class MatplotlibWorldCanvas(WorldCanvas):
         self.path_planner_artists = {"graph": [], "path": []}
 
         self.show()
+        self.axes.autoscale()
+        self.axes.axis("equal")
+
+    def _show_all_paths(self):
+        """Custom method to draw paths for EVERY robot in the world."""
+        for robot in self.world.robots:
+            self._draw_single_robot_path(robot)
+
+    def _draw_single_robot_path(self, robot):
+        """Helper to draw a specific robot's path without clearing others."""
+        if not robot.path_planner:
+            return
+
+        # Get the path from the robot
+        path = robot.path_planner.get_latest_path()
+        if not path:
+            return
+
+        # Clear OLD artists for THIS specific robot only
+        if robot.name in self.path_artists_storage:
+            for artist in self.path_artists_storage[robot.name]:
+                try:
+                    artist.remove()
+                except:
+                    pass
+
+        # Note: plot_path_planner returns a dict of lists of artists
+        new_artists_dict = plot_path_planner(
+            self.axes,
+            graphs=[], # Set to graphs=robot.path_planner.get_graphs() if you want the RRT/PRM trees
+            path=path,
+            path_color=robot.color
+        )
+
+        # Store these artists so we can remove them in the next frame
+        flat_artists = new_artists_dict.get("path", []) + new_artists_dict.get("graph", [])
+        self.path_artists_storage[robot.name] = flat_artists
+
+    def show(self) -> None:
+        """Overriding show to ensure all robots are processed."""
+        self.show_rooms()
+        self.show_hallways()
+        self.show_locations()
+        self.show_objects()
+        self.show_robots()
+        self.update_robots_plot()
+
+        self._show_all_paths()  # Show paths for all robots
+
         self.axes.autoscale()
         self.axes.axis("equal")
 

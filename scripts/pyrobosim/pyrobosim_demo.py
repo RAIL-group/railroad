@@ -15,23 +15,38 @@ if __name__ == "__main__":
         objects = env.get_objects_at_location(loc)
         print(f"Objects at {loc}: {objects}")
 
-    action_list = [
-        ('move', 'robot', None, 'my_desk'),
-        ('search', 'robot', 'my_desk', None),
-        ('pick', 'robot', 'my_desk', 'apple0'),
-        ('move', 'robot', 'my_desk', 'counter0'),
-        ('place', 'robot', 'counter0', 'apple0'),
-        ('no_op', 'robot', None, None),  # by design no_op makes the robot wait
-        ('move', 'robot', None, 'kitchen')
-    ]
+    r_names = list(env.robots.keys())
 
-    for action in action_list:
-        skill, robot, arg1, arg2 = action
-        print(f"Executing skill: {skill} with args: {arg1}, {arg2}")
-        env.execute_skill(robot, skill, arg1, arg2)
+    action_list = {
+        r_names[0]: [
+            ('move', None, 'my_desk'),
+            ('pick', 'my_desk', 'apple0'),
+            ('move', 'my_desk', 'table0'),
+            ('place', 'table0', 'apple0'),
+        ],
+        r_names[1]: [
+            ('move', None, 'table0'),
+            ('pick', 'table0', 'banana0'),
+            ('move', 'table0', 'counter0'),
+            ('place', 'counter0', 'banana0'),
+            ('move', 'counter0', 'table0'),
+        ]
+    }
+    action_done = {r: True for r in r_names}
 
-        while True:
-            status = env.get_executed_skill_status(robot, skill)
-            env.canvas.update()
+    while sum([len(action_list[r]) for r in r_names]) != 0:
+        for r in r_names:
+            if action_done[r]:
+                try:
+                    action_name = action_list[r].pop(0)
+                    skill, arg1, arg2 = action_name
+                    env.execute_skill(r, skill, arg1, arg2)
+                    action_done[r] = False
+                except:
+                    pass
+            status = env.get_executed_skill_status(r, skill)
             if status == SkillStatus.DONE:
-                break
+                action_done[r] = True
+
+        env.canvas.update()
+    print("All robots task complete !!!")
