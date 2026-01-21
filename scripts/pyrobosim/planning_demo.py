@@ -78,7 +78,7 @@ def main(args):
 
             # Execute action
             action = get_action_by_name(all_actions, action_name)
-            env_interface.advance(action, do_interrupt=False, loop_callback=env.canvas.update)
+            env_interface.advance(action, do_interrupt=False, loop_callback_fn=env.canvas.update)
             actions_taken.append(action_name)
 
             tree_trace = mcts.get_trace_from_last_mcts_tree()
