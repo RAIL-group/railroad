@@ -38,8 +38,11 @@ class PyRoboSimEnv(BaseEnvironment):
         self.is_no_op_running = {robot: False for robot in self.robots}
 
     def get_objects_at_location(self, location):
-        location = self.world.get_location_by_name(location)
         objects = {'object': set()}
+        if location.endswith("_loc"):
+            # Our custom robot locations (not defined in pyrobosim) has no objects
+            return objects
+        location = self.world.get_location_by_name(location)
         if location:
             for spawn in location.children:
                 for obj in spawn.children:
