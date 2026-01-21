@@ -24,10 +24,11 @@ def main(args):
         fluents={
             F("revealed robot1_loc"),
             F("at robot1 robot1_loc"), F("free robot1"),
-            # F("at robot2 robot1_loc"), F("free robot2"),
+            F("revealed robot2_loc"),
+            F("at robot2 robot1_loc"), F("free robot2"),
         },
     )
-    goal = F(f"at apple0 counter0") & F(f"at robot1 counter0")
+    goal = F("at apple0 counter0") & F("at robot1 counter0")
 
     # Create operators
     move_time_fn = env.get_skills_cost_fn(skill_name='move')
@@ -101,7 +102,7 @@ def main(args):
 
 if __name__ == "__main__":
     args = argparse.ArgumentParser()
-    args.add_argument("--world_file", type=str, default='./pyrobosim_worlds/test_world.yaml',
+    args.add_argument("--world_file", type=str, default='./resources/pyrobosim_worlds/test_world.yaml',
                       help="Path to the world YAML file.")
     args = args.parse_args()
 
