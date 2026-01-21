@@ -80,26 +80,25 @@ class PyRoboSimEnv(BaseEnvironment):
                 return 1.0  # TODO: Get skills time from pyrobosim
             return get_skill_time
 
-
     def _get_feasible_pose_from_location_for_robot(self, robot, location_name):
-            if location_name in self.initial_robot_locations:
-                return self.initial_robot_locations[location_name]
+        if location_name in self.initial_robot_locations:
+            return self.initial_robot_locations[location_name]
 
-            entity = query_to_entity(
-                self.world,
-                location_name,
-                mode="location",
-                robot=robot,
-                resolution_strategy="nearest",
-            )
-            if entity is None:
-                raise ValueError(f"Could not find entity for location '{location_name}'.")
+        entity = query_to_entity(
+            self.world,
+            location_name,
+            mode="location",
+            robot=robot,
+            resolution_strategy="nearest",
+        )
+        if entity is None:
+            raise ValueError(f"Could not find entity for location '{location_name}'.")
 
-            goal_node = graph_node_from_entity(self.world, entity, robot=robot)
-            if goal_node is None:
-                raise ValueError(f"Could not find graph node associated with location '{location_name}'.")
-            goal = goal_node.pose
-            return goal
+        goal_node = graph_node_from_entity(self.world, entity, robot=robot)
+        if goal_node is None:
+            raise ValueError(f"Could not find graph node associated with location '{location_name}'.")
+        goal = goal_node.pose
+        return goal
 
     def _get_move_cost_fn(self):
         def get_move_time(robot, loc_from, loc_to):
@@ -147,7 +146,7 @@ class PyRoboSimEnv(BaseEnvironment):
 
     @run_async
     def _search(self, robot_name):
-        # self.robots[robot_name].detect_objects()
+        # No need to search for now since all objects are assumed to be known
         pass
 
     @run_async
@@ -226,13 +225,13 @@ class MatplotlibWorldCanvas(WorldCanvas):
             for artist in self.path_artists_storage[robot.name]:
                 try:
                     artist.remove()
-                except:
+                except Exception:
                     pass
 
         # Note: plot_path_planner returns a dict of lists of artists
         new_artists_dict = plot_path_planner(
             self.axes,
-            graphs=[], # Set to graphs=robot.path_planner.get_graphs() if you want the RRT/PRM trees
+            graphs=[],  # Set to graphs=robot.path_planner.get_graphs() if you want the RRT/PRM trees
             path=path,
             path_color=robot.color
         )
