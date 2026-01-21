@@ -5,7 +5,7 @@ from environments import SkillStatus
 
 if __name__ == "__main__":
     args = argparse.ArgumentParser()
-    args.add_argument("--world_file", type=str, default='./pyrobosim_worlds/test_world.yaml',
+    args.add_argument("--world_file", type=str, default='./resources/pyrobosim_worlds/test_world.yaml',
                       help="Path to the world YAML file.")
     args = args.parse_args()
 
