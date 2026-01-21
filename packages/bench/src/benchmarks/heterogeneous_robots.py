@@ -97,8 +97,8 @@ def bench_heterogeneous_robots(case: BenchmarkCase):
         fluents=initial_fluents,
     )
 
-    # Define goal: have supplies at the start location
-    goal_fluents = {F("at supplies start")}
+    # Define goal: find supplies and have them at the start location
+    goal = F("found supplies") & F("at supplies start")
 
     objects_by_type = {
         "robot": robot_names,
@@ -140,19 +140,19 @@ def bench_heterogeneous_robots(case: BenchmarkCase):
 
     # Dashboard with recording console
     recording_console = Console(record=True, force_terminal=True, width=120)
-    h_value = ff_heuristic(initial_state, goal_fluents, env_interface.get_actions())
-    dashboard = PlannerDashboard(goal_fluents, initial_heuristic=h_value, console=recording_console)
+    h_value = ff_heuristic(initial_state, goal, env_interface.get_actions())
+    dashboard = PlannerDashboard(goal, initial_heuristic=h_value, console=recording_console)
 
     for iteration in range(max_iterations):
         # Check if goal is reached
-        if env_interface.is_goal_reached(goal_fluents):
+        if goal.evaluate(env_interface.state.fluents):
             break
 
         # Get available actions
         all_actions = env_interface.get_actions()
         # Plan next action
         mcts = MCTSPlanner(all_actions)
-        action_name = mcts(env_interface.state, goal_fluents,
+        action_name = mcts(env_interface.state, goal,
                            max_iterations=case.mcts.iterations,
                            c=case.mcts.c,
                            max_depth=20)
@@ -167,7 +167,7 @@ def bench_heterogeneous_robots(case: BenchmarkCase):
         actions_taken.append(action_name)
 
         tree_trace = mcts.get_trace_from_last_mcts_tree()
-        h_value = ff_heuristic(env_interface.state, goal_fluents, env_interface.get_actions())
+        h_value = ff_heuristic(env_interface.state, goal, env_interface.get_actions())
         relevant_fluents = {
             f for f in env_interface.state.fluents
             if any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
@@ -186,7 +186,7 @@ def bench_heterogeneous_robots(case: BenchmarkCase):
     html_output = recording_console.export_html(inline_styles=True)
 
     return {
-        "success": env_interface.is_goal_reached(goal_fluents),
+        "success": goal.evaluate(env_interface.state.fluents),
         "wall_time": time.perf_counter() - start_time,
         "plan_cost": float(env_interface.state.time),
         "actions_count": len(actions_taken),
