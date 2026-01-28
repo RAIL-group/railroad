@@ -8,6 +8,7 @@ from pyrobosim.gui.world_canvas import WorldCanvas
 from pyrobosim.gui.options import WorldCanvasOptions
 from pyrobosim.utils.knowledge import query_to_entity, graph_node_from_entity
 from pyrobosim.navigation.visualization import plot_path_planner
+import numpy as np
 
 
 def run_async(func):
@@ -25,9 +26,9 @@ def run_async(func):
 
 
 class PyRoboSimEnv(BaseEnvironment):
-    def __init__(self, world_file: str, show_plot: bool = True):
+    def __init__(self, world_file: str, show_plot: bool = True, record_plots: bool = False):
         self.world = WorldYamlLoader().from_file(world_file)
-        self.canvas = MatplotlibWorldCanvas(self.world, show_plot)
+        self.canvas = MatplotlibWorldCanvas(self.world, show_plot, record_plots)
         self.initial_robot_locations = {
             f"{r.name}_loc": r.pose for r in self.world.robots
         }
@@ -171,19 +172,47 @@ class MatplotlibWorldCanvas(WorldCanvas):
         def get_current_robot(self):
             return None
 
-        def isVisible(self):
-            return True
+    def __init__(self, world, show_plot: bool = True, record_plots: bool = False):
+        self.world = world
+        self.show_plot = show_plot
+        if not self.show_plot:
+            plt.switch_backend("Agg")
+        self.record_plots = record_plots
+        self.options = WorldCanvasOptions()
+        self.main_window = self.MockMainWindow()
+        self.fig, self.axes = plt.subplots(
+            dpi=self.options.dpi,
+            tight_layout=True
+        )
+        plt.ion()
 
-    def __init__(self, world, show_plot=True):
-        options = WorldCanvasOptions()
-        main_window = self.MockMainWindow()
-        options = WorldCanvasOptions()
+        # Hijack the signals BEFORE calling any methods like show()
+        # This prevents the "Signal source has been deleted" error
+        self.draw_signal = self.MockSignal(self.draw_signal_callback)
+        # Add other signals as needed to prevent attribute errors
+        self.show_robots_signal = self.MockSignal(self.show_robots)
+        self.show_planner_and_path_signal = self.MockSignal(self._show_all_paths)
 
-        super().__init__(main_window, world, show=show_plot, options=options)
-        self.fig = plt.figure(dpi=options.dpi, tight_layout=True)
-        self.axes = self.fig.add_subplot(111)
-
+        # Manually initialize the artist lists from WorldCanvas since we do not call its __init__
         self.path_artists_storage = {}
+        self.robot_bodies = []
+        self.robot_dirs = []
+        self.robot_lengths = []
+        self.robot_texts = []
+        self.robot_sensor_artists = []
+        self.obj_patches = []
+        self.obj_texts = []
+        self.hallway_patches = []
+        self.room_patches = []
+        self.room_texts = []
+        self.location_patches = []
+        self.location_texts = []
+        self.path_planner_artists = {"graph": [], "path": []}
+
+        self.show()
+        self.axes.autoscale()
+        self.axes.axis("equal")
+        self._plot_frames = []
 
     def _show_all_paths(self):
         """Custom method to draw paths for EVERY robot in the world."""
@@ -243,4 +272,45 @@ class MatplotlibWorldCanvas(WorldCanvas):
         """Updates the world visualization in a loop."""
         self.show()
         self.fig.canvas.draw_idle()
-        plt.pause(self.options.animation_dt)
+        self._plot_frames.append(self._get_frame())
+        if self.show_plot:
+            plt.pause(self.options.animation_dt)
+
+    def wait_for_close(self):
+        """Blocks until the plot window is closed."""
+        if not self.show_plot:
+            return
+        plt.ioff()
+        plt.show()
+
+    def _get_frame(self):
+        """Captures the current frame as an image array."""
+        self.fig.canvas.draw()
+        width, height = self.fig.canvas.get_width_height()
+        image = np.frombuffer(self.fig.canvas.tostring_argb(), dtype='uint8')
+        image = image.reshape((height, width, 4))
+        return image[..., 1:4]  # Convert ARGB to RGB
+
+    def save_animation(self, filepath):
+        """Saves the recorded frames as a video file."""
+        if not self.record_plots:
+            import warnings
+            warnings.warn("No frames recorded to save animation. Use 'record_plots=True' to record plot frames.")
+            return
+
+        import imageio
+        fps = int(round(1 / self.options.animation_dt))
+
+        writer = imageio.get_writer(
+            filepath,
+            format="ffmpeg",
+            mode="I",
+            fps=fps,
+            codec="libx264",
+            macro_block_size=None
+        )
+
+        for frame in self._plot_frames:
+            writer.append_data(frame.astype("uint8"))
+
+        writer.close()
