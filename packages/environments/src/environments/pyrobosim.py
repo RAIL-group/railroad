@@ -293,7 +293,9 @@ class MatplotlibWorldCanvas(WorldCanvas):
     def _get_frame(self):
         """Captures the current frame as an image array."""
         self.fig.canvas.draw()
-        width, height = self.fig.canvas.get_width_height()
+        renderer = self.fig.canvas.get_renderer()
+        width = int(renderer.width)
+        height = int(renderer.height)
         image = np.frombuffer(self.fig.canvas.tostring_argb(), dtype='uint8')
         image = image.reshape((height, width, 4))
         return image[..., 1:4]  # Convert ARGB to RGB
@@ -305,8 +307,17 @@ class MatplotlibWorldCanvas(WorldCanvas):
             warnings.warn("No frames recorded to save animation. Use 'record_plots=True' to record plot frames.")
             return
 
+        if not self._plot_frames:
+            import warnings
+            warnings.warn("No frames were recorded.")
+            return
+
         import imageio
+        from PIL import Image
         fps = int(round(1 / self.options.animation_dt))
+
+        # Use the first frame's size as the target
+        target_size = (self._plot_frames[0].shape[1], self._plot_frames[0].shape[0])
 
         writer = imageio.get_writer(
             filepath,
@@ -318,6 +329,12 @@ class MatplotlibWorldCanvas(WorldCanvas):
         )
 
         for frame in self._plot_frames:
-            writer.append_data(frame.astype("uint8"))
+            frame_uint8 = frame.astype("uint8")
+            # Resize if dimensions don't match
+            if (frame.shape[1], frame.shape[0]) != target_size:
+                img = Image.fromarray(frame_uint8)
+                img = img.resize(target_size, Image.Resampling.LANCZOS)
+                frame_uint8 = np.array(img)
+            writer.append_data(frame_uint8)
 
         writer.close()
