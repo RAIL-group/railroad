@@ -26,6 +26,8 @@ def run_async(func):
 
 
 class PyRoboSimEnv(BaseEnvironment):
+    """Environment class that wraps PyRoboSim simulator."""
+
     def __init__(self, world_file: str, show_plot: bool = True, record_plots: bool = False):
         self.world = WorldYamlLoader().from_file(world_file)
         self.canvas = MatplotlibWorldCanvas(self.world, show_plot, record_plots)
@@ -161,6 +163,11 @@ class PyRoboSimEnv(BaseEnvironment):
 
 
 class MatplotlibWorldCanvas(WorldCanvas):
+    """
+    Matplotlib-based visualization canvas for PyRoboSim worlds.
+    Replaces Qt-based WorldCanvas to support non-blocking plotting.
+    """
+
     class MockSignal:
         def __init__(self, callback):
             self.callback = callback
