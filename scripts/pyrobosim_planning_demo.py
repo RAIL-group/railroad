@@ -1,7 +1,6 @@
 import environments
 from mrppddl.planner import MCTSPlanner
 from mrppddl.core import Fluent as F, State, get_action_by_name
-from pathlib import Path
 from environments.core import EnvironmentInterface
 from mrppddl._bindings import ff_heuristic
 from mrppddl.dashboard import PlannerDashboard
@@ -10,7 +9,9 @@ import logging
 
 
 def main(args):
-    env = environments.pyrobosim.PyRoboSimEnv(args.world_file)
+    env = environments.pyrobosim.PyRoboSimEnv(args.world_file,
+                                              show_plot=True,
+                                              record_plots=True)
     objects = ['apple0']
 
     objects_by_type = {
@@ -98,6 +99,9 @@ def main(args):
 
     # Print the full dashboard history to the console (optional)
     dashboard.print_history(env_interface.state, actions_taken)
+
+    env.canvas.save_animation(filepath='./data/pyrobosim_planning_demo.mp4')
+    env.canvas.wait_for_close()
 
 
 if __name__ == "__main__":
