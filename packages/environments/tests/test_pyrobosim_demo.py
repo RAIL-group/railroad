@@ -1,22 +1,14 @@
-import argparse
 from environments.pyrobosim import PyRoboSimEnv
 from environments import SkillStatus
+from pathlib import Path
 
 
-if __name__ == "__main__":
-    args = argparse.ArgumentParser()
-    args.add_argument("--world_file", type=str, default='./resources/pyrobosim_worlds/test_world.yaml',
-                      help="Path to the world YAML file.")
-    args = args.parse_args()
-
-    env = PyRoboSimEnv(args.world_file)
-
-    for loc in env.locations:
-        objects = env.get_objects_at_location(loc)
-        print(f"Objects at {loc}: {objects}")
+def test_pyrobosim_demo():
+    env = PyRoboSimEnv(world_file='./resources/pyrobosim_worlds/test_world.yaml',
+                       show_plot=False,
+                       record_plots=True)
 
     r_names = list(env.robots.keys())
-
     action_list = {
         r_names[0]: [
             ('move', None, 'my_desk'),
@@ -42,11 +34,14 @@ if __name__ == "__main__":
                     skill, arg1, arg2 = action_name
                     env.execute_skill(r, skill, arg1, arg2)
                     action_done[r] = False
-                except:
+                except Exception:
                     pass
             status = env.get_executed_skill_status(r, skill)
             if status == SkillStatus.DONE:
                 action_done[r] = True
-
         env.canvas.update()
-    print("All robots task complete !!!")
+
+    save_dir = Path("./data/test_logs")
+    save_dir.mkdir(parents=True, exist_ok=True)
+    env.canvas.save_animation(save_dir / "pyrobosim_demo.mp4")
+    env.canvas.wait_for_close()
