@@ -26,7 +26,7 @@ def main(args):
             F("revealed robot1_loc"),
             F("at robot1 robot1_loc"), F("free robot1"),
             F("revealed robot2_loc"),
-            F("at robot2 robot1_loc"), F("free robot2"),
+            F("at robot2 robot2_loc"), F("free robot2"),
         },
     )
     goal = F("at apple0 counter0") & F("at robot1 counter0")
