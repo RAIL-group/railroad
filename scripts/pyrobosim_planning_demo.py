@@ -10,9 +10,9 @@ import logging
 
 def main(args):
     env = environments.pyrobosim.PyRoboSimEnv(args.world_file,
-                                              show_plot=True,
-                                              record_plots=True)
-    objects = ['apple0']
+                                              show_plot=args.show_plot,
+                                              record_plots=not args.no_video)
+    objects = list(env.objects.keys())[:2]  # Take first two objects for the demo
 
     objects_by_type = {
         "robot": env.robots.keys(),
@@ -29,7 +29,7 @@ def main(args):
             F("at robot2 robot2_loc"), F("free robot2"),
         },
     )
-    goal = F("at apple0 counter0") & F("at robot1 counter0")
+    goal = F("at apple0 counter0") & F("at banana0 counter0")
 
     # Create operators
     move_time_fn = env.get_skills_cost_fn(skill_name='move')
@@ -99,8 +99,8 @@ def main(args):
 
     # Print the full dashboard history to the console (optional)
     dashboard.print_history(env_interface.state, actions_taken)
-
-    env.canvas.save_animation(filepath='./data/pyrobosim_planning_demo.mp4')
+    if not args.no_video:
+        env.canvas.save_animation(filepath='./data/pyrobosim_planning_demo.mp4')
     env.canvas.wait_for_close()
 
 
@@ -108,6 +108,8 @@ if __name__ == "__main__":
     args = argparse.ArgumentParser()
     args.add_argument("--world_file", type=str, default='./resources/pyrobosim_worlds/test_world.yaml',
                       help="Path to the world YAML file.")
+    args.add_argument("--show_plot", action='store_true', help="Whether to show the plot window.")
+    args.add_argument("--no_video", action='store_true', help="Whether to disable generating video of the simulation.")
     args = args.parse_args()
 
     # Turn off all logging of level INFO and below (to suppress pyrobosim logs)
