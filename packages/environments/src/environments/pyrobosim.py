@@ -9,6 +9,7 @@ from pyrobosim.gui.options import WorldCanvasOptions
 from pyrobosim.utils.knowledge import query_to_entity, graph_node_from_entity
 from pyrobosim.navigation.visualization import plot_path_planner
 import numpy as np
+from pathlib import Path
 
 
 def run_async(func):
@@ -29,7 +30,7 @@ class PyRoboSimEnv(BaseEnvironment):
     """Environment class that wraps PyRoboSim simulator."""
 
     def __init__(self, world_file: str, show_plot: bool = True, record_plots: bool = False):
-        self.world = WorldYamlLoader().from_file(world_file)
+        self.world = WorldYamlLoader().from_file(Path(world_file))
         self.canvas = MatplotlibWorldCanvas(self.world, show_plot, record_plots)
         self.initial_robot_locations = {
             f"{r.name}_loc": r.pose for r in self.world.robots
@@ -314,6 +315,9 @@ class MatplotlibWorldCanvas(WorldCanvas):
 
         # Use the first frame's size as the target
         target_size = (self._plot_frames[0].shape[1], self._plot_frames[0].shape[0])
+
+        filepath = Path(filepath)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
 
         writer = imageio.get_writer(
             filepath,
