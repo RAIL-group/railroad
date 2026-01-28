@@ -25,9 +25,9 @@ def run_async(func):
 
 
 class PyRoboSimEnv(BaseEnvironment):
-    def __init__(self, world_file: str):
+    def __init__(self, world_file: str, show_plot: bool = True):
         self.world = WorldYamlLoader().from_file(world_file)
-        self.canvas = MatplotlibWorldCanvas(self.world)
+        self.canvas = MatplotlibWorldCanvas(self.world, show_plot)
         self.initial_robot_locations = {
             f"{r.name}_loc": r.pose for r in self.world.robots
         }
@@ -171,42 +171,19 @@ class MatplotlibWorldCanvas(WorldCanvas):
         def get_current_robot(self):
             return None
 
-    def __init__(self, world):
-        self.world = world
-        self.options = WorldCanvasOptions()
-        self.main_window = self.MockMainWindow()
-        self.fig, self.axes = plt.subplots(
-            dpi=self.options.dpi,
-            tight_layout=True
-        )
-        plt.ion()
+        def isVisible(self):
+            return True
 
-        # Hijack the signals BEFORE calling any methods like show()
-        # This prevents the "Signal source has been deleted" error
-        self.draw_signal = self.MockSignal(self.draw_signal_callback)
-        # Add other signals as needed to prevent attribute errors
-        self.show_robots_signal = self.MockSignal(self.show_robots)
-        self.show_planner_and_path_signal = self.MockSignal(self._show_all_paths)
+    def __init__(self, world, show_plot=True):
+        options = WorldCanvasOptions()
+        main_window = self.MockMainWindow()
+        options = WorldCanvasOptions()
 
-        # Manually initialize the artist lists inherited from WorldCanvas
+        super().__init__(main_window, world, show=show_plot, options=options)
+        self.fig = plt.figure(dpi=options.dpi, tight_layout=True)
+        self.axes = self.fig.add_subplot(111)
+
         self.path_artists_storage = {}
-        self.robot_bodies = []
-        self.robot_dirs = []
-        self.robot_lengths = []
-        self.robot_texts = []
-        self.robot_sensor_artists = []
-        self.obj_patches = []
-        self.obj_texts = []
-        self.hallway_patches = []
-        self.room_patches = []
-        self.room_texts = []
-        self.location_patches = []
-        self.location_texts = []
-        self.path_planner_artists = {"graph": [], "path": []}
-
-        self.show()
-        self.axes.autoscale()
-        self.axes.axis("equal")
 
     def _show_all_paths(self):
         """Custom method to draw paths for EVERY robot in the world."""
