@@ -319,6 +319,9 @@ class MatplotlibWorldCanvas(WorldCanvas):
         filepath = Path(filepath)
         filepath.parent.mkdir(parents=True, exist_ok=True)
 
+        # Add ./ to relative paths, for easier CLI use
+        filepath_str = filepath if filepath.as_posix().startswith(("/", "./", "../")) else f"./{filepath}"
+
         writer = imageio.get_writer(
             filepath,
             format="ffmpeg",
@@ -338,4 +341,4 @@ class MatplotlibWorldCanvas(WorldCanvas):
             writer.append_data(frame_uint8)
 
         writer.close()
-        print(f"Animation saved to {filepath}")
+        print(f"Animation saved to {filepath_str}")

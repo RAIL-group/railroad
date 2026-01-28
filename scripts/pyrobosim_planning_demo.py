@@ -105,10 +105,10 @@ def main(args):
 
 if __name__ == "__main__":
     args = argparse.ArgumentParser()
-    args.add_argument("--world_file", type=str, default='./resources/pyrobosim_worlds/test_world.yaml',
+    args.add_argument("--world-file", type=str, default='./resources/pyrobosim_worlds/test_world.yaml',
                       help="Path to the world YAML file.")
-    args.add_argument("--show_plot", action='store_true', help="Whether to show the plot window.")
-    args.add_argument("--no_video", action='store_true', help="Whether to disable generating video of the simulation.")
+    args.add_argument("--show-plot", action='store_true', help="Whether to show the plot window.")
+    args.add_argument("--no-video", action='store_true', help="Whether to disable generating video of the simulation.")
     args = args.parse_args()
 
     # Turn off all logging of level INFO and below (to suppress pyrobosim logs)
