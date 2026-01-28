@@ -48,7 +48,6 @@ def main(args):
         initial_state,
         objects_by_type,
         [no_op, pick_op, place_op, move_op, search_op],
-        # [pick_op, place_op, move_op, search_op],
         env
     )
 
