@@ -36,6 +36,7 @@ class PyRoboSimEnv(BaseEnvironment):
         }
         self.locations = {loc.name: loc.pose for loc in self.world.locations}
         self.locations.update(self.initial_robot_locations)
+        self.objects = {obj.name: obj for obj in self.world.objects}
         self.robots = {robot.name: robot for robot in self.world.robots}
         self.is_robot_assigned = {robot: False for robot in self.robots}
         self.is_no_op_running = {robot: False for robot in self.robots}
