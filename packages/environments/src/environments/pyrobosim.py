@@ -302,14 +302,9 @@ class MatplotlibWorldCanvas(WorldCanvas):
 
     def save_animation(self, filepath):
         """Saves the recorded frames as a video file."""
-        if not self.record_plots:
-            import warnings
-            warnings.warn("No frames recorded to save animation. Use 'record_plots=True' to record plot frames.")
-            return
-
         if not self._plot_frames:
             import warnings
-            warnings.warn("No frames were recorded.")
+            warnings.warn("No frames recorded to save animation. Use 'record_plots=True' to record plot frames.")
             return
 
         import imageio
@@ -338,3 +333,4 @@ class MatplotlibWorldCanvas(WorldCanvas):
             writer.append_data(frame_uint8)
 
         writer.close()
+        print(f"Animation saved to {filepath}")
