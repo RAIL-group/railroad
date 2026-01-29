@@ -158,28 +158,51 @@ double ff_backward_cost(
 // Get usable actions via forward relaxed reachability
 const std::vector<Action> get_usable_actions(const State &input_state,
 					     const std::vector<Action> &all_actions) {
-  // Step 1: Relaxed transition
+  std::unordered_set<const Action*> feasible_action_set;
+
+  // Step 1: Relaxed transition (processes upcoming effects)
   auto relaxed_result = transition(input_state, nullptr, true);
-  if (relaxed_result.empty()) {
-    return {};
-  }
-  State relaxed = relaxed_result[0].first;
+  if (!relaxed_result.empty()) {
+    State relaxed = relaxed_result[0].first;
 
-  // Get initial fluents from relaxed state
-  std::unordered_set<Fluent> initial_fluents(
-      relaxed.fluents().begin(), relaxed.fluents().end());
+    // Get initial fluents from relaxed state
+    std::unordered_set<Fluent> initial_fluents(
+        relaxed.fluents().begin(), relaxed.fluents().end());
 
-  // Use ff_forward_phase to get all reachable fluents
-  auto forward = ff_forward_phase(initial_fluents, all_actions);
+    // Use ff_forward_phase to get all reachable fluents
+    auto forward = ff_forward_phase(initial_fluents, all_actions);
 
-  // Collect all actions whose preconditions are satisfied by known fluents
-  // This is simpler and more reliable than tracking specific action contributions
-  std::vector<Action> feasible_actions;
-  State state_all_known(0.0, forward.known_fluents);
-  for (const auto& a : all_actions) {
-    if (state_all_known.satisfies_precondition(a, true)) {
-      feasible_actions.push_back(a);
+    // Collect all actions whose preconditions are satisfied by known fluents
+    State state_all_known(0.0, forward.known_fluents);
+    for (const auto& a : all_actions) {
+      if (state_all_known.satisfies_precondition(a, true)) {
+        feasible_action_set.insert(&a);
+      }
     }
+  }
+
+  // Step 2: Also consider current fluents WITHOUT processing upcoming effects
+  // This handles cases where upcoming effects would preclude valid actions
+  // (e.g., another robot can still move to a location before it's marked visited)
+  {
+    std::unordered_set<Fluent> current_fluents(
+        input_state.fluents().begin(), input_state.fluents().end());
+
+    auto forward_current = ff_forward_phase(current_fluents, all_actions);
+
+    State state_current_known(0.0, forward_current.known_fluents);
+    for (const auto& a : all_actions) {
+      if (state_current_known.satisfies_precondition(a, true)) {
+        feasible_action_set.insert(&a);
+      }
+    }
+  }
+
+  // Convert set to vector
+  std::vector<Action> feasible_actions;
+  feasible_actions.reserve(feasible_action_set.size());
+  for (const Action* a : feasible_action_set) {
+    feasible_actions.push_back(*a);
   }
 
   return feasible_actions;
