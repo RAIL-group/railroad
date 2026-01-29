@@ -148,7 +148,7 @@ def get_next_actions(state: State, all_actions: List[Action]) -> List[Action]:
     # Step 1: Extract all `free(...)` fluents
     free_robot_fluents: List[Fluent] = cast(
         List[Fluent],
-        sorted([f for f in state.fluents if f.name == "free"], key=str),
+        sorted([f for f in state.fluents if f.name == "free"], key=lambda f: str(f)),
     )
     # neg_fluents = {~f for f in free_robot_fluents}
     neg_state = state.copy()
