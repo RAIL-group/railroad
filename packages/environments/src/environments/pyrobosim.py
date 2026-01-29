@@ -114,10 +114,10 @@ class PyRoboSimEnv(BaseEnvironment):
             from_pose = self._get_feasible_pose_from_location_for_robot(self.robots[robot], loc_from)
             to_pose = self._get_feasible_pose_from_location_for_robot(self.robots[robot], loc_to)
 
-            plan = self.robots[robot].path_planner.plan(from_pose, to_pose)
+            plan = self.robots[robot].path_planner.plan(from_pose, to_pose)  # type: ignore[union-attr]
 
             # Clear the latest path to avoid showing in the plot
-            self.robots[robot].path_planner.latest_path = None
+            self.robots[robot].path_planner.latest_path = None  # type: ignore[union-attr]
 
             if plan is None:
                 return float('inf')
