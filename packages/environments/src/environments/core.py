@@ -1,11 +1,11 @@
 import itertools
 from copy import copy
 
-from mrppddl.core import Fluent as F, State
+from mrppddl.core import Action, Fluent as F, State
 from mrppddl.core import transition
 from mrppddl.core import Operator
 from .environments import BaseEnvironment, SkillStatus
-from typing import Dict, Set, List, Collection
+from typing import Dict, Set, List, Collection, Optional
 import math
 
 
@@ -215,7 +215,12 @@ class EnvironmentInterface():
 
 
 class OngoingAction:
-    def __init__(self, time, action, environment=None):
+    def __init__(
+        self,
+        time: int | float,
+        action: Action,
+        environment: Optional[BaseEnvironment] = None,
+    ):
         self.time = time
         self.name = action.name
         self._start_time = time
@@ -242,6 +247,7 @@ class OngoingAction:
     @property
     def is_action_complete(self):
         if self.is_action_called:
+            assert self.environment is not None
             action_name = self.name.split()[0]
             action_status = self.environment.get_executed_skill_status(self.robot, action_name)
             if action_status == SkillStatus.DONE:
@@ -284,6 +290,7 @@ class OngoingAction:
 
 class OngoingSearchAction(OngoingAction):
     def advance(self, time):
+        assert self.environment is not None
         _, _, loc, obj = self.name.split()  # (e.g., search r1 locA objA)
         if not self.is_action_called:
             self.environment.execute_skill(self.robot, 'search', loc, obj)
@@ -293,6 +300,7 @@ class OngoingSearchAction(OngoingAction):
 
 class OngoingPickAction(OngoingAction):
     def advance(self, time):
+        assert self.environment is not None
         _, _, loc, obj = self.name.split()  # (e.g., pick r1 locA objA)
         if not self.is_action_called:
             self.environment.execute_skill(self.robot, 'pick', loc, obj)
@@ -307,6 +315,7 @@ class OngoingPickAction(OngoingAction):
 
 class OngoingPlaceAction(OngoingAction):
     def advance(self, time):
+        assert self.environment is not None
         _, _, loc, obj = self.name.split()  # (e.g., place r1 locA objA)
         if not self.is_action_called:
             self.environment.execute_skill(self.robot, 'place', loc, obj)
@@ -320,12 +329,18 @@ class OngoingPlaceAction(OngoingAction):
 
 
 class OngoingMoveAction(OngoingAction):
-    def __init__(self, time, action, environment=None):
+    def __init__(
+        self,
+        time: int | float,
+        action: Action,
+        environment: Optional[BaseEnvironment] = None,
+    ):
         super().__init__(time, action, environment)
         # Keep track of initial start and end locations
         _, self.robot, self.start, self.end = self.name.split()  # (e.g., move r1 locA locB)
 
     def advance(self, time):
+        assert self.environment is not None
         if not self.is_action_called:
             self.environment.execute_skill(self.robot, 'move', self.start, self.end)
             self.is_action_called = True
@@ -335,6 +350,7 @@ class OngoingMoveAction(OngoingAction):
         """If the time > start_time, it can be interrupted. The robot location
         is updated, this action is marked as done, and the new fluents are
         returned."""
+        assert self.environment is not None
 
         if self.time <= self._start_time:
             return set()  # Cannot interrupt before start time
@@ -372,6 +388,7 @@ class OngoingMoveAction(OngoingAction):
 
 class OngoingNoOpAction(OngoingAction):
     def advance(self, time):
+        assert self.environment is not None
         if not self.is_action_called:
             self.environment.execute_skill(self.robot, 'no_op')
             self.is_action_called = True
