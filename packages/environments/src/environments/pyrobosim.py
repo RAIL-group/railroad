@@ -324,7 +324,7 @@ class MatplotlibWorldCanvas(WorldCanvas):
 
         writer = imageio.get_writer(
             filepath,
-            format="ffmpeg",
+            format="ffmpeg",  # type: ignore[arg-type]  # imageio accepts string format names
             mode="I",
             fps=fps,
             codec="libx264",

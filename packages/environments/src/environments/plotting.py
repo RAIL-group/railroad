@@ -29,7 +29,7 @@ def plot_single_robot_trajectory(ax, robot_all_poses, trajectory, graph, robot_n
 
     # Create a continuous norm to map from data points to colors
     norm = plt.Normalize(0, len(x))
-    lc = LineCollection(segments, cmap=color_map_name, norm=norm)
+    lc = LineCollection(segments.tolist(), cmap=color_map_name, norm=norm)
 
     # Set the values used for colormapping
     lc.set_array(np.arange(len(x)))
