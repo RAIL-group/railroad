@@ -161,9 +161,9 @@ class SimpleEnvironment(BaseEnvironment):
         min_robots = [n for n, t in remaining_times if t == min_time]
         return min_robots, min_time
 
-    def get_executed_skill_status(self, robot_name, action_name):
-        if action_name not in ['move', 'pick', 'place', 'search', 'no_op']:
-            print(f"Action: '{action_name}' not verified in Simulation!")
+    def get_executed_skill_status(self, robot_name: str, skill_name: str) -> SkillStatus:
+        if skill_name not in ['move', 'pick', 'place', 'search', 'no_op']:
+            print(f"Action: '{skill_name}' not verified in Simulation!")
 
         # For simulation we do the following:
         # If all robots are not assigned, return IDLE
