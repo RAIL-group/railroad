@@ -1,17 +1,19 @@
 """A set of functions useful for manipulating occupancy grids."""
 
 import math
-import matplotlib
+import matplotlib.path
 import numpy as np
 import scipy
+from typing import Optional
 
+from common import Pose
 from . import laser
 
 from .constants import (COLLISION_VAL, FREE_VAL, UNOBSERVED_VAL,
                         OBSTACLE_THRESHOLD)
 
 
-def _transform_rays(rays, sensor_pose):
+def _transform_rays(rays, sensor_pose: Pose):
     """Transform (rotate and offset) a laser scan according to pose."""
     origin = np.array([[sensor_pose.x], [sensor_pose.y]])
     rotation_mat = np.array(
@@ -22,7 +24,7 @@ def _transform_rays(rays, sensor_pose):
     return np.matmul(rotation_mat, rays) + origin
 
 
-def _get_poly_for_scan(transformed_rays, sensor_pose):
+def _get_poly_for_scan(transformed_rays, sensor_pose: Pose):
     """Returns a polygon obj for a transformed scan.
 
     For the polygon to completely contain the region defined by the scan,
@@ -38,7 +40,7 @@ def _set_points_inside_poly(grid,
                             poly,
                             value,
                             max_range=None,
-                            sensor_pose=None):
+                            sensor_pose: Optional[Pose] = None):
     """Sets the value of any grid points defined by a polygon.
 
     This function is suitable for setting all free points defined by a
@@ -66,6 +68,7 @@ def _set_points_inside_poly(grid,
 
     # Prune points outside the max range if necessary
     if max_range is not None:
+        assert sensor_pose is not None
         origin_np = np.array([[sensor_pose.x], [sensor_pose.y]])
         is_within_range = np.sum(
             (grid_points - origin_np.T)**2, axis=1) < (max_range**2)

@@ -84,7 +84,7 @@ def test_move_action():
     assert F("at r1 r1_loc") not in sim.state.fluents
     assert sim.state.time == 10.0
     assert len(sim.ongoing_actions) == 0
-    assert np.all(sim.environment.locations["r2_loc"] == (0.0, 10.0))
+    assert np.all(sim.environment.locations["r2_loc"] == (0.0, 10.0))  # type: ignore[union-attr]
 
 
 def test_search_action():

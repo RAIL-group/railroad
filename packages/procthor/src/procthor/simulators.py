@@ -36,6 +36,7 @@ class SceneGraphSimulator:
         unexplored_containers = sorted(unexplored_containers)
 
         observed_graph = self.known_graph.get_object_free_graph()
+        assert self.known_grid is not None
         observed_grid = self.known_grid.copy()
 
         # Reveal container nodes not chosen as subgoals

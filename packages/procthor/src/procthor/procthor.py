@@ -148,6 +148,7 @@ class ThorInterface:
     def get_reachable_positions(self):
         if self.cached_data is not None:
             return self.cached_data['reachable_positions']
+        assert self.controller is not None
         event = self.controller.step(action="GetReachablePositions")
         reachable_positions = event.metadata["actionReturn"]
         return reachable_positions
@@ -313,6 +314,7 @@ class ThorInterface:
             else:
                 return self.cached_data['image_persp']
         # Setup top down camera
+        assert self.controller is not None
         event = self.controller.step(action="GetMapViewCameraProperties", raise_for_failure=True)
         pose = copy.deepcopy(event.metadata["actionReturn"])
 
