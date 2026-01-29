@@ -87,7 +87,7 @@ class RealEnvironment(BaseEnvironment):
         result = self._stop_robot_service.call(request)
         return result['stopped']
 
-    def get_action_status(self, robot_name, action_name: str) -> str:
+    def get_action_status(self, robot_name, action_name: str) -> str | None:
         if action_name == 'move':
             return self._get_move_status(robot_name)
 
@@ -99,6 +99,7 @@ if __name__ == '__main__':
     client.run()
     env = RealEnvironment(client)
 
+    robot_locations = {"r1": "r1_loc", "r2": "r2_loc"}
     objects_by_type = {
         "robot": robot_locations.keys(),
         # "robot": {"r1"},
