@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from common import Pose
 import environments
 import environments.procthor
@@ -12,12 +14,12 @@ from environments.core import EnvironmentInterface
 
 
 def get_args():
-    args = lambda: None
-    args.num_robots = 1
-    args.current_seed = 4001
-    args.resolution = 0.05
-    args.save_dir = './data/test_logs'
-    return args
+    return SimpleNamespace(
+        num_robots=1,
+        current_seed=4001,
+        resolution=0.05,
+        save_dir='./data/test_logs',
+    )
 
 
 def test_procthor_add_remove_objects():

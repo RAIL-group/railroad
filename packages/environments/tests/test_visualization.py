@@ -3,6 +3,7 @@ import random
 import matplotlib.pyplot as plt
 from pathlib import Path
 from functools import reduce
+from types import SimpleNamespace
 
 import procthor
 import environments
@@ -17,11 +18,12 @@ from operator import and_
 
 
 def get_args():
-    args = lambda: None
-    args.num_robots = 1
-    args.current_seed = 7005
-    args.resolution = 0.05
-    args.save_dir = './data/test_logs'
+    args = SimpleNamespace(
+        num_robots=1,
+        current_seed=7005,
+        resolution=0.05,
+        save_dir='./data/test_logs',
+    )
     random.seed(args.current_seed)
     return args
 

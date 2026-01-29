@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import numpy as np
 import matplotlib.pyplot as plt
 import procthor
@@ -8,11 +10,11 @@ from pathlib import Path
 
 
 def get_args():
-    args = lambda key: None
-    args.save_dir = './data/test_logs'
-    args.current_seed = 0
-    args.resolution = 0.05
-    return args
+    return SimpleNamespace(
+        save_dir='./data/test_logs',
+        current_seed=0,
+        resolution=0.05,
+    )
 
 
 @pytest.mark.timeout(15)
