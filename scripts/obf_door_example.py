@@ -33,7 +33,7 @@ def _plot_graph(G, state_str=None,
     node_labels = {node: f"{state_str(node)}" for node in G.nodes}
 
     norm = None
-    cmap = plt.cm.viridis.reversed()
+    cmap = plt.get_cmap('viridis').reversed()
     color_map = {}
 
     # Goal node processing

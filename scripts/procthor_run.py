@@ -6,6 +6,7 @@ Uses the new Goal API for defining planning objectives.
 
 from functools import reduce
 from operator import and_
+from types import SimpleNamespace
 
 import pytest
 from common import Pose
@@ -19,23 +20,16 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from environments import plotting, utils, SimulatedRobot
 from environments.core import EnvironmentInterface
-from mrppddl._bindings import ff_heuristic
 from mrppddl.dashboard import PlannerDashboard
 
 
-def get_args():
-    args = lambda: None
-    # args.num_robots = 1
-    args.num_robots = 2
-    args.current_seed = 4001
-    args.resolution = 0.05
-    args.save_dir = './data/test_logs'
-    return args
-
-
 def main():
-    args = get_args()
-    args.current_seed = 4001
+    args = SimpleNamespace(
+        num_robots=2,
+        current_seed=4001,
+        resolution=0.05,
+        save_dir='./data/test_logs',
+    )
     robot_locations = {
         'robot1': 'start_loc',
         'robot2': 'start_loc',
@@ -96,7 +90,8 @@ def main():
     max_iterations = 60  # Limit iterations to avoid infinite loops
 
     # Dashboard
-    h_value = ff_heuristic(initial_state, goal, sim.get_actions())
+    mcts = MCTSPlanner(sim.get_actions())
+    h_value = mcts.heuristic(initial_state, goal)
     with PlannerDashboard(goal, initial_heuristic=h_value) as dashboard:
         # (Optional) initial dashboard update
         dashboard.update(sim_state=sim.state)
@@ -123,7 +118,7 @@ def main():
             actions_taken.append(action_name)
 
             tree_trace = mcts.get_trace_from_last_mcts_tree()
-            h_value = ff_heuristic(sim.state, goal, sim.get_actions())
+            h_value = mcts.heuristic(sim.state, goal)
             relevant_fluents = {
                 f for f in sim.state.fluents
                 if any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
