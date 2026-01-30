@@ -1,15 +1,20 @@
-from .core import Operator, Fluent, Effect, OptCallable, Num
-from typing import Callable, Set, Union
-from railroad._bindings import GoalType, Goal, AndGoal
+"""Goal formatting and display utilities.
 
-F = Fluent
+This module provides functions for formatting and analyzing Goal objects.
+"""
+
+from typing import Set, Union
+
+from railroad.core import Fluent
+from railroad._bindings import GoalType, Goal, AndGoal, LiteralGoal
 
 
 # =============================================================================
 # Goal formatting and display functions
 # =============================================================================
 
-def format_goal(goal, indent: int = 0, compact: bool = False) -> str:
+
+def format_goal(goal: Goal, indent: int = 0, compact: bool = False) -> str:
     """Format a goal as a readable string.
 
     Args:
@@ -33,6 +38,7 @@ def format_goal(goal, indent: int = 0, compact: bool = False) -> str:
     prefix = "  " * indent
 
     if goal_type == GoalType.LITERAL:
+        assert isinstance(goal, LiteralGoal)
         return f"{prefix}{goal.fluent()}"
 
     elif goal_type == GoalType.TRUE_GOAL:
@@ -46,7 +52,7 @@ def format_goal(goal, indent: int = 0, compact: bool = False) -> str:
         if compact and len(children) <= 2 and all(
             c.get_type() == GoalType.LITERAL for c in children
         ):
-            child_strs = [str(c.fluent()) for c in children]
+            child_strs = [str(c.fluent()) for c in children if isinstance(c, LiteralGoal)]
             return f"{prefix}AND({', '.join(child_strs)})"
         else:
             lines = [f"{prefix}AND("]
@@ -60,7 +66,7 @@ def format_goal(goal, indent: int = 0, compact: bool = False) -> str:
         if compact and len(children) <= 2 and all(
             c.get_type() == GoalType.LITERAL for c in children
         ):
-            child_strs = [str(c.fluent()) for c in children]
+            child_strs = [str(c.fluent()) for c in children if isinstance(c, LiteralGoal)]
             return f"{prefix}OR({', '.join(child_strs)})"
         else:
             lines = [f"{prefix}OR("]
@@ -73,7 +79,7 @@ def format_goal(goal, indent: int = 0, compact: bool = False) -> str:
         return f"{prefix}<unknown goal type>"
 
 
-def get_satisfied_branch(goal, fluents: Set[Fluent]) -> Union[Goal, None]:
+def get_satisfied_branch(goal: Goal, fluents: Set[Fluent]) -> Union[Goal, None]:
     """Find the minimal satisfied branch of a goal.
 
     For OR goals, returns the first satisfied child.
@@ -124,7 +130,7 @@ def get_satisfied_branch(goal, fluents: Set[Fluent]) -> Union[Goal, None]:
     return None
 
 
-def get_best_branch(goal, fluents: Set[Fluent]) -> Goal:
+def get_best_branch(goal: Goal, fluents: Set[Fluent]) -> Goal:
     """Find the most promising branch of a goal (highest completion ratio).
 
     For OR goals, returns the child with highest completion ratio.
@@ -178,125 +184,3 @@ def get_best_branch(goal, fluents: Set[Fluent]) -> Goal:
         return goal
 
     return goal
-
-
-# =============================================================================
-# Operator construction helpers
-# =============================================================================
-
-
-def _make_callable(opt_expr: OptCallable) -> Callable[..., float]:
-    if isinstance(opt_expr, Num):
-        return lambda *args: opt_expr
-    else:
-        return lambda *args: opt_expr(*args)
-
-
-def _invert_prob(opt_expr: OptCallable) -> Callable[..., float]:
-    if isinstance(opt_expr, Num):
-        return lambda *args: 1 - opt_expr
-    else:
-        return lambda *args: 1 - opt_expr(*args)
-
-
-def construct_move_operator(move_time: OptCallable):
-    move_time = _make_callable(move_time)
-    return Operator(
-        name="move",
-        parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
-        preconditions=[F("at ?r ?from"), F("free ?r")],
-        effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?r ?from")}),
-            Effect(
-                time=(move_time, ["?r", "?from", "?to"]),
-                resulting_fluents={F("free ?r"), F("at ?r ?to")},
-            ),
-        ],
-    )
-
-
-def construct_move_visited_operator(move_time: OptCallable):
-    move_time = _make_callable(move_time)
-    return Operator(
-        name="move",
-        parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
-        preconditions=[F("at ?r ?from"), F("free ?r")],
-        effects=[
-            Effect(time=0, resulting_fluents={Fluent("not free ?r")}),
-            Effect(
-                time=(move_time, ["?r", "?from", "?to"]),
-                resulting_fluents={
-                    F("free ?r"),
-                    F("not at ?r ?from"),
-                    F("at ?r ?to"),
-                    F("visited ?to"),
-                },
-            ),
-        ],
-    )
-
-
-def construct_search_operator(
-    object_find_prob: OptCallable, move_time: OptCallable, pick_time: OptCallable
-) -> Operator:
-    object_find_prob = _make_callable(object_find_prob)
-    inv_object_find_prob = _invert_prob(object_find_prob)
-    move_time = _make_callable(move_time)
-    pick_time = _make_callable(pick_time)
-    return Operator(
-        name="search",
-        parameters=[
-            ("?robot", "robot"),
-            ("?loc_from", "location"),
-            ("?loc_to", "location"),
-            ("?object", "object"),
-        ],
-        preconditions=[
-            Fluent("free ?robot"),
-            Fluent("at ?robot ?loc_from"),
-            ~Fluent("searched ?loc_to ?object"),
-            ~Fluent("found ?object"),
-        ],
-        effects=[
-            Effect(
-                time=0,
-                resulting_fluents={
-                    ~Fluent("free ?robot"),
-                    ~Fluent("at ?robot ?loc_from"),
-                    Fluent("searched ?loc_to ?object"),
-                },
-            ),
-            Effect(
-                time=(move_time, ["?robot", "?loc_from", "?loc_to"]),
-                resulting_fluents={Fluent("at ?robot ?loc_to")},
-                prob_effects=[
-                    (
-                        (object_find_prob, ["?robot", "?loc_to", "?object"]),
-                        [
-                            Effect(time=0, resulting_fluents={Fluent("found ?object")}),
-                            Effect(
-                                time=(pick_time, ["?robot", "?object"]),
-                                resulting_fluents={
-                                    Fluent("holding ?robot ?object"),
-                                    Fluent("free ?robot"),
-                                },
-                            ),
-                        ],
-                    ),
-                    (
-                        (inv_object_find_prob, ["?robot", "?loc_to", "?object"]),
-                        [Effect(time=0, resulting_fluents={Fluent("free ?robot")})],
-                    ),
-                ],
-            ),
-        ],
-    )
-
-
-def construct_wait_operator():
-    return Operator(
-        name="wait",
-        parameters=[("?r1", "robot"), ("?r2", "robot")],
-        preconditions=[F("free ?r1"), ~F("free ?r2"), ~F("waiting ?r2 ?r1")],
-        effects=[Effect(time=0, resulting_fluents={F("not free ?r1"), F("waiting ?r1 ?r2")})],
-    )

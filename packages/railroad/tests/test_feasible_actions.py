@@ -1,6 +1,6 @@
 from railroad.core import Fluent as F, State, transition, get_action_by_name
 from railroad.planner import MCTSPlanner
-from railroad.helper import _make_callable
+from railroad.operators import _make_callable
 from railroad.core import OptCallable, Operator, Effect
 
 

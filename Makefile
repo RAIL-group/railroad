@@ -38,9 +38,12 @@ clean: clean-cpp clean-python clean-venv  ## Remove build artifacts, Python cach
 	@find . -type f -name "*.DS_Store" -delete 2>/dev/null || true
 	@rm -rf uv.lock
 
-.PHONY: typecheck test
+.PHONY: typecheck test test-standalone-install
 typecheck:  ## Runs the typechecker via pyright
 	@uv run ty check packages
 
 test:  ## Runs tests (limit scope via PYTEST_FILTER=filter)
 	@uv run pytest -vk $(PYTEST_FILTER)
+
+test-standalone-install:  ## Test standalone install of a package (PACKAGE=railroad)
+	@./scripts/test-standalone-install.sh $(or $(PACKAGE),railroad)

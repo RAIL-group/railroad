@@ -93,7 +93,7 @@ setup(
     name="railroad",
     version="0.2.0",
     package_dir={"": "src"},
-    packages=["railroad"],
+    packages=["railroad", "railroad.operators", "railroad.environment"],
     ext_modules=ext_modules,
     cmdclass={"build_ext": build_ext_and_stubgen},
     include_package_data=True,

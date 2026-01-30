@@ -9,7 +9,7 @@ from railroad.core import (
     get_next_actions,
     get_action_by_name,
 )
-from railroad.helper import _make_callable
+from railroad.operators import _make_callable
 from typing import Callable
 import pytest
 

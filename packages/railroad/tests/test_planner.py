@@ -1,6 +1,6 @@
 from railroad.core import Fluent, State, transition, get_action_by_name
-from railroad.helper import construct_move_visited_operator
-from railroad.helper import construct_search_operator
+from railroad.operators import construct_move_visited_operator
+from railroad.operators import construct_search_and_pick_operator
 from railroad.planner import MCTSPlanner, get_usable_actions
 
 import pytest
@@ -112,7 +112,7 @@ def test_mcts_search_picks_more_likely_location(roomA_prob, num_robots):
             return 0.4  # same as your original default for non-roomA
 
     # Ground actions
-    search_actions = construct_search_operator(
+    search_actions = construct_search_and_pick_operator(
         object_search_prob, 5.0, 3
     ).instantiate(objects_by_type)
 

@@ -26,10 +26,10 @@ from railroad._bindings import (
     GoalType,
 )
 from railroad.core import ff_heuristic
-from environments.operators import (
-    construct_move_operator_nonblocking,
-    construct_pick_operator_nonblocking,
-    construct_place_operator_nonblocking,
+from railroad.operators import (
+    construct_move_operator,
+    construct_pick_operator,
+    construct_place_operator,
 )
 
 
@@ -100,8 +100,8 @@ class TestNegativeGoalHeuristic:
             "object": ["Book"],
         }
 
-        pick_op = construct_pick_operator_nonblocking(1.0)
-        move_op = construct_move_operator_nonblocking(1.0)
+        pick_op = construct_pick_operator(1.0)
+        move_op = construct_move_operator(1.0)
         all_actions = pick_op.instantiate(objects_by_type) + move_op.instantiate(objects_by_type)
 
         initial_state = State(
@@ -158,9 +158,9 @@ class TestMCTSPlannerWithNegativeGoals:
             "object": ["Book"],
         }
 
-        pick_op = construct_pick_operator_nonblocking(1.0)
-        move_op = construct_move_operator_nonblocking(1.0)
-        place_op = construct_place_operator_nonblocking(1.0)
+        pick_op = construct_pick_operator(1.0)
+        move_op = construct_move_operator(1.0)
+        place_op = construct_place_operator(1.0)
         all_actions = (
             pick_op.instantiate(objects_by_type) +
             move_op.instantiate(objects_by_type) +
@@ -201,9 +201,9 @@ class TestMCTSPlannerWithNegativeGoals:
             "object": ["Book", "Mug"],
         }
 
-        pick_op = construct_pick_operator_nonblocking(1.0)
-        move_op = construct_move_operator_nonblocking(1.0)
-        place_op = construct_place_operator_nonblocking(1.0)
+        pick_op = construct_pick_operator(1.0)
+        move_op = construct_move_operator(1.0)
+        place_op = construct_place_operator(1.0)
         all_actions = (
             pick_op.instantiate(objects_by_type) +
             move_op.instantiate(objects_by_type) +
@@ -277,7 +277,7 @@ class TestNegativeGoalSolutions:
             ],
         )
 
-        move_op = construct_move_operator_nonblocking(1.0)
+        move_op = construct_move_operator(1.0)
         all_actions = pick_op_with_not_at.instantiate(objects_by_type) + move_op.instantiate(objects_by_type)
 
         initial_state = State(
