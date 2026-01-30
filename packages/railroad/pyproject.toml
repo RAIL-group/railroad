@@ -8,7 +8,7 @@ cache-keys = [
   { file = "setup.py" },
 
   # Changing the bindings will trigger a rebuild
-  { file = "src/mrppddl/*.cpp" },
+  { file = "src/railroad/*.cpp" },
 
   # Changes to headers will trigger a rebuild
   { file = "include/**/*.hpp" },
