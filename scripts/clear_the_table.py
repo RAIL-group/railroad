@@ -85,9 +85,9 @@ def main():
     }
 
     # Create operators
-    move_time_fn = env.get_skills_cost_fn(skill_name='move')
-    pick_time = env.get_skills_cost_fn(skill_name='pick')
-    place_time = env.get_skills_cost_fn(skill_name='place')
+    move_time_fn = env.get_skills_time_fn(skill_name='move')
+    pick_time = env.get_skills_time_fn(skill_name='pick')
+    place_time = env.get_skills_time_fn(skill_name='place')
 
     move_op = operators.construct_move_operator_blocking(move_time_fn)
     pick_op = operators.construct_pick_operator_blocking(pick_time)

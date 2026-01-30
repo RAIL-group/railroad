@@ -93,26 +93,26 @@ def bench_movie_night(case: BenchmarkCase):
 
     # Create operators
     move_op = operators.construct_move_operator_blocking(
-        move_time=env.get_skills_cost_fn('move')
+        move_time=env.get_skills_time_fn('move')
     )
 
     # Search operator with 80% success rate when object is actually present
     object_find_prob = lambda r, loc, o: 0.8 if o in objects_at_locations.get(loc, dict()).get("object", dict()) else 0.2
     search_op = operators.construct_search_operator(
         object_find_prob=object_find_prob,
-        search_time=env.get_skills_cost_fn('search')
+        search_time=env.get_skills_time_fn('search')
     )
 
     no_op = operators.construct_no_op_operator(
-        no_op_time=env.get_skills_cost_fn('no_op'),
+        no_op_time=env.get_skills_time_fn('no_op'),
         extra_cost=100
     )
     pick_op = operators.construct_pick_operator_blocking(
-        pick_time=env.get_skills_cost_fn('pick')
+        pick_time=env.get_skills_time_fn('pick')
     )
 
     place_op = operators.construct_place_operator_blocking(
-        place_time=env.get_skills_cost_fn('place')
+        place_time=env.get_skills_time_fn('place')
     )
 
     # Create simulator

@@ -137,25 +137,25 @@ def bench_multi_object_search_base(case: BenchmarkCase):
 
     # Create operators
     move_op = operators.construct_move_operator_blocking(
-        move_time=env.get_skills_cost_fn('move')
+        move_time=env.get_skills_time_fn('move')
     )
 
     # Search operator with 80% success rate when object is actually present
     search_op = operators.construct_search_operator(
         object_find_prob=lambda r, l, o: 0.6 if 'kitchen' in l else 0.4,
-        search_time=env.get_skills_cost_fn('search')
+        search_time=env.get_skills_time_fn('search')
     )
 
     pick_op = operators.construct_pick_operator_blocking(
-        pick_time=env.get_skills_cost_fn('pick')
+        pick_time=env.get_skills_time_fn('pick')
     )
 
     place_op = operators.construct_place_operator_blocking(
-        place_time=env.get_skills_cost_fn('place')
+        place_time=env.get_skills_time_fn('place')
     )
 
     no_op = operators.construct_no_op_operator(
-        no_op_time=env.get_skills_cost_fn('no_op'),
+        no_op_time=env.get_skills_time_fn('no_op'),
         extra_cost=10
     )
 

@@ -51,7 +51,7 @@ def bench_single_robot_nav(case: BenchmarkCase):
     goal = F(f"at robot1 loc{num_locations - 1}")
 
     # Create operators
-    move_time_fn = env.get_skills_cost_fn('move')
+    move_time_fn = env.get_skills_time_fn('move')
     move_op = operators.construct_move_operator_blocking(move_time_fn)
 
     objects_by_type = {
