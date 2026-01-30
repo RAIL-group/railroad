@@ -820,10 +820,10 @@ class ProgressDisplay:
             self._print_benchmark_summary(benchmark_name)
             self.completed_benchmarks.add(benchmark_name)
 
-            # Move to the next benchmark with pending tasks
+            # Move to the next benchmark with pending tasks (in plan order, not alphabetical)
             if self.active_benchmark == benchmark_name:
                 self.active_benchmark = None
-                for bname in sorted(self.benchmark_progresses.keys()):
+                for bname in self.benchmark_progresses.keys():
                     if bname not in self.completed_benchmarks and self.benchmark_pending_tasks[bname] > 0:
                         self.active_benchmark = bname
                         break
