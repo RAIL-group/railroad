@@ -1,5 +1,5 @@
-from mrppddl.core import Operator, Fluent, Effect, transition, get_next_actions
-from mrppddl.core import State
+from railroad.core import Operator, Fluent, Effect, transition, get_next_actions
+from railroad.core import State
 from typing import Callable, List, Optional, Dict
 import matplotlib.pyplot as plt
 import networkx as nx
