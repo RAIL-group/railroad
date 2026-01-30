@@ -20,16 +20,14 @@ from railroad.core import Fluent as F, State, get_action_by_name, ff_heuristic
 from railroad._bindings import LiteralGoal
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
-import environments
-from railroad.environment import EnvironmentInterface
-from environments import SimpleEnvironment
+from railroad.environment import AbstractEnvironment, EnvironmentInterface, SimpleEnvironment
 from railroad import operators
 from rich.console import Console
 
 from bench import benchmark, BenchmarkCase
 
 
-class HouseholdEnvironment(environments.BaseEnvironment):
+class HouseholdEnvironment(AbstractEnvironment):
     """Simple household environment for testing multi-object manipulation."""
 
     def __init__(self, locations, objects_at_locations):
