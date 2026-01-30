@@ -28,12 +28,12 @@ This project uses `uv` as the package manager and build tool. The build system a
 
 The repository is organized as a monorepo with several interdependent packages:
 
-#### Core Planning (`mrppddl/`)
-- **C++ Core**: High-performance planning algorithms implemented in C++ (headers in `include/`, bindings in `src/mrppddl/_bindings.cpp`)
+#### Core Planning (`railroad/`)
+- **C++ Core**: High-performance planning algorithms implemented in C++ (headers in `include/`, bindings in `src/railroad/_bindings.cpp`)
   - A* search, MCTS planning
   - State management and action grounding
   - FF heuristic for forward planning
-- **Python Layer**: Python wrapper and utilities (`src/mrppddl/`)
+- **Python Layer**: Python wrapper and utilities (`src/railroad/`)
   - `core.py`: Effect, Operator, Action, State, Fluent classes
   - `planner.py`: MCTSPlanner wrapper with automatic negative precondition handling
   - `helper.py`: Helper functions to construct common operators (move, search, pick, place, wait)
@@ -97,7 +97,7 @@ Goals specify planning objectives using complex logical expressions:
 ```python
 from functools import reduce
 from operator import and_, or_
-from mrppddl.core import Fluent as F
+from railroad.core import Fluent as F
 
 # AND goal: all conditions must be true
 goal = reduce(and_, [F("at robot1 kitchen"), F("found Knife")])
@@ -122,14 +122,14 @@ Key points:
 ## Testing Strategy
 
 Tests are organized by component:
-- `mrppddl/tests/`: Core PDDL functionality, planners, state transitions
+- `railroad/tests/`: Core PDDL functionality, planners, state transitions
 - `environments/tests/`, `procthor/tests/`, `gridmap/tests/`: Component-specific tests
 
 Key test patterns:
 - Use fixtures for common test setups
 - Parametrize tests with `@pytest.mark.parametrize` for multiple scenarios
 - Test both symbolic (PDDL) and grounded (instantiated) levels
-- Integration tests in `test_mrppddl_wait.py` demonstrate multi-agent coordination
+- Integration tests in `test_railroad_wait.py` demonstrate multi-agent coordination
 
 ## Example Workflows
 
@@ -141,7 +141,7 @@ uv run pytest -vk test_fluent_equality
 ### Creating a New PDDL Problem
 The typical flow:
 1. Define environment with locations and objects
-2. Create operators using helpers from `mrppddl.helper`
+2. Create operators using helpers from `railroad.helper`
 3. Instantiate actions from operators with `operator.instantiate(objects_by_type)`
 4. Define goal using the Goal API: `goal = reduce(and_, [F(...), F(...)])`
 5. Run planner with initial state and goal: `planner(state, goal, ...)`
