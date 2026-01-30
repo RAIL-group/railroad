@@ -66,3 +66,4 @@ addopts = "-v -n auto --html=data/test_logs/test_report.html --self-contained-ht
 markers = [
     "slow: marks tests as slow to run (deselect with '-m \"not slow\"')"
 ]
+testpaths = ["packages"]
