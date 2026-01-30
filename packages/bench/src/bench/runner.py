@@ -247,7 +247,7 @@ class BenchmarkRunner:
             Completed execution plan with results
         """
         # Create MLflow experiment with timestamp
-        experiment_name = f"mrppddl_bench_{int(time.time())}"
+        experiment_name = f"railroad_bench_{int(time.time())}"
         self.tracker.create_experiment(experiment_name, plan.metadata)
 
         # Start progress display

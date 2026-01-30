@@ -16,10 +16,10 @@ Uses the new Goal API for defining planning objectives.
 import time
 import itertools
 import numpy as np
-from mrppddl.core import Fluent as F, State, get_action_by_name, ff_heuristic
-from mrppddl._bindings import LiteralGoal
-from mrppddl.planner import MCTSPlanner
-from mrppddl.dashboard import PlannerDashboard
+from railroad.core import Fluent as F, State, get_action_by_name, ff_heuristic
+from railroad._bindings import LiteralGoal
+from railroad.planner import MCTSPlanner
+from railroad.dashboard import PlannerDashboard
 import environments
 from environments.core import EnvironmentInterface
 from environments import SimpleEnvironment

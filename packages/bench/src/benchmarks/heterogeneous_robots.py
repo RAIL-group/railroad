@@ -5,13 +5,13 @@ Benchmark: Heterogeneous Robots in an environment.
 import time
 import itertools
 import numpy as np
-from mrppddl.core import Fluent as F, State, get_action_by_name
-from mrppddl.planner import MCTSPlanner
-from mrppddl.dashboard import PlannerDashboard
+from railroad.core import Fluent as F, State, get_action_by_name
+from railroad.planner import MCTSPlanner
+from railroad.dashboard import PlannerDashboard
 import environments
 from environments.core import EnvironmentInterface
 from environments import SimpleEnvironment
-from mrppddl._bindings import ff_heuristic
+from railroad._bindings import ff_heuristic
 from rich.console import Console
 from bench import benchmark, BenchmarkCase
 

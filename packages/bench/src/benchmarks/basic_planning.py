@@ -5,8 +5,8 @@ Demonstrates benchmark registration and parametrization.
 """
 
 from bench import benchmark, BenchmarkCase
-from mrppddl.core import Fluent as F, State, get_action_by_name
-from mrppddl.planner import MCTSPlanner
+from railroad.core import Fluent as F, State, get_action_by_name
+from railroad.planner import MCTSPlanner
 from environments import SimpleEnvironment
 from environments.core import EnvironmentInterface
 import environments.operators
