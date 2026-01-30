@@ -3,8 +3,8 @@
 import pickle
 import pytest
 
-from mrppddl.core import Fluent as F
-from mrppddl._bindings import TrueGoal, FalseGoal, LiteralGoal, AndGoal, OrGoal
+from railroad.core import Fluent as F
+from railroad._bindings import TrueGoal, FalseGoal, LiteralGoal, AndGoal, OrGoal
 
 
 class TestGoalPickle:

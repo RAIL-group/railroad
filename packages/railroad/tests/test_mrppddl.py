@@ -1,5 +1,5 @@
 import pytest
-from mrppddl.core import (
+from railroad.core import (
     Fluent,
     Effect,
     State,
@@ -10,7 +10,7 @@ from mrppddl.core import (
     Action,
     Operator,
 )
-from mrppddl.helper import construct_move_operator, construct_search_operator
+from railroad.helper import construct_move_operator, construct_search_operator
 import random
 
 F = Fluent

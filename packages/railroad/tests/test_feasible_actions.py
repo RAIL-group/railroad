@@ -1,7 +1,7 @@
-from mrppddl.core import Fluent as F, State, transition, get_action_by_name
-from mrppddl.planner import MCTSPlanner
-from mrppddl.helper import _make_callable
-from mrppddl.core import OptCallable, Operator, Effect
+from railroad.core import Fluent as F, State, transition, get_action_by_name
+from railroad.planner import MCTSPlanner
+from railroad.helper import _make_callable
+from railroad.core import OptCallable, Operator, Effect
 
 
 def construct_move_visited_operator(move_time: OptCallable):

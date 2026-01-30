@@ -1,7 +1,7 @@
-from mrppddl.core import Fluent, State, transition, get_action_by_name
-from mrppddl.helper import construct_move_visited_operator
-from mrppddl.helper import construct_search_operator
-from mrppddl.planner import MCTSPlanner, get_usable_actions
+from railroad.core import Fluent, State, transition, get_action_by_name
+from railroad.helper import construct_move_visited_operator
+from railroad.helper import construct_search_operator
+from railroad.planner import MCTSPlanner, get_usable_actions
 
 import pytest
 import random

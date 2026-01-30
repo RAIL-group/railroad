@@ -8,7 +8,7 @@ such as "clear the table" scenarios where the goal is NOT(at obj table).
 from functools import reduce
 from operator import and_
 
-from mrppddl.core import (
+from railroad.core import (
     Fluent as F,
     State,
     Operator,
@@ -20,12 +20,12 @@ from mrppddl.core import (
     convert_action_to_positive_preconditions,
     convert_action_effects,
 )
-from mrppddl._bindings import (
+from railroad._bindings import (
     Goal,
     LiteralGoal,
     GoalType,
 )
-from mrppddl.core import ff_heuristic
+from railroad.core import ff_heuristic
 from environments.operators import (
     construct_move_operator_nonblocking,
     construct_pick_operator_nonblocking,
@@ -117,7 +117,7 @@ class TestNegativeGoalHeuristic:
         goal = LiteralGoal(~F("at Book table"))
 
         # Extract negative fluents and create mapping
-        from mrppddl.core import extract_negative_goal_fluents
+        from railroad.core import extract_negative_goal_fluents
         negative_fluents = extract_negative_goal_fluents(goal)
 
         # Also include negatives from action preconditions
@@ -150,7 +150,7 @@ class TestMCTSPlannerWithNegativeGoals:
 
     def test_mcts_planner_with_negative_goal(self):
         """Test that MCTSPlanner works with negative goals."""
-        from mrppddl.planner import MCTSPlanner
+        from railroad.planner import MCTSPlanner
 
         objects_by_type = {
             "robot": ["r1"],
@@ -193,7 +193,7 @@ class TestMCTSPlannerWithNegativeGoals:
 
     def test_mcts_planner_clear_table_multiple_objects(self):
         """Test MCTSPlanner with clear table goal (multiple negative literals)."""
-        from mrppddl.planner import MCTSPlanner
+        from railroad.planner import MCTSPlanner
 
         objects_by_type = {
             "robot": ["r1"],

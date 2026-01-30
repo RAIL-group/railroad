@@ -32,11 +32,11 @@ Organized into themed test classes:
 import math
 import pytest
 
-from mrppddl.core import Fluent, State, transition, get_action_by_name
-from mrppddl.helper import construct_move_visited_operator
+from railroad.core import Fluent, State, transition, get_action_by_name
+from railroad.helper import construct_move_visited_operator
 
 # Goal classes from bindings
-from mrppddl._bindings import (
+from railroad._bindings import (
     GoalType,
     LiteralGoal,
     AndGoal,
@@ -46,7 +46,7 @@ from mrppddl._bindings import (
     ff_heuristic,
 )
 
-from mrppddl.planner import MCTSPlanner, get_usable_actions
+from railroad.planner import MCTSPlanner, get_usable_actions
 
 F = Fluent
 
@@ -543,7 +543,7 @@ class TestGoalNegativeConversion:
     """
 
     def test_convert_simple_negative_literal(self):
-        from mrppddl.core import create_positive_fluent_mapping, convert_goal_to_positive_preconditions
+        from railroad.core import create_positive_fluent_mapping, convert_goal_to_positive_preconditions
 
         neg_fluent = ~F("free r1")
         goal = LiteralGoal(neg_fluent)
@@ -558,7 +558,7 @@ class TestGoalNegativeConversion:
         assert not converted_fluent.negated
 
     def test_convert_nested_goals_with_negatives(self):
-        from mrppddl.core import create_positive_fluent_mapping, convert_goal_to_positive_preconditions
+        from railroad.core import create_positive_fluent_mapping, convert_goal_to_positive_preconditions
 
         goal = AndGoal([
             LiteralGoal(F("at r1 kitchen")),
@@ -581,7 +581,7 @@ class TestGoalNegativeConversion:
                 assert not lit.negated
 
     def test_unconverted_fluents_pass_through(self):
-        from mrppddl.core import create_positive_fluent_mapping, convert_goal_to_positive_preconditions
+        from railroad.core import create_positive_fluent_mapping, convert_goal_to_positive_preconditions
 
         goal = LiteralGoal(~F("at r1 kitchen"))
         neg_to_pos = create_positive_fluent_mapping({F("free r1")})  # doesn't include 'at'

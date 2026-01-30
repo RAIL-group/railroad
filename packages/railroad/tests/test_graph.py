@@ -1,4 +1,4 @@
-from mrppddl.core import (
+from railroad.core import (
     Operator,
     Fluent,
     Effect,
@@ -9,7 +9,7 @@ from mrppddl.core import (
     get_next_actions,
     get_action_by_name,
 )
-from mrppddl.helper import _make_callable
+from railroad.helper import _make_callable
 from typing import Callable
 import pytest
 
