@@ -20,7 +20,7 @@ class build_ext_and_stubgen(build_ext):
     """
     Build the C++ extension, then generate .pyi stubs via pybind11-stubgen.
 
-    Generates: src/mrppddl/_bindings.pyi
+    Generates: src/railroad/_bindings.pyi
     """
 
     def run(self):
@@ -31,10 +31,10 @@ class build_ext_and_stubgen(build_ext):
         # The compiled extension ends up under self.build_lib (temporary build dir).
         build_lib = Path(self.build_lib).resolve()
 
-        module = "mrppddl._bindings"
+        module = "railroad._bindings"
 
         # Where to write the final stub inside your source tree/package.
-        out_pyi = Path("src/mrppddl/_bindings.pyi").resolve()
+        out_pyi = Path("src/railroad/_bindings.pyi").resolve()
 
         # Optional: skip if stub is newer than built extension
         ext_path = Path(self.get_ext_fullpath(module)).resolve()
@@ -60,26 +60,26 @@ class build_ext_and_stubgen(build_ext):
         )
 
         # pybind11-stubgen writes a package-style tree:
-        #   <out>/mrppddl/_bindings.pyi
-        generated = stub_out_dir / "mrppddl" / "_bindings.pyi"
+        #   <out>/railroad/_bindings.pyi
+        generated = stub_out_dir / "railroad" / "_bindings.pyi"
         if not generated.exists():
             raise RuntimeError(f"Stubgen did not produce expected file: {generated}")
 
         out_pyi.parent.mkdir(parents=True, exist_ok=True)
 
         # Post-process: pybind11-stubgen sometimes emits fully-qualified names
-        # like `mrppddl._bindings.Action` instead of just `Action`. Since we're
+        # like `railroad._bindings.Action` instead of just `Action`. Since we're
         # inside the _bindings module, strip the prefix to avoid import errors.
         stub_content = generated.read_text(encoding="utf-8")
-        stub_content = stub_content.replace("mrppddl._bindings.", "")
+        stub_content = stub_content.replace("railroad._bindings.", "")
 
         out_pyi.write_text(stub_content, encoding="utf-8")
 
 
 ext_modules = [
     Extension(
-        "mrppddl._bindings",
-        sources=["src/mrppddl/_bindings.cpp"],
+        "railroad._bindings",
+        sources=["src/railroad/_bindings.cpp"],
         include_dirs=[
             "include",
             get_pybind_include(),  # pyright: ignore[reportArgumentType]
@@ -90,13 +90,13 @@ ext_modules = [
 ]
 
 setup(
-    name="mrppddl",
+    name="railroad",
     version="0.2.0",
     package_dir={"": "src"},
-    packages=["mrppddl"],
+    packages=["railroad"],
     ext_modules=ext_modules,
     cmdclass={"build_ext": build_ext_and_stubgen},
     include_package_data=True,
-    package_data={"mrppddl": ["*.pyi"]},
+    package_data={"railroad": ["*.pyi"]},
     zip_safe=False,
 )
