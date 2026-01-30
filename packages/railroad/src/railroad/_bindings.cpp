@@ -1,16 +1,16 @@
-#define MRPPDDL_USE_PYBIND
-#include "mrppddl/core.hpp"
-#include "mrppddl/ff_heuristic.hpp"
-#include "mrppddl/goal.hpp"
-#include "mrppddl/planner.hpp"
-#include "mrppddl/state.hpp"
+#define RAILROAD_USE_PYBIND
+#include "railroad/core.hpp"
+#include "railroad/ff_heuristic.hpp"
+#include "railroad/goal.hpp"
+#include "railroad/planner.hpp"
+#include "railroad/state.hpp"
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
 
 namespace py = pybind11;
-using namespace mrppddl;
+using namespace railroad;
 
 PYBIND11_MODULE(_bindings, m) {
   py::class_<Fluent>(m, "Fluent")
@@ -355,7 +355,7 @@ PYBIND11_MODULE(_bindings, m) {
       [](const State &state,
          std::optional<std::reference_wrapper<const Action>> action,
          bool relax) {
-        return mrppddl::transition(state, action ? &action->get() : nullptr,
+        return railroad::transition(state, action ? &action->get() : nullptr,
                                    relax);
       },
       py::arg("state"), py::arg("action") = std::nullopt,
