@@ -3,19 +3,19 @@ from typing import Callable, List, Tuple, Dict, Set, Union, Sequence, Collection
 import itertools
 
 try:
-    from mrppddl import _bindings  # noqa: F401
+    from railroad import _bindings  # noqa: F401
 except ImportError as e:
     raise ImportError(
-        "mrppddl's native extension (_bindings) is missing.\n"
+        "railroad's native extension (_bindings) is missing.\n"
         "To rebuild the package, run:\n"
-        "    uv sync --reinstall-package mrppddl\n"
+        "    uv sync --reinstall-package railroad\n"
         "or 'make rebuild-cpp'\n"
     ) from e
 
-from mrppddl._bindings import GroundedEffect, Fluent, Action, State
-from mrppddl._bindings import transition  # noqa: F401
-from mrppddl._bindings import LiteralGoal, AndGoal, OrGoal, Goal
-from mrppddl._bindings import ff_heuristic as _ff_heuristic_cpp
+from railroad._bindings import GroundedEffect, Fluent, Action, State
+from railroad._bindings import transition  # noqa: F401
+from railroad._bindings import LiteralGoal, AndGoal, OrGoal, Goal
+from railroad._bindings import ff_heuristic as _ff_heuristic_cpp
 
 
 def ff_heuristic(state: State, goal: Union[Goal, Fluent], all_actions: List[Action]) -> float:
@@ -210,7 +210,7 @@ def extract_negative_goal_fluents(goal: Goal) -> Set[Fluent]:
         Set of positive Fluent objects that appear negated in the goal.
         For example, if goal has ~F("at Book table"), returns {F("at Book table")}.
     """
-    from mrppddl._bindings import GoalType
+    from railroad._bindings import GoalType
 
     negative_fluents = set()
     goal_type = goal.get_type()
@@ -294,7 +294,7 @@ def convert_state_to_positive_preconditions(
         For example, if F("hand_full r1") is not in state.fluents,
         adds F("not-hand_full r1") to indicate hand is not full.
     """
-    from mrppddl._bindings import GroundedEffect
+    from railroad._bindings import GroundedEffect
 
     new_fluents = set(state.fluents)
 
@@ -407,7 +407,7 @@ def convert_action_effects(
     Returns:
         New Action with augmented effects
     """
-    from mrppddl._bindings import GroundedEffect
+    from railroad._bindings import GroundedEffect
 
     def augment_fluents(fluents: Set[Fluent]) -> Set[Fluent]:
         """Augment a set of fluents with consistency fluents."""
@@ -521,7 +521,7 @@ def convert_goal_to_positive_preconditions(
     Returns:
         A new Goal with converted fluents
     """
-    from mrppddl._bindings import (
+    from railroad._bindings import (
         GoalType,
         LiteralGoal,
         AndGoal,
