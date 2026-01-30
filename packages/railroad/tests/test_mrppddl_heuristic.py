@@ -1,6 +1,6 @@
 import pytest
 
-from mrppddl.core import (
+from railroad.core import (
     Fluent,
     Operator,
     Effect,
@@ -12,8 +12,8 @@ from mrppddl.core import (
     convert_action_to_positive_preconditions,
     convert_action_effects,
 )
-from mrppddl._bindings import Action, GroundedEffect
-from mrppddl.core import ff_heuristic, LiteralGoal
+from railroad._bindings import Action, GroundedEffect
+from railroad.core import ff_heuristic, LiteralGoal
 
 F = Fluent
 
@@ -578,7 +578,7 @@ def test_convert_state_with_upcoming_effects():
     are properly converted to maintain consistency with the negative-to-positive
     precondition mapping.
     """
-    from mrppddl.core import convert_state_to_positive_preconditions
+    from railroad.core import convert_state_to_positive_preconditions
 
     # Hand-code a simple mapping
     neg_to_pos_mapping = {
