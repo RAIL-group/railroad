@@ -10,14 +10,14 @@ from operator import and_
 import itertools
 import roslibpy
 import environments
-from mrppddl.core import Fluent as F, State, get_action_by_name
-from mrppddl.core import transition
+from railroad.core import Fluent as F, State, get_action_by_name
+from railroad.core import transition
 
-from mrppddl.core import OptCallable, Operator, Effect
-from mrppddl.helper import _make_callable, _invert_prob
+from railroad.core import OptCallable, Operator, Effect
+from railroad.helper import _make_callable, _invert_prob
 from typing import Dict, Set, List, Tuple, Callable
 
-from mrppddl.planner import MCTSPlanner
+from railroad.planner import MCTSPlanner
 import environments
 from environments.environments import BaseEnvironment, SkillStatus
 from environments.operators import construct_move_visited_operator

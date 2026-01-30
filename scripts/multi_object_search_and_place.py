@@ -17,9 +17,9 @@ from functools import reduce
 from operator import and_
 
 import numpy as np
-from mrppddl.core import Fluent as F, State, get_action_by_name, ff_heuristic
-from mrppddl.planner import MCTSPlanner
-from mrppddl.dashboard import PlannerDashboard
+from railroad.core import Fluent as F, State, get_action_by_name, ff_heuristic
+from railroad.planner import MCTSPlanner
+from railroad.dashboard import PlannerDashboard
 import environments
 from environments import SimpleEnvironment
 from environments.core import EnvironmentInterface

@@ -1,9 +1,9 @@
 import environments
-from mrppddl.planner import MCTSPlanner
-from mrppddl.core import Fluent as F, State, get_action_by_name
+from railroad.planner import MCTSPlanner
+from railroad.core import Fluent as F, State, get_action_by_name
 from environments.core import EnvironmentInterface
-from mrppddl._bindings import ff_heuristic
-from mrppddl.dashboard import PlannerDashboard
+from railroad._bindings import ff_heuristic
+from railroad.dashboard import PlannerDashboard
 import argparse
 import logging
 

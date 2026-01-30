@@ -12,15 +12,15 @@ import pytest
 from common import Pose
 import environments
 import environments.procthor
-from mrppddl.planner import MCTSPlanner
+from railroad.planner import MCTSPlanner
 import random
-from mrppddl.core import Fluent as F, State, get_action_by_name
+from railroad.core import Fluent as F, State, get_action_by_name
 import procthor
 import matplotlib.pyplot as plt
 from pathlib import Path
 from environments import plotting, utils, SimulatedRobot
 from environments.core import EnvironmentInterface
-from mrppddl.dashboard import PlannerDashboard
+from railroad.dashboard import PlannerDashboard
 
 
 def main():
