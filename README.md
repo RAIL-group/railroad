@@ -1,4 +1,4 @@
-# MRPPDDL: Multi-Robot Probabilistic PDDL Planning
+# Railroad: Multi-Robot Probabilistic PDDL Planning
 
 A high-performance planning framework for multi-robot systems that combines symbolic PDDL-style planning with probabilistic reasoning and realistic 3D simulation environments.
 
@@ -34,9 +34,9 @@ uv sync
 from functools import reduce
 from operator import and_
 
-from mrppddl.core import Fluent as F, State
-from mrppddl.helper import construct_move_operator, construct_search_operator
-from mrppddl.planner import MCTSPlanner
+from railroad.core import Fluent as F, State
+from railroad.helper import construct_move_operator, construct_search_operator
+from railroad.planner import MCTSPlanner
 
 # Define initial state
 initial_state = State(fluents={
@@ -97,7 +97,7 @@ See `scripts/obf_door_example.py` for a complete example of planning and executi
 The repository is organized as a monorepo with the following structure:
 
 - **`packages/`** - All packages are located this directory:
-    - **`mrppddl/`** - Core PDDL planning engine (C++ with Python bindings)
+    - **`railroad/`** - Core PDDL planning engine (C++ with Python bindings)
     - **`procthor/`** - ProcTHOR simulator interface and utilities
     - **`environments/`** - Environment abstractions and implementations
     - **`gridmap/`** - Occupancy grid mapping and planning utilities
@@ -124,7 +124,7 @@ uv run pytest -vk search
 ### Type Checking
 
 ```bash
-# Type check in `packages` dir (currently only `mrppddl` and `bench` have type hints, more coverage coming later)
+# Type check in `packages` dir (currently only `railroad` and `bench` have type hints, more coverage coming later)
 uv run ty check packages
 ```
 
@@ -151,7 +151,7 @@ If you modify C++ code or encounter import errors:
 ```bash
 make rebuild-cpp
 # or equivalently:
-uv sync --reinstall-package mrppddl
+uv sync --reinstall-package railroad
 ```
 
 ## Key Concepts
@@ -176,7 +176,7 @@ Goals specify what conditions must be satisfied to complete planning. The system
 ```python
 from functools import reduce
 from operator import and_, or_
-from mrppddl.core import Fluent as F
+from railroad.core import Fluent as F
 
 # Single literal goal
 goal = F("at robot1 kitchen")
@@ -203,7 +203,7 @@ objects = ["Book", "Mug"]
 goal = reduce(or_, [F(f"at {obj} shelf") for obj in objects])
 
 # Nested goals with AND and OR
-from mrppddl._bindings import AndGoal, OrGoal, LiteralGoal
+from railroad._bindings import AndGoal, OrGoal, LiteralGoal
 goal = AndGoal([
     OrGoal([LiteralGoal(F("at Remote den")), LiteralGoal(F("at Plate den"))]),
     OrGoal([LiteralGoal(F("at Cookie den")), LiteralGoal(F("at Couch den"))]),
@@ -221,15 +221,15 @@ if goal.evaluate(current_state.fluents):
 all_literals = goal.get_all_literals()
 
 # Get goal type
-from mrppddl._bindings import GoalType
+from railroad._bindings import GoalType
 goal_type = goal.get_type()  # GoalType.AND, GoalType.OR, GoalType.LITERAL, etc.
 ```
 
 #### Using Goals with Planners
 
 ```python
-from mrppddl.planner import MCTSPlanner
-from mrppddl._bindings import ff_heuristic_goal
+from railroad.planner import MCTSPlanner
+from railroad._bindings import ff_heuristic_goal
 
 # Plan with goal object
 planner = MCTSPlanner(actions)
@@ -261,7 +261,7 @@ h_value = ff_heuristic_goal(state, goal, actions)
 
 The C++ extension needs to be rebuilt:
 ```bash
-uv sync --reinstall-package mrppddl
+uv sync --reinstall-package railroad
 ```
 
 ### ProcTHOR Resource Downloads
