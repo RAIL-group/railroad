@@ -3,16 +3,14 @@
 This module provides concrete environment implementations.
 """
 
-from typing import Any, Callable, Dict, Set, Tuple, Union
+from typing import Any, Callable, Dict, Set
 
 import numpy as np
 from numpy.typing import NDArray
 
-# Import base classes from railroad.environment
-from railroad.environment import BaseEnvironment, SkillStatus, SimulatedRobot, Pose
+from railroad.environment import BaseEnvironment, SkillStatus, SimulatedRobot
 
-# Re-export for backward compatibility
-__all__ = ["BaseEnvironment", "SkillStatus", "SimulatedRobot", "SimpleEnvironment", "Pose"]
+__all__ = ["SimpleEnvironment"]
 
 
 class SimpleEnvironment(BaseEnvironment):

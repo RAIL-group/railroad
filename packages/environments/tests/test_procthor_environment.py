@@ -1,8 +1,8 @@
 from types import SimpleNamespace
 
 from common import Pose
-import environments
 import environments.procthor
+from railroad import operators
 from railroad.planner import MCTSPlanner
 import random
 from railroad.core import Fluent as F, State, get_action_by_name, LiteralGoal
@@ -10,7 +10,7 @@ import procthor
 import matplotlib.pyplot as plt
 from pathlib import Path
 from environments import plotting, utils
-from environments.core import EnvironmentInterface
+from railroad.environment import EnvironmentInterface
 
 
 def get_args():
@@ -87,8 +87,8 @@ def test_procthor_move_and_search():
     search_time = env.get_skills_cost_fn(skill_name='search')
     object_find_prob = lambda r, loc, o: 1.0
 
-    move_op = environments.operators.construct_move_operator(move_time_fn)
-    search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
+    move_op = operators.construct_move_operator_blocking(move_time_fn)
+    search_op = operators.construct_search_operator(object_find_prob, search_time)
 
     sim = EnvironmentInterface(init_state, objects_by_type, [search_op, move_op], env)
 
@@ -184,10 +184,10 @@ def test_procthor_move_search_pick_place():
     place_time = env.get_skills_cost_fn(skill_name='place')
     object_find_prob = lambda r, loc, o: 1.0
 
-    move_op = environments.operators.construct_move_operator(move_time_fn)
-    search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
-    pick_op = environments.operators.construct_pick_operator(pick_time)
-    place_op = environments.operators.construct_place_operator(place_time)
+    move_op = operators.construct_move_operator_blocking(move_time_fn)
+    search_op = operators.construct_search_operator(object_find_prob, search_time)
+    pick_op = operators.construct_pick_operator_blocking(pick_time)
+    place_op = operators.construct_place_operator_blocking(place_time)
 
     sim = EnvironmentInterface(init_state, objects_by_type, [move_op, search_op, pick_op, place_op], env)
 

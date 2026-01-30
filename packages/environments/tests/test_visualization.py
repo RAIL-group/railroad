@@ -6,13 +6,13 @@ from functools import reduce
 from types import SimpleNamespace
 
 import procthor
-import environments
 import environments.procthor
 from common import Pose
+from railroad import operators
 from railroad.planner import MCTSPlanner
 from railroad.core import Fluent as F, State, get_action_by_name, LiteralGoal
 from environments import plotting, utils
-from environments.core import EnvironmentInterface
+from railroad.environment import EnvironmentInterface
 from environments.utils import extract_robot_poses
 from operator import and_
 
@@ -54,11 +54,11 @@ def test_single_robot_plotting():
     no_op_time = env.get_skills_cost_fn(skill_name='no_op')
     object_find_prob = lambda r, loc, o: 1.0
 
-    move_op = environments.operators.construct_move_operator(move_time_fn)
-    search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
-    pick_op = environments.operators.construct_pick_operator(pick_time)
-    place_op = environments.operators.construct_place_operator(place_time)
-    no_op = environments.operators.construct_no_op_operator(no_op_time=no_op_time, extra_cost=100.0)
+    move_op = operators.construct_move_operator_blocking(move_time_fn)
+    search_op = operators.construct_search_operator(object_find_prob, search_time)
+    pick_op = operators.construct_pick_operator_blocking(pick_time)
+    place_op = operators.construct_place_operator_blocking(place_time)
+    no_op = operators.construct_no_op_operator(no_op_time=no_op_time, extra_cost=100.0)
 
     sim = EnvironmentInterface(
         init_state,
@@ -145,11 +145,11 @@ def test_multi_robot_unknown_plotting():
     place_time = env.get_skills_cost_fn(skill_name='place')
     no_op_time = env.get_skills_cost_fn(skill_name='no_op')
     object_find_prob = lambda r, l, o: 1.0
-    move_op = environments.operators.construct_move_operator(move_time_fn)
-    search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
-    pick_op = environments.operators.construct_pick_operator(pick_time)
-    place_op = environments.operators.construct_place_operator(place_time)
-    no_op = environments.operators.construct_no_op_operator(no_op_time=no_op_time, extra_cost=100.0)
+    move_op = operators.construct_move_operator_blocking(move_time_fn)
+    search_op = operators.construct_search_operator(object_find_prob, search_time)
+    pick_op = operators.construct_pick_operator_blocking(pick_time)
+    place_op = operators.construct_place_operator_blocking(place_time)
+    no_op = operators.construct_no_op_operator(no_op_time=no_op_time, extra_cost=100.0)
 
     sim = EnvironmentInterface(init_state, objects_by_type,
                                [search_op, move_op, pick_op, place_op, no_op], env)
@@ -240,10 +240,10 @@ def test_multi_robot_known_plotting():
     place_time = env.get_skills_cost_fn(skill_name='place')
     no_op_time = env.get_skills_cost_fn(skill_name='no_op')
     object_find_prob = lambda r, l, o: 1.0
-    move_op = environments.operators.construct_move_operator(move_time_fn)
-    pick_op = environments.operators.construct_pick_operator(pick_time)
-    place_op = environments.operators.construct_place_operator(place_time)
-    no_op = environments.operators.construct_no_op_operator(no_op_time=no_op_time, extra_cost=100.0)
+    move_op = operators.construct_move_operator_blocking(move_time_fn)
+    pick_op = operators.construct_pick_operator_blocking(pick_time)
+    place_op = operators.construct_place_operator_blocking(place_time)
+    no_op = operators.construct_no_op_operator(no_op_time=no_op_time, extra_cost=100.0)
 
     sim = EnvironmentInterface(init_state, objects_by_type,
                                [move_op, pick_op, place_op, no_op], env)

@@ -1,8 +1,8 @@
 import pytest
 import numpy as np
 from railroad.core import Fluent as F, State, get_action_by_name
-import environments
-from environments.core import EnvironmentInterface
+from railroad import operators
+from railroad.environment import EnvironmentInterface
 from environments import SimpleEnvironment
 
 # Fancy error handling; shows local vars
@@ -61,11 +61,11 @@ def test_simulator_advance_blocking_operators():
     object_find_prob = lambda r, loc, o: (0.8 if o in OBJECTS_AT_LOCATIONS.get(loc, dict()).get("object", dict())
                                           else 0.2)
 
-    move_op = environments.operators.construct_move_operator(move_time_fn)
-    search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
-    pick_op = environments.operators.construct_pick_operator(pick_time)
-    place_op = environments.operators.construct_place_operator(place_time)
-    no_op = environments.operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
+    move_op = operators.construct_move_operator_blocking(move_time_fn)
+    search_op = operators.construct_search_operator(object_find_prob, search_time)
+    pick_op = operators.construct_pick_operator_blocking(pick_time)
+    place_op = operators.construct_place_operator_blocking(place_time)
+    no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
 
     # Create simulator
     sim = EnvironmentInterface(
