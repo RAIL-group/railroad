@@ -46,7 +46,7 @@ class BenchmarkAnalyzer:
                 "tags": exp.tags if exp.tags else {},
             }
             for exp in experiments
-            if exp.name.startswith("mrppddl_bench_")
+            if exp.name.startswith("railroad_bench_")
         ])
 
         if not df.empty:

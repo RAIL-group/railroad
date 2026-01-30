@@ -27,7 +27,7 @@ class MLflowTracker:
     Handles experiment creation and task result logging.
 
     Experiment hierarchy:
-        Experiment: mrppddl_bench_{timestamp}
+        Experiment: railroad_bench_{timestamp}
             └─ Run (per task): {benchmark_name}_{case_idx}_{repeat_idx}
     """
 
@@ -59,7 +59,7 @@ class MLflowTracker:
         Create new experiment with metadata tags.
 
         Args:
-            name: Experiment name (e.g., mrppddl_bench_1234567890)
+            name: Experiment name (e.g., railroad_bench_1234567890)
             metadata: Metadata dictionary to log as experiment tags
         """
         # Suppress database initialization logs
