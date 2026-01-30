@@ -1,6 +1,6 @@
-from mrppddl.core import Fluent as F
-from mrppddl.helper import _make_callable, _invert_prob
-from mrppddl.core import OptCallable, Operator, Effect
+from railroad.core import Fluent as F
+from railroad.helper import _make_callable, _invert_prob
+from railroad.core import OptCallable, Operator, Effect
 
 
 def construct_move_operator_nonblocking(move_time: OptCallable):
