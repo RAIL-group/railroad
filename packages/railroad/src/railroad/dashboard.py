@@ -11,7 +11,7 @@ import re
 from time import sleep, perf_counter
 from typing import List, Dict, Set, Union, Tuple, Optional
 
-from mrppddl._bindings import (
+from railroad._bindings import (
     Goal,
     LiteralGoal,
     AndGoal,
@@ -19,7 +19,7 @@ from mrppddl._bindings import (
     GoalType,
     Fluent,
 )
-from mrppddl.helper import format_goal, get_best_branch, get_satisfied_branch
+from railroad.helper import format_goal, get_best_branch, get_satisfied_branch
 
 
 def split_markdown_flat(text: str) -> List[Dict[str, str]]:

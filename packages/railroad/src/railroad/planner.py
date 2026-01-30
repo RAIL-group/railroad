@@ -1,11 +1,11 @@
 from typing import List, Dict, Union, SupportsFloat, SupportsInt
 from collections.abc import Set
-from mrppddl._bindings import astar, get_usable_actions  # noqa
-from mrppddl._bindings import MCTSPlanner as _MCTSPlannerCpp
-from mrppddl._bindings import Action, State, Fluent
-from mrppddl._bindings import GoalType  # noqa: F401
+from railroad._bindings import astar, get_usable_actions  # noqa
+from railroad._bindings import MCTSPlanner as _MCTSPlannerCpp
+from railroad._bindings import Action, State, Fluent
+from railroad._bindings import GoalType  # noqa: F401
 # Import Goal as the base class (it's called "Goal" in bindings, maps to GoalBase in C++)
-from mrppddl._bindings import Goal, LiteralGoal
+from railroad._bindings import Goal, LiteralGoal
 
 
 def _normalize_goal(goal: Union[Goal, Fluent]) -> Goal:
@@ -25,7 +25,7 @@ def _normalize_goal(goal: Union[Goal, Fluent]) -> Goal:
     if isinstance(goal, Fluent):
         return LiteralGoal(goal)
     return goal
-from mrppddl.core import (
+from railroad.core import (
     extract_negative_preconditions,
     extract_negative_goal_fluents,
     create_positive_fluent_mapping,
@@ -190,7 +190,7 @@ class MCTSPlanner:
         Returns:
             Heuristic value (estimated cost to reach goal)
         """
-        from mrppddl._bindings import ff_heuristic as _ff_heuristic_cpp
+        from railroad._bindings import ff_heuristic as _ff_heuristic_cpp
 
         # Normalize goal (wrap Fluent in LiteralGoal if needed)
         goal = _normalize_goal(goal)

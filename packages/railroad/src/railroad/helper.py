@@ -1,6 +1,6 @@
 from .core import Operator, Fluent, Effect, OptCallable, Num
 from typing import Callable, Set, Union
-from mrppddl._bindings import GoalType, Goal, AndGoal
+from railroad._bindings import GoalType, Goal, AndGoal
 
 F = Fluent
 
