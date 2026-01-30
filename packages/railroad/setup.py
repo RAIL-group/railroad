@@ -93,10 +93,19 @@ setup(
     name="railroad",
     version="0.2.0",
     package_dir={"": "src"},
-    packages=["railroad", "railroad.operators", "railroad.environment"],
+    packages=["railroad", "railroad.operators", "railroad.environment", "railroad.examples"],
     ext_modules=ext_modules,
     cmdclass={"build_ext": build_ext_and_stubgen},
     include_package_data=True,
     package_data={"railroad": ["*.pyi"]},
     zip_safe=False,
+    install_requires=[
+        "numpy",
+        "click>=8.0",
+    ],
+    entry_points={
+        "console_scripts": [
+            "railroad=railroad.cli:main",
+        ],
+    },
 )
