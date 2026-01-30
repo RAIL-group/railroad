@@ -10,40 +10,43 @@ def main() -> None:
     pass
 
 
-@main.group()
-def example() -> None:
+@main.group(invoke_without_command=True)
+@click.pass_context
+def example(ctx: click.Context) -> None:
     """Run example planning scenarios."""
-    pass
+    if ctx.invoked_subcommand is None:
+        # No subcommand given - list examples
+        from railroad.examples import EXAMPLES
+
+        click.echo("Available examples:\n")
+        for name, info in EXAMPLES.items():
+            click.echo(f"  {name:24} {info['description']}")
+        click.echo("\nRun an example with: railroad example <name>")
 
 
-@example.command("list")
-def list_examples() -> None:
-    """List available examples."""
+def _make_example_command(name: str, description: str) -> None:
+    """Create and register a click command for an example."""
+
+    @example.command(name, help=description)
+    def _run() -> None:
+        from railroad.examples import EXAMPLES
+
+        example_info = EXAMPLES[name]
+        click.echo(f"Running example: {name}")
+        click.echo(f"  {example_info['description']}\n")
+        example_fn = example_info["main"]
+        example_fn()
+
+
+# Register each example as a direct subcommand
+def _register_examples() -> None:
     from railroad.examples import EXAMPLES
 
-    click.echo("Available examples:\n")
     for name, info in EXAMPLES.items():
-        click.echo(f"  {name:24} {info['description']}")
-    click.echo("\nRun an example with: railroad example run <name>")
+        _make_example_command(name, info["description"])
 
 
-@example.command("run")
-@click.argument("name")
-def run_example(name: str) -> None:
-    """Run an example by name."""
-    from railroad.examples import EXAMPLES
-
-    if name not in EXAMPLES:
-        click.echo(f"Error: Unknown example '{name}'", err=True)
-        click.echo("Run 'railroad example list' to see available examples", err=True)
-        raise SystemExit(1)
-
-    example_info = EXAMPLES[name]
-    click.echo(f"Running example: {name}")
-    click.echo(f"  {example_info['description']}\n")
-
-    example_fn = example_info["main"]
-    example_fn()
+_register_examples()
 
 
 if __name__ == "__main__":
