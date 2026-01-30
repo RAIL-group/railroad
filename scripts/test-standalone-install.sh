@@ -59,4 +59,8 @@ uv pip install --python .venv/bin/python pytest pytest-timeout
 log_info "Running tests..."
 .venv/bin/python -m pytest -v tests/
 
+# Run an example to verify all runtime dependencies are installed
+log_info "Running example to verify dependencies..."
+.venv/bin/railroad example clear-table
+
 log_info "Standalone install test completed successfully!"

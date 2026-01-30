@@ -102,6 +102,7 @@ setup(
     install_requires=[
         "numpy",
         "click>=8.0",
+        "rich",
     ],
     entry_points={
         "console_scripts": [
