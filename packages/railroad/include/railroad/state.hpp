@@ -1,6 +1,6 @@
 #pragma once
-#include "mrppddl/core.hpp"
-#include "mrppddl/constants.hpp"
+#include "railroad/core.hpp"
+#include "railroad/constants.hpp"
 #include <algorithm>
 #include <functional>
 #include <sstream>
@@ -11,7 +11,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace mrppddl {
+namespace railroad {
 
 class State {
 public:
@@ -184,17 +184,17 @@ private:
   }
 };
 
-} // namespace mrppddl
+} // namespace railroad
 
 namespace std {
-template <> struct hash<mrppddl::State> {
-  std::size_t operator()(const mrppddl::State &s) const noexcept {
+template <> struct hash<railroad::State> {
+  std::size_t operator()(const railroad::State &s) const noexcept {
     return s.hash(); // assumes State::hash() is a valid const method
   }
 };
 } // namespace std
 
-namespace mrppddl {
+namespace railroad {
 
 inline void advance_to_terminal(State state, double prob,
                                 std::unordered_map<State, double> &outcomes,
@@ -311,4 +311,4 @@ inline const std::vector<std::pair<State, double>>& Action::get_relaxed_successo
   return *relaxed_successors_cache_;
 }
 
-} // namespace mrppddl
+} // namespace railroad

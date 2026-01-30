@@ -1,7 +1,7 @@
 #pragma once
 
-#include "mrppddl/core.hpp"
-#include "mrppddl/state.hpp"
+#include "railroad/core.hpp"
+#include "railroad/state.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -10,7 +10,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace mrppddl {
+namespace railroad {
 
 using HeuristicFn = std::function<double(const State &)>;
 using FFMemory = std::unordered_map<std::size_t, double>;
@@ -531,13 +531,13 @@ inline double get_relaxed_expected_cost(
   return std::numeric_limits<double>::infinity();
 }
 
-} // namespace mrppddl
+} // namespace railroad
 
 // Include goal.hpp here to get the full definition of GoalBase
 // This is placed after the namespace closes to avoid circular dependencies
-#include "mrppddl/goal.hpp"
+#include "railroad/goal.hpp"
 
-namespace mrppddl {
+namespace railroad {
 
 // Extract DNF branches from a goal for efficient heuristic computation.
 // Uses the goal's cached get_dnf_branches() method which properly handles
@@ -622,4 +622,4 @@ inline double ff_heuristic(const State &input_state,
   return dtime + min_cost;
 }
 
-} // namespace mrppddl
+} // namespace railroad
