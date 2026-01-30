@@ -59,10 +59,10 @@ def main():
     goal = reduce(and_, [F(f"at {obj} {to_loc}") for obj in objects])
 
     # Create operators
-    move_time_fn = env.get_skills_cost_fn(skill_name='move')
-    search_time = env.get_skills_cost_fn(skill_name='search')
-    pick_time = env.get_skills_cost_fn(skill_name='pick')
-    place_time = env.get_skills_cost_fn(skill_name='place')
+    move_time_fn = env.get_skills_time_fn(skill_name='move')
+    search_time = env.get_skills_time_fn(skill_name='search')
+    pick_time = env.get_skills_time_fn(skill_name='pick')
+    place_time = env.get_skills_time_fn(skill_name='place')
     # Build mapping of object -> actual location from the known graph
     object_locations = {}
     for container_idx in env.known_graph.container_indices:

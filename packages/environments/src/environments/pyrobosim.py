@@ -80,16 +80,13 @@ class PyRoboSimEnv(BaseEnvironment):
             raise ValueError(f"Skill '{skill_name}' not recognized.")
         time.sleep(0.1)  # Give some time for the skill to start
 
-    def get_skills_cost_fn(self, skill_name: str):
+    def get_skills_time_fn(self, skill_name: str):
         if skill_name == 'move':
             return self._get_move_cost_fn()
         else:
             def get_skill_time(robot_name, *args, **kwargs):
                 return 1.0  # TODO: Get skills time from pyrobosim
             return get_skill_time
-
-    # Alias for abstract method
-    get_skills_time_fn = get_skills_cost_fn
 
     def _get_feasible_pose_from_location_for_robot(self, robot, location_name):
         if location_name in self.initial_robot_locations:
@@ -163,7 +160,7 @@ class PyRoboSimEnv(BaseEnvironment):
     @run_async
     def _no_op(self, robot_name):
         self.is_no_op_running[robot_name] = True
-        time.sleep(self.get_skills_cost_fn('no_op')(robot_name))
+        time.sleep(self.get_skills_time_fn('no_op')(robot_name))
         self.is_no_op_running[robot_name] = False
 
 

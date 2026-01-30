@@ -44,7 +44,7 @@ class DemoEnvironment(SimpleEnvironment):
             return 0.5 * distance if robot == 'drone' else distance  # drone is faster
         return get_move_time
 
-    def get_skills_cost_fn(self, skill_name: str):
+    def get_skills_time_fn(self, skill_name: str):
         if skill_name == 'move':
             return super()._get_move_cost_fn()
         else:
@@ -108,20 +108,20 @@ def bench_heterogeneous_robots(case: BenchmarkCase):
     }
 
     # Create operators
-    move_time_fn = env.get_skills_cost_fn('move')
+    move_time_fn = env.get_skills_time_fn('move')
     move_op = operators.construct_move_operator(move_time_fn)
     search_op = operators.construct_search_operator(object_find_prob=lambda r, loc, o: 1.0,
-                                                    search_time=env.get_skills_cost_fn('search'))
+                                                    search_time=env.get_skills_time_fn('search'))
     no_op = operators.construct_no_op_operator(
-        no_op_time=env.get_skills_cost_fn('no_op'),
+        no_op_time=env.get_skills_time_fn('no_op'),
         extra_cost=100
     )
     pick_op = operators.construct_pick_operator_blocking(
-        pick_time=env.get_skills_cost_fn('pick')
+        pick_time=env.get_skills_time_fn('pick')
     )
 
     place_op = operators.construct_place_operator_blocking(
-        place_time=env.get_skills_cost_fn('place')
+        place_time=env.get_skills_time_fn('place')
     )
 
     # Create environment interface

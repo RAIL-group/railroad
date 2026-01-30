@@ -54,10 +54,10 @@ def test_simulator_advance_blocking_operators():
     }
 
     # Create operators
-    move_time_fn = env.get_skills_cost_fn(skill_name='move')
-    search_time = env.get_skills_cost_fn(skill_name='search')
-    pick_time = env.get_skills_cost_fn(skill_name='pick')
-    place_time = env.get_skills_cost_fn(skill_name='place')
+    move_time_fn = env.get_skills_time_fn(skill_name='move')
+    search_time = env.get_skills_time_fn(skill_name='search')
+    pick_time = env.get_skills_time_fn(skill_name='pick')
+    place_time = env.get_skills_time_fn(skill_name='place')
     object_find_prob = lambda r, loc, o: (0.8 if o in OBJECTS_AT_LOCATIONS.get(loc, dict()).get("object", dict())
                                           else 0.2)
 

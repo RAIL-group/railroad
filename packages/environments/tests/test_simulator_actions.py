@@ -35,7 +35,7 @@ SKILLS_TIME = {
 class TestEnvironment(SimpleEnvironment):
     __test__ = False  # Tell pytest this is not a test class
 
-    def get_skills_cost_fn(self, skill_name: str):
+    def get_skills_time_fn(self, skill_name: str):
         if skill_name == 'move':
             return super()._get_move_cost_fn()
         else:
@@ -64,7 +64,7 @@ def test_move_action():
     env = SimpleEnvironment(
         locations=LOCATIONS, objects_at_locations=OBJECTS_AT_LOCATIONS, robot_locations=robot_locations)
 
-    move_time_fn = env.get_skills_cost_fn(skill_name='move')
+    move_time_fn = env.get_skills_time_fn(skill_name='move')
     move_op = operators.construct_move_operator_blocking(move_time_fn)
 
     sim = EnvironmentInterface(initial_state, objects_by_type, [move_op], env)
@@ -107,7 +107,7 @@ def test_search_action():
     env = TestEnvironment(
         locations=LOCATIONS, objects_at_locations=OBJECTS_AT_LOCATIONS, robot_locations=robot_locations)
 
-    search_time = env.get_skills_cost_fn(skill_name='search')
+    search_time = env.get_skills_time_fn(skill_name='search')
     object_find_prob = lambda r, l, o: 0.8 if l == "roomA" else 0.2  # noqa: E731, E741
     search_op = operators.construct_search_operator(object_find_prob, search_time)
 
@@ -160,8 +160,8 @@ def test_pick_and_place_action():
     env = TestEnvironment(
         locations=LOCATIONS, objects_at_locations=OBJECTS_AT_LOCATIONS, robot_locations=robot_locations)
 
-    pick_time = env.get_skills_cost_fn(skill_name='pick')
-    place_time = env.get_skills_cost_fn(skill_name='place')
+    pick_time = env.get_skills_time_fn(skill_name='pick')
+    place_time = env.get_skills_time_fn(skill_name='place')
     pick_op = operators.construct_pick_operator(pick_time)
     place_op = operators.construct_place_operator(place_time)
 
@@ -273,10 +273,10 @@ def test_no_oscillation_pick_place_move_search():
     env = TestEnvironment(locations=OTHER_LOCATIONS,
                           objects_at_locations=OTHER_OBJECTS_AT_LOCATIONS, robot_locations=robot_locations)
 
-    move_time_fn = env.get_skills_cost_fn(skill_name='move')
-    search_time = env.get_skills_cost_fn(skill_name='search')
-    pick_time = env.get_skills_cost_fn(skill_name='pick')
-    place_time = env.get_skills_cost_fn(skill_name='place')
+    move_time_fn = env.get_skills_time_fn(skill_name='move')
+    search_time = env.get_skills_time_fn(skill_name='search')
+    pick_time = env.get_skills_time_fn(skill_name='pick')
+    place_time = env.get_skills_time_fn(skill_name='place')
     object_find_prob = lambda r, loc, o: 1.0
 
     move_op = operators.construct_move_operator_blocking(move_time_fn)

@@ -83,8 +83,8 @@ def test_procthor_move_and_search():
         },
     )
 
-    move_time_fn = env.get_skills_cost_fn(skill_name='move')
-    search_time = env.get_skills_cost_fn(skill_name='search')
+    move_time_fn = env.get_skills_time_fn(skill_name='move')
+    search_time = env.get_skills_time_fn(skill_name='search')
     object_find_prob = lambda r, loc, o: 1.0
 
     move_op = operators.construct_move_operator_blocking(move_time_fn)
@@ -178,10 +178,10 @@ def test_procthor_move_search_pick_place():
     # Task: Place all objects at random_location
     goal = LiteralGoal(F(f"at {objects[0]} {to_loc}"))
 
-    move_time_fn = env.get_skills_cost_fn(skill_name='move')
-    search_time = env.get_skills_cost_fn(skill_name='search')
-    pick_time = env.get_skills_cost_fn(skill_name='pick')
-    place_time = env.get_skills_cost_fn(skill_name='place')
+    move_time_fn = env.get_skills_time_fn(skill_name='move')
+    search_time = env.get_skills_time_fn(skill_name='search')
+    pick_time = env.get_skills_time_fn(skill_name='pick')
+    place_time = env.get_skills_time_fn(skill_name='place')
     object_find_prob = lambda r, loc, o: 1.0
 
     move_op = operators.construct_move_operator_blocking(move_time_fn)

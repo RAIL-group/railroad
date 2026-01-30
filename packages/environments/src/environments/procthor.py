@@ -132,21 +132,18 @@ class ProcTHOREnvironment(BaseEnvironment):
             getattr(self.robots[robot_name], skill_name)()
 
             # Keep track of skill start time and duration
-            skill_time = self.get_skills_cost_fn(skill_name)(robot_name, *args, **kwargs)
+            skill_time = self.get_skills_time_fn(skill_name)(robot_name, *args, **kwargs)
             self.robot_skill_start_time_and_duration[robot_name] = (self.time, skill_time)
         else:
             raise ValueError(f"Skill '{skill_name}' not defined for robot '{robot_name}'.")
 
-    def get_skills_cost_fn(self, skill_name: str):
+    def get_skills_time_fn(self, skill_name: str):
         if skill_name == 'move':
             return self._get_move_cost_fn()
         else:
             def get_skill_time(robot_name, *args, **kwargs):
                 return SKILLS_TIME[robot_name][skill_name]
             return get_skill_time
-
-    # Alias for abstract method
-    get_skills_time_fn = get_skills_cost_fn
 
     def stop_robot(self, robot_name):
         # If the robot was moving, it's now at a new intermediate location

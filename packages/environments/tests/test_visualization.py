@@ -47,11 +47,11 @@ def test_single_robot_plotting():
         },
     )
 
-    move_time_fn = env.get_skills_cost_fn(skill_name='move')
-    pick_time = env.get_skills_cost_fn(skill_name='pick')
-    place_time = env.get_skills_cost_fn(skill_name='place')
-    search_time = env.get_skills_cost_fn(skill_name='search')
-    no_op_time = env.get_skills_cost_fn(skill_name='no_op')
+    move_time_fn = env.get_skills_time_fn(skill_name='move')
+    pick_time = env.get_skills_time_fn(skill_name='pick')
+    place_time = env.get_skills_time_fn(skill_name='place')
+    search_time = env.get_skills_time_fn(skill_name='search')
+    no_op_time = env.get_skills_time_fn(skill_name='no_op')
     object_find_prob = lambda r, loc, o: 1.0
 
     move_op = operators.construct_move_operator_blocking(move_time_fn)
@@ -139,11 +139,11 @@ def test_multi_robot_unknown_plotting():
     )
 
     # Create operators
-    move_time_fn = env.get_skills_cost_fn(skill_name='move')
-    search_time = env.get_skills_cost_fn(skill_name='search')
-    pick_time = env.get_skills_cost_fn(skill_name='pick')
-    place_time = env.get_skills_cost_fn(skill_name='place')
-    no_op_time = env.get_skills_cost_fn(skill_name='no_op')
+    move_time_fn = env.get_skills_time_fn(skill_name='move')
+    search_time = env.get_skills_time_fn(skill_name='search')
+    pick_time = env.get_skills_time_fn(skill_name='pick')
+    place_time = env.get_skills_time_fn(skill_name='place')
+    no_op_time = env.get_skills_time_fn(skill_name='no_op')
     object_find_prob = lambda r, l, o: 1.0
     move_op = operators.construct_move_operator_blocking(move_time_fn)
     search_op = operators.construct_search_operator(object_find_prob, search_time)
@@ -235,10 +235,10 @@ def test_multi_robot_known_plotting():
     )
 
     # Create operators
-    move_time_fn = env.get_skills_cost_fn(skill_name='move')
-    pick_time = env.get_skills_cost_fn(skill_name='pick')
-    place_time = env.get_skills_cost_fn(skill_name='place')
-    no_op_time = env.get_skills_cost_fn(skill_name='no_op')
+    move_time_fn = env.get_skills_time_fn(skill_name='move')
+    pick_time = env.get_skills_time_fn(skill_name='pick')
+    place_time = env.get_skills_time_fn(skill_name='place')
+    no_op_time = env.get_skills_time_fn(skill_name='no_op')
     object_find_prob = lambda r, l, o: 1.0
     move_op = operators.construct_move_operator_blocking(move_time_fn)
     pick_op = operators.construct_pick_operator_blocking(pick_time)

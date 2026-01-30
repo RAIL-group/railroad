@@ -21,7 +21,7 @@ from typing import (
 from railroad.core import Operator, transition
 from railroad._bindings import Action, Fluent, State, GroundedEffect
 
-from .base import BaseEnvironment, SkillStatus
+from .base import AbstractEnvironment, SkillStatus
 
 F = Fluent
 
@@ -38,7 +38,7 @@ class EnvironmentInterface:
         initial_state: State,
         objects_by_type: Dict[str, Collection[str]],
         operators: List[Operator],
-        environment: BaseEnvironment,
+        environment: AbstractEnvironment,
     ) -> None:
         """Initialize the environment interface.
 
@@ -282,7 +282,7 @@ class OngoingAction:
         self,
         time: Union[int, float],
         action: Action,
-        environment: Optional[BaseEnvironment] = None,
+        environment: Optional[AbstractEnvironment] = None,
     ) -> None:
         """Initialize an ongoing action.
 
@@ -425,7 +425,7 @@ class OngoingMoveAction(OngoingAction):
         self,
         time: Union[int, float],
         action: Action,
-        environment: Optional[BaseEnvironment] = None,
+        environment: Optional[AbstractEnvironment] = None,
     ) -> None:
         super().__init__(time, action, environment)
         # Keep track of initial start and end locations
