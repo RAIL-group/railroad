@@ -1,15 +1,15 @@
 #pragma once
 
-#ifdef MRPPDDL_USE_PYBIND
+#ifdef RAILROAD_USE_PYBIND
 #include <pybind11/pybind11.h>
 #include <Python.h>
 #endif
 
-#include "mrppddl/core.hpp"
-#include "mrppddl/ff_heuristic.hpp"
-#include "mrppddl/goal.hpp"
-#include "mrppddl/state.hpp"
-#include "mrppddl/constants.hpp"
+#include "railroad/core.hpp"
+#include "railroad/ff_heuristic.hpp"
+#include "railroad/goal.hpp"
+#include "railroad/state.hpp"
+#include "railroad/constants.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -25,7 +25,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace mrppddl {
+namespace railroad {
 
 inline std::vector<const Action *>
 get_next_actions(const State &state, const std::vector<Action> &all_actions) {
@@ -337,7 +337,7 @@ inline std::string mcts(const State &root_state,
     bool is_node_goal = false;
     bool did_need_relaxed_transition = false;
 
-    #ifdef MRPPDDL_USE_PYBIND
+    #ifdef RAILROAD_USE_PYBIND
     if (PyErr_CheckSignals() != 0) {
       throw pybind11::error_already_set();
     }
@@ -502,4 +502,4 @@ private:
   std::string last_mcts_tree_trace_;
 };
 
-} // namespace mrppddl
+} // namespace railroad

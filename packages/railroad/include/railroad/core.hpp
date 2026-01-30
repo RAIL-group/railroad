@@ -11,7 +11,7 @@
 #include <vector>
 #include <optional>
 
-namespace mrppddl {
+namespace railroad {
 
 inline void hash_combine(std::size_t &seed, std::size_t value) {
   seed ^= value + 0x9e3779b9 + (seed << 6) + (seed >> 2);
@@ -96,17 +96,17 @@ private:
   }
 };
 
-} // namespace mrppddl
+} // namespace railroad
 
 namespace std {
-template <> struct hash<mrppddl::Fluent> {
-  std::size_t operator()(const mrppddl::Fluent &f) const noexcept {
+template <> struct hash<railroad::Fluent> {
+  std::size_t operator()(const railroad::Fluent &f) const noexcept {
     return f.hash();
   }
 };
 } // namespace std
 
-namespace mrppddl {
+namespace railroad {
 
 class GroundedEffect; // Forward Declaration
 
@@ -250,17 +250,17 @@ inline bool operator==(const ProbBranchWrapper &a, const ProbBranchWrapper &b) {
   return a.prob() == b.prob() && a.effects() == b.effects();
 }
 
-} // namespace mrppddl
+} // namespace railroad
 
 namespace std {
-template <> struct hash<mrppddl::GroundedEffect> {
-  std::size_t operator()(const mrppddl::GroundedEffect &eff) const noexcept {
+template <> struct hash<railroad::GroundedEffect> {
+  std::size_t operator()(const railroad::GroundedEffect &eff) const noexcept {
     return eff.hash();
   }
 };
 } // namespace std
 
-namespace mrppddl {
+namespace railroad {
 
 // Forward declaration for lazy computation of relaxed successors
 class State;
@@ -373,17 +373,17 @@ private:
   mutable std::optional<std::vector<std::pair<State, double>>> relaxed_successors_cache_;
 };
 
-} // namespace mrppddl
+} // namespace railroad
 
 namespace std {
-template <> struct hash<mrppddl::Action> {
-  std::size_t operator()(const mrppddl::Action &action) const noexcept {
+template <> struct hash<railroad::Action> {
+  std::size_t operator()(const railroad::Action &action) const noexcept {
     return action.hash();
   }
 };
 } // namespace std
 
-namespace mrppddl {
+namespace railroad {
 
 std::size_t ProbBranchWrapper::hash() const {
   if (cached_hash_)
@@ -400,4 +400,4 @@ std::size_t ProbBranchWrapper::hash() const {
   return h_branch;
 }
 
-} // namespace mrppddl
+} // namespace railroad

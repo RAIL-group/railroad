@@ -27,7 +27,7 @@ double ff_heuristic(const State &input_state,
 
 **Python API:**
 ```python
-from mrppddl._bindings import ff_heuristic
+from railroad._bindings import ff_heuristic
 
 h = ff_heuristic(state, goal, all_actions, mode="default")
 ```

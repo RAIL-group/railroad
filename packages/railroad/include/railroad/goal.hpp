@@ -1,6 +1,6 @@
 #pragma once
 
-#include "mrppddl/core.hpp"
+#include "railroad/core.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace mrppddl {
+namespace railroad {
 
 enum class GoalType { LITERAL, AND, OR, TRUE_GOAL, FALSE_GOAL };
 
@@ -572,4 +572,4 @@ inline GoalPtr goal_from_fluent_set(const FluentSet& fluents) {
   return std::make_shared<AndGoal>(std::move(children))->normalize();
 }
 
-}  // namespace mrppddl
+}  // namespace railroad
