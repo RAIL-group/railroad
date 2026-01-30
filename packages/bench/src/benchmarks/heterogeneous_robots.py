@@ -9,8 +9,9 @@ from railroad.core import Fluent as F, State, get_action_by_name
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
 import environments
-from environments.core import EnvironmentInterface
+from railroad.environment import EnvironmentInterface
 from environments import SimpleEnvironment
+from railroad import operators
 from railroad._bindings import ff_heuristic
 from rich.console import Console
 from bench import benchmark, BenchmarkCase
@@ -108,18 +109,18 @@ def bench_heterogeneous_robots(case: BenchmarkCase):
 
     # Create operators
     move_time_fn = env.get_skills_cost_fn('move')
-    move_op = environments.operators.construct_move_operator_nonblocking(move_time_fn)
-    search_op = environments.operators.construct_search_operator(object_find_prob=lambda r, loc, o: 1.0,
-                                                                 search_time=env.get_skills_cost_fn('search'))
-    no_op = environments.operators.construct_no_op_operator(
+    move_op = operators.construct_move_operator(move_time_fn)
+    search_op = operators.construct_search_operator(object_find_prob=lambda r, loc, o: 1.0,
+                                                    search_time=env.get_skills_cost_fn('search'))
+    no_op = operators.construct_no_op_operator(
         no_op_time=env.get_skills_cost_fn('no_op'),
         extra_cost=100
     )
-    pick_op = environments.operators.construct_pick_operator(
+    pick_op = operators.construct_pick_operator_blocking(
         pick_time=env.get_skills_cost_fn('pick')
     )
 
-    place_op = environments.operators.construct_place_operator(
+    place_op = operators.construct_place_operator_blocking(
         place_time=env.get_skills_cost_fn('place')
     )
 

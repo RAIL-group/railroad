@@ -21,8 +21,9 @@ from railroad.core import Fluent as F, State, get_action_by_name, ff_heuristic
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
 import environments
+from railroad import operators
 from environments import SimpleEnvironment
-from environments.core import EnvironmentInterface
+from railroad.environment import EnvironmentInterface
 
 
 # Define locations with coordinates (for move cost calculation)
@@ -90,11 +91,11 @@ def main():
     pick_time = env.get_skills_cost_fn(skill_name='pick')
     place_time = env.get_skills_cost_fn(skill_name='place')
     object_find_prob=lambda r, l, o: 0.6 if 'kitchen' in l else 0.4
-    move_op = environments.operators.construct_move_operator(move_time_fn)
-    search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
-    pick_op = environments.operators.construct_pick_operator(pick_time)
-    place_op = environments.operators.construct_place_operator(place_time)
-    no_op = environments.operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
+    move_op = operators.construct_move_operator_blocking(move_time_fn)
+    search_op = operators.construct_search_operator(object_find_prob, search_time)
+    pick_op = operators.construct_pick_operator_blocking(pick_time)
+    place_op = operators.construct_place_operator_blocking(place_time)
+    no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
 
     # Create simulator
     sim = EnvironmentInterface(

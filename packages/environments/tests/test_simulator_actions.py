@@ -1,9 +1,9 @@
 import numpy as np
 from railroad.core import Fluent as F, State, get_action_by_name, LiteralGoal
 from railroad.planner import MCTSPlanner
-import environments
+from railroad import operators
 from environments import SimpleEnvironment
-from environments.core import EnvironmentInterface
+from railroad.environment import EnvironmentInterface
 
 
 LOCATIONS = {
@@ -65,7 +65,7 @@ def test_move_action():
         locations=LOCATIONS, objects_at_locations=OBJECTS_AT_LOCATIONS, robot_locations=robot_locations)
 
     move_time_fn = env.get_skills_cost_fn(skill_name='move')
-    move_op = environments.operators.construct_move_operator(move_time_fn)
+    move_op = operators.construct_move_operator_blocking(move_time_fn)
 
     sim = EnvironmentInterface(initial_state, objects_by_type, [move_op], env)
     actions = sim.get_actions()
@@ -109,7 +109,7 @@ def test_search_action():
 
     search_time = env.get_skills_cost_fn(skill_name='search')
     object_find_prob = lambda r, l, o: 0.8 if l == "roomA" else 0.2  # noqa: E731, E741
-    search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
+    search_op = operators.construct_search_operator(object_find_prob, search_time)
 
     sim = EnvironmentInterface(initial_state, objects_by_type, [search_op], env)
 
@@ -162,8 +162,8 @@ def test_pick_and_place_action():
 
     pick_time = env.get_skills_cost_fn(skill_name='pick')
     place_time = env.get_skills_cost_fn(skill_name='place')
-    pick_op = environments.operators.construct_pick_operator_nonblocking(pick_time)
-    place_op = environments.operators.construct_place_operator_nonblocking(place_time)
+    pick_op = operators.construct_pick_operator(pick_time)
+    place_op = operators.construct_place_operator(place_time)
 
     sim = EnvironmentInterface(initial_state, objects_by_type, [pick_op, place_op], env)
 
@@ -279,10 +279,10 @@ def test_no_oscillation_pick_place_move_search():
     place_time = env.get_skills_cost_fn(skill_name='place')
     object_find_prob = lambda r, loc, o: 1.0
 
-    move_op = environments.operators.construct_move_operator(move_time_fn)
-    search_op = environments.operators.construct_search_operator(object_find_prob, search_time)
-    pick_op = environments.operators.construct_pick_operator(pick_time)
-    place_op = environments.operators.construct_place_operator(place_time)
+    move_op = operators.construct_move_operator_blocking(move_time_fn)
+    search_op = operators.construct_search_operator(object_find_prob, search_time)
+    pick_op = operators.construct_pick_operator_blocking(pick_time)
+    place_op = operators.construct_place_operator_blocking(place_time)
 
     sim = EnvironmentInterface(initial_state, objects_by_type, [move_op, search_op, pick_op, place_op], env)
 

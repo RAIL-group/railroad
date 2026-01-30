@@ -8,8 +8,8 @@ from bench import benchmark, BenchmarkCase
 from railroad.core import Fluent as F, State, get_action_by_name
 from railroad.planner import MCTSPlanner
 from environments import SimpleEnvironment
-from environments.core import EnvironmentInterface
-import environments.operators
+from railroad.environment import EnvironmentInterface
+from railroad import operators
 import time
 
 
@@ -52,7 +52,7 @@ def bench_single_robot_nav(case: BenchmarkCase):
 
     # Create operators
     move_time_fn = env.get_skills_cost_fn('move')
-    move_op = environments.operators.construct_move_operator(move_time_fn)
+    move_op = operators.construct_move_operator_blocking(move_time_fn)
 
     objects_by_type = {
         "robot": {"robot1"},
