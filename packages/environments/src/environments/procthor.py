@@ -2,7 +2,7 @@ import numpy as np
 import itertools
 from procthor import ThorInterface
 from . import utils
-from .environments import BaseEnvironment, SimulatedRobot, SkillStatus
+from railroad.environment import BaseEnvironment, SimulatedRobot, SkillStatus
 
 SKILLS_TIME = {
     'robot1': {
@@ -144,6 +144,9 @@ class ProcTHOREnvironment(BaseEnvironment):
             def get_skill_time(robot_name, *args, **kwargs):
                 return SKILLS_TIME[robot_name][skill_name]
             return get_skill_time
+
+    # Alias for abstract method
+    get_skills_time_fn = get_skills_cost_fn
 
     def stop_robot(self, robot_name):
         # If the robot was moving, it's now at a new intermediate location

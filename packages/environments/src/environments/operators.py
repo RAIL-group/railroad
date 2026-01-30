@@ -1,165 +1,69 @@
-from railroad.core import Fluent as F
-from railroad.helper import _make_callable, _invert_prob
-from railroad.core import OptCallable, Operator, Effect
+"""Operator constructors - backward compatibility shim.
 
+This module re-exports operators from railroad.operators for backward compatibility.
+New code should import directly from railroad.operators.
 
-def construct_move_operator_nonblocking(move_time: OptCallable):
-    move_time = _make_callable(move_time)
-    return Operator(
-        name="move",
-        parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
-        preconditions=[F("at ?r ?from"), F("free ?r")],
-        effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?r ?from")}),
-            Effect(
-                time=(move_time, ["?r", "?from", "?to"]),
-                resulting_fluents={F("free ?r"), F("at ?r ?to")},
-            ),
-        ],
-    )
+Naming aliases for backward compatibility:
+- construct_move_operator_nonblocking -> construct_move_operator
+- construct_pick_operator_nonblocking -> construct_pick_operator
+- construct_place_operator_nonblocking -> construct_place_operator
+"""
 
+# Re-export from railroad.operators
+from railroad.operators import (
+    # Move operators - import with aliases for clarity
+    construct_move_operator as construct_move_operator_nonblocking,
+    construct_move_operator_blocking,
+    construct_move_visited_operator,
+    construct_move_visited_operator_constrained,
+    # Search operators
+    construct_search_operator,
+    construct_search_and_pick_operator,
+    # Pick operators - import with aliases for clarity
+    construct_pick_operator as construct_pick_operator_nonblocking,
+    construct_pick_operator_blocking,
+    # Place operators - import with aliases for clarity
+    construct_place_operator as construct_place_operator_nonblocking,
+    construct_place_operator_blocking,
+    # Wait operators
+    construct_wait_operator,
+    construct_no_op_operator,
+    # Utilities
+    _make_callable,
+    _invert_prob,
+)
 
-def construct_move_operator(move_time: OptCallable):
-    move_time = _make_callable(move_time)
-    move_time_plus_eps = lambda *args: move_time(*args) + 0.1
-    return Operator(
-        name="move",
-        parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
-        preconditions=[F("at ?r ?from"), F("free ?r"), ~F("just-moved ?r")],
-        effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?r ?from")}),
-            Effect(
-                time=(move_time, ["?r", "?from", "?to"]),
-                resulting_fluents={F("free ?r"), F("at ?r ?to"), F("just-moved ?r")},
-            ),
-            Effect(
-                time=(move_time_plus_eps, ["?r", "?from", "?to"]),
-                resulting_fluents={~F("just-moved ?r")},
-            ),
-        ],
-    )
+# BACKWARD COMPATIBILITY: In the old environments.operators module:
+# - construct_move_operator was the BLOCKING version (with just-moved precondition)
+# - construct_pick_operator was the BLOCKING version (with just-picked precondition)
+# - construct_place_operator was the BLOCKING version (with just-placed precondition)
+# We preserve this behavior for backward compatibility.
+construct_move_operator = construct_move_operator_blocking
+construct_pick_operator = construct_pick_operator_blocking
+construct_place_operator = construct_place_operator_blocking
 
-
-def construct_search_operator(object_find_prob: OptCallable, search_time: OptCallable) -> Operator:
-    object_find_prob = _make_callable(object_find_prob)
-    inv_object_find_prob = _invert_prob(object_find_prob)
-    search_time = _make_callable(search_time)
-    return Operator(
-        name="search",
-        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
-        preconditions=[F("at ?r ?loc"), F("free ?r"), F("not revealed ?loc"),
-                       F("not searched ?loc ?obj"), F("not found ?obj"), F("not lock-search ?loc")],
-        effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r"), F("lock-search ?loc")}),
-            Effect(time=(search_time, ["?r", "?loc"]),
-                   resulting_fluents={F("free ?r"),
-                                      F("searched ?loc ?obj"),
-                                      F("not lock-search ?loc")
-                                      },
-                   prob_effects=[((object_find_prob, ["?r", "?loc", "?obj"]),
-                                  [Effect(time=0, resulting_fluents={F("found ?obj"), F("at ?obj ?loc")})]),
-                                 ((inv_object_find_prob, ["?r", "?loc", "?obj"]),
-                                  [])]
-                   )
-        ]
-    )
-
-
-def construct_pick_operator_nonblocking(pick_time: OptCallable) -> Operator:
-    pick_time = _make_callable(pick_time)
-    return Operator(
-        name="pick",
-        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
-        preconditions=[F("at ?r ?loc"), F("free ?r"), F("at ?obj ?loc"), ~F("hand-full ?r")],
-        effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?obj ?loc")}),
-            Effect(time=(pick_time, ["?r", "?loc", "?obj"]),
-                   resulting_fluents={F("free ?r"), F("holding ?r ?obj"), F("hand-full ?r")}),
-        ],
-    )
-
-
-def construct_pick_operator(pick_time: OptCallable) -> Operator:
-    pick_time = _make_callable(pick_time)
-    pick_time_plus_eps = lambda *args: pick_time(*args) + 0.1
-    return Operator(
-        name="pick",
-        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
-        preconditions=[F("at ?r ?loc"), F("free ?r"), F("at ?obj ?loc"), ~F("hand-full ?r"), ~F("just-placed ?r ?obj")],
-        effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?obj ?loc")}),
-            Effect(time=(pick_time, ["?r", "?loc", "?obj"]),
-                   resulting_fluents={F("free ?r"), F("holding ?r ?obj"), F("hand-full ?r"), F("just-picked ?r ?obj")}),
-            Effect(time=(pick_time_plus_eps, ["?r", "?loc", "?obj"]),
-                   resulting_fluents={~F("just-picked ?r ?obj")}),
-        ],
-    )
-
-
-def construct_place_operator_nonblocking(place_time: OptCallable) -> Operator:
-    place_time = _make_callable(place_time)
-    return Operator(
-        name="place",
-        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
-        preconditions=[F("at ?r ?loc"), F("free ?r"), F("holding ?r ?obj"), F("hand-full ?r")],
-        effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r"), F("not holding ?r ?obj")}),
-            Effect(time=(place_time, ["?r", "?loc", "?obj"]),
-                   resulting_fluents={F("free ?r"), F("at ?obj ?loc"), ~F("hand-full ?r")}),
-        ],
-    )
-
-
-def construct_place_operator(place_time: OptCallable) -> Operator:
-    place_time = _make_callable(place_time)
-    place_time_plus_eps = lambda *args: place_time(*args) + 0.1
-    return Operator(
-        name="place",
-        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
-        preconditions=[F("at ?r ?loc"), F("free ?r"), F("holding ?r ?obj"),
-                       F("hand-full ?r"), ~F("just-picked ?r ?obj")],
-        effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r"), F("not holding ?r ?obj")}),
-            Effect(time=(place_time, ["?r", "?loc", "?obj"]),
-                   resulting_fluents={F("free ?r"), F("at ?obj ?loc"), ~F("hand-full ?r"), F("just-placed ?r ?obj")}),
-            Effect(time=(place_time_plus_eps, ["?r", "?loc", "?obj"]),
-                   resulting_fluents={~F("just-placed ?r ?obj")}),
-        ],
-    )
-
-
-def construct_no_op_operator(no_op_time: OptCallable, extra_cost: float = 0.0) -> Operator:
-    '''Sometimes, patience is a virtuous skill.'''
-    no_op_time = _make_callable(no_op_time)
-    return Operator(
-        name="no_op",
-        parameters=[("?r", "robot")],
-        preconditions=[F("free ?r")],
-        effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r")}),
-            Effect(time=(no_op_time, ["?r"]), resulting_fluents={F("free ?r")}),
-        ],
-        extra_cost=extra_cost,
-    )
-
-
-# REAL WORLD OPERATORS
-def construct_move_visited_operator(move_time: OptCallable):
-    move_time = _make_callable(move_time)
-    return Operator(
-        name="move",
-        parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
-        preconditions=[F("at ?r ?from"), F("free ?r"), F("not visited ?to")],
-        effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r")}),
-            Effect(
-                time=(move_time, ["?r", "?from", "?to"]),
-                resulting_fluents={
-                    F("free ?r"),
-                    F("not at ?r ?from"),
-                    F("at ?r ?to"),
-                    F("visited ?to"),
-                },
-            ),
-        ],
-    )
+__all__ = [
+    # Move operators
+    "construct_move_operator",
+    "construct_move_operator_nonblocking",  # Alias for backward compatibility
+    "construct_move_operator_blocking",
+    "construct_move_visited_operator",
+    "construct_move_visited_operator_constrained",
+    # Search operators
+    "construct_search_operator",
+    "construct_search_and_pick_operator",
+    # Pick operators
+    "construct_pick_operator",
+    "construct_pick_operator_nonblocking",  # Alias for backward compatibility
+    "construct_pick_operator_blocking",
+    # Place operators
+    "construct_place_operator",
+    "construct_place_operator_nonblocking",  # Alias for backward compatibility
+    "construct_place_operator_blocking",
+    # Wait operators
+    "construct_wait_operator",
+    "construct_no_op_operator",
+    # Utilities
+    "_make_callable",
+    "_invert_prob",
+]

@@ -10,7 +10,7 @@ from railroad.core import (
     Operator,
     Effect,
 )
-from railroad.helper import construct_move_operator, construct_move_visited_operator, construct_wait_operator
+from railroad.operators import construct_move_operator, construct_move_visited_operator, construct_wait_operator
 from railroad.planner import MCTSPlanner, get_usable_actions
 import random
 

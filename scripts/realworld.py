@@ -14,14 +14,14 @@ from railroad.core import Fluent as F, State, get_action_by_name
 from railroad.core import transition
 
 from railroad.core import OptCallable, Operator, Effect
-from railroad.helper import _make_callable, _invert_prob
+from railroad.operators import _make_callable, _invert_prob
 from typing import Dict, Set, List, Tuple, Callable
 
 from railroad.planner import MCTSPlanner
 import environments
-from environments.environments import BaseEnvironment, SkillStatus
-from environments.operators import construct_move_visited_operator
-from environments.core import EnvironmentInterface as PlanningLoop
+from railroad.environment import BaseEnvironment, SkillStatus
+from railroad.operators import construct_move_visited_operator
+from railroad.environment import EnvironmentInterface as PlanningLoop
 
 
 

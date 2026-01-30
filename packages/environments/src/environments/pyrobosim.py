@@ -1,7 +1,7 @@
 import threading
 import functools
 from pyrobosim.core.yaml_utils import WorldYamlLoader
-from .environments import BaseEnvironment, SkillStatus
+from railroad.environment import BaseEnvironment, SkillStatus
 import time
 import matplotlib.pyplot as plt
 from pyrobosim.gui.world_canvas import WorldCanvas
@@ -87,6 +87,9 @@ class PyRoboSimEnv(BaseEnvironment):
             def get_skill_time(robot_name, *args, **kwargs):
                 return 1.0  # TODO: Get skills time from pyrobosim
             return get_skill_time
+
+    # Alias for abstract method
+    get_skills_time_fn = get_skills_cost_fn
 
     def _get_feasible_pose_from_location_for_robot(self, robot, location_name):
         if location_name in self.initial_robot_locations:

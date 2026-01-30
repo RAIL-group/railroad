@@ -10,7 +10,7 @@ from railroad.core import (
     Action,
     Operator,
 )
-from railroad.helper import construct_move_operator, construct_search_operator
+from railroad.operators import construct_move_operator, construct_search_and_pick_operator
 import random
 
 F = Fluent
@@ -376,7 +376,7 @@ def test_search_sequence():
             return 0.6
 
     # Ground actions
-    search_actions = construct_search_operator(object_search_prob, 5.0, 3).instantiate(
+    search_actions = construct_search_and_pick_operator(object_search_prob, 5.0, 3).instantiate(
         objects_by_type
     )
     # Initial state

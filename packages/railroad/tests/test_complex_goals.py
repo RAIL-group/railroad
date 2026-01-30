@@ -33,7 +33,7 @@ import math
 import pytest
 
 from railroad.core import Fluent, State, transition, get_action_by_name
-from railroad.helper import construct_move_visited_operator
+from railroad.operators import construct_move_visited_operator
 
 # Goal classes from bindings
 from railroad._bindings import (
