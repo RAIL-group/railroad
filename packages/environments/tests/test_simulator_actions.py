@@ -2,8 +2,7 @@ import numpy as np
 from railroad.core import Fluent as F, State, get_action_by_name, LiteralGoal
 from railroad.planner import MCTSPlanner
 from railroad import operators
-from environments import SimpleEnvironment
-from railroad.environment import EnvironmentInterface
+from railroad.environment import EnvironmentInterface, SimpleEnvironment
 
 
 LOCATIONS = {

@@ -2,8 +2,7 @@ import pytest
 import numpy as np
 from railroad.core import Fluent as F, State, get_action_by_name
 from railroad import operators
-from railroad.environment import EnvironmentInterface
-from environments import SimpleEnvironment
+from railroad.environment import EnvironmentInterface, SimpleEnvironment
 
 # Fancy error handling; shows local vars
 from rich.traceback import install
