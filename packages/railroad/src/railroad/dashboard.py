@@ -145,12 +145,15 @@ class PlannerDashboard:
     """
     Rich-based dashboard for the robot task planner.
 
-    Layout:
+    Layout (interactive mode):
       ┌──────────────────────────────────────────┐
       │  progress bar (goals achieved / total)   │
       ├──────────────────────────────────────────┤
       │  Left: fluents & goals   │ Right: trace  │
       └──────────────────────────┴───────────────┘
+
+    In non-interactive mode (CI, Claude Code, Colab, piped output),
+    falls back to simple text progress updates.
     """
 
     def __init__(
@@ -158,6 +161,7 @@ class PlannerDashboard:
         goal: Union[Goal, Fluent],
         initial_heuristic=None,
         console=None,
+        force_interactive: bool | None = None,
     ):
         """Initialize the planner dashboard.
 
@@ -166,11 +170,19 @@ class PlannerDashboard:
                   or a bare Fluent (which will be wrapped in LiteralGoal)
             initial_heuristic: Initial heuristic value for progress tracking
             console: Optional Rich console for output
+            force_interactive: Override interactive detection (True=live dashboard,
+                               False=simple output, None=auto-detect)
         """
         if console:
             self.console = console
         else:
-            self.console = Console(force_terminal=True, record=True)
+            self.console = Console(record=True)
+
+        # Determine if we should use interactive mode
+        if force_interactive is not None:
+            self._interactive = force_interactive
+        else:
+            self._interactive = self.console.is_interactive
 
         # Normalize goal input to a Goal object
         # Wrap bare Fluent with LiteralGoal for better user experience
@@ -220,28 +232,39 @@ class PlannerDashboard:
                 extra=f"h={self.initial_heuristic:.2f}",
             )
 
-        # Initial panels
-        self.layout["progress"].update(self._build_progress_panel())
-        self.layout["status"].update(
-            Panel("Initializing... running first planning step.", title=Text("State", style="bold"), border_style="dark_red")
-        )
-        self.layout["debug"].update(
-            Panel("No trace yet.", title=Text("MCTS Trace", style="bold default"), border_style="dark_red")
-        )
+        # Initial panels (only needed for interactive mode)
+        if self._interactive:
+            self.layout["progress"].update(self._build_progress_panel())
+            self.layout["status"].update(
+                Panel("Initializing... running first planning step.", title=Text("State", style="bold"), border_style="dark_red")
+            )
+            self.layout["debug"].update(
+                Panel("No trace yet.", title=Text("MCTS Trace", style="bold default"), border_style="dark_red")
+            )
+
+    @property
+    def is_interactive(self) -> bool:
+        """Return whether the dashboard is running in interactive mode."""
+        return self._interactive
 
     def __enter__(self):
-        self._live = Live(
-            self.renderable,
-            console=Console(force_terminal=True),
-            refresh_per_second=100,
-            screen=True,
-            auto_refresh=True,
-        )
-        self._live.__enter__()
+        if self._interactive:
+            self._live = Live(
+                self.renderable,
+                console=Console(force_terminal=True),
+                refresh_per_second=100,
+                screen=True,
+                auto_refresh=True,
+            )
+            self._live.__enter__()
+        else:
+            # Non-interactive mode: just print initial message
+            self._live = None
+            self.console.print("[bold]Planner starting...[/bold]")
         return self
 
     def __exit__(self, exc_type, exc, tb):
-        if hasattr(self, "_live") and self._live is not None:
+        if self._live is not None:
             self._live.__exit__(exc_type, exc, tb)
             self._live = None
 
@@ -696,12 +719,6 @@ class PlannerDashboard:
 
         # Use best branch progress for OR goals
         achieved, total, label = self._get_best_branch_progress(sim_state)
-        self.progress.update(
-            self.goal_task_id,
-            completed=achieved,
-            total=total,
-            extra=f"{int(achieved)}/{total} ({label})",
-        )
 
         if last_action_name:
             # Record action with its START time (before execution)
@@ -710,22 +727,43 @@ class PlannerDashboard:
         # Update last state time for next action's start time
         self._last_state_time = sim_state.time
 
-        # Heuristic (optional)
-        self._update_heuristic(heuristic_value)
-
-        self.layout["progress"].update(self._build_progress_panel())
-        self.layout["status"].update(
-            self._build_state_panel(
-                sim_state=sim_state,
-                relevant_fluents=relevant_fluents,
-                step_index=step_index,
-                last_action_name=last_action_name,
+        if self._interactive:
+            # Interactive mode: update live dashboard
+            self.progress.update(
+                self.goal_task_id,
+                completed=achieved,
+                total=total,
+                extra=f"{int(achieved)}/{total} ({label})",
             )
-        )
-        if tree_trace:
-            self.layout["debug"].update(self._build_trace_panel(sim_state, tree_trace))
 
-        sleep(0.01)
+            # Heuristic (optional)
+            self._update_heuristic(heuristic_value)
+
+            self.layout["progress"].update(self._build_progress_panel())
+            self.layout["status"].update(
+                self._build_state_panel(
+                    sim_state=sim_state,
+                    relevant_fluents=relevant_fluents,
+                    step_index=step_index,
+                    last_action_name=last_action_name,
+                )
+            )
+            if tree_trace:
+                self.layout["debug"].update(self._build_trace_panel(sim_state, tree_trace))
+
+            sleep(0.01)
+        else:
+            # Non-interactive mode: print simple progress line
+            step_str = f"Step {step_index}" if step_index is not None else "Step -"
+            action_str = last_action_name or "initializing"
+            h_str = f"h={heuristic_value:.1f}" if heuristic_value is not None else ""
+            self.console.print(
+                f"[dim]{step_str}[/dim] | "
+                f"t={sim_state.time:.2f}s | "
+                f"goals={int(achieved)}/{total} | "
+                f"{h_str} | "
+                f"[bold]{action_str}[/bold]"
+            )
 
         self._record_history_entry(
             sim_state=sim_state,
