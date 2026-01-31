@@ -7,9 +7,38 @@ from rich.table import Table
 from rich.rule import Rule
 from rich.text import Text
 
+import os
 import re
 from time import sleep, perf_counter
 from typing import List, Dict, Set, Union, Tuple, Optional
+
+
+def _is_headless_environment() -> bool:
+    """Detect if running in a headless environment where live dashboards don't work well.
+
+    Checks for:
+    - CI environments (GitHub Actions, GitLab CI, etc.) via CI env var
+    - Claude Code via CLAUDECODE env var
+    - Google Colab via COLAB_RELEASE_TAG env var
+    - Jupyter notebooks via JPY_PARENT_PID or VSCODE_PID env vars
+    """
+    # CI environments (GitHub Actions, GitLab, Jenkins, etc.)
+    if os.environ.get("CI"):
+        return True
+
+    # Claude Code
+    if os.environ.get("CLAUDECODE"):
+        return True
+
+    # Google Colab
+    if os.environ.get("COLAB_RELEASE_TAG") or os.environ.get("COLAB_GPU"):
+        return True
+
+    # Jupyter environments
+    if os.environ.get("JPY_PARENT_PID"):
+        return True
+
+    return False
 
 from railroad._bindings import (
     Goal,
@@ -179,8 +208,11 @@ class PlannerDashboard:
             self.console = Console(record=True)
 
         # Determine if we should use interactive mode
+        # Check for explicit override first, then headless environments, then console detection
         if force_interactive is not None:
             self._interactive = force_interactive
+        elif _is_headless_environment():
+            self._interactive = False
         else:
             self._interactive = self.console.is_interactive
 
