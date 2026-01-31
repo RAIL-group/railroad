@@ -63,4 +63,8 @@ log_info "Running tests..."
 log_info "Running example to verify dependencies..."
 .venv/bin/railroad example clear-table
 
+# Test benchmarks discovery (dry-run to avoid running actual benchmarks)
+log_info "Testing benchmark discovery..."
+.venv/bin/railroad benchmarks run --dry-run
+
 log_info "Standalone install test completed successfully!"

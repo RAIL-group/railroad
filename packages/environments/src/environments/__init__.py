@@ -5,4 +5,3 @@ robot simulation and PDDL planning execution.
 """
 
 from . import procthor, plotting, utils, pyrobosim
-from .environments import SimpleEnvironment

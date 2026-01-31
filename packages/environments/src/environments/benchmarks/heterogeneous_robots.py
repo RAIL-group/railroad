@@ -8,8 +8,7 @@ import numpy as np
 from railroad.core import Fluent as F, State, get_action_by_name
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
-from railroad.environment import EnvironmentInterface
-from environments import SimpleEnvironment
+from railroad.environment import EnvironmentInterface, SimpleEnvironment
 from railroad import operators
 from railroad._bindings import ff_heuristic
 from rich.console import Console
