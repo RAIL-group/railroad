@@ -10,34 +10,52 @@ on:
 permissions:
   contents: read
 
+
 jobs:
   uv-example:
-    name: python
     runs-on: ubuntu-latest
+    env:
+      RESOURCE_CACHE_DIR: ${{ github.workspace }}/.cache/resources-cache
 
     steps:
       - uses: actions/checkout@v6
 
-      - name: Debug workspace
-        run: |
-          pwd
-          ls -la
-          echo "Files:"
-          ls -la
-          echo "Searching for pyproject.toml:"
-          find . -maxdepth 3 -name pyproject.toml -print
+      - name: Restore cached resources
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.RESOURCE_CACHE_DIR }}
+          key: resources-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            resources-${{ runner.os }}-
 
-          # hard fail if not found in repo root
-          test -f pyproject.toml
+      - name: Populate resources/ from cache
+        run: |
+          mkdir -p resources
+          if [ -d "${RESOURCE_CACHE_DIR}" ]; then
+            rsync -a "${RESOURCE_CACHE_DIR}/" resources/
+          fi
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
       - name: Install the project
-        run: uv sync --locked --all-extras --dev
+        run: uv sync
 
       - name: Run typechecking
         run: uv run ty check
 
       - name: Run tests
         run: uv run pytest
+
+      - name: Update resource cache from resources/
+        if: always()
+        run: |
+          mkdir -p "${RESOURCE_CACHE_DIR}"
+          rsync -a resources/ "${RESOURCE_CACHE_DIR}/"
+
+      - name: Save resources cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.RESOURCE_CACHE_DIR }}
+          key: resources-${{ runner.os }}-${{ hashFiles('resources/VERSION') }}
