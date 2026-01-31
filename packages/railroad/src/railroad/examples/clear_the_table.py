@@ -90,7 +90,9 @@ def main() -> None:
     max_iterations = 40
 
     # Dashboard
-    h_value = ff_heuristic(initial_state, goal, sim.get_actions())
+    all_actions = sim.get_actions()
+    mcts = MCTSPlanner(all_actions)
+    h_value = mcts.heuristic(initial_state, goal)
     with PlannerDashboard(goal, initial_heuristic=h_value) as dashboard:
         dashboard.update(sim_state=sim.state)
 
@@ -117,7 +119,7 @@ def main() -> None:
             actions_taken.append(action_name)
 
             tree_trace = mcts.get_trace_from_last_mcts_tree()
-            h_value = ff_heuristic(sim.state, goal, sim.get_actions())
+            h_value = mcts.heuristic(sim.state, goal)
             relevant_fluents = {
                 f for f in sim.state.fluents if any(kw in f.name for kw in ["at", "holding", "found"])
             }
