@@ -2,6 +2,48 @@
 requires = ["setuptools>=64", "wheel", "pybind11", "pybind11-stubgen"]
 build-backend = "setuptools.build_meta"
 
+[project]
+name = "railroad"
+version = "0.2.0"
+description = "Multi-Robot Probabilistic Planning with PDDL"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy",
+    "click>=8.0",
+    "rich",
+    "mlflow",
+    "pandas",
+    "dash>=3.3.0",
+    "dash-bootstrap-components>=1.6.0",
+    "plotly",
+]
+
+[project.scripts]
+railroad = "railroad.cli:main"
+
+[project.entry-points."railroad.benchmarks"]
+railroad = "railroad.bench.benchmarks"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+zip-safe = false
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+railroad = ["*.pyi"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = [
+    "ignore:invalid escape sequence:SyntaxWarning",
+]
+markers = [
+    "slow: marks tests as slow to run (deselect with '-m \"not slow\"')",
+]
+
 [tool.uv]
 cache-keys = [
   { file = "pyproject.toml" },
