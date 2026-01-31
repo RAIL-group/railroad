@@ -20,7 +20,6 @@ dependencies = [
     "common",
     "gridmap",
     "environments",
-    "bench",
     "prior>=1.0.3",
     "ai2thor>=5.0.0",
     "sentence-transformers>=5.1.2",
@@ -46,7 +45,6 @@ common = { path = "packages/common", editable = true }
 gridmap = { path = "packages/gridmap", editable = true }
 environments = { path = "packages/environments", editable = true }
 procthor = { path = "packages/procthor", editable = true }
-bench = { path = "packages/bench", editable = true }
 
 [tool.ty.environment]
 extra-paths = [
@@ -55,7 +53,6 @@ extra-paths = [
     "packages/gridmap/src",
     "packages/procthor/src",
     "packages/environments/src",
-    "packages/bench/src",
 ]
 
 [tool.pytest.ini_options]

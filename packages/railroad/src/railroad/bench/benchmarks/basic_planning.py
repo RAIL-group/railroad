@@ -4,7 +4,7 @@ Example benchmark: Basic single-robot planning tasks.
 Demonstrates benchmark registration and parametrization.
 """
 
-from bench import benchmark, BenchmarkCase
+from railroad.bench import benchmark, BenchmarkCase
 from railroad.core import Fluent as F, State, get_action_by_name
 from railroad.planner import MCTSPlanner
 from environments import SimpleEnvironment

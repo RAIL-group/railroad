@@ -3,7 +3,7 @@ Tests for benchmark registry and parameter access.
 """
 
 import pytest
-from bench.registry import BenchmarkCase, _DotAccessor
+from railroad.bench.registry import BenchmarkCase, _DotAccessor
 
 
 class TestBenchmarkCaseDotNotation:

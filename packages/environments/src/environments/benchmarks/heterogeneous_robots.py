@@ -8,13 +8,12 @@ import numpy as np
 from railroad.core import Fluent as F, State, get_action_by_name
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
-import environments
 from railroad.environment import EnvironmentInterface
 from environments import SimpleEnvironment
 from railroad import operators
 from railroad._bindings import ff_heuristic
 from rich.console import Console
-from bench import benchmark, BenchmarkCase
+from railroad.bench import benchmark, BenchmarkCase
 
 SKILLS_TIME = {
     'rover': {

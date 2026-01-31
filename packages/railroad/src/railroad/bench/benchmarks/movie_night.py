@@ -26,7 +26,7 @@ from railroad import operators
 from railroad.core import ff_heuristic
 from rich.console import Console
 
-from bench import benchmark, BenchmarkCase
+from railroad.bench import benchmark, BenchmarkCase
 @benchmark(
     name="movie_night_search",
     description="Robots must search a small home to find some objects to bring to the den.",
@@ -145,7 +145,7 @@ def bench_movie_night(case: BenchmarkCase):
 
         # Plan next action
         mcts = MCTSPlanner(all_actions)
-        action_name = mcts(sim.state, goal, 
+        action_name = mcts(sim.state, goal,
                             max_iterations=case.mcts.iterations,
                             c=case.mcts.c,
                             max_depth=20)
