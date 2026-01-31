@@ -1,3 +1,10 @@
+"""
+Setup script for railroad C++ extension.
+
+Most configuration is in pyproject.toml. This file only handles the C++
+extension build which requires custom logic for pybind11 and stub generation.
+"""
+
 from __future__ import annotations
 
 import os
@@ -89,40 +96,8 @@ ext_modules = [
     )
 ]
 
+# Minimal setup() - most config is in pyproject.toml
 setup(
-    name="railroad",
-    version="0.2.0",
-    package_dir={"": "src"},
-    packages=[
-        "railroad",
-        "railroad.operators",
-        "railroad.environment",
-        "railroad.examples",
-        "railroad.bench",
-        "railroad.bench.dashboard",
-        "railroad.bench.benchmarks",
-    ],
     ext_modules=ext_modules,
     cmdclass={"build_ext": build_ext_and_stubgen},
-    include_package_data=True,
-    package_data={"railroad": ["*.pyi"]},
-    zip_safe=False,
-    install_requires=[
-        "numpy",
-        "click>=8.0",
-        "rich",
-        "mlflow",
-        "pandas",
-        "dash>=3.3.0",
-        "dash-bootstrap-components>=1.6.0",
-        "plotly",
-    ],
-    entry_points={
-        "console_scripts": [
-            "railroad=railroad.cli:main",
-        ],
-        "railroad.benchmarks": [
-            "railroad=railroad.bench.benchmarks",
-        ],
-    },
 )
