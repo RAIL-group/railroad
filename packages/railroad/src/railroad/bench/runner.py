@@ -39,6 +39,7 @@ class BenchmarkRunner:
         mlflow_tracking_uri: Optional[str] = None,
         tags: Optional[List[str]] = None,
         case_filter: Optional[str] = None,
+        include_files: Optional[List[str]] = None,
     ):
         """
         Initialize benchmark runner.
@@ -50,6 +51,7 @@ class BenchmarkRunner:
             mlflow_tracking_uri: MLflow tracking URI (default: sqlite:///mlflow.db)
             tags: Filter benchmarks by tags (default: None, run all)
             case_filter: Filter cases by matching against benchmark name and parameters (default: None)
+            include_files: List of additional benchmark files to load (default: None)
         """
         self.benchmarks = benchmarks
         self.repeat_max = repeat_max
@@ -59,6 +61,7 @@ class BenchmarkRunner:
         self.tracker = MLflowTracker(tracking_uri=mlflow_tracking_uri)
         self.filter_tags = tags
         self.case_filter = case_filter
+        self.include_files = include_files
 
     def create_plan(self) -> ExecutionPlan:
         """
@@ -224,6 +227,7 @@ class BenchmarkRunner:
             "repeat_max": self.repeat_max if self.repeat_max is not None else "None",
             "parallel_workers": self.parallel,
             "num_benchmarks": len(self.benchmarks),
+            "include_files": self.include_files,
         }
 
     def dry_run(self, plan: ExecutionPlan):
