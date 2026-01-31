@@ -8,7 +8,7 @@ from dash import Output, Input, State, ALL, callback_context, html
 from flask import send_file
 import mlflow
 
-from bench.analysis import BenchmarkAnalyzer
+from railroad.bench.analysis import BenchmarkAnalyzer
 from .data import (
     load_all_experiments_with_summaries,
     load_experiment_by_name,

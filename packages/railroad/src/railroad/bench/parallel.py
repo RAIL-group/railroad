@@ -64,12 +64,11 @@ def _execute_task_worker(task: Task, mlflow_uri: Optional[str] = None) -> Task:
     # Restore the benchmark function by importing from bench registry
     if task.benchmark_fn is None:
         try:
-            # Import benchmarks module to trigger decorator registration
-            import benchmarks  # noqa: F401
-            from bench.registry import get_all_benchmarks
+            # Use entry-point discovery to load all benchmarks
+            from railroad.bench.discovery import discover_benchmarks
 
             # Find the benchmark by name in the registry
-            all_benchmarks = get_all_benchmarks()
+            all_benchmarks = discover_benchmarks()
             for bench in all_benchmarks:
                 if bench.name == task.benchmark_name:
                     task.benchmark_fn = bench.fn

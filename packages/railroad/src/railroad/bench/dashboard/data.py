@@ -3,7 +3,7 @@ Data loading functions for MLflow experiments.
 """
 
 import pandas as pd
-from bench.analysis import BenchmarkAnalyzer
+from railroad.bench.analysis import BenchmarkAnalyzer
 
 
 # Global cache for downloaded artifact paths
