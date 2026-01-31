@@ -38,6 +38,13 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
+      - name: Install system deps for X/GL
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            xvfb mesa-utils \
+            libgl1 libgl1-mesa-dri libglib2.0-0 libsm6 libxrender1 libxext6
+
       - name: Install the project
         run: uv sync
 
@@ -45,7 +52,10 @@ jobs:
         run: uv run ty check
 
       - name: Run tests
-        run: uv run pytest
+        env:
+          DISPLAY: ":99"
+        run: |
+          xvfb-run -a -s "-screen 0 1280x1024x24" uv run pytest
 
       - name: Update resource cache from resources/
         if: always()
