@@ -5,6 +5,7 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+    types: [opened, reopened, synchronize, ready_for_review]
 
 permissions:
   contents: read
@@ -16,6 +17,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          path: resources
+          key: resources-${{ runner.os }}-${{ hashFiles('**/uv.lock', '**/pyproject.toml') }}
+          restore-keys: |
+            resources-${{ runner.os }}-
+
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
