@@ -24,7 +24,7 @@ jobs:
             resources-${{ runner.os }}-
 
       - name: Debug workspace
-	run: |
+        run: |
           pwd
           ls -la
 
