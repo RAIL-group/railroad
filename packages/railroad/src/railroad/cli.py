@@ -48,6 +48,8 @@ def benchmarks() -> None:
               help="Show plan without executing")
 @click.option("--mlflow-uri", default=None,
               help="MLflow tracking URI (default: sqlite:///mlflow.db)")
+@click.option("--include", "-i", multiple=True, type=click.Path(exists=True),
+              help="Include benchmark file(s) in addition to entry points (can be repeated)")
 def benchmarks_run(
     case_filter: str | None,
     repeat_max: int | None,
@@ -55,14 +57,16 @@ def benchmarks_run(
     tags: tuple[str, ...] | None,
     dry_run: bool,
     mlflow_uri: str | None,
+    include: tuple[str, ...],
 ) -> None:
     """Run PDDL planning benchmarks."""
     import sys
     from railroad.bench.discovery import discover_benchmarks
     from railroad.bench.runner import BenchmarkRunner
 
-    # Discover all benchmarks via entry points
-    all_benchmarks = discover_benchmarks()
+    # Discover all benchmarks via entry points and included files
+    include_files = list(include) if include else None
+    all_benchmarks = discover_benchmarks(include_files=include_files)
 
     if not all_benchmarks:
         click.echo("Error: No benchmarks found. Make sure your benchmarks use the @benchmark decorator.")
@@ -79,6 +83,7 @@ def benchmarks_run(
         mlflow_tracking_uri=mlflow_uri,
         tags=tags_list,
         case_filter=case_filter,
+        include_files=include_files,
     )
 
     # Create plan

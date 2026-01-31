@@ -44,7 +44,11 @@ def _handle_interrupt(progress: ProgressDisplay, message: str = "Interrupted by 
     os._exit(1)
 
 
-def _execute_task_worker(task: Task, mlflow_uri: Optional[str] = None) -> Task:
+def _execute_task_worker(
+    task: Task,
+    mlflow_uri: Optional[str] = None,
+    include_files: Optional[list[str]] = None,
+) -> Task:
     """
     Worker function for parallel execution.
 
@@ -54,6 +58,7 @@ def _execute_task_worker(task: Task, mlflow_uri: Optional[str] = None) -> Task:
     Args:
         task: Task to execute
         mlflow_uri: MLflow tracking URI
+        include_files: Additional benchmark files to load
 
     Returns:
         Completed task with results
@@ -68,7 +73,7 @@ def _execute_task_worker(task: Task, mlflow_uri: Optional[str] = None) -> Task:
             from railroad.bench.discovery import discover_benchmarks
 
             # Find the benchmark by name in the registry
-            all_benchmarks = discover_benchmarks()
+            all_benchmarks = discover_benchmarks(include_files=include_files)
             for bench in all_benchmarks:
                 if bench.name == task.benchmark_name:
                     task.benchmark_fn = bench.fn
@@ -184,12 +189,15 @@ class ParallelExecutor:
         # Get MLflow URI from tracker
         mlflow_uri = self.tracker.tracking_uri if hasattr(self.tracker, 'tracking_uri') else None
 
+        # Get include_files from plan metadata for worker processes
+        include_files = plan.metadata.get("include_files")
+
         try:
             with ProcessPoolExecutor(max_workers=self.num_workers) as executor:
                 # Submit all tasks at once
                 futures = {}
                 for task in plan.tasks:
-                    future = executor.submit(_execute_task_worker, task, mlflow_uri)  # type: ignore[arg-type]
+                    future = executor.submit(_execute_task_worker, task, mlflow_uri, include_files)  # type: ignore[arg-type]
                     futures[future] = task
 
                 # Mark first batch as running (up to num_workers)
