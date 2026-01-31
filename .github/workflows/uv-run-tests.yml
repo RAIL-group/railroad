@@ -24,7 +24,9 @@ jobs:
             resources-${{ runner.os }}-
 
       - name: Debug workspace
-	run: pwd && ls -la
+	run: |
+          pwd
+          ls -la
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
