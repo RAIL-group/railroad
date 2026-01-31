@@ -51,11 +51,11 @@ jobs:
       - name: Run typechecking
         run: uv run ty check
 
-      - name: Run tests
+      - name: Run railroad tests
         env:
           DISPLAY: ":99"
         run: |
-          xvfb-run -a -s "-screen 0 1280x1024x24" uv run pytest
+          xvfb-run -a -s "-screen 0 1280x1024x24" uv run pytest packages/railroad
 
       - name: Update resource cache from resources/
         if: always()
@@ -68,4 +68,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ env.RESOURCE_CACHE_DIR }}
-          key: resources-${{ runner.os }}-${{ hashFiles('resources/VERSION') }}
+          key: resources-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
