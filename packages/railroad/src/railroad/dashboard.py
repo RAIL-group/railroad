@@ -620,55 +620,84 @@ class PlannerDashboard:
         }
         self.history.append(entry)
 
+    def _format_single_entry(self, entry: dict) -> str:
+        """Format a single history entry as markdown text."""
+        lines: list[str] = []
+        step = entry["step"]
+        t = entry["time"]
+        action = entry["last_action"]
+
+        lines.append(f"# Step {step} | t = {t:.2f}s | action = {action}")
+        lines.append(f"Selected Action: {action}\n")
+        if entry["tree_trace"]:
+            lines.append("\n## MCTS Tree Trace:")
+            # indent the trace for readability
+            for line in entry["tree_trace"].splitlines():
+                lines.append(f"    {line}")
+        lines.append("\n## Selected Active Fluents:")
+        for f in entry["relevant_fluents"]:
+            lines.append(f"    {f}")
+        lines.append("## Goal Fluents:")
+        for g, ok in entry["goals"].items():
+            mark = "✓" if ok else "✗"
+            lines.append(f"   {mark} {g}")
+        # Show overall goal satisfaction
+        goal_status = entry.get("goal_satisfied", False)
+        status_mark = "✓ SATISFIED" if goal_status else "✗ NOT SATISFIED"
+        lines.append(f"## Overall Goal: {status_mark}")
+
+        return "\n".join(lines)
+
+    def _print_entry(self, entry: dict):
+        """Pretty-print a single history entry using Rich."""
+        text = self._format_single_entry(entry)
+        split_text = split_markdown_flat(text)
+        for item in split_text:
+            text_type = item['type']
+            content = item['text']
+            if text_type == 'text':
+                self.console.print(content)
+            elif text_type == 'h1':
+                self.console.print()
+                self.console.rule(content)
+            elif text_type == 'h2':
+                self.console.print(f"[bold red]{content}[/]")
+
     def format_history_as_text(self) -> str:
         """Return the full dashboard history as a multi-line string."""
         lines: list[str] = []
         for entry in self.history:
-            step = entry["step"]
-            t = entry["time"]
-            action = entry["last_action"]
-
-            lines.append(f"# Step {step} | t = {t:.2f}s | action = {action}")
-            lines.append(f"Selected Action: {action}\n")
-            if entry["tree_trace"]:
-                lines.append("\n## MCTS Tree Trace:")
-                # indent the trace for readability
-                for line in entry["tree_trace"].splitlines():
-                    lines.append(f"    {line}")
-            lines.append("\n## Selected Active Fluents:")
-            for f in entry["relevant_fluents"]:
-                lines.append(f"    {f}")
-            lines.append("## Goal Fluents:")
-            for g, ok in entry["goals"].items():
-                mark = "✓" if ok else "✗"
-                lines.append(f"   {mark} {g}")
-            # Show overall goal satisfaction
-            goal_status = entry.get("goal_satisfied", False)
-            status_mark = "✓ SATISFIED" if goal_status else "✗ NOT SATISFIED"
-            lines.append(f"## Overall Goal: {status_mark}")
+            lines.append(self._format_single_entry(entry))
             lines.append("\n")  # blank line between steps
-        
+
         return "\n".join(lines)
 
     def print_history(self, final_state=None, actions_taken=None):
-        """Pretty-print the full history using Rich."""
+        """Pretty-print the full history using Rich.
+
+        In non-interactive mode, skips the step-by-step history (already printed
+        during update calls) and only prints the final summary.
+        """
         local_console = self.console
 
         if not self.history:
             local_console.print("[yellow]No history recorded.[/yellow]")
             return
 
-        split_text = split_markdown_flat(self.format_history_as_text())
-        for item in split_text:
-            text_type = item['type']
-            text = item['text']
-            if text_type == 'text':
-                local_console.print(text)
-            elif text_type == 'h1':
-                local_console.print()
-                local_console.rule(text)
-            elif text_type == 'h2':
-                local_console.print(f"[bold red]{text}[/]")
+        # In interactive mode (or when there's no final_state), print full history
+        # In non-interactive mode, history was already printed during updates
+        if self._interactive or not final_state:
+            split_text = split_markdown_flat(self.format_history_as_text())
+            for item in split_text:
+                text_type = item['type']
+                text = item['text']
+                if text_type == 'text':
+                    local_console.print(text)
+                elif text_type == 'h1':
+                    local_console.print()
+                    local_console.rule(text)
+                elif text_type == 'h2':
+                    local_console.print(f"[bold red]{text}[/]")
 
         if final_state and actions_taken:
             if self._is_goal_satisfied(final_state):
@@ -784,19 +813,8 @@ class PlannerDashboard:
                 self.layout["debug"].update(self._build_trace_panel(sim_state, tree_trace))
 
             sleep(0.01)
-        else:
-            # Non-interactive mode: print simple progress line
-            step_str = f"Step {step_index}" if step_index is not None else "Step -"
-            action_str = last_action_name or "initializing"
-            h_str = f"h={heuristic_value:.1f}" if heuristic_value is not None else ""
-            self.console.print(
-                f"[dim]{step_str}[/dim] | "
-                f"t={sim_state.time:.2f}s | "
-                f"goals={int(achieved)}/{total} | "
-                f"{h_str} | "
-                f"[bold]{action_str}[/bold]"
-            )
 
+        # Record history entry (used by both modes)
         self._record_history_entry(
             sim_state=sim_state,
             relevant_fluents=relevant_fluents,
@@ -805,3 +823,7 @@ class PlannerDashboard:
             last_action_name=last_action_name,
             heuristic_value=heuristic_value,
         )
+
+        if not self._interactive:
+            # Non-interactive mode: print full entry details
+            self._print_entry(self.history[-1])
