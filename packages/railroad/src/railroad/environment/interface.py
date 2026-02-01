@@ -377,10 +377,11 @@ class OngoingSearchAction(OngoingAction):
 
     def advance(self, time: float) -> List[Tuple[float, GroundedEffect]]:
         assert self.environment is not None
-        _, _, loc, obj = self.name.split()  # (e.g., search r1 locA objA)
         if not self.is_action_called:
             duration = max(eff.time for eff in self._action.effects)
-            self.environment.execute_skill(self.robot, "search", loc, obj, duration=duration)
+            # Pass action name parts as args (handles both "search r loc obj" and "search r from to obj")
+            args = self.name.split()[2:]  # Everything after "search robot"
+            self.environment.execute_skill(self.robot, "search", *args, duration=duration)
             self.is_action_called = True
         return super().advance(time)
 

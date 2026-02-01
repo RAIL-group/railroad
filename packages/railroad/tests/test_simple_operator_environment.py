@@ -477,6 +477,120 @@ class TestOperatorTimingIntegration:
         assert sim_fail.state.time == pytest.approx(search_time, abs=0.2)
         assert sim_success.state.time == pytest.approx(sim_fail.state.time, abs=0.1)
 
+
+class TestSearchAndPickTiming:
+    """Tests for search_and_pick operator timing behavior.
+
+    The construct_search_and_pick_operator has different timing for success vs failure:
+    - Success: move_time + pick_time (robot moves, finds object, picks it up)
+    - Failure: move_time only (robot moves, doesn't find object, becomes free)
+    """
+
+    def test_search_and_pick_success_applies_all_effects(self):
+        """Test that search_and_pick applies all effects on success (100% find prob)."""
+        move_time = 5.0
+        pick_time = 3.0
+
+        search_pick_op = operators.construct_search_and_pick_operator(
+            object_find_prob=1.0,  # Always find
+            move_time=move_time,
+            pick_time=pick_time,
+        )
+        env = SimpleOperatorEnvironment(
+            operators=[search_pick_op],
+            objects_at_locations={"kitchen": {"Knife"}},
+        )
+
+        initial_state = State(
+            time=0,
+            fluents={F("at robot1 living_room"), F("free robot1")},
+        )
+        objects_by_type = {
+            "robot": ["robot1"],
+            "location": ["living_room", "kitchen"],
+            "object": ["Knife"],
+        }
+
+        sim = EnvironmentInterface(initial_state, objects_by_type, [search_pick_op], env)
+        action = get_action_by_name(sim.get_actions(), "search robot1 living_room kitchen Knife")
+
+        sim.advance(action, do_interrupt=False)
+
+        # Verify success effects
+        assert F("at robot1 kitchen") in sim.state.fluents, "Robot should be at kitchen"
+        assert F("found Knife") in sim.state.fluents, "Knife should be found"
+        assert F("holding robot1 Knife") in sim.state.fluents, "Robot should be holding Knife"
+        assert F("free robot1") in sim.state.fluents, "Robot should be free"
+
+    def test_search_and_pick_failure_applies_correct_effects(self):
+        """Test that search_and_pick applies correct effects on failure (0% find prob)."""
+        move_time = 5.0
+        pick_time = 3.0
+
+        search_pick_op = operators.construct_search_and_pick_operator(
+            object_find_prob=0.0,  # Never find
+            move_time=move_time,
+            pick_time=pick_time,
+        )
+        env = SimpleOperatorEnvironment(
+            operators=[search_pick_op],
+            objects_at_locations={"kitchen": set()},
+        )
+
+        initial_state = State(
+            time=0,
+            fluents={F("at robot1 living_room"), F("free robot1")},
+        )
+        objects_by_type = {
+            "robot": ["robot1"],
+            "location": ["living_room", "kitchen"],
+            "object": ["Knife"],
+        }
+
+        sim = EnvironmentInterface(initial_state, objects_by_type, [search_pick_op], env)
+        action = get_action_by_name(sim.get_actions(), "search robot1 living_room kitchen Knife")
+
+        sim.advance(action, do_interrupt=False)
+
+        # Verify failure effects
+        assert F("at robot1 kitchen") in sim.state.fluents, "Robot should be at kitchen"
+        assert F("free robot1") in sim.state.fluents, "Robot should be free"
+        assert F("found Knife") not in sim.state.fluents, "Knife should NOT be found"
+        assert F("holding robot1 Knife") not in sim.state.fluents, "Robot should NOT be holding"
+
+    def test_search_and_pick_duration_is_move_time_only(self):
+        """Test that computed duration is move_time, not move_time + pick_time.
+
+        This demonstrates that max(eff.time) only sees top-level effects,
+        not nested probabilistic effect times.
+        """
+        move_time = 5.0
+        pick_time = 3.0
+
+        search_pick_op = operators.construct_search_and_pick_operator(
+            object_find_prob=1.0,
+            move_time=move_time,
+            pick_time=pick_time,
+        )
+
+        # Check what duration would be computed
+        actions = search_pick_op.instantiate({
+            "robot": ["robot1"],
+            "location": ["living_room", "kitchen"],
+            "object": ["Knife"],
+        })
+        action = get_action_by_name(actions, "search robot1 living_room kitchen Knife")
+
+        # Duration is max of top-level effect times
+        computed_duration = max(eff.time for eff in action.effects)
+
+        # This will be move_time, not move_time + pick_time
+        # because pick_time is nested inside probabilistic effects
+        assert computed_duration == pytest.approx(move_time, abs=0.1), (
+            f"Duration should be move_time ({move_time}), not move_time + pick_time ({move_time + pick_time}). "
+            f"Got {computed_duration}"
+        )
+
     def test_sequential_actions_accumulate_time(self):
         """Test that sequential actions accumulate their times correctly."""
         move_time = 5.0
