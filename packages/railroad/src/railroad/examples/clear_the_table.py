@@ -12,38 +12,27 @@ than their presence.
 from functools import reduce
 from operator import and_
 
-import numpy as np
-
-from railroad.core import Fluent as F, State, get_action_by_name, ff_heuristic
+from railroad.core import Fluent as F, State, get_action_by_name
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
 from railroad import operators
-from railroad.environment import EnvironmentInterface, SimpleEnvironment
+from railroad.environment import EnvironmentInterface, SimpleOperatorEnvironment
 
 
-# Define locations with coordinates (for move cost calculation)
-LOCATIONS = {
-    "living_room": np.array([0, 0]),
-    "kitchen": np.array([5, 0]),
-    "table": np.array([2, 3]),  # The table location to clear
-    "shelf": np.array([8, 3]),  # Destination for cleared items
-}
+# Define locations
+LOCATIONS = ["living_room", "kitchen", "table", "shelf"]
 
 # Define where objects actually are (ground truth)
 OBJECTS_AT_LOCATIONS = {
-    "living_room": {"object": set()},
-    "kitchen": {"object": set()},
-    "table": {"object": {"Book", "Mug", "Vase"}},  # Objects to clear
-    "shelf": {"object": set()},  # Destination
+    "living_room": set(),
+    "kitchen": set(),
+    "table": {"Book", "Mug", "Vase"},  # Objects to clear
+    "shelf": set(),  # Destination
 }
 
 
 def main() -> None:
     """Run the clear-the-table example."""
-    # Initialize environment
-    robot_locations = {"robot1": "living_room"}
-    env = SimpleEnvironment(LOCATIONS, OBJECTS_AT_LOCATIONS, robot_locations=robot_locations)
-
     # Objects that need to be cleared from the table
     objects_on_table = ["Book", "Mug", "Vase"]
 
@@ -69,21 +58,25 @@ def main() -> None:
     # Objects by type
     objects_by_type = {
         "robot": ["robot1"],
-        "location": list(LOCATIONS.keys()),
+        "location": LOCATIONS,
         "object": objects_on_table,
     }
 
-    # Create operators
-    move_time_fn = env.get_skills_time_fn(skill_name="move")
-    pick_time = env.get_skills_time_fn(skill_name="pick")
-    place_time = env.get_skills_time_fn(skill_name="place")
+    # Define operators with timing baked in
+    move_op = operators.construct_move_operator_blocking(move_time=5.0)
+    pick_op = operators.construct_pick_operator_blocking(pick_time=5.0)
+    place_op = operators.construct_place_operator_blocking(place_time=5.0)
 
-    move_op = operators.construct_move_operator_blocking(move_time_fn)
-    pick_op = operators.construct_pick_operator_blocking(pick_time)
-    place_op = operators.construct_place_operator_blocking(place_time)
+    all_operators = [pick_op, place_op, move_op]
+
+    # Create environment with ground truth object locations
+    env = SimpleOperatorEnvironment(
+        operators=all_operators,
+        objects_at_locations=OBJECTS_AT_LOCATIONS,
+    )
 
     # Create simulator
-    sim = EnvironmentInterface(initial_state, objects_by_type, [pick_op, place_op, move_op], env)
+    sim = EnvironmentInterface(initial_state, objects_by_type, all_operators, env)
 
     # Planning loop
     actions_taken = []

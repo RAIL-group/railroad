@@ -10,40 +10,28 @@ OR Couch to the den. This shows how OR goals allow flexibility in achieving
 objectives.
 """
 
-import numpy as np
-
 from railroad.core import Fluent as F, State, get_action_by_name, ff_heuristic
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
 from railroad import operators
-from railroad.environment import EnvironmentInterface, SimpleEnvironment
+from railroad.environment import EnvironmentInterface, SimpleOperatorEnvironment
 
 
-# Define locations with coordinates
-LOCATIONS = {
-    "living_room": np.array([0, 0]),
-    "kitchen": np.array([10, 0]),
-    "bedroom": np.array([0, 12]),
-    "office": np.array([10, 12]),
-    "den": np.array([15, 5]),
-}
+# Define locations
+LOCATIONS = ["living_room", "kitchen", "bedroom", "office", "den"]
 
 # Define where objects actually are (ground truth)
 OBJECTS_AT_LOCATIONS = {
-    "living_room": {"object": {"Remote"}},
-    "kitchen": {"object": {"Cookie", "Plate"}},
-    "bedroom": {"object": set()},
-    "office": {"object": {"Couch"}},
-    "den": {"object": set()},
+    "living_room": {"Remote"},
+    "kitchen": {"Cookie", "Plate"},
+    "bedroom": set(),
+    "office": {"Couch"},
+    "den": set(),
 }
 
 
 def main() -> None:
     """Run the find-and-move-couch example."""
-    # Initialize environment
-    robot_locations = {"robot1": "living_room", "robot2": "living_room"}
-    env = SimpleEnvironment(LOCATIONS, OBJECTS_AT_LOCATIONS, robot_locations=robot_locations)
-
     # Define the objects we're looking for
     objects_of_interest = ["Remote", "Cookie", "Plate", "Couch"]
 
@@ -72,31 +60,32 @@ def main() -> None:
     # Objects by type
     objects_by_type = {
         "robot": ["robot1", "robot2"],
-        "location": list(LOCATIONS.keys()),
+        "location": LOCATIONS,
         "object": objects_of_interest,
     }
 
-    # Create operators
-    move_time_fn = env.get_skills_time_fn(skill_name="move")
-    search_time = env.get_skills_time_fn(skill_name="search")
-    pick_time = env.get_skills_time_fn(skill_name="pick")
-    place_time = env.get_skills_time_fn(skill_name="place")
-
     # Higher find probability if object is actually at the location
     def object_find_prob(robot: str, loc: str, obj: str) -> float:
-        objects_here = OBJECTS_AT_LOCATIONS.get(loc, {}).get("object", set())
+        objects_here = OBJECTS_AT_LOCATIONS.get(loc, set())
         return 0.8 if obj in objects_here else 0.2
 
-    move_op = operators.construct_move_operator_blocking(move_time_fn)
-    search_op = operators.construct_search_operator(object_find_prob, search_time)
-    pick_op = operators.construct_pick_operator_blocking(pick_time)
-    place_op = operators.construct_place_operator_blocking(place_time)
+    # Define operators with timing baked in
+    move_op = operators.construct_move_operator_blocking(move_time=10.0)
+    search_op = operators.construct_search_operator(object_find_prob, search_time=5.0)
+    pick_op = operators.construct_pick_operator_blocking(pick_time=5.0)
+    place_op = operators.construct_place_operator_blocking(place_time=5.0)
     no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
 
-    # Create simulator
-    sim = EnvironmentInterface(
-        initial_state, objects_by_type, [no_op, pick_op, place_op, move_op, search_op], env
+    all_operators = [no_op, pick_op, place_op, move_op, search_op]
+
+    # Create environment with ground truth object locations
+    env = SimpleOperatorEnvironment(
+        operators=all_operators,
+        objects_at_locations=OBJECTS_AT_LOCATIONS,
     )
+
+    # Create simulator
+    sim = EnvironmentInterface(initial_state, objects_by_type, all_operators, env)
 
     # Planning loop
     actions_taken = []
