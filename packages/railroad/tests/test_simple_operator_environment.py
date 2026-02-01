@@ -398,6 +398,85 @@ class TestOperatorTimingIntegration:
 
         assert sim.state.time == pytest.approx(search_time, abs=0.2)
 
+    @pytest.mark.parametrize("search_time", [3.0, 7.0, 15.0])
+    def test_different_search_times_produce_different_elapsed_times(self, search_time: float):
+        """Test that different search_time values result in different elapsed times."""
+        search_op = operators.construct_search_operator(
+            object_find_prob=1.0,
+            search_time=search_time,
+        )
+        env = SimpleOperatorEnvironment(
+            operators=[search_op],
+            objects_at_locations={"kitchen": {"Knife"}},
+        )
+
+        initial_state = State(
+            time=0,
+            fluents={F("at robot1 kitchen"), F("free robot1")},
+        )
+        objects_by_type = {
+            "robot": ["robot1"],
+            "location": ["kitchen"],
+            "object": ["Knife"],
+        }
+
+        sim = EnvironmentInterface(initial_state, objects_by_type, [search_op], env)
+        actions = sim.get_actions()
+        search_action = get_action_by_name(actions, "search robot1 kitchen Knife")
+
+        sim.advance(search_action, do_interrupt=False)
+
+        assert sim.state.time == pytest.approx(search_time, abs=0.2), (
+            f"Expected time ~{search_time}, got {sim.state.time}"
+        )
+
+    def test_search_time_same_for_success_and_failure(self):
+        """Test that construct_search_operator uses same time for success/failure.
+
+        The search operator has probabilistic outcomes but both take the same time.
+        This test verifies that by checking elapsed time regardless of find probability.
+        """
+        search_time = 6.0
+
+        # Test with 100% find probability (success)
+        search_op_success = operators.construct_search_operator(
+            object_find_prob=1.0,
+            search_time=search_time,
+        )
+        env_success = SimpleOperatorEnvironment(
+            operators=[search_op_success],
+            objects_at_locations={"kitchen": {"Knife"}},
+        )
+        state_success = State(time=0, fluents={F("at robot1 kitchen"), F("free robot1")})
+        sim_success = EnvironmentInterface(
+            state_success, {"robot": ["robot1"], "location": ["kitchen"], "object": ["Knife"]},
+            [search_op_success], env_success
+        )
+        action_success = get_action_by_name(sim_success.get_actions(), "search robot1 kitchen Knife")
+        sim_success.advance(action_success, do_interrupt=False)
+
+        # Test with 0% find probability (failure)
+        search_op_fail = operators.construct_search_operator(
+            object_find_prob=0.0,
+            search_time=search_time,
+        )
+        env_fail = SimpleOperatorEnvironment(
+            operators=[search_op_fail],
+            objects_at_locations={"kitchen": set()},  # No knife here
+        )
+        state_fail = State(time=0, fluents={F("at robot1 kitchen"), F("free robot1")})
+        sim_fail = EnvironmentInterface(
+            state_fail, {"robot": ["robot1"], "location": ["kitchen"], "object": ["Knife"]},
+            [search_op_fail], env_fail
+        )
+        action_fail = get_action_by_name(sim_fail.get_actions(), "search robot1 kitchen Knife")
+        sim_fail.advance(action_fail, do_interrupt=False)
+
+        # Both should take the same time
+        assert sim_success.state.time == pytest.approx(search_time, abs=0.2)
+        assert sim_fail.state.time == pytest.approx(search_time, abs=0.2)
+        assert sim_success.state.time == pytest.approx(sim_fail.state.time, abs=0.1)
+
     def test_sequential_actions_accumulate_time(self):
         """Test that sequential actions accumulate their times correctly."""
         move_time = 5.0
