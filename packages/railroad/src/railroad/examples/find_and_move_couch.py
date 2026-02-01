@@ -14,7 +14,7 @@ from railroad.core import Fluent as F, State, get_action_by_name, ff_heuristic
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
 from railroad import operators
-from railroad.environment import EnvironmentInterface, SimpleOperatorEnvironment
+from railroad.execution import Environment, EnvironmentInterface
 
 
 # Define locations
@@ -79,10 +79,7 @@ def main() -> None:
     all_operators = [no_op, pick_op, place_op, move_op, search_op]
 
     # Create environment with ground truth object locations
-    env = SimpleOperatorEnvironment(
-        operators=all_operators,
-        objects_at_locations=OBJECTS_AT_LOCATIONS,
-    )
+    env = Environment(OBJECTS_AT_LOCATIONS)
 
     # Create simulator
     sim = EnvironmentInterface(initial_state, objects_by_type, all_operators, env)
@@ -109,7 +106,7 @@ def main() -> None:
                 break
 
             action = get_action_by_name(all_actions, action_name)
-            sim.advance(action, do_interrupt=False)
+            sim.advance(action)
             actions_taken.append(action_name)
 
             tree_trace = mcts.get_trace_from_last_mcts_tree()
