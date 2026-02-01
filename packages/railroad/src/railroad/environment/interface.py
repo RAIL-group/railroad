@@ -379,7 +379,8 @@ class OngoingSearchAction(OngoingAction):
         assert self.environment is not None
         _, _, loc, obj = self.name.split()  # (e.g., search r1 locA objA)
         if not self.is_action_called:
-            self.environment.execute_skill(self.robot, "search", loc, obj)
+            duration = max(eff.time for eff in self._action.effects)
+            self.environment.execute_skill(self.robot, "search", loc, obj, duration=duration)
             self.is_action_called = True
         return super().advance(time)
 
@@ -391,7 +392,8 @@ class OngoingPickAction(OngoingAction):
         assert self.environment is not None
         _, _, loc, obj = self.name.split()  # (e.g., pick r1 locA objA)
         if not self.is_action_called:
-            self.environment.execute_skill(self.robot, "pick", loc, obj)
+            duration = max(eff.time for eff in self._action.effects)
+            self.environment.execute_skill(self.robot, "pick", loc, obj, duration=duration)
             self.is_action_called = True
 
         new_effects = super().advance(time)
@@ -408,7 +410,8 @@ class OngoingPlaceAction(OngoingAction):
         assert self.environment is not None
         _, _, loc, obj = self.name.split()  # (e.g., place r1 locA objA)
         if not self.is_action_called:
-            self.environment.execute_skill(self.robot, "place", loc, obj)
+            duration = max(eff.time for eff in self._action.effects)
+            self.environment.execute_skill(self.robot, "place", loc, obj, duration=duration)
             self.is_action_called = True
 
         new_effects = super().advance(time)
@@ -434,7 +437,8 @@ class OngoingMoveAction(OngoingAction):
     def advance(self, time: float) -> List[Tuple[float, GroundedEffect]]:
         assert self.environment is not None
         if not self.is_action_called:
-            self.environment.execute_skill(self.robot, "move", self.start, self.end)
+            duration = max(eff.time for eff in self._action.effects)
+            self.environment.execute_skill(self.robot, "move", self.start, self.end, duration=duration)
             self.is_action_called = True
         return super().advance(time)
 
@@ -489,6 +493,7 @@ class OngoingNoOpAction(OngoingAction):
     def advance(self, time: float) -> List[Tuple[float, GroundedEffect]]:
         assert self.environment is not None
         if not self.is_action_called:
-            self.environment.execute_skill(self.robot, "no_op")
+            duration = max(eff.time for eff in self._action.effects)
+            self.environment.execute_skill(self.robot, "no_op", duration=duration)
             self.is_action_called = True
         return super().advance(time)

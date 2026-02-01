@@ -277,7 +277,18 @@ class SimpleEnvironment(AbstractEnvironment):
         self._ground_truth[location][object_type].add(obj)
 
     def execute_skill(self, robot_name: str, skill_name: str, *args: Any, **kwargs: Any) -> None:
-        """Execute a skill on a robot."""
+        """Execute a skill on a robot.
+
+        Args:
+            robot_name: Name of the robot.
+            skill_name: Name of the skill to execute.
+            *args: Positional arguments for the skill.
+            **kwargs: Keyword arguments for the skill. If 'duration' is provided,
+                it will be used instead of computing via get_skills_time_fn.
+        """
+        # Extract duration from kwargs if provided (for SimpleOperatorEnvironment compatibility)
+        provided_duration = kwargs.pop("duration", None)
+
         if skill_name == "move":
             loc_from = args[0]
             loc_to = args[1]
@@ -285,15 +296,21 @@ class SimpleEnvironment(AbstractEnvironment):
             self.robots[robot_name].move(target_coords)
 
             # Keep track of move start time and duration
-            move_cost_fn = self._get_move_cost_fn()
-            move_time = move_cost_fn(robot_name, loc_from, loc_to) / 1.0  # robot velocity = 1.0
+            if provided_duration is not None:
+                move_time = provided_duration
+            else:
+                move_cost_fn = self._get_move_cost_fn()
+                move_time = move_cost_fn(robot_name, loc_from, loc_to) / 1.0  # robot velocity = 1.0
             self.robot_skill_start_time_and_duration[robot_name] = (self.time, move_time)
 
         elif skill_name in ["pick", "place", "search", "no_op"]:
             getattr(self.robots[robot_name], skill_name)()
 
             # Keep track of skill start time and duration
-            skill_time = self.get_skills_time_fn(skill_name)(robot_name, *args, **kwargs)
+            if provided_duration is not None:
+                skill_time = provided_duration
+            else:
+                skill_time = self.get_skills_time_fn(skill_name)(robot_name, *args, **kwargs)
             self.robot_skill_start_time_and_duration[robot_name] = (self.time, skill_time)
         else:
             raise ValueError(f"Skill '{skill_name}' not defined for robot '{robot_name}'.")
@@ -361,3 +378,139 @@ class SimpleEnvironment(AbstractEnvironment):
         if robot_name not in min_robots:
             return SkillStatus.RUNNING
         return SkillStatus.DONE
+
+
+class SimpleOperatorEnvironment(AbstractEnvironment):
+    """Minimal environment wrapper where timing comes from operators.
+
+    A simpler AbstractEnvironment implementation that:
+    - Takes user-defined operators (timing already baked in via effects)
+    - Takes ground truth object locations (for search resolution)
+    - Extracts action duration from the duration kwarg passed to execute_skill,
+      rather than defining timing via get_skills_time_fn
+
+    This is useful when users want to define operators with timing built-in
+    and don't need coordinate-based movement costs or robot pose tracking.
+
+    Example:
+        >>> from railroad import operators
+        >>> move_op = operators.construct_move_operator_blocking(move_time=5.0)
+        >>> search_op = operators.construct_search_operator(find_prob=0.5, search_time=3.0)
+        >>> objects_at_locations = {"kitchen": {"Knife", "Mug"}, "bedroom": {"Pillow"}}
+        >>> env = SimpleOperatorEnvironment(
+        ...     operators=[move_op, search_op],
+        ...     objects_at_locations=objects_at_locations,
+        ... )
+    """
+
+    def __init__(
+        self,
+        operators: List[Any],
+        objects_at_locations: Dict[str, Set[str]],
+    ) -> None:
+        """Initialize the simple operator environment.
+
+        Args:
+            operators: List of operators (stored for reference, timing comes from actions).
+            objects_at_locations: Ground truth mapping of location names to sets of object names.
+        """
+        super().__init__()
+
+        self.operators = operators
+        self._objects_at_locations: Dict[str, Set[str]] = {
+            loc: set(objs) for loc, objs in objects_at_locations.items()
+        }
+        # Track skill timing per robot: (start_time, duration)
+        self._robot_skill_tracking: Dict[str, Tuple[float, float]] = {}
+        # Track which robots are currently busy
+        self._robot_busy: Dict[str, bool] = {}
+
+    def get_objects_at_location(self, location: str) -> Dict[str, Set[str]]:
+        """Return objects at a location (simulates perception)."""
+        objects = self._objects_at_locations.get(location, set())
+        return {"object": set(objects)}
+
+    def remove_object_from_location(self, obj: str, location: str) -> None:
+        """Remove an object from a location (e.g., when picked up)."""
+        if location in self._objects_at_locations:
+            self._objects_at_locations[location].discard(obj)
+
+    def add_object_at_location(self, obj: str, location: str) -> None:
+        """Add an object to a location (e.g., when placed down)."""
+        if location not in self._objects_at_locations:
+            self._objects_at_locations[location] = set()
+        self._objects_at_locations[location].add(obj)
+
+    def execute_skill(self, robot_name: str, skill_name: str, *args: Any, **kwargs: Any) -> None:
+        """Execute a skill on a robot.
+
+        Args:
+            robot_name: Name of the robot.
+            skill_name: Name of the skill to execute.
+            *args: Positional arguments for the skill (unused in this implementation).
+            **kwargs: Keyword arguments. Must include 'duration' for timing.
+
+        Raises:
+            ValueError: If duration is not provided.
+        """
+        duration = kwargs.get("duration")
+        if duration is None:
+            raise ValueError(
+                f"SimpleOperatorEnvironment requires 'duration' kwarg for skill '{skill_name}'. "
+                "Ensure OngoingAction classes pass duration from action effects."
+            )
+
+        self._robot_skill_tracking[robot_name] = (self.time, duration)
+        self._robot_busy[robot_name] = True
+
+    def get_skills_time_fn(self, skill_name: str) -> Callable[..., float]:
+        """Not implemented - timing comes from operators.
+
+        Raises:
+            NotImplementedError: Always, as this environment uses operator-defined timing.
+        """
+        raise NotImplementedError(
+            "SimpleOperatorEnvironment does not use get_skills_time_fn. "
+            "Timing should be baked into operators and extracted from action effects."
+        )
+
+    def get_executed_skill_status(self, robot_name: str, skill_name: str) -> SkillStatus:
+        """Get the execution status of a skill.
+
+        Returns DONE when the robot that finishes first among all busy robots.
+        This enables multi-robot coordination where actions complete in order.
+        """
+        if robot_name not in self._robot_skill_tracking:
+            return SkillStatus.IDLE
+
+        if not self._robot_busy.get(robot_name, False):
+            return SkillStatus.IDLE
+
+        # Check if all tracked robots are busy
+        all_busy = all(self._robot_busy.get(r, False) for r in self._robot_skill_tracking)
+        if not all_busy:
+            return SkillStatus.IDLE
+
+        # Find which robot(s) finish first
+        remaining_times: List[Tuple[str, float]] = []
+        for r_name, (start_time, duration) in self._robot_skill_tracking.items():
+            if self._robot_busy.get(r_name, False):
+                elapsed = self.time - start_time
+                remaining = duration - elapsed
+                remaining_times.append((r_name, remaining))
+
+        if not remaining_times:
+            return SkillStatus.IDLE
+
+        min_remaining = min(t for _, t in remaining_times)
+        robots_finishing_first = [r for r, t in remaining_times if t == min_remaining]
+
+        if robot_name in robots_finishing_first:
+            return SkillStatus.DONE
+        return SkillStatus.RUNNING
+
+    def stop_robot(self, robot_name: str) -> None:
+        """Stop a robot's current action."""
+        self._robot_busy[robot_name] = False
+        if robot_name in self._robot_skill_tracking:
+            del self._robot_skill_tracking[robot_name]

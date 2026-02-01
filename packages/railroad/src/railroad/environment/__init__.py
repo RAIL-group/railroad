@@ -9,6 +9,7 @@ Usage:
 Available classes:
 - AbstractEnvironment: Abstract base class for environment implementations
 - SimpleEnvironment: Reference implementation for testing and examples
+- SimpleOperatorEnvironment: Minimal wrapper where timing comes from operators
 - SkillStatus: Enum for skill execution status (IDLE, RUNNING, DONE)
 - SimulatedRobot: Simple robot state tracking for simulation
 - EnvironmentInterface: Bridge between PDDL planning and environment execution
@@ -20,6 +21,7 @@ Available classes:
 from .base import (
     AbstractEnvironment,
     SimpleEnvironment,
+    SimpleOperatorEnvironment,
     SkillStatus,
     SimulatedRobot,
     Pose,
@@ -43,6 +45,7 @@ __all__ = [
     "AbstractEnvironment",
     "BaseEnvironment",  # Backward compatibility alias
     "SimpleEnvironment",
+    "SimpleOperatorEnvironment",
     "SkillStatus",
     "SimulatedRobot",
     "Pose",
