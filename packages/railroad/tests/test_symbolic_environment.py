@@ -352,3 +352,120 @@ def test_simple_symbolic_environment_create_search_skill():
     assert skill.location == "kitchen"
     assert skill.target_object == "Knife"
     assert not skill.is_interruptible
+
+
+def test_simple_symbolic_environment_create_pick_skill():
+    """Test pick skill creation via factory method."""
+    from railroad.environment.symbolic import SimpleSymbolicEnvironment
+    from railroad.environment.skill import SymbolicPickSkill
+    from railroad import operators
+
+    env = SimpleSymbolicEnvironment(
+        fluents=set(),
+        objects_by_type={"robot": {"r1"}, "location": {"kitchen"}, "object": {"Knife"}},
+        objects_at_locations={"kitchen": {"Knife"}},
+    )
+
+    pick_op = operators.construct_pick_operator_blocking(pick_time=2.0)
+    actions = pick_op.instantiate(env.objects_by_type)
+    pick_action = [a for a in actions if "r1" in a.name and "kitchen" in a.name and "Knife" in a.name][0]
+
+    skill = env.create_skill(pick_action, time=0.0)
+
+    assert isinstance(skill, SymbolicPickSkill)
+    assert skill.robot == "r1"
+    assert skill.location == "kitchen"
+    assert skill.target_object == "Knife"
+    assert not skill.is_interruptible
+
+
+def test_simple_symbolic_environment_create_place_skill():
+    """Test place skill creation via factory method."""
+    from railroad.environment.symbolic import SimpleSymbolicEnvironment
+    from railroad.environment.skill import SymbolicPlaceSkill
+    from railroad import operators
+
+    env = SimpleSymbolicEnvironment(
+        fluents=set(),
+        objects_by_type={"robot": {"r1"}, "location": {"bedroom"}, "object": {"Knife"}},
+        objects_at_locations={},
+    )
+
+    place_op = operators.construct_place_operator_blocking(place_time=2.0)
+    actions = place_op.instantiate(env.objects_by_type)
+    place_action = [a for a in actions if "r1" in a.name and "bedroom" in a.name and "Knife" in a.name][0]
+
+    skill = env.create_skill(place_action, time=0.0)
+
+    assert isinstance(skill, SymbolicPlaceSkill)
+    assert skill.robot == "r1"
+    assert skill.location == "bedroom"
+    assert skill.target_object == "Knife"
+    assert not skill.is_interruptible
+
+
+def test_pick_skill_updates_ground_truth():
+    """Test that pick skill updates environment ground truth."""
+    from railroad.environment.symbolic import SimpleSymbolicEnvironment
+    from railroad.environment.interface_v2 import EnvironmentInterfaceV2
+    from railroad.core import get_action_by_name
+    from railroad import operators
+
+    env = SimpleSymbolicEnvironment(
+        fluents={
+            F("at", "robot1", "kitchen"), F("free", "robot1"),
+            F("at", "Knife", "kitchen"), F("found", "Knife"),
+        },
+        objects_by_type={
+            "robot": {"robot1"},
+            "location": {"kitchen"},
+            "object": {"Knife"},
+        },
+        objects_at_locations={"kitchen": {"Knife"}},
+    )
+
+    pick_op = operators.construct_pick_operator_blocking(pick_time=2.0)
+    interface = EnvironmentInterfaceV2(environment=env, operators=[pick_op])
+
+    actions = interface.get_actions()
+    pick_action = get_action_by_name(actions, "pick robot1 kitchen Knife")
+
+    interface.advance(pick_action, do_interrupt=False)
+
+    assert F("holding", "robot1", "Knife") in interface.state.fluents
+    # Ground truth should be updated
+    assert "Knife" not in env._objects_at_locations.get("kitchen", set())
+
+
+def test_place_skill_updates_ground_truth():
+    """Test that place skill updates environment ground truth."""
+    from railroad.environment.symbolic import SimpleSymbolicEnvironment
+    from railroad.environment.interface_v2 import EnvironmentInterfaceV2
+    from railroad.core import get_action_by_name
+    from railroad import operators
+
+    env = SimpleSymbolicEnvironment(
+        fluents={
+            F("at", "robot1", "bedroom"), F("free", "robot1"),
+            F("holding", "robot1", "Knife"), F("hand-full", "robot1"),
+        },
+        objects_by_type={
+            "robot": {"robot1"},
+            "location": {"bedroom"},
+            "object": {"Knife"},
+        },
+        objects_at_locations={"bedroom": set()},
+    )
+
+    place_op = operators.construct_place_operator_blocking(place_time=2.0)
+    interface = EnvironmentInterfaceV2(environment=env, operators=[place_op])
+
+    actions = interface.get_actions()
+    place_action = get_action_by_name(actions, "place robot1 bedroom Knife")
+
+    interface.advance(place_action, do_interrupt=False)
+
+    assert F("at", "Knife", "bedroom") in interface.state.fluents
+    assert F("holding", "robot1", "Knife") not in interface.state.fluents
+    # Ground truth should be updated
+    assert "Knife" in env._objects_at_locations.get("bedroom", set())

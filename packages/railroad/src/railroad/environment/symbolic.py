@@ -4,7 +4,15 @@ from typing import Dict, List, Set, Tuple
 
 from railroad._bindings import Action, Fluent, GroundedEffect
 
-from .skill import ActiveSkill, Environment, SymbolicMoveSkill, SymbolicSearchSkill, SymbolicSkill
+from .skill import (
+    ActiveSkill,
+    Environment,
+    SymbolicMoveSkill,
+    SymbolicPickSkill,
+    SymbolicPlaceSkill,
+    SymbolicSearchSkill,
+    SymbolicSkill,
+)
 
 
 class SimpleSymbolicEnvironment:
@@ -68,6 +76,26 @@ class SimpleSymbolicEnvironment:
             # search robot location object
             location, target_object = parts[2], parts[3]
             return SymbolicSearchSkill(
+                action=action,
+                start_time=time,
+                robot=robot,
+                location=location,
+                target_object=target_object,
+            )
+        elif action_type == "pick":
+            # pick robot location object
+            location, target_object = parts[2], parts[3]
+            return SymbolicPickSkill(
+                action=action,
+                start_time=time,
+                robot=robot,
+                location=location,
+                target_object=target_object,
+            )
+        elif action_type == "place":
+            # place robot location object
+            location, target_object = parts[2], parts[3]
+            return SymbolicPlaceSkill(
                 action=action,
                 start_time=time,
                 robot=robot,

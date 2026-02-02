@@ -278,3 +278,105 @@ class SymbolicSearchSkill(SymbolicSkill):
         super().__init__(action, start_time, robot, is_interruptible=False)
         self.location = location
         self.target_object = target_object
+
+
+class SymbolicPickSkill(SymbolicSkill):
+    """Symbolic skill for pick actions.
+
+    Pick actions remove an object from a location and put it in the robot's
+    hand. When the main pick effect is applied (the one with `holding`),
+    the ground truth is updated to reflect the object is no longer at the
+    location.
+    """
+
+    def __init__(
+        self,
+        action: "Action",
+        start_time: float,
+        robot: str,
+        location: str,
+        target_object: str,
+    ) -> None:
+        """Initialize a symbolic pick skill.
+
+        Args:
+            action: The pick action being executed.
+            start_time: Start time of the pick.
+            robot: Name of the robot executing this skill.
+            location: Location where object is being picked from.
+            target_object: Object being picked up.
+        """
+        super().__init__(action, start_time, robot, is_interruptible=False)
+        self.location = location
+        self.target_object = target_object
+        self._picked = False
+
+        # Find the time of the main pick effect (the one with "holding")
+        self._main_effect_time: float = float("inf")
+        for eff in action.effects:
+            for fluent in eff.resulting_fluents:
+                if fluent.name == "holding" and not fluent.negated:
+                    self._main_effect_time = start_time + eff.time
+                    break
+
+    def advance(self, time: float, env: Environment) -> None:
+        """Advance pick, updating ground truth when main effect is applied."""
+        effects_before = len(self._upcoming_effects)
+        super().advance(time, env)
+        effects_after = len(self._upcoming_effects)
+
+        # Update ground truth when the main pick effect has been applied
+        if not self._picked and time >= self._main_effect_time - 1e-9 and effects_after < effects_before:
+            env.remove_object_from_location(self.target_object, self.location)
+            self._picked = True
+
+
+class SymbolicPlaceSkill(SymbolicSkill):
+    """Symbolic skill for place actions.
+
+    Place actions put an object from the robot's hand at a location.
+    When the main place effect is applied (the one with `at object location`),
+    the ground truth is updated to reflect the object is now at the location.
+    """
+
+    def __init__(
+        self,
+        action: "Action",
+        start_time: float,
+        robot: str,
+        location: str,
+        target_object: str,
+    ) -> None:
+        """Initialize a symbolic place skill.
+
+        Args:
+            action: The place action being executed.
+            start_time: Start time of the place.
+            robot: Name of the robot executing this skill.
+            location: Location where object is being placed.
+            target_object: Object being placed.
+        """
+        super().__init__(action, start_time, robot, is_interruptible=False)
+        self.location = location
+        self.target_object = target_object
+        self._placed = False
+
+        # Find the time of the main place effect (the one with "at object location")
+        self._main_effect_time: float = float("inf")
+        for eff in action.effects:
+            for fluent in eff.resulting_fluents:
+                if fluent.name == "at" and not fluent.negated and len(fluent.args) >= 2:
+                    if fluent.args[0] == target_object:
+                        self._main_effect_time = start_time + eff.time
+                        break
+
+    def advance(self, time: float, env: Environment) -> None:
+        """Advance place, updating ground truth when main effect is applied."""
+        effects_before = len(self._upcoming_effects)
+        super().advance(time, env)
+        effects_after = len(self._upcoming_effects)
+
+        # Update ground truth when the main place effect has been applied
+        if not self._placed and time >= self._main_effect_time - 1e-9 and effects_after < effects_before:
+            env.add_object_at_location(self.target_object, self.location)
+            self._placed = True
