@@ -1,5 +1,5 @@
 from environments.pyrobosim import PyRoboSimEnv
-from railroad.environment import SkillStatus
+from railroad.experimental.environment import SkillStatus
 from pathlib import Path
 
 

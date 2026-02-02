@@ -2,7 +2,7 @@ import numpy as np
 import itertools
 from procthor import ThorInterface
 from . import utils
-from railroad.environment import BaseEnvironment, SimulatedRobot, SkillStatus
+from railroad.experimental.environment import BaseEnvironment, SimulatedRobot, SkillStatus
 
 SKILLS_TIME = {
     'robot1': {

@@ -19,7 +19,7 @@ import numpy as np
 from railroad.core import Fluent as F, State, get_action_by_name
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
-from railroad.environment import EnvironmentInterface as Simulator, SimpleEnvironment
+from railroad.experimental.environment import EnvironmentInterface as Simulator, SimpleEnvironment
 from railroad import operators
 from railroad.core import ff_heuristic
 from rich.console import Console

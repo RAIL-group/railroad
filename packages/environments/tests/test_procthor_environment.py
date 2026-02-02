@@ -10,7 +10,7 @@ import procthor
 import matplotlib.pyplot as plt
 from pathlib import Path
 from environments import plotting, utils
-from railroad.environment import EnvironmentInterface
+from railroad.experimental.environment import EnvironmentInterface
 
 
 def get_args():

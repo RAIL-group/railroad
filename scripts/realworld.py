@@ -19,9 +19,8 @@ from typing import Dict, Set, List, Tuple, Callable
 
 from railroad.planner import MCTSPlanner
 import environments
-from railroad.environment import BaseEnvironment, SkillStatus
+from railroad.experimental.environment import BaseEnvironment, SkillStatus, EnvironmentInterface as PlanningLoop
 from railroad.operators import construct_move_visited_operator
-from railroad.environment import EnvironmentInterface as PlanningLoop
 
 
 

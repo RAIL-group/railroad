@@ -12,7 +12,7 @@ from railroad import operators
 from railroad.planner import MCTSPlanner
 from railroad.core import Fluent as F, State, get_action_by_name, LiteralGoal
 from environments import plotting, utils
-from railroad.environment import EnvironmentInterface
+from railroad.experimental.environment import EnvironmentInterface
 from environments.utils import extract_robot_poses
 from operator import and_
 

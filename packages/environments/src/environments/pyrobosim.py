@@ -2,7 +2,7 @@ import threading
 import functools
 import warnings
 from pyrobosim.core.yaml_utils import WorldYamlLoader
-from railroad.environment import BaseEnvironment, SkillStatus
+from railroad.experimental.environment import BaseEnvironment, SkillStatus
 import time
 import matplotlib.pyplot as plt
 from pyrobosim.gui.world_canvas import WorldCanvas
