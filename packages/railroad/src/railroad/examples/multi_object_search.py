@@ -10,56 +10,44 @@ The environment simulates a household with multiple rooms where items need
 to be reorganized.
 """
 
-from functools import reduce
-from operator import and_
-
-import numpy as np
-
-from railroad.core import Fluent as F, State, get_action_by_name, ff_heuristic
+from railroad.core import Fluent as F, get_action_by_name, ff_heuristic
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
 from railroad import operators
-from railroad.environment import EnvironmentInterface, SimpleEnvironment
+from railroad.environment import EnvironmentInterfaceV2, SimpleSymbolicEnvironment
 
 
-# Define locations with coordinates (for move cost calculation)
-LOCATIONS = {
-    "start_loc": np.array([-5, -5]),
-    "living_room": np.array([0, 0]),
-    "kitchen": np.array([10, 0]),
-    "bedroom": np.array([0, 12]),
-    "office": np.array([10, 12]),
-}
+# Define locations
+LOCATIONS = ["start_loc", "living_room", "kitchen", "bedroom", "office"]
 
 # Define where objects actually are (ground truth)
 OBJECTS_AT_LOCATIONS = {
-    "living_room": {"object": {"Notebook", "Pillow"}},
-    "kitchen": {"object": {"Clock", "Mug"}},
-    "bedroom": {"object": {"Knife"}},
-    "office": {"object": set()},
-    "start_loc": {"object": set()},
+    "living_room": {"Notebook", "Pillow"},
+    "kitchen": {"Clock", "Mug"},
+    "bedroom": {"Knife"},
+    "office": set(),
+    "start_loc": set(),
 }
+
+# Fixed operator times for symbolic planning
+MOVE_TIME = 5.0
+SEARCH_TIME = 5.0
+PICK_TIME = 5.0
+PLACE_TIME = 5.0
 
 
 def main() -> None:
     """Run the multi-object search example."""
-    # Initialize environment
-    robot_locations = {"robot1": "start_loc", "robot2": "start_loc"}
-    env = SimpleEnvironment(LOCATIONS, OBJECTS_AT_LOCATIONS, robot_locations)
-
     # Define the objects we're looking for
     objects_of_interest = ["Knife", "Notebook", "Clock", "Mug", "Pillow"]
 
-    # Define initial state
-    initial_state = State(
-        time=0,
-        fluents={
-            F("at", "robot1", "start_loc"),
-            F("at", "robot2", "start_loc"),
-            F("free", "robot1"),
-            F("free", "robot2"),
-        },
-    )
+    # Define initial fluents
+    initial_fluents = {
+        F("at", "robot1", "start_loc"),
+        F("at", "robot2", "start_loc"),
+        F("free", "robot1"),
+        F("free", "robot2"),
+    }
 
     # Define goal: all items at their proper locations
     goal = (
@@ -72,36 +60,32 @@ def main() -> None:
 
     # Objects by type
     objects_by_type = {
-        "robot": ["robot1", "robot2"],
-        "location": list(LOCATIONS.keys()),
-        "object": objects_of_interest,
+        "robot": {"robot1", "robot2"},
+        "location": set(LOCATIONS),
+        "object": set(objects_of_interest),
     }
-
-    # Create operators
-    move_time_fn = env.get_skills_time_fn(skill_name="move")
-    search_time = env.get_skills_time_fn(skill_name="search")
-    pick_time = env.get_skills_time_fn(skill_name="pick")
-    place_time = env.get_skills_time_fn(skill_name="place")
 
     # Probabilistic search - higher success rate in kitchen
     object_find_prob = lambda r, loc, o: 0.6 if "kitchen" in loc else 0.4
 
-    move_op = operators.construct_move_operator_blocking(move_time_fn)
-    search_op = operators.construct_search_operator(object_find_prob, search_time)
-    pick_op = operators.construct_pick_operator_blocking(pick_time)
-    place_op = operators.construct_place_operator_blocking(place_time)
+    # Create operators with fixed times
+    move_op = operators.construct_move_operator_blocking(MOVE_TIME)
+    search_op = operators.construct_search_operator(object_find_prob, SEARCH_TIME)
+    pick_op = operators.construct_pick_operator_blocking(PICK_TIME)
+    place_op = operators.construct_place_operator_blocking(PLACE_TIME)
     no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
 
-    # Create simulator
-    sim = EnvironmentInterface(
-        initial_state, objects_by_type, [no_op, move_op, search_op, pick_op, place_op], env
-    )
+    # Initialize symbolic environment
+    env = SimpleSymbolicEnvironment(initial_fluents, objects_by_type, OBJECTS_AT_LOCATIONS)
+
+    # Create interface
+    sim = EnvironmentInterfaceV2(env, [no_op, move_op, search_op, pick_op, place_op])
 
     # Planning loop
     actions_taken = []
     max_iterations = 60
 
-    h_value = ff_heuristic(initial_state, goal, sim.get_actions())
+    h_value = ff_heuristic(sim.state, goal, sim.get_actions())
     with PlannerDashboard(goal, initial_heuristic=h_value) as dashboard:
         dashboard.update(sim_state=sim.state)
 
