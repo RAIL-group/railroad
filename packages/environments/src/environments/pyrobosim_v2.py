@@ -245,66 +245,23 @@ class PyRoboSimEnvironment:
         action_type = parts[0]
         robot = parts[1]
 
-        if action_type == "move":
-            # move robot from to
-            loc_from, loc_to = parts[2], parts[3]
+        if action_type in {'move', 'search', 'pick', 'place', 'no_op'}:
             return PhysicalSkill(
                 action=action,
                 start_time=time,
                 robot=robot,
                 physical_env=self,
-                skill_name="move",
-                skill_args=(loc_from, loc_to),
-            )
-        elif action_type == "search":
-            # search robot location object
-            location = parts[2]
-            return PhysicalSkill(
-                action=action,
-                start_time=time,
-                robot=robot,
-                physical_env=self,
-                skill_name="search",
-                skill_args=(location,),
-            )
-        elif action_type == "pick":
-            # pick robot location object
-            location, obj = parts[2], parts[3]
-            return PhysicalSkill(
-                action=action,
-                start_time=time,
-                robot=robot,
-                physical_env=self,
-                skill_name="pick",
-                skill_args=(location, obj),
-            )
-        elif action_type == "place":
-            # place robot location object
-            location, obj = parts[2], parts[3]
-            return PhysicalSkill(
-                action=action,
-                start_time=time,
-                robot=robot,
-                physical_env=self,
-                skill_name="place",
-                skill_args=(location, obj),
-            )
-        elif action_type == "no_op":
-            return PhysicalSkill(
-                action=action,
-                start_time=time,
-                robot=robot,
-                physical_env=self,
-                skill_name="no_op",
-                skill_args=(),
+                skill_name=action_type,
+                skill_args=parts[1:],
             )
         else:
-            # Default: use symbolic skill
-            return SymbolicSkill(
-                action=action,
-                start_time=time,
-                robot=robot,
-            )
+            raise NotImplementedError("Action type not found; unsupported behavior.")
+            # # Default: use symbolic skill
+            # return SymbolicSkill(
+            #     action=action,
+            #     start_time=time,
+            #     robot=robot,
+            # )
 
     def apply_effect(self, effect: GroundedEffect) -> None:
         """Apply effect fluents to the state."""
