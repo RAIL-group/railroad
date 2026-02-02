@@ -11,8 +11,7 @@ import logging
 from typing import Dict, List, Set, Tuple
 
 
-# Fixed operator times for symbolic planning
-MOVE_TIME = 5.0
+# Fixed operator times for non-move skills
 SEARCH_TIME = 1.0
 PICK_TIME = 1.0
 PLACE_TIME = 1.0
@@ -307,9 +306,10 @@ def main(args):
 
     goal = F("at apple0 counter0") & F("at banana0 counter0")
 
-    # Create operators with fixed times
+    # Create operators - move uses distance-based time from simulator
+    move_time_fn = physical_env._get_move_cost_fn()
     object_find_prob = lambda r, l, o: 0.8 if l == 'my_desk' and o == 'apple0' else 0.2
-    move_op = operators.construct_move_operator_blocking(MOVE_TIME)
+    move_op = operators.construct_move_operator_blocking(move_time_fn)
     search_op = operators.construct_search_operator(object_find_prob, SEARCH_TIME)
     pick_op = operators.construct_pick_operator_blocking(PICK_TIME)
     place_op = operators.construct_place_operator_blocking(PLACE_TIME)
