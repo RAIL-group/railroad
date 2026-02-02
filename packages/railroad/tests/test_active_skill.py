@@ -53,3 +53,30 @@ def test_symbolic_skill_base_class():
     assert skill.is_interruptible is False  # Default
     assert len(skill.upcoming_effects) == 1
     assert skill.time_to_next_event == 5.0
+
+
+def test_symbolic_move_skill_interrupt():
+    """Test that SymbolicMoveSkill supports interruption."""
+    from railroad.environment.skill import SymbolicMoveSkill
+    from railroad._bindings import Fluent as F
+    from railroad.core import Effect, Operator
+
+    # Create a move action
+    op = Operator(
+        name="move",
+        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F("at", "?robot", "?from"), F("free", "?robot")],
+        effects=[
+            Effect(time=0.0, resulting_fluents={~F("free", "?robot")}),
+            Effect(time=10.0, resulting_fluents={~F("at", "?robot", "?from"), F("at", "?robot", "?to"), F("free", "?robot")}),
+        ]
+    )
+    actions = op.instantiate({"robot": ["r1"], "location": ["kitchen", "bedroom"]})
+    # Find the move action from kitchen to bedroom
+    action = [a for a in actions if "kitchen" in a.name and "bedroom" in a.name][0]
+
+    skill = SymbolicMoveSkill(action=action, start_time=0.0, robot="r1", start="kitchen", end="bedroom")
+
+    assert skill.is_interruptible is True
+    assert skill.start == "kitchen"
+    assert skill.end == "bedroom"

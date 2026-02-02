@@ -170,3 +170,82 @@ class SymbolicSkill:
     def interrupt(self, env: Environment) -> None:
         """Interrupt this skill. Default: no-op (non-interruptible skills)."""
         pass
+
+
+class SymbolicMoveSkill(SymbolicSkill):
+    """Symbolic skill for move actions with interruption support.
+
+    Move actions can be interrupted mid-execution, creating an
+    intermediate location (robot_loc) at the interrupt point.
+    """
+
+    def __init__(
+        self,
+        action: "Action",
+        start_time: float,
+        robot: str,
+        start: str,
+        end: str,
+    ) -> None:
+        """Initialize a symbolic move skill.
+
+        Args:
+            action: The move action being executed.
+            start_time: Start time of the move.
+            robot: Name of the robot executing this skill.
+            start: Starting location name.
+            end: Destination location name.
+        """
+        super().__init__(action, start_time, robot, is_interruptible=True)
+        self.start = start
+        self.end = end
+        self._current_time = start_time
+
+    def advance(self, time: float, env: Environment) -> None:
+        """Advance the move, tracking current time for interruption."""
+        self._current_time = time
+        super().advance(time, env)
+
+    def interrupt(self, env: Environment) -> None:
+        """Interrupt move and create intermediate location.
+
+        Creates a robot_loc intermediate location and rewrites
+        destination fluents to point there instead of the original end.
+        """
+        if self._current_time <= self._start_time:
+            return  # Cannot interrupt before start
+
+        if self.is_done:
+            return  # Already complete
+
+        robot = self._robot
+        old_target = self.end
+        new_target = f"{robot}_loc"
+
+        # Collect fluents from remaining effects, rewriting destination
+        new_fluents: Set[Fluent] = set()
+        for _, eff in self._upcoming_effects:
+            if eff.is_probabilistic:
+                raise ValueError("Probabilistic effects cannot be interrupted.")
+            for fluent in eff.resulting_fluents:
+                # Remove conflicting negation if present
+                if (~fluent) in new_fluents:
+                    new_fluents.remove(~fluent)
+                # Rewrite fluent args, replacing old target with new
+                new_args = [
+                    arg if arg != old_target else new_target
+                    for arg in fluent.args
+                ]
+                new_fluents.add(
+                    Fluent(" ".join([fluent.name] + new_args), negated=fluent.negated)
+                )
+
+        # Apply the rewritten fluents directly to environment
+        for fluent in new_fluents:
+            if fluent.negated:
+                env.fluents.discard(~fluent)
+            else:
+                env.fluents.add(fluent)
+
+        # Clear remaining effects
+        self._upcoming_effects = []
