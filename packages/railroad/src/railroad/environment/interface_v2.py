@@ -37,14 +37,24 @@ class EnvironmentInterfaceV2:
     def time(self) -> float:
         return self._time
 
+    def _update_skills(self) -> None:
+        """Update all active skills to check for completion and apply effects.
+
+        This ensures fluent state stays synchronized with physical execution.
+        """
+        for skill in self._active_skills:
+            skill.advance(self._time, self._environment)
+        self._active_skills = [s for s in self._active_skills if not s.is_done]
+
     @property
     def state(self) -> State:
         """Assemble state from Environment fluents + ActiveSkill upcoming effects."""
+        # Update skills to apply any completed effects before assembling state
+        self._update_skills()
+
         effects: List[tuple[float, GroundedEffect]] = []
         for skill in self._active_skills:
             effects.extend(skill.upcoming_effects)
-
-        self._active_skills = [s for s in self._active_skills if not s.is_done]
 
         return State(
             self._time,

@@ -75,23 +75,55 @@ class PhysicalSkill:
 
     @property
     def time_to_next_event(self) -> float:
-        # Check if physical action is complete
+        if not self._upcoming_effects:
+            return float("inf")
+
+        # Check for immediate effects (time=0 or time <= start_time)
+        next_effect_time = self._upcoming_effects[0][0]
+        if next_effect_time <= self._start_time + 1e-9:
+            return next_effect_time
+
+        # For completion effects, wait for physical action to be done
         if self._is_physical_action_done():
-            # Return current time so effects get applied
-            if self._upcoming_effects:
-                return self._upcoming_effects[0][0]
-        # Return a small delay to poll again
-        return self._start_time + 0.1
+            return next_effect_time
+
+        # Physical action still running - poll again soon
+        # Return a time slightly after start to keep polling
+        return self._start_time + 0.01
 
     def advance(self, time: float, env: "PyRoboSimEnvironmentAdapter") -> None:
-        """Advance skill, checking physical completion and applying effects."""
-        is_done = self._is_physical_action_done()
+        """Advance skill, applying effects based on time and physical completion.
 
-        if is_done and self._upcoming_effects:
-            # Physical action complete - apply all effects
+        - Immediate effects (time <= start_time): Apply based on time
+        - Completion effects (time > start_time): Apply only when physical action done
+        """
+        if not self._upcoming_effects:
+            return
+
+        # Apply immediate effects (time=0) based on time alone
+        immediate_effects = [
+            (t, eff) for t, eff in self._upcoming_effects
+            if t <= self._start_time + 1e-9 and t <= time + 1e-9
+        ]
+        for _, effect in immediate_effects:
+            env.apply_effect(effect)
+
+        # Remove applied immediate effects
+        if immediate_effects:
+            self._upcoming_effects = [
+                (t, eff) for t, eff in self._upcoming_effects
+                if t > self._start_time + 1e-9 or t > time + 1e-9
+            ]
+
+        # For completion effects, wait for physical action to be done
+        if self._is_physical_action_done() and self._upcoming_effects:
+            # Physical action complete - apply remaining effects
             for _, effect in self._upcoming_effects:
                 env.apply_effect(effect)
             self._upcoming_effects = []
+
+        # Mark done when no more effects and physical action complete
+        if not self._upcoming_effects and self._is_physical_action_done():
             self._is_done = True
 
     def interrupt(self, env: "PyRoboSimEnvironmentAdapter") -> None:
