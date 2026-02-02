@@ -101,3 +101,72 @@ class Environment(Protocol):
     def add_object_at_location(self, obj: str, location: str) -> None:
         """Update ground truth when object placed."""
         ...
+
+
+class SymbolicSkill:
+    """Base class for symbolic (non-physical) skill execution.
+
+    Implements ActiveSkill protocol for symbolic mode where skills
+    step through effects immediately when asked.
+    """
+
+    def __init__(
+        self,
+        action: "Action",
+        start_time: float,
+        robot: str,
+        is_interruptible: bool = False,
+    ) -> None:
+        """Initialize a symbolic skill.
+
+        Args:
+            action: The action being executed.
+            start_time: Start time of the action.
+            robot: Name of the robot executing this skill.
+            is_interruptible: Whether this skill can be interrupted.
+        """
+        self._action = action
+        self._start_time = start_time
+        self._robot = robot
+        self._is_interruptible = is_interruptible
+        self._upcoming_effects: List[Tuple[float, GroundedEffect]] = sorted(
+            [(start_time + eff.time, eff) for eff in action.effects],
+            key=lambda el: el[0]
+        )
+
+    @property
+    def robot(self) -> str:
+        return self._robot
+
+    @property
+    def is_done(self) -> bool:
+        return len(self._upcoming_effects) == 0
+
+    @property
+    def is_interruptible(self) -> bool:
+        return self._is_interruptible
+
+    @property
+    def upcoming_effects(self) -> List[Tuple[float, GroundedEffect]]:
+        return self._upcoming_effects
+
+    @property
+    def time_to_next_event(self) -> float:
+        if self._upcoming_effects:
+            return self._upcoming_effects[0][0]
+        return float("inf")
+
+    def advance(self, time: float, env: Environment) -> None:
+        """Advance to given time, apply due effects to environment."""
+        due_effects = [
+            (t, eff) for t, eff in self._upcoming_effects
+            if t <= time + 1e-9
+        ]
+        self._upcoming_effects = self._upcoming_effects[len(due_effects):]
+
+        for _, effect in due_effects:
+            env.apply_effect(effect)
+
+    def interrupt(self, env: Environment) -> None:
+        """Interrupt this skill. Default: no-op (non-interruptible skills)."""
+        pass

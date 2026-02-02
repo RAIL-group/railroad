@@ -28,3 +28,28 @@ def test_environment_protocol_exists():
     assert hasattr(Environment, 'get_objects_at_location')
     assert hasattr(Environment, 'remove_object_from_location')
     assert hasattr(Environment, 'add_object_at_location')
+
+
+def test_symbolic_skill_base_class():
+    """Test SymbolicSkill base implementation."""
+    from railroad.environment.skill import SymbolicSkill
+    from railroad._bindings import Fluent as F
+    from railroad.core import Effect, Operator
+
+    # Create a simple action
+    op = Operator(
+        name="test_action",
+        parameters=[("?robot", "robot")],
+        preconditions=[F("free", "?robot")],
+        effects=[Effect(time=5.0, resulting_fluents={F("done", "?robot")})]
+    )
+    actions = op.instantiate({"robot": ["r1"]})
+    action = actions[0]
+
+    skill = SymbolicSkill(action=action, start_time=0.0, robot="r1")
+
+    assert skill.robot == "r1"
+    assert skill.is_done is False
+    assert skill.is_interruptible is False  # Default
+    assert len(skill.upcoming_effects) == 1
+    assert skill.time_to_next_event == 5.0
