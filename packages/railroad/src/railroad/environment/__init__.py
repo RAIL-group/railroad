@@ -1,45 +1,27 @@
 """Environment classes for robot simulation and planning execution.
 
-This module provides base classes and interfaces for robot environments
+This module provides the recommended interface for robot environments
 used in PDDL planning and simulation.
 
-Usage:
-    from railroad.environment import AbstractEnvironment, EnvironmentInterface
+Recommended Usage:
+    from railroad.environment import (
+        Environment,           # Protocol for environments
+        ActiveSkill,          # Protocol for skill execution
+        SymbolicSkill,        # Symbolic skill implementation
+        SimpleSymbolicEnvironment,  # Simple environment for symbolic execution
+        EnvironmentInterfaceV2,     # Main interface for planning/execution
+    )
 
-Available classes:
-- AbstractEnvironment: Abstract base class for environment implementations
-- SimpleEnvironment: Reference implementation for testing and examples
-- SkillStatus: Enum for skill execution status (IDLE, RUNNING, DONE)
-- SimulatedRobot: Simple robot state tracking for simulation
-- EnvironmentInterface: Bridge between PDDL planning and environment execution
-- OngoingAction: Base class for tracking action execution
-- OngoingSearchAction, OngoingPickAction, OngoingPlaceAction,
-  OngoingMoveAction, OngoingNoOpAction: Specialized action trackers
-- ActiveSkill: Protocol for tracking execution of a single action
-- Environment: Protocol for environment that owns world state
-- SymbolicSkill: Symbolic skill execution (action-driven, no subclasses needed)
-- SimpleSymbolicEnvironment: Simple environment for symbolic execution
-- EnvironmentInterfaceV2: New interface using Environment/ActiveSkill architecture
+Legacy classes (from railroad.experimental.environment):
+    The following are re-exported for backward compatibility but are deprecated.
+    For new code, use the classes above instead.
+    - AbstractEnvironment, BaseEnvironment, SimpleEnvironment
+    - EnvironmentInterface
+    - OngoingAction and subclasses
+    - SkillStatus, SimulatedRobot, Pose
 """
 
-from .base import (
-    AbstractEnvironment,
-    SimpleEnvironment,
-    SkillStatus,
-    SimulatedRobot,
-    Pose,
-)
-
-from .interface import (
-    EnvironmentInterface,
-    OngoingAction,
-    OngoingSearchAction,
-    OngoingPickAction,
-    OngoingPlaceAction,
-    OngoingMoveAction,
-    OngoingNoOpAction,
-)
-
+# New interface components (recommended)
 from .skill import (
     ActiveSkill,
     Environment,
@@ -50,18 +32,40 @@ from .symbolic import SimpleSymbolicEnvironment
 
 from .interface_v2 import EnvironmentInterfaceV2
 
+
+# Re-export legacy classes from experimental for backward compatibility
+from railroad.experimental.environment import (
+    AbstractEnvironment,
+    SimpleEnvironment,
+    SkillStatus,
+    SimulatedRobot,
+    Pose,
+    EnvironmentInterface,
+    OngoingAction,
+    OngoingSearchAction,
+    OngoingPickAction,
+    OngoingPlaceAction,
+    OngoingMoveAction,
+    OngoingNoOpAction,
+)
+
 # Backward compatibility alias
 BaseEnvironment = AbstractEnvironment
 
 __all__ = [
-    # Base classes
+    # Recommended (v2) interface
+    "ActiveSkill",
+    "Environment",
+    "SymbolicSkill",
+    "SimpleSymbolicEnvironment",
+    "EnvironmentInterfaceV2",
+    # Legacy (re-exported from experimental for backward compatibility)
     "AbstractEnvironment",
-    "BaseEnvironment",  # Backward compatibility alias
+    "BaseEnvironment",
     "SimpleEnvironment",
     "SkillStatus",
     "SimulatedRobot",
     "Pose",
-    # Interface classes
     "EnvironmentInterface",
     "OngoingAction",
     "OngoingSearchAction",
@@ -69,10 +73,4 @@ __all__ = [
     "OngoingPlaceAction",
     "OngoingMoveAction",
     "OngoingNoOpAction",
-    # New interface components (v2)
-    "ActiveSkill",
-    "Environment",
-    "SymbolicSkill",
-    "SimpleSymbolicEnvironment",
-    "EnvironmentInterfaceV2",
 ]
