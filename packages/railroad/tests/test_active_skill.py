@@ -14,3 +14,17 @@ def test_active_skill_protocol_exists():
     assert hasattr(ActiveSkill, 'time_to_next_event')
     assert hasattr(ActiveSkill, 'advance')
     assert hasattr(ActiveSkill, 'interrupt')
+
+
+def test_environment_protocol_exists():
+    """Test that Environment protocol can be imported."""
+    from railroad.environment.skill import Environment
+
+    assert hasattr(Environment, 'fluents')
+    assert hasattr(Environment, 'objects_by_type')
+    assert hasattr(Environment, 'create_skill')
+    assert hasattr(Environment, 'apply_effect')
+    assert hasattr(Environment, 'resolve_probabilistic_effect')
+    assert hasattr(Environment, 'get_objects_at_location')
+    assert hasattr(Environment, 'remove_object_from_location')
+    assert hasattr(Environment, 'add_object_at_location')
