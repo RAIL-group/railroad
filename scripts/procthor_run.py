@@ -104,7 +104,7 @@ def main():
 
             all_actions = sim.get_actions()
             mcts = MCTSPlanner(all_actions)
-            action_name = mcts(sim.state, goal, max_iterations=10000, c=300, max_depth=20)
+            action_name = mcts(sim.state, goal, max_iterations=10000, c=300, max_depth=20, heuristic_multiplier=2)
 
             if action_name == 'NONE':
                 dashboard.console.print("No more actions available. Goal may not be achievable.")
