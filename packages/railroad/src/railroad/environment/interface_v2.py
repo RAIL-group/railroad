@@ -169,7 +169,14 @@ class EnvironmentInterfaceV2:
             for s in self._active_skills:
                 s.advance(next_time, self._environment)
 
-            self._time = next_time
+            # Update time - use actual completion time from physical skills if available
+            actual_time = next_time
+            for s in self._active_skills:
+                if s.is_done:
+                    completion_time = getattr(s, 'completion_time', None)
+                    if isinstance(completion_time, (int, float)):
+                        actual_time = max(actual_time, completion_time)
+            self._time = actual_time
             self._active_skills = [s for s in self._active_skills if not s.is_done]
 
             if loop_callback_fn is not None:

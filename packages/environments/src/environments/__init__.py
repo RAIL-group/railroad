@@ -4,4 +4,5 @@ This package provides environment implementations and interfaces for
 robot simulation and PDDL planning execution.
 """
 
-from . import procthor, plotting, utils, pyrobosim
+from . import procthor, plotting, utils, pyrobosim, pyrobosim_v2
+from .pyrobosim_v2 import PyRoboSimEnvironment, PhysicalSkill, MatplotlibWorldCanvas

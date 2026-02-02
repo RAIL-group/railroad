@@ -1,5 +1,6 @@
 import threading
 import functools
+import warnings
 from pyrobosim.core.yaml_utils import WorldYamlLoader
 from railroad.environment import BaseEnvironment, SkillStatus
 import time
@@ -27,9 +28,19 @@ def run_async(func):
 
 
 class PyRoboSimEnv(BaseEnvironment):
-    """Environment class that wraps PyRoboSim simulator."""
+    """Environment class that wraps PyRoboSim simulator.
+
+    .. deprecated::
+        Use :class:`environments.pyrobosim_v2.PyRoboSimEnvironment` instead.
+    """
 
     def __init__(self, world_file: str, show_plot: bool = True, record_plots: bool = False):
+        warnings.warn(
+            "PyRoboSimEnv is deprecated. Use PyRoboSimEnvironment from "
+            "environments.pyrobosim_v2 instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.world = WorldYamlLoader().from_file(Path(world_file))
         self.canvas = MatplotlibWorldCanvas(self.world, show_plot, record_plots)
         self.initial_robot_locations = {

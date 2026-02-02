@@ -10,6 +10,8 @@ The environment simulates a household with multiple rooms where items need
 to be reorganized.
 """
 
+import numpy as np
+
 from railroad.core import Fluent as F, get_action_by_name, ff_heuristic
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
@@ -18,8 +20,14 @@ from railroad.environment import EnvironmentInterfaceV2, SimpleSymbolicEnvironme
 from railroad._bindings import State
 
 
-# Define locations
-LOCATIONS = ["start_loc", "living_room", "kitchen", "bedroom", "office"]
+# Define locations with coordinates (for move cost calculation)
+LOCATIONS = {
+    "start_loc": np.array([-5, -5]),
+    "living_room": np.array([0, 0]),
+    "kitchen": np.array([10, 0]),
+    "bedroom": np.array([0, 12]),
+    "office": np.array([10, 12]),
+}
 
 # Define where objects actually are (ground truth)
 OBJECTS_AT_LOCATIONS = {
@@ -31,10 +39,12 @@ OBJECTS_AT_LOCATIONS = {
 }
 
 # Fixed operator times for symbolic planning
-MOVE_TIME = 5.0
 SEARCH_TIME = 5.0
 PICK_TIME = 5.0
 PLACE_TIME = 5.0
+
+# Robot velocity for move time calculation
+ROBOT_VELOCITY = 1.0
 
 
 def main() -> None:
@@ -62,15 +72,20 @@ def main() -> None:
     # Objects by type
     objects_by_type = {
         "robot": {"robot1", "robot2"},
-        "location": set(LOCATIONS),
+        "location": set(LOCATIONS.keys()),
         "object": set(objects_of_interest),
     }
 
     # Probabilistic search - higher success rate in kitchen
     object_find_prob = lambda r, loc, o: 0.6 if "kitchen" in loc else 0.4
 
-    # Create operators with fixed times
-    move_op = operators.construct_move_operator_blocking(MOVE_TIME)
+    # Distance-based move time function
+    def get_move_time(robot: str, loc_from: str, loc_to: str) -> float:
+        distance = float(np.linalg.norm(LOCATIONS[loc_from] - LOCATIONS[loc_to]))
+        return distance / ROBOT_VELOCITY
+
+    # Create operators - move uses distance-based time
+    move_op = operators.construct_move_operator_blocking(get_move_time)
     search_op = operators.construct_search_operator(object_find_prob, SEARCH_TIME)
     pick_op = operators.construct_pick_operator_blocking(PICK_TIME)
     place_op = operators.construct_place_operator_blocking(PLACE_TIME)
