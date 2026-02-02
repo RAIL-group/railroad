@@ -17,6 +17,7 @@ from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
 from railroad import operators
 from railroad.environment import EnvironmentInterfaceV2, SimpleSymbolicEnvironment
+from railroad._bindings import State
 
 
 # Define locations
@@ -69,8 +70,9 @@ def main() -> None:
     pick_op = operators.construct_pick_operator_blocking(PICK_TIME)
     place_op = operators.construct_place_operator_blocking(PLACE_TIME)
 
-    # Initialize symbolic environment
-    env = SimpleSymbolicEnvironment(initial_fluents, objects_by_type, OBJECTS_AT_LOCATIONS)
+    # Initialize symbolic environment with initial state
+    initial_state = State(0.0, initial_fluents, [])
+    env = SimpleSymbolicEnvironment(initial_state, objects_by_type, OBJECTS_AT_LOCATIONS)
 
     # Create interface
     sim = EnvironmentInterfaceV2(env, [pick_op, place_op, move_op])

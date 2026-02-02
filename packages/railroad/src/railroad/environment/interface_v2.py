@@ -31,7 +31,17 @@ class EnvironmentInterfaceV2:
         self._environment = environment
         self._operators = operators
         self._active_skills: List[ActiveSkill] = []
-        self._time: float = 0.0
+
+        # Initialize time and upcoming effects from environment's initial_state if available
+        initial_state = getattr(environment, "initial_state", None)
+        if initial_state is not None:
+            self._time: float = initial_state.time
+            self._initial_upcoming_effects: List[tuple[float, GroundedEffect]] = list(
+                initial_state.upcoming_effects
+            )
+        else:
+            self._time = 0.0
+            self._initial_upcoming_effects = []
 
     @property
     def time(self) -> float:
@@ -46,13 +56,32 @@ class EnvironmentInterfaceV2:
             skill.advance(self._time, self._environment)
         self._active_skills = [s for s in self._active_skills if not s.is_done]
 
+    def _apply_initial_effects(self, time: float) -> None:
+        """Apply initial upcoming effects that are due at or before the given time."""
+        due_effects = [(t, e) for t, e in self._initial_upcoming_effects if t <= time + 1e-9]
+        for _, effect in due_effects:
+            self._environment.apply_effect(effect)
+        self._initial_upcoming_effects = [
+            (t, e) for t, e in self._initial_upcoming_effects if t > time + 1e-9
+        ]
+
+    def _next_initial_effect_time(self) -> float:
+        """Return the time of the next initial upcoming effect, or inf if none."""
+        if not self._initial_upcoming_effects:
+            return float("inf")
+        return min(t for t, _ in self._initial_upcoming_effects)
+
     @property
     def state(self) -> State:
         """Assemble state from Environment fluents + ActiveSkill upcoming effects."""
         # Update skills to apply any completed effects before assembling state
         self._update_skills()
 
+        # Combine initial upcoming effects with active skill effects
         effects: List[tuple[float, GroundedEffect]] = []
+        effects.extend(
+            (t, e) for t, e in self._initial_upcoming_effects if t > self._time
+        )
         for skill in self._active_skills:
             effects.extend(skill.upcoming_effects)
 
@@ -119,19 +148,24 @@ class EnvironmentInterfaceV2:
         self._active_skills.append(skill)
 
         # Apply any immediate effects at the current time
+        self._apply_initial_effects(self._time)
         for s in self._active_skills:
             s.advance(self._time, self._environment)
         self._active_skills = [s for s in self._active_skills if not s.is_done]
 
         # Continue until any robot becomes free (enables concurrent dispatch)
         while not self._any_robot_free():
-            if all(s.is_done for s in self._active_skills):
+            if all(s.is_done for s in self._active_skills) and not self._initial_upcoming_effects:
                 break
 
-            next_time = min(s.time_to_next_event for s in self._active_skills)
+            # Consider both skill effects and initial effects for next time
+            skill_times = [s.time_to_next_event for s in self._active_skills] or [float("inf")]
+            next_time = min(min(skill_times), self._next_initial_effect_time())
             if next_time == float("inf"):
                 break
 
+            # Apply effects at next_time
+            self._apply_initial_effects(next_time)
             for s in self._active_skills:
                 s.advance(next_time, self._environment)
 

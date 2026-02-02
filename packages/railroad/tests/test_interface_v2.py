@@ -9,8 +9,9 @@ def test_interface_v2_construction():
     from railroad.environment.interface_v2 import EnvironmentInterfaceV2
     from railroad.environment.symbolic import SimpleSymbolicEnvironment
 
+    initial_fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
     env = SimpleSymbolicEnvironment(
-        fluents={F("at", "robot1", "kitchen"), F("free", "robot1")},
+        initial_state=State(0.0, initial_fluents, []),
         objects_by_type={"robot": {"robot1"}, "location": {"kitchen", "bedroom"}},
         objects_at_locations={},
     )
@@ -40,8 +41,9 @@ def test_interface_v2_advance():
     from railroad.environment.symbolic import SimpleSymbolicEnvironment
     from railroad.core import get_action_by_name
 
+    initial_fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
     env = SimpleSymbolicEnvironment(
-        fluents={F("at", "robot1", "kitchen"), F("free", "robot1")},
+        initial_state=State(0.0, initial_fluents, []),
         objects_by_type={"robot": {"robot1"}, "location": {"kitchen", "bedroom"}},
         objects_at_locations={},
     )

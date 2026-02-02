@@ -1,6 +1,6 @@
 """Tests for SimpleSymbolicEnvironment."""
 import pytest
-from railroad._bindings import Fluent as F, GroundedEffect
+from railroad._bindings import Fluent as F, GroundedEffect, State
 from railroad.core import Effect, Operator
 
 
@@ -16,7 +16,7 @@ def test_simple_symbolic_environment_construction():
     objects_at_locations = {"kitchen": {"Knife"}}
 
     env = SimpleSymbolicEnvironment(
-        fluents=fluents,
+        initial_state=State(0.0, fluents, []),
         objects_by_type=objects_by_type,
         objects_at_locations=objects_at_locations,
     )
@@ -31,7 +31,7 @@ def test_simple_symbolic_environment_apply_effect():
 
     fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
     env = SimpleSymbolicEnvironment(
-        fluents=fluents,
+        initial_state=State(0.0, fluents, []),
         objects_by_type={},
         objects_at_locations={},
     )
@@ -53,7 +53,7 @@ def test_simple_symbolic_environment_apply_effect_add():
 
     fluents = {F("at", "robot1", "kitchen")}
     env = SimpleSymbolicEnvironment(
-        fluents=fluents,
+        initial_state=State(0.0, fluents, []),
         objects_by_type={},
         objects_at_locations={},
     )
@@ -75,7 +75,7 @@ def test_simple_symbolic_environment_create_skill():
     from railroad.environment.skill import SymbolicSkill
 
     env = SimpleSymbolicEnvironment(
-        fluents=set(),
+        initial_state=State(0.0, set(), []),
         objects_by_type={},
         objects_at_locations={},
     )
@@ -100,7 +100,7 @@ def test_simple_symbolic_environment_create_move_skill():
     from railroad.environment.skill import SymbolicSkill
 
     env = SimpleSymbolicEnvironment(
-        fluents=set(),
+        initial_state=State(0.0, set(), []),
         objects_by_type={},
         objects_at_locations={},
     )
@@ -136,7 +136,7 @@ def test_simple_symbolic_environment_revelation():
     objects_at_locations = {"kitchen": {"Knife", "Fork"}}
 
     env = SimpleSymbolicEnvironment(
-        fluents=fluents,
+        initial_state=State(0.0, fluents, []),
         objects_by_type={"robot": {"robot1"}, "location": {"kitchen"}},
         objects_at_locations=objects_at_locations,
     )
@@ -163,7 +163,7 @@ def test_simple_symbolic_environment_get_objects_at_location():
     objects_at_locations = {"kitchen": {"Knife", "Fork"}}
 
     env = SimpleSymbolicEnvironment(
-        fluents=set(),
+        initial_state=State(0.0, set(), []),
         objects_by_type={},
         objects_at_locations=objects_at_locations,
     )
@@ -184,7 +184,7 @@ def test_simple_symbolic_environment_object_location_from_fluents():
     objects_at_locations = {"kitchen": {"Knife", "Fork"}}
 
     env = SimpleSymbolicEnvironment(
-        fluents=set(),
+        initial_state=State(0.0, set(), []),
         objects_by_type={},
         objects_at_locations=objects_at_locations,
     )
@@ -211,7 +211,7 @@ def test_simple_symbolic_environment_fluent_overrides_ground_truth():
 
     # Initial ground truth: Knife at kitchen
     env = SimpleSymbolicEnvironment(
-        fluents=set(),
+        initial_state=State(0.0, set(), []),
         objects_by_type={},
         objects_at_locations={"kitchen": {"Knife"}},
     )
@@ -232,7 +232,7 @@ def test_simple_symbolic_environment_resolve_probabilistic_effect():
 
     # Create an environment where "obj" IS at "loc"
     env = SimpleSymbolicEnvironment(
-        fluents=set(),
+        initial_state=State(0.0, set(), []),
         objects_by_type={},
         objects_at_locations={"loc": {"obj"}},  # obj is at loc
     )
@@ -270,7 +270,7 @@ def test_simple_symbolic_environment_resolve_probabilistic_effect():
 
     # Now test when object is NOT at location
     env2 = SimpleSymbolicEnvironment(
-        fluents=set(),
+        initial_state=State(0.0, set(), []),
         objects_by_type={},
         objects_at_locations={"other_loc": {"obj"}},  # obj is at other_loc, not loc
     )
@@ -287,8 +287,9 @@ def test_search_skill_resolves_probabilistically():
     from railroad import operators
 
     # Object IS at kitchen - search should succeed
+    fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
     env = SimpleSymbolicEnvironment(
-        fluents={F("at", "robot1", "kitchen"), F("free", "robot1")},
+        initial_state=State(0.0, fluents, []),
         objects_by_type={"robot": {"robot1"}, "location": {"kitchen"}, "object": {"Knife"}},
         objects_at_locations={"kitchen": {"Knife"}},
     )
@@ -319,8 +320,9 @@ def test_search_skill_fails_when_object_not_at_location():
     from railroad import operators
 
     # Object is NOT at kitchen (it's at bedroom)
+    fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
     env = SimpleSymbolicEnvironment(
-        fluents={F("at", "robot1", "kitchen"), F("free", "robot1")},
+        initial_state=State(0.0, fluents, []),
         objects_by_type={"robot": {"robot1"}, "location": {"kitchen", "bedroom"}, "object": {"Knife"}},
         objects_at_locations={"bedroom": {"Knife"}},  # Knife is NOT at kitchen
     )
@@ -349,7 +351,7 @@ def test_simple_symbolic_environment_create_search_skill():
     from railroad import operators
 
     env = SimpleSymbolicEnvironment(
-        fluents=set(),
+        initial_state=State(0.0, set(), []),
         objects_by_type={"robot": {"r1"}, "location": {"kitchen"}, "object": {"Knife"}},
         objects_at_locations={},
     )
@@ -375,7 +377,7 @@ def test_simple_symbolic_environment_create_pick_skill():
     from railroad import operators
 
     env = SimpleSymbolicEnvironment(
-        fluents=set(),
+        initial_state=State(0.0, set(), []),
         objects_by_type={"robot": {"r1"}, "location": {"kitchen"}, "object": {"Knife"}},
         objects_at_locations={"kitchen": {"Knife"}},
     )
@@ -398,7 +400,7 @@ def test_simple_symbolic_environment_create_place_skill():
     from railroad import operators
 
     env = SimpleSymbolicEnvironment(
-        fluents=set(),
+        initial_state=State(0.0, set(), []),
         objects_by_type={"robot": {"r1"}, "location": {"bedroom"}, "object": {"Knife"}},
         objects_at_locations={},
     )
@@ -421,11 +423,12 @@ def test_pick_skill_updates_fluents():
     from railroad.core import get_action_by_name
     from railroad import operators
 
+    fluents = {
+        F("at", "robot1", "kitchen"), F("free", "robot1"),
+        F("at", "Knife", "kitchen"), F("found", "Knife"),
+    }
     env = SimpleSymbolicEnvironment(
-        fluents={
-            F("at", "robot1", "kitchen"), F("free", "robot1"),
-            F("at", "Knife", "kitchen"), F("found", "Knife"),
-        },
+        initial_state=State(0.0, fluents, []),
         objects_by_type={
             "robot": {"robot1"},
             "location": {"kitchen"},
@@ -456,11 +459,12 @@ def test_place_skill_updates_fluents():
     from railroad.core import get_action_by_name
     from railroad import operators
 
+    fluents = {
+        F("at", "robot1", "bedroom"), F("free", "robot1"),
+        F("holding", "robot1", "Knife"), F("hand-full", "robot1"),
+    }
     env = SimpleSymbolicEnvironment(
-        fluents={
-            F("at", "robot1", "bedroom"), F("free", "robot1"),
-            F("holding", "robot1", "Knife"), F("hand-full", "robot1"),
-        },
+        initial_state=State(0.0, fluents, []),
         objects_by_type={
             "robot": {"robot1"},
             "location": {"bedroom"},

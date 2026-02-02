@@ -2,7 +2,7 @@
 
 from typing import Dict, List, Set, Tuple
 
-from railroad._bindings import Action, Fluent, GroundedEffect
+from railroad._bindings import Action, Fluent, GroundedEffect, State
 
 from .skill import ActiveSkill, Environment, SymbolicSkill
 
@@ -20,20 +20,26 @@ class SimpleSymbolicEnvironment:
 
     def __init__(
         self,
-        fluents: Set[Fluent],
+        initial_state: State,
         objects_by_type: Dict[str, Set[str]],
         objects_at_locations: Dict[str, Set[str]],
     ) -> None:
         """Initialize the symbolic environment.
 
         Args:
-            fluents: Initial set of fluents (ground truth).
+            initial_state: Initial state containing fluents and optional upcoming effects.
             objects_by_type: Objects organized by type.
             objects_at_locations: Ground truth object locations for search resolution.
         """
-        self._fluents = set(fluents)
+        self._initial_state = initial_state
+        self._fluents = set(initial_state.fluents)
         self._objects_by_type = {k: set(v) for k, v in objects_by_type.items()}
         self._objects_at_locations = {k: set(v) for k, v in objects_at_locations.items()}
+
+    @property
+    def initial_state(self) -> State:
+        """The initial state used to create this environment."""
+        return self._initial_state
 
     @property
     def fluents(self) -> Set[Fluent]:
