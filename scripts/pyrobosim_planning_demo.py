@@ -63,11 +63,21 @@ class PhysicalSkill:
     def upcoming_effects(self) -> List[Tuple[float, GroundedEffect]]:
         return self._upcoming_effects
 
+    def _is_physical_action_done(self) -> bool:
+        """Check if the physical robot action is complete."""
+        # For no_op, check our own flag
+        if self._skill_name == "no_op":
+            return not self._physical_env.is_no_op_running.get(self._robot, False)
+        # For other skills, check if robot is busy
+        robot = self._physical_env.robots.get(self._robot)
+        if robot is None:
+            return True
+        return not robot.is_busy()
+
     @property
     def time_to_next_event(self) -> float:
-        # Poll physical environment for completion
-        status = self._physical_env.get_executed_skill_status(self._robot, self._skill_name)
-        if status == SkillStatus.DONE:
+        # Check if physical action is complete
+        if self._is_physical_action_done():
             # Return current time so effects get applied
             if self._upcoming_effects:
                 return self._upcoming_effects[0][0]
@@ -76,9 +86,9 @@ class PhysicalSkill:
 
     def advance(self, time: float, env: "PyRoboSimEnvironmentAdapter") -> None:
         """Advance skill, checking physical completion and applying effects."""
-        status = self._physical_env.get_executed_skill_status(self._robot, self._skill_name)
+        is_done = self._is_physical_action_done()
 
-        if status == SkillStatus.DONE and self._upcoming_effects:
+        if is_done and self._upcoming_effects:
             # Physical action complete - apply all effects
             for _, effect in self._upcoming_effects:
                 env.apply_effect(effect)
