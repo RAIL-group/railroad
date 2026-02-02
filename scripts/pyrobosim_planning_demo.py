@@ -3,7 +3,7 @@ from railroad import operators
 from railroad.planner import MCTSPlanner
 from railroad.core import Fluent as F, get_action_by_name
 from railroad.environment import EnvironmentInterfaceV2, SkillStatus
-from railroad.environment.skill import ActiveSkill, SymbolicSkill
+from railroad.environment.skill import ActiveSkill, Environment, SymbolicSkill
 from railroad._bindings import Action, Fluent, GroundedEffect, ff_heuristic
 from railroad.dashboard import PlannerDashboard
 import argparse
@@ -108,7 +108,7 @@ class PhysicalSkill:
         # Return a time slightly after start to keep polling
         return self._start_time + 0.01
 
-    def advance(self, time: float, env: "PyRoboSimEnvironmentAdapter") -> None:
+    def advance(self, time: float, env: Environment) -> None:
         """Advance skill, applying effects based on time and physical completion.
 
         - Immediate effects (time <= start_time): Apply based on time
@@ -143,7 +143,7 @@ class PhysicalSkill:
         if not self._upcoming_effects and self._is_physical_action_done():
             self._is_done = True
 
-    def interrupt(self, env: "PyRoboSimEnvironmentAdapter") -> None:
+    def interrupt(self, env: Environment) -> None:
         """Interrupt this skill by stopping the physical robot."""
         if self._is_interruptible and not self._is_done:
             self._physical_env.stop_robot(self._robot)
@@ -244,7 +244,6 @@ class PyRoboSimEnvironmentAdapter:
                 action=action,
                 start_time=time,
                 robot=robot,
-                is_interruptible=False,
             )
 
     def apply_effect(self, effect: GroundedEffect) -> None:

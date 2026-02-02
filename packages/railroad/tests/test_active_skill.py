@@ -87,17 +87,43 @@ def test_symbolic_move_skill_interrupt_behavior():
     from railroad._bindings import Fluent as F
     from railroad.core import Effect, Operator
 
-    # Create a simple mock environment
+    # Create a simple mock environment that implements Environment protocol
     class MockEnvironment:
         def __init__(self):
-            self.fluents = {F("at", "r1", "kitchen"), F("free", "r1")}
+            self._fluents = {F("at", "r1", "kitchen"), F("free", "r1")}
+            self._objects_by_type = {"robot": {"r1"}, "location": {"kitchen", "bedroom"}}
+
+        @property
+        def fluents(self):
+            return self._fluents
+
+        @property
+        def objects_by_type(self):
+            return self._objects_by_type
+
+        def create_skill(self, action, time):
+            from railroad.environment.skill import SymbolicSkill
+            robot = action.name.split()[1] if action.name else "r1"
+            return SymbolicSkill(action=action, start_time=time, robot=robot)
 
         def apply_effect(self, effect):
             for fluent in effect.resulting_fluents:
                 if fluent.negated:
-                    self.fluents.discard(~fluent)
+                    self._fluents.discard(~fluent)
                 else:
-                    self.fluents.add(fluent)
+                    self._fluents.add(fluent)
+
+        def resolve_probabilistic_effect(self, effect, current_fluents):
+            return [effect], current_fluents
+
+        def get_objects_at_location(self, location):
+            return {}
+
+        def remove_object_from_location(self, obj, location):
+            pass
+
+        def add_object_at_location(self, obj, location):
+            pass
 
     # Create move operator and action
     op = Operator(
