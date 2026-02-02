@@ -4,7 +4,7 @@ from typing import Dict, List, Set, Tuple
 
 from railroad._bindings import Action, Fluent, GroundedEffect
 
-from .skill import ActiveSkill, Environment, SymbolicMoveSkill, SymbolicSkill
+from .skill import ActiveSkill, Environment, SymbolicMoveSkill, SymbolicSearchSkill, SymbolicSkill
 
 
 class SimpleSymbolicEnvironment:
@@ -64,6 +64,16 @@ class SimpleSymbolicEnvironment:
                 start=start,
                 end=end,
             )
+        elif action_type == "search":
+            # search robot location object
+            location, target_object = parts[2], parts[3]
+            return SymbolicSearchSkill(
+                action=action,
+                start_time=time,
+                robot=robot,
+                location=location,
+                target_object=target_object,
+            )
         else:
             # Default: non-interruptible symbolic skill
             return SymbolicSkill(
@@ -74,20 +84,24 @@ class SimpleSymbolicEnvironment:
             )
 
     def apply_effect(self, effect: GroundedEffect) -> None:
-        """Apply an effect, handling adds and removes."""
-        if effect.is_probabilistic:
-            # Resolve probabilistic effect first
-            nested_effects, _ = self.resolve_probabilistic_effect(effect, self._fluents)
-            for nested in nested_effects:
-                self.apply_effect(nested)
-            return
+        """Apply an effect, handling adds and removes.
 
+        For probabilistic effects, both the deterministic resulting_fluents
+        AND the resolved probabilistic branch are applied.
+        """
+        # Always apply the deterministic resulting_fluents first
         for fluent in effect.resulting_fluents:
             if fluent.negated:
                 # Remove the positive version
                 self._fluents.discard(~fluent)
             else:
                 self._fluents.add(fluent)
+
+        # Then handle probabilistic branches if present
+        if effect.is_probabilistic:
+            nested_effects, _ = self.resolve_probabilistic_effect(effect, self._fluents)
+            for nested in nested_effects:
+                self.apply_effect(nested)
 
         # Handle perception/revelation
         self._handle_revelation()
@@ -118,6 +132,8 @@ class SimpleSymbolicEnvironment:
         """Resolve which branch of a probabilistic effect occurs.
 
         For search actions, checks ground truth to determine success/failure.
+        The success branch contains a "found <object>" fluent - we check if
+        that object is actually at the searched location in ground truth.
         """
         if not effect.is_probabilistic:
             return [effect], current_fluents
@@ -126,10 +142,38 @@ class SimpleSymbolicEnvironment:
         if not branches:
             return [], current_fluents
 
-        # Default: return first branch (success case)
-        # More sophisticated resolution will be added in Task 7
-        _, first_branch_effects = branches[0]
-        return list(first_branch_effects), current_fluents
+        # Try to identify the success branch (contains "found" fluent)
+        # and check ground truth to decide
+        for _, branch_effects in branches:
+            for branch_eff in branch_effects:
+                for fluent in branch_eff.resulting_fluents:
+                    if fluent.name == "found" and not fluent.negated:
+                        # This is the success branch - check ground truth
+                        target_object = fluent.args[0]
+                        # Find the location from the "at" fluent in the same branch
+                        location = self._find_search_location_from_branch(branch_eff, target_object)
+                        if location and self._is_object_at_location(target_object, location):
+                            # Object IS at location - return success branch
+                            return list(branch_effects), current_fluents
+
+        # Object NOT at location or couldn't determine - return failure branch (last one)
+        _, last_branch_effects = branches[-1]
+        return list(last_branch_effects), current_fluents
+
+    def _find_search_location_from_branch(
+        self, effect: GroundedEffect, target_object: str
+    ) -> str | None:
+        """Find the location from the 'at object location' fluent in a branch."""
+        for fluent in effect.resulting_fluents:
+            if fluent.name == "at" and len(fluent.args) >= 2:
+                if fluent.args[0] == target_object:
+                    return fluent.args[1]
+        return None
+
+    def _is_object_at_location(self, obj: str, location: str) -> bool:
+        """Check if object is at location in ground truth."""
+        objects_at_loc = self._objects_at_locations.get(location, set())
+        return obj in objects_at_loc
 
     def get_objects_at_location(self, location: str) -> Dict[str, Set[str]]:
         """Get objects at a location (ground truth)."""

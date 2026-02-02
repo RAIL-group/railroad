@@ -211,13 +211,14 @@ def test_simple_symbolic_environment_add_object_at_location():
 
 
 def test_simple_symbolic_environment_resolve_probabilistic_effect():
-    """Test resolving probabilistic effects."""
+    """Test resolving probabilistic effects based on ground truth."""
     from railroad.environment.symbolic import SimpleSymbolicEnvironment
 
+    # Create an environment where "obj" IS at "loc"
     env = SimpleSymbolicEnvironment(
         fluents=set(),
         objects_by_type={},
-        objects_at_locations={},
+        objects_at_locations={"loc": {"obj"}},  # obj is at loc
     )
 
     # Create a deterministic effect
@@ -230,19 +231,124 @@ def test_simple_symbolic_environment_resolve_probabilistic_effect():
     effects, fluents = env.resolve_probabilistic_effect(det_effect, set())
     assert effects == [det_effect]
 
-    # Create a probabilistic effect
-    branch1_effect = GroundedEffect(time=0.0, resulting_fluents={F("found", "obj")})
+    # Create a probabilistic effect with proper search structure
+    # Success branch has both "found obj" and "at obj loc"
+    branch1_effect = GroundedEffect(
+        time=0.0,
+        resulting_fluents={F("found", "obj"), F("at", "obj", "loc")}
+    )
     branch2_effect = GroundedEffect(time=0.0, resulting_fluents={F("searched", "loc")})
     prob_effect = GroundedEffect(
         time=2.0,
         resulting_fluents=set(),
         prob_effects=[
-            (0.6, [branch1_effect]),
-            (0.4, [branch2_effect]),
+            (0.6, [branch1_effect]),  # success branch
+            (0.4, [branch2_effect]),  # failure branch
         ],
     )
 
-    # Default: should return first branch (success case)
+    # Since obj IS at loc in ground truth, should return success branch
     effects, fluents = env.resolve_probabilistic_effect(prob_effect, set())
     assert len(effects) == 1
     assert effects[0] == branch1_effect
+
+    # Now test when object is NOT at location
+    env2 = SimpleSymbolicEnvironment(
+        fluents=set(),
+        objects_by_type={},
+        objects_at_locations={"other_loc": {"obj"}},  # obj is at other_loc, not loc
+    )
+    effects2, _ = env2.resolve_probabilistic_effect(prob_effect, set())
+    assert len(effects2) == 1
+    assert effects2[0] == branch2_effect  # failure branch
+
+
+def test_search_skill_resolves_probabilistically():
+    """Test that search skill resolves probabilistic effects via environment."""
+    from railroad.environment.symbolic import SimpleSymbolicEnvironment
+    from railroad.environment.interface_v2 import EnvironmentInterfaceV2
+    from railroad.core import get_action_by_name
+    from railroad import operators
+
+    # Object IS at kitchen - search should succeed
+    env = SimpleSymbolicEnvironment(
+        fluents={F("at", "robot1", "kitchen"), F("free", "robot1")},
+        objects_by_type={"robot": {"robot1"}, "location": {"kitchen"}, "object": {"Knife"}},
+        objects_at_locations={"kitchen": {"Knife"}},
+    )
+
+    search_op = operators.construct_search_operator(
+        object_find_prob=0.5,  # Probability doesn't matter - ground truth does
+        search_time=3.0,
+    )
+
+    interface = EnvironmentInterfaceV2(environment=env, operators=[search_op])
+    actions = interface.get_actions()
+    search_action = get_action_by_name(actions, "search robot1 kitchen Knife")
+
+    interface.advance(search_action, do_interrupt=False)
+
+    # Since Knife IS at kitchen, search should succeed
+    assert F("searched", "kitchen", "Knife") in interface.state.fluents
+    assert F("found", "Knife") in interface.state.fluents
+    assert F("at", "Knife", "kitchen") in interface.state.fluents
+    assert F("free", "robot1") in interface.state.fluents
+
+
+def test_search_skill_fails_when_object_not_at_location():
+    """Test that search fails when object is NOT at the searched location."""
+    from railroad.environment.symbolic import SimpleSymbolicEnvironment
+    from railroad.environment.interface_v2 import EnvironmentInterfaceV2
+    from railroad.core import get_action_by_name
+    from railroad import operators
+
+    # Object is NOT at kitchen (it's at bedroom)
+    env = SimpleSymbolicEnvironment(
+        fluents={F("at", "robot1", "kitchen"), F("free", "robot1")},
+        objects_by_type={"robot": {"robot1"}, "location": {"kitchen", "bedroom"}, "object": {"Knife"}},
+        objects_at_locations={"bedroom": {"Knife"}},  # Knife is NOT at kitchen
+    )
+
+    search_op = operators.construct_search_operator(
+        object_find_prob=0.9,  # High probability, but ground truth says object NOT here
+        search_time=3.0,
+    )
+
+    interface = EnvironmentInterfaceV2(environment=env, operators=[search_op])
+    actions = interface.get_actions()
+    search_action = get_action_by_name(actions, "search robot1 kitchen Knife")
+
+    interface.advance(search_action, do_interrupt=False)
+
+    # Search should complete but NOT find the object
+    assert F("searched", "kitchen", "Knife") in interface.state.fluents
+    assert F("found", "Knife") not in interface.state.fluents
+    assert F("free", "robot1") in interface.state.fluents
+
+
+def test_simple_symbolic_environment_create_search_skill():
+    """Test search skill creation via factory method."""
+    from railroad.environment.symbolic import SimpleSymbolicEnvironment
+    from railroad.environment.skill import SymbolicSearchSkill
+    from railroad import operators
+
+    env = SimpleSymbolicEnvironment(
+        fluents=set(),
+        objects_by_type={"robot": {"r1"}, "location": {"kitchen"}, "object": {"Knife"}},
+        objects_at_locations={},
+    )
+
+    search_op = operators.construct_search_operator(
+        object_find_prob=0.5,
+        search_time=3.0,
+    )
+    actions = search_op.instantiate(env.objects_by_type)
+    search_action = [a for a in actions if "r1" in a.name and "kitchen" in a.name and "Knife" in a.name][0]
+
+    skill = env.create_skill(search_action, time=0.0)
+
+    assert isinstance(skill, SymbolicSearchSkill)
+    assert skill.robot == "r1"
+    assert skill.location == "kitchen"
+    assert skill.target_object == "Knife"
+    assert not skill.is_interruptible

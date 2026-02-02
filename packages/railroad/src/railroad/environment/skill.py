@@ -249,3 +249,32 @@ class SymbolicMoveSkill(SymbolicSkill):
 
         # Clear remaining effects
         self._upcoming_effects = []
+
+
+class SymbolicSearchSkill(SymbolicSkill):
+    """Symbolic skill for search actions with probabilistic resolution.
+
+    Search actions have probabilistic outcomes resolved by the environment
+    based on ground truth object locations. This skill is non-interruptible.
+    """
+
+    def __init__(
+        self,
+        action: "Action",
+        start_time: float,
+        robot: str,
+        location: str,
+        target_object: str,
+    ) -> None:
+        """Initialize a symbolic search skill.
+
+        Args:
+            action: The search action being executed.
+            start_time: Start time of the search.
+            robot: Name of the robot executing this skill.
+            location: Location being searched.
+            target_object: Object being searched for.
+        """
+        super().__init__(action, start_time, robot, is_interruptible=False)
+        self.location = location
+        self.target_object = target_object
