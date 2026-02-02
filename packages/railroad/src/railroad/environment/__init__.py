@@ -15,6 +15,13 @@ Available classes:
 - OngoingAction: Base class for tracking action execution
 - OngoingSearchAction, OngoingPickAction, OngoingPlaceAction,
   OngoingMoveAction, OngoingNoOpAction: Specialized action trackers
+- ActiveSkill: Protocol for tracking execution of a single action
+- Environment: Protocol for environment that owns world state
+- SymbolicSkill: Base class for symbolic skill execution
+- SymbolicMoveSkill, SymbolicSearchSkill, SymbolicPickSkill,
+  SymbolicPlaceSkill: Specialized symbolic skill implementations
+- SimpleSymbolicEnvironment: Simple environment for symbolic execution
+- EnvironmentInterfaceV2: New interface using Environment/ActiveSkill architecture
 """
 
 from .base import (
@@ -35,6 +42,20 @@ from .interface import (
     OngoingNoOpAction,
 )
 
+from .skill import (
+    ActiveSkill,
+    Environment,
+    SymbolicSkill,
+    SymbolicMoveSkill,
+    SymbolicSearchSkill,
+    SymbolicPickSkill,
+    SymbolicPlaceSkill,
+)
+
+from .symbolic import SimpleSymbolicEnvironment
+
+from .interface_v2 import EnvironmentInterfaceV2
+
 # Backward compatibility alias
 BaseEnvironment = AbstractEnvironment
 
@@ -54,4 +75,14 @@ __all__ = [
     "OngoingPlaceAction",
     "OngoingMoveAction",
     "OngoingNoOpAction",
+    # New interface components (v2)
+    "ActiveSkill",
+    "Environment",
+    "SymbolicSkill",
+    "SymbolicMoveSkill",
+    "SymbolicSearchSkill",
+    "SymbolicPickSkill",
+    "SymbolicPlaceSkill",
+    "SimpleSymbolicEnvironment",
+    "EnvironmentInterfaceV2",
 ]
