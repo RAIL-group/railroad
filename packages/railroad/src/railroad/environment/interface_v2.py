@@ -109,7 +109,7 @@ class EnvironmentInterfaceV2:
         do_interrupt: bool = True,
         loop_callback_fn: Optional[Callable[[], None]] = None,
     ) -> State:
-        """Execute action, return state when a robot is free."""
+        """Execute action, return state when a robot is free for new dispatch."""
         if not self.state.satisfies_precondition(action):
             raise ValueError(
                 f"Action preconditions not satisfied: {action.name} in state {self.state}"
@@ -123,7 +123,7 @@ class EnvironmentInterfaceV2:
             s.advance(self._time, self._environment)
         self._active_skills = [s for s in self._active_skills if not s.is_done]
 
-        # Continue until a robot becomes free
+        # Continue until any robot becomes free (enables concurrent dispatch)
         while not self._any_robot_free():
             if all(s.is_done for s in self._active_skills):
                 break
@@ -151,6 +151,12 @@ class EnvironmentInterfaceV2:
 
     def _any_robot_free(self) -> bool:
         return any(f.name == "free" for f in self._environment.fluents)
+
+    def _is_robot_free(self, robot: Optional[str]) -> bool:
+        """Check if a specific robot is free."""
+        if robot is None:
+            return self._any_robot_free()
+        return F("free", robot) in self._environment.fluents
 
     def is_goal_reached(self, goal_fluents: Collection[Fluent]) -> bool:
         return all(f in self.state.fluents for f in goal_fluents)

@@ -97,7 +97,7 @@ def test_simple_symbolic_environment_create_skill():
 def test_simple_symbolic_environment_create_move_skill():
     """Test move skill creation via factory method."""
     from railroad.environment.symbolic import SimpleSymbolicEnvironment
-    from railroad.environment.skill import SymbolicMoveSkill
+    from railroad.environment.skill import SymbolicSkill
 
     env = SimpleSymbolicEnvironment(
         fluents=set(),
@@ -123,10 +123,9 @@ def test_simple_symbolic_environment_create_move_skill():
 
     skill = env.create_skill(action, time=0.0)
 
-    assert isinstance(skill, SymbolicMoveSkill)
+    assert isinstance(skill, SymbolicSkill)
     assert skill.robot == "r1"
-    assert skill.start == "kitchen"
-    assert skill.end == "bedroom"
+    assert skill.is_interruptible  # Move skills are interruptible
 
 
 def test_simple_symbolic_environment_revelation():
@@ -177,10 +176,11 @@ def test_simple_symbolic_environment_get_objects_at_location():
     assert result == {"object": set()}
 
 
-def test_simple_symbolic_environment_remove_object_from_location():
-    """Test removing an object from a location (for pick)."""
+def test_simple_symbolic_environment_object_location_from_fluents():
+    """Test that object locations are derived from fluents."""
     from railroad.environment.symbolic import SimpleSymbolicEnvironment
 
+    # Initial ground truth: Knife and Fork at kitchen
     objects_at_locations = {"kitchen": {"Knife", "Fork"}}
 
     env = SimpleSymbolicEnvironment(
@@ -189,25 +189,41 @@ def test_simple_symbolic_environment_remove_object_from_location():
         objects_at_locations=objects_at_locations,
     )
 
-    env.remove_object_from_location("Knife", "kitchen")
+    # Before any fluents, objects are at initial locations
+    assert env._is_object_at_location("Knife", "kitchen")
+    assert env._is_object_at_location("Fork", "kitchen")
 
-    assert "Knife" not in env._objects_at_locations["kitchen"]
-    assert "Fork" in env._objects_at_locations["kitchen"]
+    # After adding "holding" fluent, object is no longer at location
+    env._fluents.add(F("holding", "robot1", "Knife"))
+    assert not env._is_object_at_location("Knife", "kitchen")
+    assert env._is_object_at_location("Fork", "kitchen")  # Fork still there
+
+    # After adding "at" fluent at different location, object is there
+    env._fluents.discard(F("holding", "robot1", "Knife"))
+    env._fluents.add(F("at", "Knife", "bedroom"))
+    assert not env._is_object_at_location("Knife", "kitchen")
+    assert env._is_object_at_location("Knife", "bedroom")
 
 
-def test_simple_symbolic_environment_add_object_at_location():
-    """Test adding an object at a location (for place)."""
+def test_simple_symbolic_environment_fluent_overrides_ground_truth():
+    """Test that fluents override initial ground truth for object locations."""
     from railroad.environment.symbolic import SimpleSymbolicEnvironment
 
+    # Initial ground truth: Knife at kitchen
     env = SimpleSymbolicEnvironment(
         fluents=set(),
         objects_by_type={},
-        objects_at_locations={},
+        objects_at_locations={"kitchen": {"Knife"}},
     )
 
-    env.add_object_at_location("Knife", "kitchen")
+    # Initial: Knife is at kitchen (from ground truth)
+    assert env._is_object_at_location("Knife", "kitchen")
+    assert not env._is_object_at_location("Knife", "bedroom")
 
-    assert "Knife" in env._objects_at_locations["kitchen"]
+    # Add fluent saying Knife is at bedroom - this should override ground truth
+    env._fluents.add(F("at", "Knife", "bedroom"))
+    assert not env._is_object_at_location("Knife", "kitchen")  # Fluent takes priority
+    assert env._is_object_at_location("Knife", "bedroom")
 
 
 def test_simple_symbolic_environment_resolve_probabilistic_effect():
@@ -329,7 +345,7 @@ def test_search_skill_fails_when_object_not_at_location():
 def test_simple_symbolic_environment_create_search_skill():
     """Test search skill creation via factory method."""
     from railroad.environment.symbolic import SimpleSymbolicEnvironment
-    from railroad.environment.skill import SymbolicSearchSkill
+    from railroad.environment.skill import SymbolicSkill
     from railroad import operators
 
     env = SimpleSymbolicEnvironment(
@@ -347,17 +363,15 @@ def test_simple_symbolic_environment_create_search_skill():
 
     skill = env.create_skill(search_action, time=0.0)
 
-    assert isinstance(skill, SymbolicSearchSkill)
+    assert isinstance(skill, SymbolicSkill)
     assert skill.robot == "r1"
-    assert skill.location == "kitchen"
-    assert skill.target_object == "Knife"
-    assert not skill.is_interruptible
+    assert not skill.is_interruptible  # Search skills are not interruptible
 
 
 def test_simple_symbolic_environment_create_pick_skill():
     """Test pick skill creation via factory method."""
     from railroad.environment.symbolic import SimpleSymbolicEnvironment
-    from railroad.environment.skill import SymbolicPickSkill
+    from railroad.environment.skill import SymbolicSkill
     from railroad import operators
 
     env = SimpleSymbolicEnvironment(
@@ -372,17 +386,15 @@ def test_simple_symbolic_environment_create_pick_skill():
 
     skill = env.create_skill(pick_action, time=0.0)
 
-    assert isinstance(skill, SymbolicPickSkill)
+    assert isinstance(skill, SymbolicSkill)
     assert skill.robot == "r1"
-    assert skill.location == "kitchen"
-    assert skill.target_object == "Knife"
-    assert not skill.is_interruptible
+    assert not skill.is_interruptible  # Pick skills are not interruptible
 
 
 def test_simple_symbolic_environment_create_place_skill():
     """Test place skill creation via factory method."""
     from railroad.environment.symbolic import SimpleSymbolicEnvironment
-    from railroad.environment.skill import SymbolicPlaceSkill
+    from railroad.environment.skill import SymbolicSkill
     from railroad import operators
 
     env = SimpleSymbolicEnvironment(
@@ -397,15 +409,13 @@ def test_simple_symbolic_environment_create_place_skill():
 
     skill = env.create_skill(place_action, time=0.0)
 
-    assert isinstance(skill, SymbolicPlaceSkill)
+    assert isinstance(skill, SymbolicSkill)
     assert skill.robot == "r1"
-    assert skill.location == "bedroom"
-    assert skill.target_object == "Knife"
-    assert not skill.is_interruptible
+    assert not skill.is_interruptible  # Place skills are not interruptible
 
 
-def test_pick_skill_updates_ground_truth():
-    """Test that pick skill updates environment ground truth."""
+def test_pick_skill_updates_fluents():
+    """Test that pick skill updates fluents correctly."""
     from railroad.environment.symbolic import SimpleSymbolicEnvironment
     from railroad.environment.interface_v2 import EnvironmentInterfaceV2
     from railroad.core import get_action_by_name
@@ -432,13 +442,15 @@ def test_pick_skill_updates_ground_truth():
 
     interface.advance(pick_action, do_interrupt=False)
 
+    # Verify fluents are correct
     assert F("holding", "robot1", "Knife") in interface.state.fluents
-    # Ground truth should be updated
-    assert "Knife" not in env._objects_at_locations.get("kitchen", set())
+    assert F("at", "Knife", "kitchen") not in interface.state.fluents
+    # Object location is derived from fluents - holding means not at location
+    assert not env._is_object_at_location("Knife", "kitchen")
 
 
-def test_place_skill_updates_ground_truth():
-    """Test that place skill updates environment ground truth."""
+def test_place_skill_updates_fluents():
+    """Test that place skill updates fluents correctly."""
     from railroad.environment.symbolic import SimpleSymbolicEnvironment
     from railroad.environment.interface_v2 import EnvironmentInterfaceV2
     from railroad.core import get_action_by_name
@@ -465,7 +477,8 @@ def test_place_skill_updates_ground_truth():
 
     interface.advance(place_action, do_interrupt=False)
 
+    # Verify fluents are correct
     assert F("at", "Knife", "bedroom") in interface.state.fluents
     assert F("holding", "robot1", "Knife") not in interface.state.fluents
-    # Ground truth should be updated
-    assert "Knife" in env._objects_at_locations.get("bedroom", set())
+    # Object location is derived from fluents
+    assert env._is_object_at_location("Knife", "bedroom")

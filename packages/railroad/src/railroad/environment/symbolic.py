@@ -4,15 +4,7 @@ from typing import Dict, List, Set, Tuple
 
 from railroad._bindings import Action, Fluent, GroundedEffect
 
-from .skill import (
-    ActiveSkill,
-    Environment,
-    SymbolicMoveSkill,
-    SymbolicPickSkill,
-    SymbolicPlaceSkill,
-    SymbolicSearchSkill,
-    SymbolicSkill,
-)
+from .skill import ActiveSkill, Environment, SymbolicSkill
 
 
 class SimpleSymbolicEnvironment:
@@ -54,73 +46,29 @@ class SimpleSymbolicEnvironment:
         return self._objects_by_type
 
     def create_skill(self, action: Action, time: float) -> ActiveSkill:
-        """Create an ActiveSkill appropriate for this action.
+        """Create an ActiveSkill from the action.
 
-        Routes to appropriate skill class based on action name.
+        The skill extracts all needed information (robot, interruptibility, etc.)
+        directly from the action - no routing needed.
         """
+        # Extract robot from action name (format: "action_type robot ...")
         parts = action.name.split()
-        action_type = parts[0]
-        robot = parts[1]
+        robot = parts[1] if len(parts) > 1 else "unknown"
 
-        if action_type == "move":
-            # move robot from to
-            start, end = parts[2], parts[3]
-            return SymbolicMoveSkill(
-                action=action,
-                start_time=time,
-                robot=robot,
-                start=start,
-                end=end,
-            )
-        elif action_type == "search":
-            # search robot location object
-            location, target_object = parts[2], parts[3]
-            return SymbolicSearchSkill(
-                action=action,
-                start_time=time,
-                robot=robot,
-                location=location,
-                target_object=target_object,
-            )
-        elif action_type == "pick":
-            # pick robot location object
-            location, target_object = parts[2], parts[3]
-            return SymbolicPickSkill(
-                action=action,
-                start_time=time,
-                robot=robot,
-                location=location,
-                target_object=target_object,
-            )
-        elif action_type == "place":
-            # place robot location object
-            location, target_object = parts[2], parts[3]
-            return SymbolicPlaceSkill(
-                action=action,
-                start_time=time,
-                robot=robot,
-                location=location,
-                target_object=target_object,
-            )
-        else:
-            # Default: non-interruptible symbolic skill
-            return SymbolicSkill(
-                action=action,
-                start_time=time,
-                robot=robot,
-                is_interruptible=False,
-            )
+        return SymbolicSkill(action=action, start_time=time, robot=robot)
 
     def apply_effect(self, effect: GroundedEffect) -> None:
         """Apply an effect, handling adds and removes.
 
+        Object locations are derived from fluents, so no separate ground truth
+        updates are needed for pick/place operations.
+
         For probabilistic effects, both the deterministic resulting_fluents
         AND the resolved probabilistic branch are applied.
         """
-        # Always apply the deterministic resulting_fluents first
+        # Apply the deterministic resulting_fluents
         for fluent in effect.resulting_fluents:
             if fluent.negated:
-                # Remove the positive version
                 self._fluents.discard(~fluent)
             else:
                 self._fluents.add(fluent)
@@ -199,9 +147,30 @@ class SimpleSymbolicEnvironment:
         return None
 
     def _is_object_at_location(self, obj: str, location: str) -> bool:
-        """Check if object is at location in ground truth."""
-        objects_at_loc = self._objects_at_locations.get(location, set())
-        return obj in objects_at_loc
+        """Check if object is at location, derived from fluents + initial ground truth.
+
+        Priority:
+        1. If object is being held → not at any location
+        2. If fluent says object is at this location → yes
+        3. If fluent says object is at a different location → no
+        4. Fall back to initial ground truth (for undiscovered objects)
+        """
+        # Check if object is being held by any robot
+        for f in self._fluents:
+            if f.name == "holding" and len(f.args) >= 2 and f.args[1] == obj:
+                return False
+
+        # Check if object is known to be at this location (from fluent)
+        if Fluent("at", obj, location) in self._fluents:
+            return True
+
+        # Check if object is known to be at a different location
+        for f in self._fluents:
+            if f.name == "at" and len(f.args) >= 2 and f.args[0] == obj:
+                return False  # Object is at a different location
+
+        # Fall back to initial ground truth (object hasn't been found/moved yet)
+        return obj in self._objects_at_locations.get(location, set())
 
     def get_objects_at_location(self, location: str) -> Dict[str, Set[str]]:
         """Get objects at a location (ground truth)."""
@@ -209,12 +178,9 @@ class SimpleSymbolicEnvironment:
         return {"object": set(objects)}
 
     def remove_object_from_location(self, obj: str, location: str) -> None:
-        """Update ground truth when object picked."""
-        if location in self._objects_at_locations:
-            self._objects_at_locations[location].discard(obj)
+        """No-op: object locations are derived from fluents."""
+        pass
 
     def add_object_at_location(self, obj: str, location: str) -> None:
-        """Update ground truth when object placed."""
-        if location not in self._objects_at_locations:
-            self._objects_at_locations[location] = set()
-        self._objects_at_locations[location].add(obj)
+        """No-op: object locations are derived from fluents."""
+        pass

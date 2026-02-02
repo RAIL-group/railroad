@@ -8,6 +8,7 @@ from railroad._bindings import Action, Fluent, GroundedEffect, ff_heuristic
 from railroad.dashboard import PlannerDashboard
 import argparse
 import logging
+import time as time_module
 from typing import Dict, List, Set, Tuple
 
 
@@ -36,8 +37,12 @@ class PhysicalSkill:
         self._skill_name = skill_name
         self._is_done = False
         self._is_interruptible = skill_name == "move"
+        self._completion_time: float | None = None
 
-        # Compute upcoming effects from action
+        # Track wall-clock time for actual duration
+        self._wall_start_time = time_module.time()
+
+        # Compute upcoming effects from action (using planned times initially)
         self._upcoming_effects: List[Tuple[float, GroundedEffect]] = sorted(
             [(start_time + eff.time, eff) for eff in action.effects],
             key=lambda el: el[0]
@@ -66,12 +71,23 @@ class PhysicalSkill:
         """Check if the physical robot action is complete."""
         # For no_op, check our own flag
         if self._skill_name == "no_op":
-            return not self._physical_env.is_no_op_running.get(self._robot, False)
-        # For other skills, check if robot is busy
-        robot = self._physical_env.robots.get(self._robot)
-        if robot is None:
-            return True
-        return not robot.is_busy()
+            done = not self._physical_env.is_no_op_running.get(self._robot, False)
+        else:
+            # For other skills, check if robot is busy
+            robot = self._physical_env.robots.get(self._robot)
+            done = robot is None or not robot.is_busy()
+
+        # Record completion time when first detected
+        if done and self._completion_time is None:
+            actual_duration = time_module.time() - self._wall_start_time
+            self._completion_time = self._start_time + actual_duration
+
+        return done
+
+    @property
+    def completion_time(self) -> float | None:
+        """Return the actual completion time (start_time + actual_duration)."""
+        return self._completion_time
 
     @property
     def time_to_next_event(self) -> float:
@@ -85,7 +101,8 @@ class PhysicalSkill:
 
         # For completion effects, wait for physical action to be done
         if self._is_physical_action_done():
-            return next_effect_time
+            # Return actual completion time instead of planned time
+            return self._completion_time if self._completion_time else next_effect_time
 
         # Physical action still running - poll again soon
         # Return a time slightly after start to keep polling

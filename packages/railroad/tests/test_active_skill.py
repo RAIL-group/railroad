@@ -56,8 +56,8 @@ def test_symbolic_skill_base_class():
 
 
 def test_symbolic_move_skill_interrupt():
-    """Test that SymbolicMoveSkill supports interruption."""
-    from railroad.environment.skill import SymbolicMoveSkill
+    """Test that SymbolicSkill supports interruption for move actions."""
+    from railroad.environment.skill import SymbolicSkill
     from railroad._bindings import Fluent as F
     from railroad.core import Effect, Operator
 
@@ -75,16 +75,15 @@ def test_symbolic_move_skill_interrupt():
     # Find the move action from kitchen to bedroom
     action = [a for a in actions if "kitchen" in a.name and "bedroom" in a.name][0]
 
-    skill = SymbolicMoveSkill(action=action, start_time=0.0, robot="r1", start="kitchen", end="bedroom")
+    skill = SymbolicSkill(action=action, start_time=0.0, robot="r1")
 
+    # Move actions are automatically detected as interruptible
     assert skill.is_interruptible is True
-    assert skill.start == "kitchen"
-    assert skill.end == "bedroom"
 
 
 def test_symbolic_move_skill_interrupt_behavior():
-    """Test that SymbolicMoveSkill.interrupt() rewrites fluents correctly."""
-    from railroad.environment.skill import SymbolicMoveSkill
+    """Test that SymbolicSkill.interrupt() rewrites fluents correctly for move actions."""
+    from railroad.environment.skill import SymbolicSkill
     from railroad._bindings import Fluent as F
     from railroad.core import Effect, Operator
 
@@ -114,14 +113,14 @@ def test_symbolic_move_skill_interrupt_behavior():
     action = [a for a in actions if "kitchen" in a.name and "bedroom" in a.name][0]
 
     env = MockEnvironment()
-    skill = SymbolicMoveSkill(action=action, start_time=0.0, robot="r1", start="kitchen", end="bedroom")
+    skill = SymbolicSkill(action=action, start_time=0.0, robot="r1")
 
     # Advance partway (apply first effect at t=0)
     skill.advance(0.0, env)
     assert F("free", "r1") not in env.fluents  # First effect applied
 
     # Advance time but not to completion
-    skill._current_time = 5.0  # Simulate being halfway through
+    skill.advance(5.0, env)  # Updates _current_time internally
 
     # Interrupt
     skill.interrupt(env)

@@ -17,9 +17,7 @@ Available classes:
   OngoingMoveAction, OngoingNoOpAction: Specialized action trackers
 - ActiveSkill: Protocol for tracking execution of a single action
 - Environment: Protocol for environment that owns world state
-- SymbolicSkill: Base class for symbolic skill execution
-- SymbolicMoveSkill, SymbolicSearchSkill, SymbolicPickSkill,
-  SymbolicPlaceSkill: Specialized symbolic skill implementations
+- SymbolicSkill: Symbolic skill execution (action-driven, no subclasses needed)
 - SimpleSymbolicEnvironment: Simple environment for symbolic execution
 - EnvironmentInterfaceV2: New interface using Environment/ActiveSkill architecture
 """
@@ -46,10 +44,6 @@ from .skill import (
     ActiveSkill,
     Environment,
     SymbolicSkill,
-    SymbolicMoveSkill,
-    SymbolicSearchSkill,
-    SymbolicPickSkill,
-    SymbolicPlaceSkill,
 )
 
 from .symbolic import SimpleSymbolicEnvironment
@@ -79,10 +73,6 @@ __all__ = [
     "ActiveSkill",
     "Environment",
     "SymbolicSkill",
-    "SymbolicMoveSkill",
-    "SymbolicSearchSkill",
-    "SymbolicPickSkill",
-    "SymbolicPlaceSkill",
     "SimpleSymbolicEnvironment",
     "EnvironmentInterfaceV2",
 ]
