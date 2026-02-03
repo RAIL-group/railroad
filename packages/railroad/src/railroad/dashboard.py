@@ -47,6 +47,7 @@ from railroad._bindings import (
     OrGoal,
     GoalType,
     Fluent,
+    State,
 )
 from railroad.helper import format_goal, get_best_branch, get_satisfied_branch
 
@@ -598,7 +599,7 @@ class PlannerDashboard:
 
     def _record_history_entry(
         self,
-        sim_state,
+        state: State,
         relevant_fluents,
         tree_trace: str | None,
         step_index: int | None,
@@ -608,14 +609,14 @@ class PlannerDashboard:
         # Store a lightweight, serializable snapshot
         entry = {
             "step": step_index,
-            "time": float(sim_state.time),
+            "time": float(state.time),
             "last_action": last_action_name,
             "heuristic": float(heuristic_value) if heuristic_value is not None else None,
             "relevant_fluents": [str(f) for f in sorted(relevant_fluents, key=lambda x: x.name)],
             "goals": {
-                str(g): bool(g in sim_state.fluents) for g in self.goal_fluents
+                str(g): bool(g in state.fluents) for g in self.goal_fluents
             },
-            "goal_satisfied": self._is_goal_satisfied(sim_state),
+            "goal_satisfied": self._is_goal_satisfied(state),
             "tree_trace": tree_trace,
         }
         self.history.append(entry)
@@ -757,7 +758,7 @@ class PlannerDashboard:
 
     def update(
         self,
-        sim_state,
+        state: State,
         relevant_fluents: Set = set(),
         tree_trace: str | None = None,
         step_index: int | None = None,
@@ -772,21 +773,21 @@ class PlannerDashboard:
         - right panel: MCTS trace
         """
         # Extract robots from (free NAME) fluents
-        for fluent in sim_state.fluents:
+        for fluent in state.fluents:
             fluent_str = str(fluent)
             if fluent_str.startswith("(free ") and fluent_str.endswith(")"):
                 robot_name = fluent_str[6:-1].strip()
                 self.known_robots.add(robot_name)
 
         # Use best branch progress for OR goals
-        achieved, total, label = self._get_best_branch_progress(sim_state)
+        achieved, total, label = self._get_best_branch_progress(state)
 
         if last_action_name:
             # Record action with its START time (before execution)
             self.actions_taken.append((last_action_name, self._last_state_time))
 
         # Update last state time for next action's start time
-        self._last_state_time = sim_state.time
+        self._last_state_time = state.time
 
         if self._interactive:
             # Interactive mode: update live dashboard
@@ -803,22 +804,22 @@ class PlannerDashboard:
             self.layout["progress"].update(self._build_progress_panel())
             self.layout["status"].update(
                 self._build_state_panel(
-                    sim_state=sim_state,
+                    sim_state=state,
                     relevant_fluents=relevant_fluents,
                     step_index=step_index,
                     last_action_name=last_action_name,
                 )
             )
             if tree_trace:
-                self.layout["debug"].update(self._build_trace_panel(sim_state, tree_trace))
+                self.layout["debug"].update(self._build_trace_panel(state, tree_trace))
 
             sleep(0.01)
 
         # Record history entry (used by both modes)
         self._record_history_entry(
-            sim_state=sim_state,
+            state=state,
             relevant_fluents=relevant_fluents,
-            tree_trace=str(sim_state) + "\n\n" + tree_trace if tree_trace else None,
+            tree_trace=str(state) + "\n\n" + tree_trace if tree_trace else None,
             step_index=step_index,
             last_action_name=last_action_name,
             heuristic_value=heuristic_value,
