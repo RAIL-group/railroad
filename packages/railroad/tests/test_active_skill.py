@@ -158,3 +158,50 @@ def test_interruptable_move_skill_interrupt_behavior():
     assert F("at", "r1", "r1_loc") in env.fluents  # Destination rewritten to robot_loc
     assert F("free", "r1") in env.fluents  # Free fluent added
     assert F("at", "r1", "bedroom") not in env.fluents  # Original destination NOT used
+
+
+def test_skill_overrides_mapping():
+    """Test that SimpleSymbolicEnvironment respects skill_overrides."""
+    from railroad.environment.skill import SymbolicSkill, InterruptableMoveSymbolicSkill
+    from railroad.environment.symbolic import SimpleSymbolicEnvironment
+    from railroad._bindings import Fluent as F, State
+    from railroad.core import Effect, Operator
+
+    # Create environment with skill override for move actions
+    env = SimpleSymbolicEnvironment(
+        initial_state=State(0.0, {F("at", "r1", "kitchen"), F("free", "r1")}, []),
+        objects_by_type={"robot": {"r1"}, "location": {"kitchen", "bedroom"}},
+        objects_at_locations={},
+        skill_overrides={"move": InterruptableMoveSymbolicSkill},
+    )
+
+    # Create move and non-move actions
+    move_op = Operator(
+        name="move",
+        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F("at", "?robot", "?from"), F("free", "?robot")],
+        effects=[Effect(time=5.0, resulting_fluents={F("at", "?robot", "?to")})],
+    )
+    wait_op = Operator(
+        name="wait",
+        parameters=[("?robot", "robot")],
+        preconditions=[F("free", "?robot")],
+        effects=[Effect(time=1.0, resulting_fluents={F("waited", "?robot")})],
+    )
+
+    move_actions = move_op.instantiate({"robot": ["r1"], "location": ["kitchen", "bedroom"]})
+    wait_actions = wait_op.instantiate({"robot": ["r1"]})
+
+    move_action = [a for a in move_actions if "kitchen" in a.name and "bedroom" in a.name][0]
+    wait_action = wait_actions[0]
+
+    # Move should get InterruptableMoveSymbolicSkill
+    move_skill = env.create_skill(move_action, 0.0)
+    assert isinstance(move_skill, InterruptableMoveSymbolicSkill)
+    assert move_skill.is_interruptible is True
+
+    # Wait should get default SymbolicSkill
+    wait_skill = env.create_skill(wait_action, 0.0)
+    assert isinstance(wait_skill, SymbolicSkill)
+    assert not isinstance(wait_skill, InterruptableMoveSymbolicSkill)
+    assert wait_skill.is_interruptible is False
