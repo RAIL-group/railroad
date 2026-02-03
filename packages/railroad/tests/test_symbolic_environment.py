@@ -35,17 +35,6 @@ def test_symbolic_environment_construction():
     assert F("at", "robot1", "kitchen") in env.state.fluents
 
 
-def test_public_api_exports():
-    """Test that classes are exported from railroad.environment."""
-    from railroad.environment import (
-        Environment,
-        SymbolicEnvironment,
-    )
-
-    assert Environment is not None
-    assert SymbolicEnvironment is not None
-
-
 # =============================================================================
 # Action Execution Tests
 # =============================================================================
@@ -75,7 +64,7 @@ def test_symbolic_environment_act():
     actions = env.get_actions()
     move_action = get_action_by_name(actions, "move robot1 kitchen bedroom")
 
-    env.act(move_action, do_interrupt=False)
+    env.act(move_action)
 
     assert env.time == pytest.approx(5.0, abs=0.1)
     assert F("at", "robot1", "bedroom") in env.state.fluents
@@ -125,7 +114,7 @@ def test_symbolic_environment_multi_robot_interrupt():
 
     # Robot1 starts long move (10s)
     move_action = get_action_by_name(actions, "move robot1 kitchen living_room")
-    env.act(move_action, do_interrupt=False)
+    env.act(move_action)
 
     # Now robot1 is busy, robot2 is still free
     assert F("free", "robot2") in env.state.fluents
@@ -134,7 +123,7 @@ def test_symbolic_environment_multi_robot_interrupt():
     # Robot2 starts short wait (2s), with interrupt enabled
     actions = env.get_actions()
     wait_action = get_action_by_name(actions, "wait robot2")
-    env.act(wait_action, do_interrupt=True)
+    env.act(wait_action)
 
     # At t=2, robot2 becomes free, robot1's move should be interrupted
     assert env.time == pytest.approx(2.0, abs=0.1)
@@ -221,7 +210,7 @@ def test_symbolic_environment_create_skill():
 
 def test_symbolic_environment_create_move_skill():
     """Test move skill creation via factory method."""
-    from railroad.environment import InterruptableMoveSymbolicSkill
+    from railroad.environment import SymbolicSkill, InterruptableMoveSymbolicSkill
 
     env = SymbolicEnvironment(
         state=State(0.0, set(), []),
@@ -247,9 +236,21 @@ def test_symbolic_environment_create_move_skill():
 
     skill = env.create_skill(action, time=0.0)
 
-    # Move skills ARE interruptible by default in the new design
-    assert isinstance(skill, InterruptableMoveSymbolicSkill)
-    assert skill.is_interruptible
+    # Move skills use SymbolicSkill by default (not interruptible)
+    assert isinstance(skill, SymbolicSkill)
+    assert not isinstance(skill, InterruptableMoveSymbolicSkill)
+    assert not skill.is_interruptible
+
+    # Can use skill_overrides to make moves interruptible
+    env_with_override = SymbolicEnvironment(
+        state=State(0.0, set(), []),
+        objects_by_type={},
+        operators=[],
+        skill_overrides={"move": InterruptableMoveSymbolicSkill},
+    )
+    skill_interruptible = env_with_override.create_skill(action, time=0.0)
+    assert isinstance(skill_interruptible, InterruptableMoveSymbolicSkill)
+    assert skill_interruptible.is_interruptible
 
 
 def test_symbolic_environment_create_search_skill():
@@ -500,7 +501,7 @@ def test_search_skill_resolves_probabilistically():
     actions = env.get_actions()
     search_action = get_action_by_name(actions, "search robot1 kitchen Knife")
 
-    env.act(search_action, do_interrupt=False)
+    env.act(search_action)
 
     # Since Knife IS at kitchen, search should succeed
     assert F("searched", "kitchen", "Knife") in env.state.fluents
@@ -531,7 +532,7 @@ def test_search_skill_fails_when_object_not_at_location():
     actions = env.get_actions()
     search_action = get_action_by_name(actions, "search robot1 kitchen Knife")
 
-    env.act(search_action, do_interrupt=False)
+    env.act(search_action)
 
     # Search should complete but NOT find the object
     assert F("searched", "kitchen", "Knife") in env.state.fluents
@@ -570,7 +571,7 @@ def test_pick_skill_updates_fluents():
     actions = env.get_actions()
     pick_action = get_action_by_name(actions, "pick robot1 kitchen Knife")
 
-    env.act(pick_action, do_interrupt=False)
+    env.act(pick_action)
 
     # Verify fluents are correct
     assert F("holding", "robot1", "Knife") in env.state.fluents
@@ -605,7 +606,7 @@ def test_place_skill_updates_fluents():
     actions = env.get_actions()
     place_action = get_action_by_name(actions, "place robot1 bedroom Knife")
 
-    env.act(place_action, do_interrupt=False)
+    env.act(place_action)
 
     # Verify fluents are correct
     assert F("at", "Knife", "bedroom") in env.state.fluents

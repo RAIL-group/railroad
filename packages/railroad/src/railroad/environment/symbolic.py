@@ -213,21 +213,15 @@ class SymbolicEnvironment(Environment):
     def create_skill(self, action: Action, time: float) -> ActiveSkill:
         """Create an ActiveSkill from the action.
 
-        Routes to skill class based on:
-        1. skill_overrides (if configured)
-        2. Default mapping (move → InterruptableMoveSymbolicSkill, else SymbolicSkill)
+        Uses SymbolicSkill by default. Use skill_overrides to customize
+        skill classes for specific action types (e.g., interruptible moves).
         """
         parts = action.name.split()
         action_type = parts[0] if parts else ""
 
-        # Check for override first
         if action_type in self._skill_overrides:
             skill_class = self._skill_overrides[action_type]
             return skill_class(action=action, start_time=time)
-
-        # Default routing
-        if action_type == "move":
-            return InterruptableMoveSymbolicSkill(action=action, start_time=time)
 
         return SymbolicSkill(action=action, start_time=time)
 
