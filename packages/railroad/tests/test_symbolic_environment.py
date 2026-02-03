@@ -125,7 +125,7 @@ def test_simple_symbolic_environment_create_move_skill():
 
     assert isinstance(skill, SymbolicSkill)
     assert skill.robot == "r1"
-    assert skill.is_interruptible  # Move skills are interruptible
+    assert not skill.is_interruptible  # Move skills are NOT interruptible by default
 
 
 def test_simple_symbolic_environment_revelation():
