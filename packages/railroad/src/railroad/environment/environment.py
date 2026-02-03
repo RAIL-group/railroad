@@ -53,7 +53,7 @@ class Environment(ABC):
             GroundedEffect(abs_time - start_time, effect.resulting_fluents)
             for abs_time, effect in upcoming_effects
         ]
-        action = Action([], relative_effects, name="_initial_effects")
+        action = Action(set(), relative_effects, name="_initial_effects")
         return SymbolicSkill(action=action, start_time=start_time)
 
     @property

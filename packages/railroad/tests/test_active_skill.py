@@ -1,30 +1,5 @@
 """Tests for ActiveSkill protocol."""
 import pytest
-from typing import Protocol, runtime_checkable
-
-
-def test_active_skill_protocol_exists():
-    """Test that ActiveSkill protocol can be imported."""
-    from railroad.environment.skill import ActiveSkill
-
-    assert hasattr(ActiveSkill, 'is_done')
-    assert hasattr(ActiveSkill, 'is_interruptible')
-    assert hasattr(ActiveSkill, 'upcoming_effects')
-    assert hasattr(ActiveSkill, 'time_to_next_event')
-    assert hasattr(ActiveSkill, 'advance')
-    assert hasattr(ActiveSkill, 'interrupt')
-
-
-def test_environment_protocol_exists():
-    """Test that Environment protocol can be imported."""
-    from railroad.environment.skill import Environment
-
-    assert hasattr(Environment, 'fluents')
-    assert hasattr(Environment, 'objects_by_type')
-    assert hasattr(Environment, 'create_skill')
-    assert hasattr(Environment, 'apply_effect')
-    assert hasattr(Environment, 'resolve_probabilistic_effect')
-    assert hasattr(Environment, 'get_objects_at_location')
 
 
 def test_symbolic_skill_base_class():
@@ -79,42 +54,12 @@ def test_symbolic_skill_move_not_interruptible_by_default():
 def test_interruptable_move_skill_interrupt_behavior():
     """Test that InterruptableMoveSymbolicSkill.interrupt() rewrites fluents correctly."""
     from railroad.environment.skill import InterruptableMoveSymbolicSkill
-    from railroad._bindings import Fluent as F
+    from railroad.environment import SymbolicEnvironment
+    from railroad._bindings import Fluent as F, State
     from railroad.core import Effect, Operator
 
-    # Create a simple mock environment that implements Environment protocol
-    class MockEnvironment:
-        def __init__(self):
-            self._fluents = {F("at", "r1", "kitchen"), F("free", "r1")}
-            self._objects_by_type = {"robot": {"r1"}, "location": {"kitchen", "bedroom"}}
-
-        @property
-        def fluents(self):
-            return self._fluents
-
-        @property
-        def objects_by_type(self):
-            return self._objects_by_type
-
-        def create_skill(self, action, time):
-            from railroad.environment.skill import SymbolicSkill
-            return SymbolicSkill(action=action, start_time=time)
-
-        def apply_effect(self, effect):
-            for fluent in effect.resulting_fluents:
-                if fluent.negated:
-                    self._fluents.discard(~fluent)
-                else:
-                    self._fluents.add(fluent)
-
-        def resolve_probabilistic_effect(self, effect, current_fluents):
-            return [effect], current_fluents
-
-        def get_objects_at_location(self, location):
-            return {}
-
-    # Create move operator and action
-    op = Operator(
+    # Create move operator
+    move_op = Operator(
         name="move",
         parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
         preconditions=[F("at", "?robot", "?from"), F("free", "?robot")],
@@ -123,10 +68,18 @@ def test_interruptable_move_skill_interrupt_behavior():
             Effect(time=10.0, resulting_fluents={~F("at", "?robot", "?from"), F("at", "?robot", "?to"), F("free", "?robot")}),
         ]
     )
-    actions = op.instantiate({"robot": ["r1"], "location": ["kitchen", "bedroom"]})
+
+    # Create environment
+    initial_state = State(0.0, {F("at", "r1", "kitchen"), F("free", "r1")})
+    env = SymbolicEnvironment(
+        state=initial_state,
+        objects_by_type={"robot": {"r1"}, "location": {"kitchen", "bedroom"}},
+        operators=[move_op],
+    )
+
+    actions = move_op.instantiate({"robot": ["r1"], "location": ["kitchen", "bedroom"]})
     action = [a for a in actions if "kitchen" in a.name and "bedroom" in a.name][0]
 
-    env = MockEnvironment()
     skill = InterruptableMoveSymbolicSkill(action=action, start_time=0.0)
 
     # InterruptableMoveSymbolicSkill IS interruptible

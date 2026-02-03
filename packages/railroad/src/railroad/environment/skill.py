@@ -1,12 +1,13 @@
 """Active skill protocol and base implementations."""
 
-from typing import TYPE_CHECKING, Dict, List, Protocol, Set, Tuple, runtime_checkable
+from typing import TYPE_CHECKING, List, Protocol, Set, Tuple, runtime_checkable
 
 from railroad._bindings import GroundedEffect
 from railroad.core import Fluent
 
 if TYPE_CHECKING:
     from railroad._bindings import Action
+    from .environment import Environment
 
 
 @runtime_checkable
@@ -44,49 +45,6 @@ class ActiveSkill(Protocol):
 
     def interrupt(self, env: "Environment") -> None:
         """Interrupt this skill, applying partial effects to environment."""
-        ...
-
-
-@runtime_checkable
-class Environment(Protocol):
-    """Protocol for environment that owns world state.
-
-    The Environment is the single source of truth for the world state. It:
-    - Holds current fluents (ground truth)
-    - Holds objects_by_type (all known objects)
-    - Creates ActiveSkills via factory method
-    - Applies effects (handling adds, removes, and perception)
-    - Resolves probabilistic effect branches
-    """
-
-    @property
-    def fluents(self) -> Set[Fluent]:
-        """Current ground truth fluents."""
-        ...
-
-    @property
-    def objects_by_type(self) -> Dict[str, Set[str]]:
-        """All known objects, organized by type."""
-        ...
-
-    def create_skill(self, action: "Action", time: float) -> ActiveSkill:
-        """Create an ActiveSkill appropriate for this environment."""
-        ...
-
-    def apply_effect(self, effect: GroundedEffect) -> None:
-        """Apply an effect, handling adds, removes, and perception."""
-        ...
-
-    def resolve_probabilistic_effect(
-        self,
-        effect: GroundedEffect,
-        current_fluents: Set[Fluent],
-    ) -> Tuple[List[GroundedEffect], Set[Fluent]]:
-        """Resolve which branch of a probabilistic effect occurs."""
-        ...
-
-    def get_objects_at_location(self, location: str) -> Dict[str, Set[str]]:
-        """Get objects at a location (ground truth for search resolution)."""
         ...
 
 
@@ -137,7 +95,7 @@ class SymbolicSkill(ActiveSkill):
             return self._upcoming_effects[0][0]
         return float("inf")
 
-    def advance(self, time: float, env: Environment) -> None:
+    def advance(self, time: float, env: "Environment") -> None:
         """Advance to given time, apply due effects to environment."""
         self._current_time = time
         due_effects = [
@@ -149,7 +107,7 @@ class SymbolicSkill(ActiveSkill):
         for _, effect in due_effects:
             env.apply_effect(effect)
 
-    def interrupt(self, env: Environment) -> None:
+    def interrupt(self, env: "Environment") -> None:
         """Interrupt this skill. No-op for base SymbolicSkill."""
         pass
 
@@ -181,7 +139,7 @@ class InterruptableMoveSymbolicSkill(SymbolicSkill):
         self._robot = parts[1] if len(parts) >= 2 else None
         self._move_destination = parts[3] if len(parts) >= 4 else None
 
-    def interrupt(self, env: Environment) -> None:
+    def interrupt(self, env: "Environment") -> None:
         """Interrupt move and create intermediate location.
 
         Creates a robot_loc intermediate location and rewrites

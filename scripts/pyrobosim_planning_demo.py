@@ -1,9 +1,9 @@
-from environments.pyrobosim_v2 import PyRoboSimEnvironment
+from environments.pyrobosim import PyRoboSimEnv
 from railroad import operators
 from railroad.planner import MCTSPlanner
 from railroad.core import Fluent as F, get_action_by_name
-from railroad.environment import EnvironmentInterfaceV2
-from railroad._bindings import ff_heuristic
+from railroad.experimental.environment import EnvironmentInterface
+from railroad._bindings import ff_heuristic, State
 from railroad.dashboard import PlannerDashboard
 import argparse
 import logging
@@ -16,8 +16,8 @@ PLACE_TIME = 1.0
 
 
 def main(args):
-    # Create the new self-contained environment
-    env = PyRoboSimEnvironment(
+    # Create the PyRoboSim environment
+    env = PyRoboSimEnv(
         world_file=args.world_file,
         show_plot=args.show_plot,
         record_plots=not args.no_video,
@@ -26,8 +26,24 @@ def main(args):
     # Goal: move apple and banana to counter
     goal = F("at apple0 counter0") & F("at banana0 counter0")
 
+    # Build initial state from environment
+    initial_fluents = set()
+    for robot_name in env.robots:
+        robot_loc = f"{robot_name}_loc"
+        initial_fluents.add(F("at", robot_name, robot_loc))
+        initial_fluents.add(F("free", robot_name))
+        initial_fluents.add(F("revealed", robot_loc))
+    initial_state = State(0.0, initial_fluents)
+
+    # Build objects_by_type from environment
+    objects_by_type = {
+        "robot": set(env.robots.keys()),
+        "location": set(env.locations.keys()),
+        "object": set(env.objects.keys()),
+    }
+
     # Create operators - move uses distance-based time from environment
-    move_time_fn = env.get_move_cost_fn()
+    move_time_fn = env.get_skills_time_fn('move')
     object_find_prob = lambda r, l, o: 0.8 if l == 'my_desk' and o == 'apple0' else 0.2
     move_op = operators.construct_move_operator_blocking(move_time_fn)
     search_op = operators.construct_search_operator(object_find_prob, SEARCH_TIME)
@@ -36,7 +52,12 @@ def main(args):
     no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
 
     # Create interface with environment and operators
-    env_interface = EnvironmentInterfaceV2(env, [no_op, pick_op, place_op, move_op, search_op])
+    env_interface = EnvironmentInterface(
+        initial_state=initial_state,
+        objects_by_type=objects_by_type,
+        operators=[no_op, pick_op, place_op, move_op, search_op],
+        environment=env,
+    )
 
     # Planning loop
     actions_taken = []

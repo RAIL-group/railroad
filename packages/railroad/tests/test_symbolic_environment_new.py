@@ -34,8 +34,8 @@ def test_symbolic_environment_act():
         parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
         preconditions=[F("at ?robot ?from"), F("free ?robot")],
         effects=[
-            Effect(time=0.0, resulting_fluents=[~F("free ?robot")]),
-            Effect(time=5.0, resulting_fluents=[~F("at ?robot ?from"), F("at ?robot ?to"), F("free ?robot")]),
+            Effect(time=0.0, resulting_fluents={~F("free ?robot")}),
+            Effect(time=5.0, resulting_fluents={~F("at ?robot ?from"), F("at ?robot ?to"), F("free ?robot")}),
         ]
     )
 

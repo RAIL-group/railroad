@@ -16,7 +16,8 @@ import environments.procthor
 from railroad.planner import MCTSPlanner
 from railroad.core import Fluent as F, State, get_action_by_name
 from railroad._bindings import ff_heuristic
-from railroad.environment import EnvironmentInterfaceV2, SimpleSymbolicEnvironment
+from railroad.environment import SymbolicEnvironment
+from railroad._bindings import State
 from railroad.dashboard import PlannerDashboard
 from railroad import operators
 from environments import plotting, utils
@@ -49,7 +50,7 @@ def main():
         F("at robot2 start_loc"), F("free robot2"),
     }
 
-    initial_state = State(time=0, fluents=initial_fluents)
+    initial_state = State(0.0, initial_fluents)
 
     # Task: Place all objects at target location
     goal = F(f"at {objects[0]} {to_loc}") & F(f"at {objects[1]} {to_loc}")
@@ -80,48 +81,46 @@ def main():
     no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
 
     # Create symbolic environment with ground truth from ProcTHOR
-    env = SimpleSymbolicEnvironment(
-        initial_state=initial_state,
+    env = SymbolicEnvironment(
+        state=initial_state,
         objects_by_type=objects_by_type,
-        objects_at_locations=objects_at_locations,
+        operators=[no_op, pick_op, place_op, move_op, search_op],
+        true_object_locations=objects_at_locations,
     )
-
-    # Create environment interface
-    sim = EnvironmentInterfaceV2(env, [no_op, pick_op, place_op, move_op, search_op])
 
     # Planning loop
     actions_taken = []
     max_iterations = 60
 
     # Dashboard
-    h_value = ff_heuristic(sim.state, goal, sim.get_actions())
+    h_value = ff_heuristic(env.state, goal, env.get_actions())
     with PlannerDashboard(goal, initial_heuristic=h_value) as dashboard:
-        dashboard.update(sim_state=sim.state)
+        dashboard.update(sim_state=env.state)
 
         for iteration in range(max_iterations):
-            if goal.evaluate(sim.state.fluents):
+            if goal.evaluate(env.state.fluents):
                 break
 
-            all_actions = sim.get_actions()
+            all_actions = env.get_actions()
             mcts = MCTSPlanner(all_actions)
-            action_name = mcts(sim.state, goal, max_iterations=10000, c=300, max_depth=20, heuristic_multiplier=2)
+            action_name = mcts(env.state, goal, max_iterations=10000, c=300, max_depth=20, heuristic_multiplier=2)
 
             if action_name == 'NONE':
                 dashboard.console.print("No more actions available. Goal may not be achievable.")
                 break
 
             action = get_action_by_name(all_actions, action_name)
-            sim.advance(action, do_interrupt=False)
+            env.act(action)
             actions_taken.append(action_name)
 
             tree_trace = mcts.get_trace_from_last_mcts_tree()
-            h_value = ff_heuristic(sim.state, goal, sim.get_actions())
+            h_value = ff_heuristic(env.state, goal, env.get_actions())
             relevant_fluents = {
-                f for f in sim.state.fluents
+                f for f in env.state.fluents
                 if any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
             }
             dashboard.update(
-                sim_state=sim.state,
+                sim_state=env.state,
                 relevant_fluents=relevant_fluents,
                 tree_trace=tree_trace,
                 step_index=iteration,
@@ -129,7 +128,7 @@ def main():
                 heuristic_value=h_value,
             )
 
-    dashboard.print_history(sim.state, actions_taken)
+    dashboard.print_history(env.state, actions_taken)
 
     # Plotting
     robot_poses_dict = utils.extract_robot_poses(actions_taken, robot_locations, procthor_env.locations)

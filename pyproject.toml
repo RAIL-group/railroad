@@ -46,6 +46,9 @@ gridmap = { path = "packages/gridmap", editable = true }
 environments = { path = "packages/environments", editable = true }
 procthor = { path = "packages/procthor", editable = true }
 
+[tool.ty.src]
+exclude = ["**/scratch/**"]
+
 [tool.ty.environment]
 extra-paths = [
     "packages/railroad/src",

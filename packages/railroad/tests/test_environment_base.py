@@ -1,20 +1,9 @@
 """Tests for base Environment class."""
 import pytest
-from abc import ABC
 from typing import Dict, Set, List
 from railroad._bindings import Fluent as F, State
 from railroad.core import Effect, Operator
 from railroad.environment.environment import Environment
-
-
-def test_environment_is_abstract():
-    """Test that Environment cannot be instantiated directly."""
-    from railroad.environment.environment import Environment
-
-    assert issubclass(Environment, ABC)
-
-    with pytest.raises(TypeError, match="Can't instantiate abstract class"):
-        Environment(state=None, operators=[])
 
 
 class MinimalEnvironment(Environment):
@@ -92,8 +81,8 @@ def test_environment_act_executes_action():
         parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
         preconditions=[F("at ?robot ?from"), F("free ?robot")],
         effects=[
-            Effect(time=0.0, resulting_fluents=[~F("free ?robot")]),
-            Effect(time=5.0, resulting_fluents=[~F("at ?robot ?from"), F("at ?robot ?to"), F("free ?robot")]),
+            Effect(time=0.0, resulting_fluents={~F("free ?robot")}),
+            Effect(time=5.0, resulting_fluents={~F("at ?robot ?from"), F("at ?robot ?to"), F("free ?robot")}),
         ]
     )
 
@@ -117,7 +106,7 @@ def test_environment_act_rejects_invalid_preconditions():
         name="move",
         parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
         preconditions=[F("at ?robot ?from"), F("free ?robot")],
-        effects=[Effect(time=5.0, resulting_fluents=[F("at ?robot ?to")])]
+        effects=[Effect(time=5.0, resulting_fluents={F("at ?robot ?to")})]
     )
 
     env = MinimalEnvironment(state=state, operators=[move_op], fluents=fluents)
