@@ -4,7 +4,7 @@ import pytest
 
 def test_symbolic_skill_base_class():
     """Test SymbolicSkill base implementation."""
-    from railroad.environment.symbolic import SymbolicSkill
+    from railroad.environment import SymbolicSkill
     from railroad._bindings import Fluent as F
     from railroad.core import Effect, Operator
 
@@ -28,7 +28,7 @@ def test_symbolic_skill_base_class():
 
 def test_symbolic_skill_move_not_interruptible_by_default():
     """Test that SymbolicSkill is NOT interruptible for move actions by default."""
-    from railroad.environment.symbolic import SymbolicSkill
+    from railroad.environment import SymbolicSkill
     from railroad._bindings import Fluent as F
     from railroad.core import Effect, Operator
 
@@ -53,7 +53,7 @@ def test_symbolic_skill_move_not_interruptible_by_default():
 
 def test_interruptable_move_skill_interrupt_behavior():
     """Test that InterruptableMoveSymbolicSkill.interrupt() rewrites fluents correctly."""
-    from railroad.environment.symbolic import InterruptableMoveSymbolicSkill
+    from railroad.environment import InterruptableMoveSymbolicSkill
     from railroad.environment import SymbolicEnvironment
     from railroad._bindings import Fluent as F, State
     from railroad.core import Effect, Operator
@@ -104,8 +104,7 @@ def test_interruptable_move_skill_interrupt_behavior():
 
 def test_skill_overrides_mapping():
     """Test that SymbolicEnvironment respects skill_overrides."""
-    from railroad.environment.symbolic import SymbolicSkill, InterruptableMoveSymbolicSkill
-    from railroad.environment.symbolic import SymbolicEnvironment
+    from railroad.environment import SymbolicSkill, InterruptableMoveSymbolicSkill, SymbolicEnvironment
     from railroad._bindings import Fluent as F, State
     from railroad.core import Effect, Operator
 
