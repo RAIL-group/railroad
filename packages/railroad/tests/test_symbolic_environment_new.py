@@ -52,3 +52,20 @@ def test_symbolic_environment_act():
 
     assert env.time == pytest.approx(5.0, abs=0.1)
     assert F("at", "robot1", "bedroom") in env.state.fluents
+
+
+def test_simple_symbolic_environment_alias():
+    """Test SimpleSymbolicEnvironment still works for backward compatibility."""
+    from railroad.environment.symbolic import SimpleSymbolicEnvironment
+
+    initial_fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
+    initial_state = State(0.0, initial_fluents, [])
+
+    # Old API - should still work
+    env = SimpleSymbolicEnvironment(
+        initial_state=initial_state,
+        objects_by_type={"robot": {"robot1"}, "location": {"kitchen"}},
+        objects_at_locations={},
+    )
+
+    assert F("at", "robot1", "kitchen") in env.fluents

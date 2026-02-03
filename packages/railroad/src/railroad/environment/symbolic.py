@@ -197,3 +197,30 @@ class SymbolicEnvironment(Environment):
 
         # Fall back to ground truth
         return obj in self._objects_at_locations.get(location, set())
+
+
+class SimpleSymbolicEnvironment(SymbolicEnvironment):
+    """Backward compatibility alias for SymbolicEnvironment.
+
+    DEPRECATED: Use SymbolicEnvironment directly with new API.
+    """
+
+    def __init__(
+        self,
+        initial_state: State,
+        objects_by_type: Dict[str, Set[str]],
+        objects_at_locations: Dict[str, Set[str]],
+        skill_overrides: Dict[str, Type[ActiveSkill]] | None = None,
+    ) -> None:
+        super().__init__(
+            state=initial_state,
+            objects_by_type=objects_by_type,
+            operators=[],  # Old API didn't take operators
+            true_object_locations=objects_at_locations,
+            skill_overrides=skill_overrides,
+        )
+
+    @property
+    def initial_state(self) -> State:
+        """The initial state used to create this environment."""
+        return State(0.0, self._fluents, [])
