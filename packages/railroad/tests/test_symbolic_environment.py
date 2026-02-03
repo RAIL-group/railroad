@@ -122,8 +122,10 @@ def test_simple_symbolic_environment_create_move_skill():
 
     skill = env.create_skill(action, time=0.0)
 
-    assert isinstance(skill, SymbolicSkill)
-    assert not skill.is_interruptible  # Move skills are NOT interruptible by default
+    # Move skills ARE interruptible by default in the new design
+    from railroad.environment.skill import InterruptableMoveSymbolicSkill
+    assert isinstance(skill, InterruptableMoveSymbolicSkill)
+    assert skill.is_interruptible
 
 
 def test_simple_symbolic_environment_revelation():
@@ -154,8 +156,8 @@ def test_simple_symbolic_environment_revelation():
     assert F("at", "Fork", "kitchen") in env.fluents
 
 
-def test_simple_symbolic_environment_get_objects_at_location():
-    """Test getting objects at a location."""
+def test_simple_symbolic_environment_objects_at_locations():
+    """Test internal objects_at_locations tracking."""
     from railroad.environment.symbolic import SimpleSymbolicEnvironment
 
     objects_at_locations = {"kitchen": {"Knife", "Fork"}}
@@ -166,12 +168,9 @@ def test_simple_symbolic_environment_get_objects_at_location():
         objects_at_locations=objects_at_locations,
     )
 
-    result = env.get_objects_at_location("kitchen")
-    assert result == {"object": {"Knife", "Fork"}}
-
-    # Test empty location
-    result = env.get_objects_at_location("bedroom")
-    assert result == {"object": set()}
+    # Access internal state for verification (get_objects_at_location is now private)
+    assert env._objects_at_locations["kitchen"] == {"Knife", "Fork"}
+    assert env._objects_at_locations.get("bedroom", set()) == set()
 
 
 def test_simple_symbolic_environment_object_location_from_fluents():
