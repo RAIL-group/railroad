@@ -25,3 +25,4 @@ data/
 # Logging
 mlruns
 mlflow.db
+.worktrees/
