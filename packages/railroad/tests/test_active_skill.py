@@ -26,8 +26,6 @@ def test_environment_protocol_exists():
     assert hasattr(Environment, 'apply_effect')
     assert hasattr(Environment, 'resolve_probabilistic_effect')
     assert hasattr(Environment, 'get_objects_at_location')
-    assert hasattr(Environment, 'remove_object_from_location')
-    assert hasattr(Environment, 'add_object_at_location')
 
 
 def test_symbolic_skill_base_class():
@@ -117,12 +115,6 @@ def test_interruptable_move_skill_interrupt_behavior():
 
         def get_objects_at_location(self, location):
             return {}
-
-        def remove_object_from_location(self, obj, location):
-            pass
-
-        def add_object_at_location(self, obj, location):
-            pass
 
     # Create move operator and action
     op = Operator(

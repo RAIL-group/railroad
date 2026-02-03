@@ -348,14 +348,6 @@ class PyRoboSimEnvironment:
                     objects["object"].add(obj.name)
         return objects
 
-    def remove_object_from_location(self, obj: str, location: str) -> None:
-        """No-op - physical env handles this during pick."""
-        pass
-
-    def add_object_at_location(self, obj: str, location: str) -> None:
-        """No-op - physical env handles this during place."""
-        pass
-
     def get_move_cost_fn(self) -> Callable[[str, str, str], float]:
         """Get a function that computes move costs based on path length.
 

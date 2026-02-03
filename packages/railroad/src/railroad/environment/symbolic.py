@@ -203,11 +203,3 @@ class SimpleSymbolicEnvironment(Environment):
         """Get objects at a location (ground truth)."""
         objects = self._objects_at_locations.get(location, set())
         return {"object": set(objects)}
-
-    def remove_object_from_location(self, obj: str, location: str) -> None:
-        """No-op: object locations are derived from fluents."""
-        pass
-
-    def add_object_at_location(self, obj: str, location: str) -> None:
-        """No-op: object locations are derived from fluents."""
-        pass

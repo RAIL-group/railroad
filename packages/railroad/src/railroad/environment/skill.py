@@ -94,22 +94,6 @@ class Environment(Protocol):
         """Get objects at a location (ground truth for search resolution)."""
         ...
 
-    def remove_object_from_location(self, obj: str, location: str) -> None:
-        """Optional: Update ground truth when object picked.
-
-        Note: Object locations can be derived from fluents, so implementations
-        may make this a no-op. Kept for backward compatibility.
-        """
-        ...
-
-    def add_object_at_location(self, obj: str, location: str) -> None:
-        """Optional: Update ground truth when object placed.
-
-        Note: Object locations can be derived from fluents, so implementations
-        may make this a no-op. Kept for backward compatibility.
-        """
-        ...
-
 
 class SymbolicSkill(ActiveSkill):
     """Symbolic skill execution driven entirely by action effects.
