@@ -278,67 +278,65 @@ def test_simple_symbolic_environment_resolve_probabilistic_effect():
 
 def test_search_skill_resolves_probabilistically():
     """Test that search skill resolves probabilistic effects via environment."""
-    from railroad.environment.symbolic import SimpleSymbolicEnvironment
-    from railroad.environment.interface_v2 import EnvironmentInterfaceV2
+    from railroad.environment.symbolic import SymbolicEnvironment
     from railroad.core import get_action_by_name
     from railroad import operators
 
     # Object IS at kitchen - search should succeed
     fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
-    env = SimpleSymbolicEnvironment(
-        initial_state=State(0.0, fluents, []),
-        objects_by_type={"robot": {"robot1"}, "location": {"kitchen"}, "object": {"Knife"}},
-        objects_at_locations={"kitchen": {"Knife"}},
-    )
 
     search_op = operators.construct_search_operator(
         object_find_prob=0.5,  # Probability doesn't matter - ground truth does
         search_time=3.0,
     )
 
-    interface = EnvironmentInterfaceV2(environment=env, operators=[search_op])
-    actions = interface.get_actions()
+    env = SymbolicEnvironment(
+        state=State(0.0, fluents, []),
+        objects_by_type={"robot": {"robot1"}, "location": {"kitchen"}, "object": {"Knife"}},
+        operators=[search_op],
+        true_object_locations={"kitchen": {"Knife"}},
+    )
+    actions = env.get_actions()
     search_action = get_action_by_name(actions, "search robot1 kitchen Knife")
 
-    interface.advance(search_action, do_interrupt=False)
+    env.act(search_action, do_interrupt=False)
 
     # Since Knife IS at kitchen, search should succeed
-    assert F("searched", "kitchen", "Knife") in interface.state.fluents
-    assert F("found", "Knife") in interface.state.fluents
-    assert F("at", "Knife", "kitchen") in interface.state.fluents
-    assert F("free", "robot1") in interface.state.fluents
+    assert F("searched", "kitchen", "Knife") in env.state.fluents
+    assert F("found", "Knife") in env.state.fluents
+    assert F("at", "Knife", "kitchen") in env.state.fluents
+    assert F("free", "robot1") in env.state.fluents
 
 
 def test_search_skill_fails_when_object_not_at_location():
     """Test that search fails when object is NOT at the searched location."""
-    from railroad.environment.symbolic import SimpleSymbolicEnvironment
-    from railroad.environment.interface_v2 import EnvironmentInterfaceV2
+    from railroad.environment.symbolic import SymbolicEnvironment
     from railroad.core import get_action_by_name
     from railroad import operators
 
     # Object is NOT at kitchen (it's at bedroom)
     fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
-    env = SimpleSymbolicEnvironment(
-        initial_state=State(0.0, fluents, []),
-        objects_by_type={"robot": {"robot1"}, "location": {"kitchen", "bedroom"}, "object": {"Knife"}},
-        objects_at_locations={"bedroom": {"Knife"}},  # Knife is NOT at kitchen
-    )
 
     search_op = operators.construct_search_operator(
         object_find_prob=0.9,  # High probability, but ground truth says object NOT here
         search_time=3.0,
     )
 
-    interface = EnvironmentInterfaceV2(environment=env, operators=[search_op])
-    actions = interface.get_actions()
+    env = SymbolicEnvironment(
+        state=State(0.0, fluents, []),
+        objects_by_type={"robot": {"robot1"}, "location": {"kitchen", "bedroom"}, "object": {"Knife"}},
+        operators=[search_op],
+        true_object_locations={"bedroom": {"Knife"}},  # Knife is NOT at kitchen
+    )
+    actions = env.get_actions()
     search_action = get_action_by_name(actions, "search robot1 kitchen Knife")
 
-    interface.advance(search_action, do_interrupt=False)
+    env.act(search_action, do_interrupt=False)
 
     # Search should complete but NOT find the object
-    assert F("searched", "kitchen", "Knife") in interface.state.fluents
-    assert F("found", "Knife") not in interface.state.fluents
-    assert F("free", "robot1") in interface.state.fluents
+    assert F("searched", "kitchen", "Knife") in env.state.fluents
+    assert F("found", "Knife") not in env.state.fluents
+    assert F("free", "robot1") in env.state.fluents
 
 
 def test_simple_symbolic_environment_create_search_skill():
@@ -412,8 +410,7 @@ def test_simple_symbolic_environment_create_place_skill():
 
 def test_pick_skill_updates_fluents():
     """Test that pick skill updates fluents correctly."""
-    from railroad.environment.symbolic import SimpleSymbolicEnvironment
-    from railroad.environment.interface_v2 import EnvironmentInterfaceV2
+    from railroad.environment.symbolic import SymbolicEnvironment
     from railroad.core import get_action_by_name
     from railroad import operators
 
@@ -421,35 +418,35 @@ def test_pick_skill_updates_fluents():
         F("at", "robot1", "kitchen"), F("free", "robot1"),
         F("at", "Knife", "kitchen"), F("found", "Knife"),
     }
-    env = SimpleSymbolicEnvironment(
-        initial_state=State(0.0, fluents, []),
+
+    pick_op = operators.construct_pick_operator_blocking(pick_time=2.0)
+
+    env = SymbolicEnvironment(
+        state=State(0.0, fluents, []),
         objects_by_type={
             "robot": {"robot1"},
             "location": {"kitchen"},
             "object": {"Knife"},
         },
-        objects_at_locations={"kitchen": {"Knife"}},
+        operators=[pick_op],
+        true_object_locations={"kitchen": {"Knife"}},
     )
 
-    pick_op = operators.construct_pick_operator_blocking(pick_time=2.0)
-    interface = EnvironmentInterfaceV2(environment=env, operators=[pick_op])
-
-    actions = interface.get_actions()
+    actions = env.get_actions()
     pick_action = get_action_by_name(actions, "pick robot1 kitchen Knife")
 
-    interface.advance(pick_action, do_interrupt=False)
+    env.act(pick_action, do_interrupt=False)
 
     # Verify fluents are correct
-    assert F("holding", "robot1", "Knife") in interface.state.fluents
-    assert F("at", "Knife", "kitchen") not in interface.state.fluents
+    assert F("holding", "robot1", "Knife") in env.state.fluents
+    assert F("at", "Knife", "kitchen") not in env.state.fluents
     # Object location is derived from fluents - holding means not at location
     assert not env._is_object_at_location("Knife", "kitchen")
 
 
 def test_place_skill_updates_fluents():
     """Test that place skill updates fluents correctly."""
-    from railroad.environment.symbolic import SimpleSymbolicEnvironment
-    from railroad.environment.interface_v2 import EnvironmentInterfaceV2
+    from railroad.environment.symbolic import SymbolicEnvironment
     from railroad.core import get_action_by_name
     from railroad import operators
 
@@ -457,26 +454,27 @@ def test_place_skill_updates_fluents():
         F("at", "robot1", "bedroom"), F("free", "robot1"),
         F("holding", "robot1", "Knife"), F("hand-full", "robot1"),
     }
-    env = SimpleSymbolicEnvironment(
-        initial_state=State(0.0, fluents, []),
+
+    place_op = operators.construct_place_operator_blocking(place_time=2.0)
+
+    env = SymbolicEnvironment(
+        state=State(0.0, fluents, []),
         objects_by_type={
             "robot": {"robot1"},
             "location": {"bedroom"},
             "object": {"Knife"},
         },
-        objects_at_locations={"bedroom": set()},
+        operators=[place_op],
+        true_object_locations={"bedroom": set()},
     )
 
-    place_op = operators.construct_place_operator_blocking(place_time=2.0)
-    interface = EnvironmentInterfaceV2(environment=env, operators=[place_op])
-
-    actions = interface.get_actions()
+    actions = env.get_actions()
     place_action = get_action_by_name(actions, "place robot1 bedroom Knife")
 
-    interface.advance(place_action, do_interrupt=False)
+    env.act(place_action, do_interrupt=False)
 
     # Verify fluents are correct
-    assert F("at", "Knife", "bedroom") in interface.state.fluents
-    assert F("holding", "robot1", "Knife") not in interface.state.fluents
+    assert F("at", "Knife", "bedroom") in env.state.fluents
+    assert F("holding", "robot1", "Knife") not in env.state.fluents
     # Object location is derived from fluents
     assert env._is_object_at_location("Knife", "bedroom")

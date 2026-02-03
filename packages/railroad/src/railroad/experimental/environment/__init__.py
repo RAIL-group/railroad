@@ -4,11 +4,11 @@ This module contains the original environment interface that has been superseded
 by the newer Environment/ActiveSkill architecture in railroad.environment.
 
 For new code, prefer using:
-- railroad.environment.Environment (protocol)
+- railroad.environment.Environment (abstract base class)
+- railroad.environment.SymbolicEnvironment (concrete implementation)
+- railroad.environment.SimpleSymbolicEnvironment (backward compatibility alias)
 - railroad.environment.ActiveSkill (protocol)
 - railroad.environment.SymbolicSkill
-- railroad.environment.SimpleSymbolicEnvironment
-- railroad.environment.EnvironmentInterfaceV2
 
 This legacy interface is preserved for backward compatibility.
 """
