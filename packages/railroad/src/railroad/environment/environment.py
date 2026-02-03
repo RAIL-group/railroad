@@ -157,3 +157,64 @@ class Environment(ABC):
     def _any_robot_free(self) -> bool:
         """Check if any robot is free."""
         return any(f.name == "free" for f in self.fluents)
+
+    def act(
+        self,
+        action: Action,
+        do_interrupt: bool = True,
+        loop_callback_fn: Optional[Callable[[], None]] = None,
+    ) -> State:
+        """Execute action, return state when a robot is free for new dispatch.
+
+        Args:
+            action: The action to execute.
+            do_interrupt: Whether to interrupt interruptible skills when done.
+            loop_callback_fn: Optional callback called each iteration.
+
+        Returns:
+            The new state after execution.
+
+        Raises:
+            ValueError: If action preconditions are not satisfied.
+        """
+        if not self.state.satisfies_precondition(action):
+            raise ValueError(
+                f"Action preconditions not satisfied: {action.name}"
+            )
+
+        skill = self.create_skill(action, self._time)
+        self._active_skills.append(skill)
+
+        # Apply immediate effects at current time
+        for s in self._active_skills:
+            s.advance(self._time, self)
+        self._active_skills = [s for s in self._active_skills if not s.is_done]
+
+        # Continue until any robot becomes free
+        while not self._any_robot_free():
+            if all(s.is_done for s in self._active_skills):
+                break
+
+            skill_times = [s.time_to_next_event for s in self._active_skills] or [float("inf")]
+            next_time = min(skill_times)
+            if next_time == float("inf"):
+                break
+
+            # Advance all skills to next event time
+            for s in self._active_skills:
+                s.advance(next_time, self)
+
+            self._time = next_time
+            self._active_skills = [s for s in self._active_skills if not s.is_done]
+
+            if loop_callback_fn is not None:
+                loop_callback_fn()
+
+        # Interrupt interruptible skills if requested
+        if do_interrupt:
+            for skill in self._active_skills:
+                if skill.is_interruptible and not skill.is_done:
+                    skill.interrupt(self)
+
+        self._active_skills = [s for s in self._active_skills if not s.is_done]
+        return self.state

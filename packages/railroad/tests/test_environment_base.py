@@ -80,3 +80,49 @@ def test_environment_get_actions():
 
     action_names = [a.name for a in actions]
     assert "move robot1 kitchen bedroom" in action_names
+
+
+def test_environment_act_executes_action():
+    """Test that act() executes an action and returns new state."""
+    fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
+    state = State(0.0, fluents, [])
+
+    move_op = Operator(
+        name="move",
+        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F("at ?robot ?from"), F("free ?robot")],
+        effects=[
+            Effect(time=0.0, resulting_fluents=[~F("free ?robot")]),
+            Effect(time=5.0, resulting_fluents=[~F("at ?robot ?from"), F("at ?robot ?to"), F("free ?robot")]),
+        ]
+    )
+
+    env = MinimalEnvironment(state=state, operators=[move_op], fluents=fluents)
+    actions = env.get_actions()
+    move_action = next(a for a in actions if a.name == "move robot1 kitchen bedroom")
+
+    result_state = env.act(move_action, do_interrupt=False)
+
+    assert env.time == pytest.approx(5.0, abs=0.1)
+    assert F("at", "robot1", "bedroom") in result_state.fluents
+    assert F("free", "robot1") in result_state.fluents
+
+
+def test_environment_act_rejects_invalid_preconditions():
+    """Test that act() raises ValueError for invalid preconditions."""
+    fluents = {F("at", "robot1", "kitchen")}  # Missing "free robot1"
+    state = State(0.0, fluents, [])
+
+    move_op = Operator(
+        name="move",
+        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F("at ?robot ?from"), F("free ?robot")],
+        effects=[Effect(time=5.0, resulting_fluents=[F("at ?robot ?to")])]
+    )
+
+    env = MinimalEnvironment(state=state, operators=[move_op], fluents=fluents)
+    actions = env.get_actions()
+    move_action = next(a for a in actions if a.name == "move robot1 kitchen bedroom")
+
+    with pytest.raises(ValueError, match="preconditions not satisfied"):
+        env.act(move_action)
