@@ -62,15 +62,14 @@ class SimpleSymbolicEnvironment(Environment):
         Checks skill_overrides first, falls back to default SymbolicSkill.
         """
         parts = action.name.split()
-        robot = parts[1] if len(parts) > 1 else "unknown"
         action_type = parts[0] if parts else ""
 
         # Check for override
         if action_type in self._skill_overrides:
             skill_class = self._skill_overrides[action_type]
-            return skill_class(action=action, start_time=time, robot=robot)
+            return skill_class(action=action, start_time=time)
 
-        return SymbolicSkill(action=action, start_time=time, robot=robot)
+        return SymbolicSkill(action=action, start_time=time)
 
     def apply_effect(self, effect: GroundedEffect) -> None:
         """Apply an effect, handling adds and removes.

@@ -27,19 +27,21 @@ class PhysicalSkill:
         self,
         action: Action,
         start_time: float,
-        robot: str,
         physical_env: "PyRoboSimEnvironment",
         skill_name: str,
         skill_args: tuple,
     ) -> None:
         self._action = action
         self._start_time = start_time
-        self._robot = robot
         self._physical_env = physical_env
         self._skill_name = skill_name
         self._is_done = False
         self._is_interruptible = skill_name == "move"
         self._completion_time: float | None = None
+
+        # Extract robot from action name: "action_type robot ..."
+        parts = action.name.split()
+        self._robot = parts[1] if len(parts) > 1 else "unknown"
 
         # Track wall-clock time for actual duration
         self._wall_start_time = time_module.time()
@@ -51,11 +53,7 @@ class PhysicalSkill:
         )
 
         # Start physical execution
-        physical_env._execute_skill(robot, skill_name, *skill_args)
-
-    @property
-    def robot(self) -> str:
-        return self._robot
+        physical_env._execute_skill(self._robot, skill_name, *skill_args)
 
     @property
     def is_done(self) -> bool:
@@ -243,25 +241,17 @@ class PyRoboSimEnvironment:
         """Create a PhysicalSkill that executes on the robot."""
         parts = action.name.split()
         action_type = parts[0]
-        robot = parts[1]
 
         if action_type in {'move', 'search', 'pick', 'place', 'no_op'}:
             return PhysicalSkill(
                 action=action,
                 start_time=time,
-                robot=robot,
                 physical_env=self,
                 skill_name=action_type,
                 skill_args=parts[1:],
             )
         else:
             raise NotImplementedError("Action type not found; unsupported behavior.")
-            # # Default: use symbolic skill
-            # return SymbolicSkill(
-            #     action=action,
-            #     start_time=time,
-            #     robot=robot,
-            # )
 
     def apply_effect(self, effect: GroundedEffect) -> None:
         """Apply effect fluents to the state."""

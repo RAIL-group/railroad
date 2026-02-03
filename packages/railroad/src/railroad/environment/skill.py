@@ -19,11 +19,6 @@ class ActiveSkill(Protocol):
     """
 
     @property
-    def robot(self) -> str:
-        """Which robot is executing this skill."""
-        ...
-
-    @property
     def is_done(self) -> bool:
         """Whether the skill has completed."""
         ...
@@ -108,28 +103,21 @@ class SymbolicSkill(ActiveSkill):
         self,
         action: "Action",
         start_time: float,
-        robot: str,
     ) -> None:
         """Initialize a symbolic skill from an action.
 
         Args:
             action: The action being executed (contains all effect info).
             start_time: Start time of the action.
-            robot: Name of the robot executing this skill.
         """
         self._action = action
         self._start_time = start_time
-        self._robot = robot
         self._current_time = start_time
         self._upcoming_effects: List[Tuple[float, GroundedEffect]] = sorted(
             [(start_time + eff.time, eff) for eff in action.effects],
             key=lambda el: el[0]
         )
         self._is_interruptible = False
-
-    @property
-    def robot(self) -> str:
-        return self._robot
 
     @property
     def is_done(self) -> bool:
@@ -178,20 +166,19 @@ class InterruptableMoveSymbolicSkill(SymbolicSkill):
         self,
         action: "Action",
         start_time: float,
-        robot: str,
     ) -> None:
         """Initialize an interruptable move skill.
 
         Args:
             action: The move action being executed.
             start_time: Start time of the move.
-            robot: Name of the robot executing this skill.
         """
-        super().__init__(action, start_time, robot)
+        super().__init__(action, start_time)
         self._is_interruptible = True
 
-        # Extract destination from action name: "move robot from to"
+        # Extract robot and destination from action name: "move robot from to"
         parts = action.name.split()
+        self._robot = parts[1] if len(parts) >= 2 else None
         self._move_destination = parts[3] if len(parts) >= 4 else None
 
     def interrupt(self, env: Environment) -> None:
@@ -206,7 +193,7 @@ class InterruptableMoveSymbolicSkill(SymbolicSkill):
         if self.is_done:
             return  # Already complete
 
-        if self._move_destination is None:
+        if self._move_destination is None or self._robot is None:
             return  # Not a valid move action
 
         # For move actions: create intermediate location and rewrite effects

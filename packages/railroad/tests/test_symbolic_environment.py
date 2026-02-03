@@ -91,7 +91,6 @@ def test_simple_symbolic_environment_create_skill():
     skill = env.create_skill(action, time=0.0)
 
     assert isinstance(skill, SymbolicSkill)
-    assert skill.robot == "r1"
 
 
 def test_simple_symbolic_environment_create_move_skill():
@@ -124,7 +123,6 @@ def test_simple_symbolic_environment_create_move_skill():
     skill = env.create_skill(action, time=0.0)
 
     assert isinstance(skill, SymbolicSkill)
-    assert skill.robot == "r1"
     assert not skill.is_interruptible  # Move skills are NOT interruptible by default
 
 
@@ -366,7 +364,6 @@ def test_simple_symbolic_environment_create_search_skill():
     skill = env.create_skill(search_action, time=0.0)
 
     assert isinstance(skill, SymbolicSkill)
-    assert skill.robot == "r1"
     assert not skill.is_interruptible  # Search skills are not interruptible
 
 
@@ -389,7 +386,6 @@ def test_simple_symbolic_environment_create_pick_skill():
     skill = env.create_skill(pick_action, time=0.0)
 
     assert isinstance(skill, SymbolicSkill)
-    assert skill.robot == "r1"
     assert not skill.is_interruptible  # Pick skills are not interruptible
 
 
@@ -412,7 +408,6 @@ def test_simple_symbolic_environment_create_place_skill():
     skill = env.create_skill(place_action, time=0.0)
 
     assert isinstance(skill, SymbolicSkill)
-    assert skill.robot == "r1"
     assert not skill.is_interruptible  # Place skills are not interruptible
 
 

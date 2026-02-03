@@ -7,7 +7,6 @@ def test_active_skill_protocol_exists():
     """Test that ActiveSkill protocol can be imported."""
     from railroad.environment.skill import ActiveSkill
 
-    assert hasattr(ActiveSkill, 'robot')
     assert hasattr(ActiveSkill, 'is_done')
     assert hasattr(ActiveSkill, 'is_interruptible')
     assert hasattr(ActiveSkill, 'upcoming_effects')
@@ -44,9 +43,8 @@ def test_symbolic_skill_base_class():
     actions = op.instantiate({"robot": ["r1"]})
     action = actions[0]
 
-    skill = SymbolicSkill(action=action, start_time=0.0, robot="r1")
+    skill = SymbolicSkill(action=action, start_time=0.0)
 
-    assert skill.robot == "r1"
     assert skill.is_done is False
     assert skill.is_interruptible is False  # Default
     assert len(skill.upcoming_effects) == 1
@@ -72,7 +70,7 @@ def test_symbolic_skill_move_not_interruptible_by_default():
     actions = op.instantiate({"robot": ["r1"], "location": ["kitchen", "bedroom"]})
     action = [a for a in actions if "kitchen" in a.name and "bedroom" in a.name][0]
 
-    skill = SymbolicSkill(action=action, start_time=0.0, robot="r1")
+    skill = SymbolicSkill(action=action, start_time=0.0)
 
     # Move actions are NOT interruptible by default
     assert skill.is_interruptible is False
@@ -100,8 +98,7 @@ def test_interruptable_move_skill_interrupt_behavior():
 
         def create_skill(self, action, time):
             from railroad.environment.skill import SymbolicSkill
-            robot = action.name.split()[1] if action.name else "r1"
-            return SymbolicSkill(action=action, start_time=time, robot=robot)
+            return SymbolicSkill(action=action, start_time=time)
 
         def apply_effect(self, effect):
             for fluent in effect.resulting_fluents:
@@ -130,7 +127,7 @@ def test_interruptable_move_skill_interrupt_behavior():
     action = [a for a in actions if "kitchen" in a.name and "bedroom" in a.name][0]
 
     env = MockEnvironment()
-    skill = InterruptableMoveSymbolicSkill(action=action, start_time=0.0, robot="r1")
+    skill = InterruptableMoveSymbolicSkill(action=action, start_time=0.0)
 
     # InterruptableMoveSymbolicSkill IS interruptible
     assert skill.is_interruptible is True

@@ -7,7 +7,7 @@ from typing import Callable, Collection, Dict, List, Optional, Set
 from railroad._bindings import Action, Fluent, State, GroundedEffect
 from railroad.core import Operator
 
-from .skill import ActiveSkill, Environment
+from .skill import ActiveSkill, Environment, SymbolicSkill
 
 F = Fluent
 
@@ -32,16 +32,36 @@ class EnvironmentInterfaceV2:
         self._operators = operators
         self._active_skills: List[ActiveSkill] = []
 
-        # Initialize time and upcoming effects from environment's initial_state if available
+        # Initialize time from environment's initial_state if available
         initial_state = getattr(environment, "initial_state", None)
         if initial_state is not None:
             self._time: float = initial_state.time
-            self._initial_upcoming_effects: List[tuple[float, GroundedEffect]] = list(
-                initial_state.upcoming_effects
-            )
+            # Convert initial upcoming effects to a SymbolicSkill
+            if initial_state.upcoming_effects:
+                initial_effects = self._create_initial_effects_skill(
+                    initial_state.time, list(initial_state.upcoming_effects)
+                )
+                self._active_skills.append(initial_effects)
         else:
             self._time = 0.0
-            self._initial_upcoming_effects = []
+
+    def _create_initial_effects_skill(
+        self,
+        start_time: float,
+        upcoming_effects: List[tuple[float, GroundedEffect]],
+    ) -> SymbolicSkill:
+        """Create a SymbolicSkill from initial upcoming effects.
+
+        Converts absolute-time effects to relative-time effects for SymbolicSkill.
+        """
+        # Create new GroundedEffects with times relative to start_time
+        relative_effects = [
+            GroundedEffect(abs_time - start_time, effect.resulting_fluents)
+            for abs_time, effect in upcoming_effects
+        ]
+        # Create an Action with these effects
+        action = Action([], relative_effects, name="_initial_effects")
+        return SymbolicSkill(action=action, start_time=start_time)
 
     @property
     def time(self) -> float:
@@ -56,32 +76,14 @@ class EnvironmentInterfaceV2:
             skill.advance(self._time, self._environment)
         self._active_skills = [s for s in self._active_skills if not s.is_done]
 
-    def _apply_initial_effects(self, time: float) -> None:
-        """Apply initial upcoming effects that are due at or before the given time."""
-        due_effects = [(t, e) for t, e in self._initial_upcoming_effects if t <= time + 1e-9]
-        for _, effect in due_effects:
-            self._environment.apply_effect(effect)
-        self._initial_upcoming_effects = [
-            (t, e) for t, e in self._initial_upcoming_effects if t > time + 1e-9
-        ]
-
-    def _next_initial_effect_time(self) -> float:
-        """Return the time of the next initial upcoming effect, or inf if none."""
-        if not self._initial_upcoming_effects:
-            return float("inf")
-        return min(t for t, _ in self._initial_upcoming_effects)
-
     @property
     def state(self) -> State:
         """Assemble state from Environment fluents + ActiveSkill upcoming effects."""
         # Update skills to apply any completed effects before assembling state
         self._update_skills()
 
-        # Combine initial upcoming effects with active skill effects
+        # Collect upcoming effects from all active skills
         effects: List[tuple[float, GroundedEffect]] = []
-        effects.extend(
-            (t, e) for t, e in self._initial_upcoming_effects if t > self._time
-        )
         for skill in self._active_skills:
             effects.extend(skill.upcoming_effects)
 
@@ -148,24 +150,21 @@ class EnvironmentInterfaceV2:
         self._active_skills.append(skill)
 
         # Apply any immediate effects at the current time
-        self._apply_initial_effects(self._time)
         for s in self._active_skills:
             s.advance(self._time, self._environment)
         self._active_skills = [s for s in self._active_skills if not s.is_done]
 
         # Continue until any robot becomes free (enables concurrent dispatch)
         while not self._any_robot_free():
-            if all(s.is_done for s in self._active_skills) and not self._initial_upcoming_effects:
+            if all(s.is_done for s in self._active_skills):
                 break
 
-            # Consider both skill effects and initial effects for next time
             skill_times = [s.time_to_next_event for s in self._active_skills] or [float("inf")]
-            next_time = min(min(skill_times), self._next_initial_effect_time())
+            next_time = min(skill_times)
             if next_time == float("inf"):
                 break
 
             # Apply effects at next_time
-            self._apply_initial_effects(next_time)
             for s in self._active_skills:
                 s.advance(next_time, self._environment)
 
