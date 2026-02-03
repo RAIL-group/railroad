@@ -164,7 +164,7 @@ def bench_movie_night(case: BenchmarkCase):
             if any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
         }
         dashboard.update(
-            sim_state=sim.state,
+            state=sim.state,
             relevant_fluents=relevant_fluents,
             tree_trace=tree_trace,
             step_index=iteration,
