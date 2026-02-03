@@ -39,12 +39,10 @@ OBJECTS_AT_LOCATIONS = {
 }
 
 # Fixed operator times for symbolic planning
+ROBOT_VELOCITY = 1.0
 SEARCH_TIME = 5.0
 PICK_TIME = 5.0
 PLACE_TIME = 5.0
-
-# Robot velocity for move time calculation
-ROBOT_VELOCITY = 1.0
 
 
 def main() -> None:
@@ -76,16 +74,21 @@ def main() -> None:
         "object": set(objects_of_interest),
     }
 
-    # Probabilistic search - higher success rate in kitchen
-    object_find_prob = lambda r, loc, o: 0.6 if "kitchen" in loc else 0.4
+    # # Probabilistic search - higher success rate in kitchen
+    # object_find_prob = lambda r, loc, o: 0.6 if "kitchen" in loc else 0.4
+    # Higher find probability if object is actually at the location
+    def object_find_prob(robot: str, loc: str, obj: str) -> float:
+        objects_here = OBJECTS_AT_LOCATIONS.get(loc, set())
+        return 0.8 if obj in objects_here else 0.2
+
 
     # Distance-based move time function
-    def get_move_time(robot: str, loc_from: str, loc_to: str) -> float:
+    def move_time(robot: str, loc_from: str, loc_to: str) -> float:
         distance = float(np.linalg.norm(LOCATIONS[loc_from] - LOCATIONS[loc_to]))
         return distance / ROBOT_VELOCITY
 
     # Create operators - move uses distance-based time
-    move_op = operators.construct_move_operator_blocking(get_move_time)
+    move_op = operators.construct_move_operator_blocking(move_time)
     search_op = operators.construct_search_operator(object_find_prob, SEARCH_TIME)
     pick_op = operators.construct_pick_operator_blocking(PICK_TIME)
     place_op = operators.construct_place_operator_blocking(PLACE_TIME)
@@ -106,7 +109,7 @@ def main() -> None:
 
     h_value = ff_heuristic(env.state, goal, env.get_actions())
     with PlannerDashboard(goal, initial_heuristic=h_value) as dashboard:
-        dashboard.update(sim_state=env.state)
+        dashboard.update(state=env.state)
 
         for iteration in range(max_iterations):
             if goal.evaluate(env.state.fluents):
@@ -133,7 +136,7 @@ def main() -> None:
                 if any(kw in f.name for kw in ["at", "holding", "found", "searched"])
             }
             dashboard.update(
-                sim_state=env.state,
+                state=env.state,
                 relevant_fluents=relevant_fluents,
                 tree_trace=tree_trace,
                 step_index=iteration,

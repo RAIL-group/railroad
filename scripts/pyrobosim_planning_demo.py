@@ -67,7 +67,7 @@ def main(args):
     h_value = ff_heuristic(env_interface.state, goal, env_interface.get_actions())
     with PlannerDashboard(goal, initial_heuristic=h_value) as dashboard:
         # (Optional) initial dashboard update
-        dashboard.update(sim_state=env_interface.state)
+        dashboard.update(state=env_interface.state)
 
         for iteration in range(max_iterations):
             # Check if goal is reached
@@ -96,7 +96,7 @@ def main(args):
                 if any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
             }
             dashboard.update(
-                sim_state=env_interface.state,
+                state=env_interface.state,
                 relevant_fluents=relevant_fluents,
                 tree_trace=tree_trace,
                 step_index=iteration,

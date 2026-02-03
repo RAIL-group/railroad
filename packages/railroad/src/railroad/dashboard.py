@@ -280,7 +280,7 @@ class PlannerDashboard:
         """Return whether the dashboard is running in interactive mode."""
         return self._interactive
 
-    def __enter__(self):
+    def __enter__(self) -> "PlannerDashboard":
         if self._interactive:
             self._live = Live(
                 self.renderable,
