@@ -67,3 +67,4 @@ markers = [
     "slow: marks tests as slow to run (deselect with '-m \"not slow\"')"
 ]
 testpaths = ["packages"]
+norecursedirs = ["packages/environments/scratch"]
