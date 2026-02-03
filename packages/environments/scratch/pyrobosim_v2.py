@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Set, Tuple
 
 from railroad._bindings import Action, Fluent, GroundedEffect
-from railroad.environment.skill import ActiveSkill, Environment, SymbolicSkill
+from railroad.environment import ActiveSkill, Environment, SymbolicSkill
 
 if TYPE_CHECKING:
     import pyrobosim

@@ -23,8 +23,18 @@ class MinimalEnvironment(Environment):
         return self._objects
 
     def create_skill(self, action, time):
-        from railroad.environment.skill import SymbolicSkill
+        from railroad.environment.symbolic import SymbolicSkill
         return SymbolicSkill(action=action, start_time=time)
+
+    def _create_initial_effects_skill(self, start_time, upcoming_effects):
+        from railroad.environment.symbolic import SymbolicSkill
+        from railroad._bindings import Action, GroundedEffect
+        relative_effects = [
+            GroundedEffect(abs_time - start_time, effect.resulting_fluents)
+            for abs_time, effect in upcoming_effects
+        ]
+        action = Action(set(), relative_effects, name="_initial_effects")
+        return SymbolicSkill(action=action, start_time=start_time)
 
     def apply_effect(self, effect) -> None:
         for fluent in effect.resulting_fluents:

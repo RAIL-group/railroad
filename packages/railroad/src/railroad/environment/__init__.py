@@ -19,12 +19,12 @@ Legacy classes have been moved to railroad.experimental.environment:
 """
 
 from .environment import Environment
-from .skill import (
-    ActiveSkill,
+from .skill import ActiveSkill
+from .symbolic import (
     InterruptableMoveSymbolicSkill,
+    SymbolicEnvironment,
     SymbolicSkill,
 )
-from .symbolic import SymbolicEnvironment
 
 __all__ = [
     # Core classes

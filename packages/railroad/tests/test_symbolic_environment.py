@@ -84,7 +84,7 @@ def test_symbolic_environment_act():
 
 def test_symbolic_environment_multi_robot_interrupt():
     """Test that robot1's move is interrupted when robot2 becomes free."""
-    from railroad.environment.skill import InterruptableMoveSymbolicSkill
+    from railroad.environment.symbolic import InterruptableMoveSymbolicSkill
     from railroad.core import get_action_by_name
 
     # Two robots: robot1 at kitchen, robot2 at bedroom
@@ -198,7 +198,7 @@ def test_symbolic_environment_apply_effect_add():
 
 def test_symbolic_environment_create_skill():
     """Test skill creation via factory method."""
-    from railroad.environment.skill import SymbolicSkill
+    from railroad.environment.symbolic import SymbolicSkill
 
     env = SymbolicEnvironment(
         state=State(0.0, set(), []),
@@ -221,7 +221,7 @@ def test_symbolic_environment_create_skill():
 
 def test_symbolic_environment_create_move_skill():
     """Test move skill creation via factory method."""
-    from railroad.environment.skill import InterruptableMoveSymbolicSkill
+    from railroad.environment.symbolic import InterruptableMoveSymbolicSkill
 
     env = SymbolicEnvironment(
         state=State(0.0, set(), []),
@@ -254,7 +254,7 @@ def test_symbolic_environment_create_move_skill():
 
 def test_symbolic_environment_create_search_skill():
     """Test search skill creation via factory method."""
-    from railroad.environment.skill import SymbolicSkill
+    from railroad.environment.symbolic import SymbolicSkill
     from railroad import operators
 
     env = SymbolicEnvironment(
@@ -278,7 +278,7 @@ def test_symbolic_environment_create_search_skill():
 
 def test_symbolic_environment_create_pick_skill():
     """Test pick skill creation via factory method."""
-    from railroad.environment.skill import SymbolicSkill
+    from railroad.environment.symbolic import SymbolicSkill
     from railroad import operators
 
     env = SymbolicEnvironment(
@@ -300,7 +300,7 @@ def test_symbolic_environment_create_pick_skill():
 
 def test_symbolic_environment_create_place_skill():
     """Test place skill creation via factory method."""
-    from railroad.environment.skill import SymbolicSkill
+    from railroad.environment.symbolic import SymbolicSkill
     from railroad import operators
 
     env = SymbolicEnvironment(

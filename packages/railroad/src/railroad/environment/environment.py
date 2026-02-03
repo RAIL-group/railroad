@@ -8,7 +8,7 @@ from typing import Callable, Collection, Dict, List, Optional, Set, Tuple
 from railroad._bindings import Action, Fluent, GroundedEffect, State
 from railroad.core import Operator
 
-from .skill import ActiveSkill, SymbolicSkill
+from .skill import ActiveSkill
 
 
 class Environment(ABC):
@@ -43,18 +43,14 @@ class Environment(ABC):
             )
             self._active_skills.append(initial_skill)
 
+    @abstractmethod
     def _create_initial_effects_skill(
         self,
         start_time: float,
         upcoming_effects: List[Tuple[float, GroundedEffect]],
-    ) -> SymbolicSkill:
-        """Create a SymbolicSkill from initial upcoming effects."""
-        relative_effects = [
-            GroundedEffect(abs_time - start_time, effect.resulting_fluents)
-            for abs_time, effect in upcoming_effects
-        ]
-        action = Action(set(), relative_effects, name="_initial_effects")
-        return SymbolicSkill(action=action, start_time=start_time)
+    ) -> ActiveSkill:
+        """Create an ActiveSkill from initial upcoming effects."""
+        ...
 
     @property
     def time(self) -> float:
