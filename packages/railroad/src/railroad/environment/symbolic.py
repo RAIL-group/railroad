@@ -1,5 +1,6 @@
 """Simple symbolic environment implementation."""
 
+import random
 from typing import Dict, List, Set, Tuple, Type
 
 from railroad._bindings import Action, Fluent, GroundedEffect, State
@@ -122,8 +123,7 @@ class SimpleSymbolicEnvironment(Environment):
         """Resolve which branch of a probabilistic effect occurs.
 
         For search actions, checks ground truth to determine success/failure.
-        The success branch contains a "found <object>" fluent - we check if
-        that object is actually at the searched location in ground truth.
+        Otherwise, samples from the probability distribution.
         """
         if not effect.is_probabilistic:
             return [effect], current_fluents
@@ -132,23 +132,36 @@ class SimpleSymbolicEnvironment(Environment):
         if not branches:
             return [], current_fluents
 
-        # Try to identify the success branch (contains "found" fluent)
-        # and check ground truth to decide
-        for _, branch_effects in branches:
-            for branch_eff in branch_effects:
-                for fluent in branch_eff.resulting_fluents:
-                    if fluent.name == "found" and not fluent.negated:
-                        # This is the success branch - check ground truth
-                        target_object = fluent.args[0]
-                        # Find the location from the "at" fluent in the same branch
-                        location = self._find_search_location_from_branch(branch_eff, target_object)
-                        if location and self._is_object_at_location(target_object, location):
-                            # Object IS at location - return success branch
-                            return list(branch_effects), current_fluents
+        # Find success branch (contains positive "found" fluent) and check ground truth
+        success_branch = None
+        target_object = None
+        location = None
 
-        # Object NOT at location or couldn't determine - return failure branch (last one)
-        _, last_branch_effects = branches[-1]
-        return list(last_branch_effects), current_fluents
+        for branch in branches:
+            _, branch_effects = branch
+            for eff in branch_effects:
+                for fluent in eff.resulting_fluents:
+                    if fluent.name == "found" and not fluent.negated:
+                        success_branch = branch
+                        target_object = fluent.args[0]
+                        location = self._find_search_location_from_branch(eff, target_object)
+
+        # If we can resolve from ground truth, do so deterministically
+        if success_branch and target_object and location:
+            if self._is_object_at_location(target_object, location):
+                _, effects = success_branch
+                return list(effects), current_fluents
+            # Object not at location - sample from non-success branches
+            other_branches = [b for b in branches if b is not success_branch]
+            if other_branches:
+                probs = [p for p, _ in other_branches]
+                _, effects = random.choices(other_branches, weights=probs, k=1)[0]
+                return list(effects), current_fluents
+
+        # Can't determine from ground truth - sample from distribution
+        probs = [p for p, _ in branches]
+        _, effects = random.choices(branches, weights=probs, k=1)[0]
+        return list(effects), current_fluents
 
     def _find_search_location_from_branch(
         self, effect: GroundedEffect, target_object: str
