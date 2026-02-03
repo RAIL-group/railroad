@@ -111,16 +111,13 @@ class Environment(Protocol):
         ...
 
 
-class SymbolicSkill:
+class SymbolicSkill(ActiveSkill):
     """Symbolic skill execution driven entirely by action effects.
 
     Implements ActiveSkill protocol for symbolic mode where skills
-    step through effects immediately when asked. All behavior is
-    derived from the action - no subclasses needed.
-
-    - Interruptibility is determined from action type (move actions are interruptible)
-    - Ground truth updates are handled by Environment.apply_effect()
-    - Interruption creates intermediate locations for move actions
+    step through effects immediately when asked. Not interruptible
+    by default - use InterruptableMoveSymbolicSkill for moves that
+    can be interrupted when another robot becomes free.
     """
 
     def __init__(
@@ -144,15 +141,7 @@ class SymbolicSkill:
             [(start_time + eff.time, eff) for eff in action.effects],
             key=lambda el: el[0]
         )
-
-        # Determine interruptibility from action type
-        action_type = action.name.split()[0] if action.name else ""
-        self._is_interruptible = action_type == "move"
-
-        # For move interruption, extract destination from action name
-        # Format: "move robot from to"
-        parts = action.name.split()
-        self._move_destination = parts[3] if len(parts) >= 4 and action_type == "move" else None
+        self._is_interruptible = False
 
     @property
     def robot(self) -> str:
@@ -189,10 +178,44 @@ class SymbolicSkill:
             env.apply_effect(effect)
 
     def interrupt(self, env: Environment) -> None:
-        """Interrupt this skill, applying partial effects if interruptible."""
-        if not self._is_interruptible:
-            return
+        """Interrupt this skill. No-op for base SymbolicSkill."""
+        pass
 
+
+class InterruptableMoveSymbolicSkill(SymbolicSkill):
+    """Move skill that can be interrupted when another robot becomes free.
+
+    When interrupted mid-execution, rewrites destination fluents to an
+    intermediate location (robot_loc), enabling the planner to account
+    for partial progress.
+    """
+
+    def __init__(
+        self,
+        action: "Action",
+        start_time: float,
+        robot: str,
+    ) -> None:
+        """Initialize an interruptable move skill.
+
+        Args:
+            action: The move action being executed.
+            start_time: Start time of the move.
+            robot: Name of the robot executing this skill.
+        """
+        super().__init__(action, start_time, robot)
+        self._is_interruptible = True
+
+        # Extract destination from action name: "move robot from to"
+        parts = action.name.split()
+        self._move_destination = parts[3] if len(parts) >= 4 else None
+
+    def interrupt(self, env: Environment) -> None:
+        """Interrupt move and create intermediate location.
+
+        Creates a robot_loc intermediate location and rewrites
+        destination fluents to point there instead of the original end.
+        """
         if self._current_time <= self._start_time:
             return  # Cannot interrupt before start
 
@@ -200,7 +223,7 @@ class SymbolicSkill:
             return  # Already complete
 
         if self._move_destination is None:
-            return  # Not a move action
+            return  # Not a valid move action
 
         # For move actions: create intermediate location and rewrite effects
         old_target = self._move_destination

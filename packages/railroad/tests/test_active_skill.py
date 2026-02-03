@@ -55,8 +55,8 @@ def test_symbolic_skill_base_class():
     assert skill.time_to_next_event == 5.0
 
 
-def test_symbolic_move_skill_interrupt():
-    """Test that SymbolicSkill supports interruption for move actions."""
+def test_symbolic_skill_move_not_interruptible_by_default():
+    """Test that SymbolicSkill is NOT interruptible for move actions by default."""
     from railroad.environment.skill import SymbolicSkill
     from railroad._bindings import Fluent as F
     from railroad.core import Effect, Operator
@@ -72,18 +72,17 @@ def test_symbolic_move_skill_interrupt():
         ]
     )
     actions = op.instantiate({"robot": ["r1"], "location": ["kitchen", "bedroom"]})
-    # Find the move action from kitchen to bedroom
     action = [a for a in actions if "kitchen" in a.name and "bedroom" in a.name][0]
 
     skill = SymbolicSkill(action=action, start_time=0.0, robot="r1")
 
-    # Move actions are automatically detected as interruptible
-    assert skill.is_interruptible is True
+    # Move actions are NOT interruptible by default
+    assert skill.is_interruptible is False
 
 
-def test_symbolic_move_skill_interrupt_behavior():
-    """Test that SymbolicSkill.interrupt() rewrites fluents correctly for move actions."""
-    from railroad.environment.skill import SymbolicSkill
+def test_interruptable_move_skill_interrupt_behavior():
+    """Test that InterruptableMoveSymbolicSkill.interrupt() rewrites fluents correctly."""
+    from railroad.environment.skill import InterruptableMoveSymbolicSkill
     from railroad._bindings import Fluent as F
     from railroad.core import Effect, Operator
 
@@ -139,7 +138,10 @@ def test_symbolic_move_skill_interrupt_behavior():
     action = [a for a in actions if "kitchen" in a.name and "bedroom" in a.name][0]
 
     env = MockEnvironment()
-    skill = SymbolicSkill(action=action, start_time=0.0, robot="r1")
+    skill = InterruptableMoveSymbolicSkill(action=action, start_time=0.0, robot="r1")
+
+    # InterruptableMoveSymbolicSkill IS interruptible
+    assert skill.is_interruptible is True
 
     # Advance partway (apply first effect at t=0)
     skill.advance(0.0, env)

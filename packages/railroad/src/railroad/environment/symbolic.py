@@ -1,13 +1,13 @@
 """Simple symbolic environment implementation."""
 
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set, Tuple, Type
 
 from railroad._bindings import Action, Fluent, GroundedEffect, State
 
 from .skill import ActiveSkill, Environment, SymbolicSkill
 
 
-class SimpleSymbolicEnvironment:
+class SimpleSymbolicEnvironment(Environment):
     """Simple environment for symbolic (non-physical) execution.
 
     Implements the Environment protocol for symbolic planning where:
@@ -23,6 +23,7 @@ class SimpleSymbolicEnvironment:
         initial_state: State,
         objects_by_type: Dict[str, Set[str]],
         objects_at_locations: Dict[str, Set[str]],
+        skill_overrides: Dict[str, Type[ActiveSkill]] | None = None,
     ) -> None:
         """Initialize the symbolic environment.
 
@@ -30,11 +31,14 @@ class SimpleSymbolicEnvironment:
             initial_state: Initial state containing fluents and optional upcoming effects.
             objects_by_type: Objects organized by type.
             objects_at_locations: Ground truth object locations for search resolution.
+            skill_overrides: Optional mapping from action type prefix to skill class.
+                             E.g., {"move": InterruptableMoveSymbolicSkill}
         """
         self._initial_state = initial_state
         self._fluents = set(initial_state.fluents)
         self._objects_by_type = {k: set(v) for k, v in objects_by_type.items()}
         self._objects_at_locations = {k: set(v) for k, v in objects_at_locations.items()}
+        self._skill_overrides = skill_overrides or {}
 
     @property
     def initial_state(self) -> State:
@@ -54,12 +58,16 @@ class SimpleSymbolicEnvironment:
     def create_skill(self, action: Action, time: float) -> ActiveSkill:
         """Create an ActiveSkill from the action.
 
-        The skill extracts all needed information (robot, interruptibility, etc.)
-        directly from the action - no routing needed.
+        Checks skill_overrides first, falls back to default SymbolicSkill.
         """
-        # Extract robot from action name (format: "action_type robot ...")
         parts = action.name.split()
         robot = parts[1] if len(parts) > 1 else "unknown"
+        action_type = parts[0] if parts else ""
+
+        # Check for override
+        if action_type in self._skill_overrides:
+            skill_class = self._skill_overrides[action_type]
+            return skill_class(action=action, start_time=time, robot=robot)
 
         return SymbolicSkill(action=action, start_time=time, robot=robot)
 
