@@ -10,6 +10,8 @@ OR Couch to the den. This shows how OR goals allow flexibility in achieving
 objectives.
 """
 
+import numpy as np
+
 from railroad.core import Fluent as F, get_action_by_name, ff_heuristic
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
@@ -19,7 +21,13 @@ from railroad._bindings import State
 
 
 # Define locations
-LOCATIONS = ["living_room", "kitchen", "bedroom", "office", "den"]
+LOCATIONS = {
+    "living_room": np.array([0, 0]),
+    "kitchen": np.array([10, 0]),
+    "bedroom": np.array([0, 12]),
+    "office": np.array([10, 12]),
+    "den": np.array([15, 5]),
+}
 
 # Define where objects actually are (ground truth)
 OBJECTS_AT_LOCATIONS = {
@@ -31,7 +39,7 @@ OBJECTS_AT_LOCATIONS = {
 }
 
 # Fixed operator times for symbolic planning
-MOVE_TIME = 5.0
+ROBOT_VELOCITY = 1.0
 SEARCH_TIME = 5.0
 PICK_TIME = 5.0
 PLACE_TIME = 5.0
@@ -64,7 +72,7 @@ def main() -> None:
     # Objects by type
     objects_by_type = {
         "robot": {"robot1", "robot2"},
-        "location": set(LOCATIONS),
+        "location": set(LOCATIONS.keys()),
         "object": set(objects_of_interest),
     }
 
@@ -73,8 +81,13 @@ def main() -> None:
         objects_here = OBJECTS_AT_LOCATIONS.get(loc, set())
         return 0.8 if obj in objects_here else 0.2
 
-    # Create operators with fixed times
-    move_op = operators.construct_move_operator_blocking(MOVE_TIME)
+    # Distance-based move time function
+    def move_time(robot: str, loc_from: str, loc_to: str) -> float:
+        distance = float(np.linalg.norm(LOCATIONS[loc_from] - LOCATIONS[loc_to]))
+        return distance / ROBOT_VELOCITY
+
+    # Create operators - move uses distance-based time
+    move_op = operators.construct_move_operator_blocking(move_time)
     search_op = operators.construct_search_operator(object_find_prob, SEARCH_TIME)
     pick_op = operators.construct_pick_operator_blocking(PICK_TIME)
     place_op = operators.construct_place_operator_blocking(PLACE_TIME)

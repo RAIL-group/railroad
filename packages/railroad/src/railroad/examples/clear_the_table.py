@@ -12,6 +12,8 @@ than their presence.
 from functools import reduce
 from operator import and_
 
+import numpy as np
+
 from railroad.core import Fluent as F, get_action_by_name
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
@@ -21,7 +23,12 @@ from railroad._bindings import State
 
 
 # Define locations
-LOCATIONS = ["living_room", "kitchen", "table", "shelf"]
+LOCATIONS = {
+    "living_room": np.array([0, 0]),
+    "kitchen": np.array([5, 0]),
+    "table": np.array([2, 3]),  # The table location to clear
+    "shelf": np.array([8, 3]),  # Destination for cleared items
+}
 
 # Define where objects actually are (ground truth)
 OBJECTS_AT_LOCATIONS = {
@@ -32,7 +39,7 @@ OBJECTS_AT_LOCATIONS = {
 }
 
 # Fixed operator times for symbolic planning
-MOVE_TIME = 5.0
+ROBOT_VELOCITY = 1.0
 PICK_TIME = 5.0
 PLACE_TIME = 5.0
 
@@ -61,12 +68,17 @@ def main() -> None:
     # Objects by type
     objects_by_type = {
         "robot": {"robot1"},
-        "location": set(LOCATIONS),
+        "location": set(LOCATIONS.keys()),
         "object": set(objects_on_table),
     }
 
     # Create operators with fixed times
-    move_op = operators.construct_move_operator_blocking(MOVE_TIME)
+    # Distance-based move time function
+    def move_time(robot: str, loc_from: str, loc_to: str) -> float:
+        distance = float(np.linalg.norm(LOCATIONS[loc_from] - LOCATIONS[loc_to]))
+        return distance / ROBOT_VELOCITY
+
+    move_op = operators.construct_move_operator_blocking(move_time)
     pick_op = operators.construct_pick_operator_blocking(PICK_TIME)
     place_op = operators.construct_place_operator_blocking(PLACE_TIME)
 
