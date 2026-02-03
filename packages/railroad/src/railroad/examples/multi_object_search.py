@@ -16,7 +16,7 @@ from railroad.core import Fluent as F, get_action_by_name, ff_heuristic
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
 from railroad import operators
-from railroad.environment import EnvironmentInterfaceV2, SimpleSymbolicEnvironment
+from railroad.environment import SymbolicEnvironment
 from railroad._bindings import State
 
 
@@ -93,45 +93,47 @@ def main() -> None:
 
     # Initialize symbolic environment with initial state
     initial_state = State(0.0, initial_fluents, [])
-    env = SimpleSymbolicEnvironment(initial_state, objects_by_type, OBJECTS_AT_LOCATIONS)
-
-    # Create interface
-    sim = EnvironmentInterfaceV2(env, [no_op, move_op, search_op, pick_op, place_op])
+    env = SymbolicEnvironment(
+        state=initial_state,
+        objects_by_type=objects_by_type,
+        operators=[no_op, move_op, search_op, pick_op, place_op],
+        true_object_locations=OBJECTS_AT_LOCATIONS,
+    )
 
     # Planning loop
     actions_taken = []
     max_iterations = 60
 
-    h_value = ff_heuristic(sim.state, goal, sim.get_actions())
+    h_value = ff_heuristic(env.state, goal, env.get_actions())
     with PlannerDashboard(goal, initial_heuristic=h_value) as dashboard:
-        dashboard.update(sim_state=sim.state)
+        dashboard.update(sim_state=env.state)
 
         for iteration in range(max_iterations):
-            if goal.evaluate(sim.state.fluents):
+            if goal.evaluate(env.state.fluents):
                 dashboard.console.print("[green]Goal achieved![/green]")
                 break
 
-            all_actions = sim.get_actions()
+            all_actions = env.get_actions()
             mcts = MCTSPlanner(all_actions)
-            action_name = mcts(sim.state, goal, max_iterations=4000, c=300, max_depth=20)
+            action_name = mcts(env.state, goal, max_iterations=4000, c=300, max_depth=20)
 
             if action_name == "NONE":
                 dashboard.console.print("No more actions available. Goal may not be achievable.")
                 break
 
             action = get_action_by_name(all_actions, action_name)
-            sim.advance(action, do_interrupt=False)
+            env.act(action, do_interrupt=False)
             actions_taken.append(action_name)
 
             tree_trace = mcts.get_trace_from_last_mcts_tree()
-            h_value = ff_heuristic(sim.state, goal, sim.get_actions())
+            h_value = ff_heuristic(env.state, goal, env.get_actions())
             relevant_fluents = {
                 f
-                for f in sim.state.fluents
+                for f in env.state.fluents
                 if any(kw in f.name for kw in ["at", "holding", "found", "searched"])
             }
             dashboard.update(
-                sim_state=sim.state,
+                sim_state=env.state,
                 relevant_fluents=relevant_fluents,
                 tree_trace=tree_trace,
                 step_index=iteration,
@@ -139,7 +141,7 @@ def main() -> None:
                 heuristic_value=h_value,
             )
 
-    dashboard.print_history(sim.state, actions_taken)
+    dashboard.print_history(env.state, actions_taken)
 
 
 if __name__ == "__main__":
