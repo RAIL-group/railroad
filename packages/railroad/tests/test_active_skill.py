@@ -103,17 +103,17 @@ def test_interruptable_move_skill_interrupt_behavior():
 
 
 def test_skill_overrides_mapping():
-    """Test that SimpleSymbolicEnvironment respects skill_overrides."""
+    """Test that SymbolicEnvironment respects skill_overrides."""
     from railroad.environment.skill import SymbolicSkill, InterruptableMoveSymbolicSkill
-    from railroad.environment.symbolic import SimpleSymbolicEnvironment
+    from railroad.environment.symbolic import SymbolicEnvironment
     from railroad._bindings import Fluent as F, State
     from railroad.core import Effect, Operator
 
     # Create environment with skill override for move actions
-    env = SimpleSymbolicEnvironment(
-        initial_state=State(0.0, {F("at", "r1", "kitchen"), F("free", "r1")}, []),
+    env = SymbolicEnvironment(
+        state=State(0.0, {F("at", "r1", "kitchen"), F("free", "r1")}, []),
         objects_by_type={"robot": {"r1"}, "location": {"kitchen", "bedroom"}},
-        objects_at_locations={},
+        operators=[],
         skill_overrides={"move": InterruptableMoveSymbolicSkill},
     )
 

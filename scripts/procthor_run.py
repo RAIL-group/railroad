@@ -1,8 +1,7 @@
 """
 ProcTHOR environment planning demonstration.
 
-Uses the new Environment/EnvironmentInterfaceV2 architecture with
-SimpleSymbolicEnvironment for symbolic planning.
+Uses the Environment/SymbolicEnvironment architecture for symbolic planning.
 """
 
 from types import SimpleNamespace

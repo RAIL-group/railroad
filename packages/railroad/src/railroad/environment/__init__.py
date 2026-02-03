@@ -6,10 +6,9 @@ used in PDDL planning and simulation.
 Usage:
     from railroad.environment import (
         Environment,           # Abstract base class for environments
-        SymbolicEnvironment,  # Environment for symbolic execution
-        SimpleSymbolicEnvironment,  # Alias for backward compatibility
-        ActiveSkill,          # Protocol for skill execution
-        SymbolicSkill,        # Symbolic skill implementation
+        SymbolicEnvironment,   # Environment for symbolic execution
+        ActiveSkill,           # Protocol for skill execution
+        SymbolicSkill,         # Symbolic skill implementation
     )
 
 Legacy classes have been moved to railroad.experimental.environment:
@@ -25,14 +24,13 @@ from .skill import (
     InterruptableMoveSymbolicSkill,
     SymbolicSkill,
 )
-from .symbolic import SimpleSymbolicEnvironment, SymbolicEnvironment
+from .symbolic import SymbolicEnvironment
 
 __all__ = [
     # Core classes
     "ActiveSkill",
     "Environment",
     "InterruptableMoveSymbolicSkill",
-    "SimpleSymbolicEnvironment",
     "SymbolicEnvironment",
     "SymbolicSkill",
 ]

@@ -1,39 +1,163 @@
-"""Tests for SimpleSymbolicEnvironment."""
+"""Tests for SymbolicEnvironment."""
+
 import pytest
 from railroad._bindings import Fluent as F, GroundedEffect, State
 from railroad.core import Effect, Operator
+from railroad.environment.symbolic import SymbolicEnvironment
 
 
-def test_simple_symbolic_environment_construction():
-    """Test basic construction of SimpleSymbolicEnvironment."""
-    from railroad.environment.symbolic import SimpleSymbolicEnvironment
+# =============================================================================
+# Construction Tests
+# =============================================================================
 
-    fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
-    objects_by_type = {
-        "robot": {"robot1"},
-        "location": {"kitchen", "bedroom"},
-    }
-    objects_at_locations = {"kitchen": {"Knife"}}
 
-    env = SimpleSymbolicEnvironment(
-        initial_state=State(0.0, fluents, []),
-        objects_by_type=objects_by_type,
-        objects_at_locations=objects_at_locations,
+def test_symbolic_environment_construction():
+    """Test basic construction of SymbolicEnvironment."""
+    initial_fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
+
+    move_op = Operator(
+        name="move",
+        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F("at", "?robot", "?from"), F("free", "?robot")],
+        effects=[
+            Effect(time=0.0, resulting_fluents={~F("free", "?robot")}),
+            Effect(time=5.0, resulting_fluents={~F("at", "?robot", "?from"), F("at", "?robot", "?to"), F("free", "?robot")}),
+        ]
     )
 
-    assert env.fluents == fluents
-    assert env.objects_by_type == objects_by_type
+    env = SymbolicEnvironment(
+        state=State(0.0, initial_fluents, []),
+        objects_by_type={"robot": {"robot1"}, "location": {"kitchen", "bedroom"}},
+        operators=[move_op],
+    )
+
+    assert env.time == 0.0
+    assert F("at", "robot1", "kitchen") in env.state.fluents
 
 
-def test_simple_symbolic_environment_apply_effect():
+def test_public_api_exports():
+    """Test that classes are exported from railroad.environment."""
+    from railroad.environment import (
+        Environment,
+        SymbolicEnvironment,
+    )
+
+    assert Environment is not None
+    assert SymbolicEnvironment is not None
+
+
+# =============================================================================
+# Action Execution Tests
+# =============================================================================
+
+
+def test_symbolic_environment_act():
+    """Test acting (advancing state) with an action."""
+    from railroad.core import get_action_by_name
+
+    initial_fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
+
+    move_op = Operator(
+        name="move",
+        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F("at", "?robot", "?from"), F("free", "?robot")],
+        effects=[
+            Effect(time=0.0, resulting_fluents={~F("free", "?robot")}),
+            Effect(time=5.0, resulting_fluents={~F("at", "?robot", "?from"), F("at", "?robot", "?to"), F("free", "?robot")}),
+        ]
+    )
+
+    env = SymbolicEnvironment(
+        state=State(0.0, initial_fluents, []),
+        objects_by_type={"robot": {"robot1"}, "location": {"kitchen", "bedroom"}},
+        operators=[move_op],
+    )
+    actions = env.get_actions()
+    move_action = get_action_by_name(actions, "move robot1 kitchen bedroom")
+
+    env.act(move_action, do_interrupt=False)
+
+    assert env.time == pytest.approx(5.0, abs=0.1)
+    assert F("at", "robot1", "bedroom") in env.state.fluents
+    assert F("free", "robot1") in env.state.fluents
+
+
+def test_symbolic_environment_multi_robot_interrupt():
+    """Test that robot1's move is interrupted when robot2 becomes free."""
+    from railroad.environment.skill import InterruptableMoveSymbolicSkill
+    from railroad.core import get_action_by_name
+
+    # Two robots: robot1 at kitchen, robot2 at bedroom
+    initial_fluents = {
+        F("at", "robot1", "kitchen"),
+        F("at", "robot2", "bedroom"),
+        F("free", "robot1"),
+        F("free", "robot2"),
+    }
+
+    move_op = Operator(
+        name="move",
+        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F("at", "?robot", "?from"), F("free", "?robot")],
+        effects=[
+            Effect(time=0.0, resulting_fluents={~F("free", "?robot")}),
+            Effect(time=10.0, resulting_fluents={~F("at", "?robot", "?from"), F("at", "?robot", "?to"), F("free", "?robot")}),
+        ]
+    )
+    # Short action for robot2
+    wait_op = Operator(
+        name="wait",
+        parameters=[("?robot", "robot")],
+        preconditions=[F("free", "?robot")],
+        effects=[
+            Effect(time=0.0, resulting_fluents={~F("free", "?robot")}),
+            Effect(time=2.0, resulting_fluents={F("free", "?robot")}),
+        ]
+    )
+
+    env = SymbolicEnvironment(
+        state=State(0.0, initial_fluents, []),
+        objects_by_type={"robot": {"robot1", "robot2"}, "location": {"kitchen", "bedroom", "living_room"}},
+        operators=[move_op, wait_op],
+        skill_overrides={"move": InterruptableMoveSymbolicSkill},
+    )
+    actions = env.get_actions()
+
+    # Robot1 starts long move (10s)
+    move_action = get_action_by_name(actions, "move robot1 kitchen living_room")
+    env.act(move_action, do_interrupt=False)
+
+    # Now robot1 is busy, robot2 is still free
+    assert F("free", "robot2") in env.state.fluents
+    assert F("free", "robot1") not in env.state.fluents
+
+    # Robot2 starts short wait (2s), with interrupt enabled
+    actions = env.get_actions()
+    wait_action = get_action_by_name(actions, "wait robot2")
+    env.act(wait_action, do_interrupt=True)
+
+    # At t=2, robot2 becomes free, robot1's move should be interrupted
+    assert env.time == pytest.approx(2.0, abs=0.1)
+    assert F("free", "robot2") in env.state.fluents
+
+    # Robot1 should now be at intermediate location and free
+    assert F("at", "robot1", "robot1_loc") in env.state.fluents
+    assert F("free", "robot1") in env.state.fluents
+    assert F("at", "robot1", "living_room") not in env.state.fluents  # Did NOT reach destination
+
+
+# =============================================================================
+# Effect Application Tests
+# =============================================================================
+
+
+def test_symbolic_environment_apply_effect():
     """Test applying effects modifies fluents."""
-    from railroad.environment.symbolic import SimpleSymbolicEnvironment
-
     fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
-    env = SimpleSymbolicEnvironment(
-        initial_state=State(0.0, fluents, []),
+    env = SymbolicEnvironment(
+        state=State(0.0, fluents, []),
         objects_by_type={},
-        objects_at_locations={},
+        operators=[],
     )
 
     # Create a grounded effect that removes free
@@ -47,15 +171,13 @@ def test_simple_symbolic_environment_apply_effect():
     assert F("free", "robot1") not in env.fluents
 
 
-def test_simple_symbolic_environment_apply_effect_add():
+def test_symbolic_environment_apply_effect_add():
     """Test applying effects that add fluents."""
-    from railroad.environment.symbolic import SimpleSymbolicEnvironment
-
     fluents = {F("at", "robot1", "kitchen")}
-    env = SimpleSymbolicEnvironment(
-        initial_state=State(0.0, fluents, []),
+    env = SymbolicEnvironment(
+        state=State(0.0, fluents, []),
         objects_by_type={},
-        objects_at_locations={},
+        operators=[],
     )
 
     # Create a grounded effect that adds a fluent
@@ -69,15 +191,19 @@ def test_simple_symbolic_environment_apply_effect_add():
     assert F("free", "robot1") in env.fluents
 
 
-def test_simple_symbolic_environment_create_skill():
+# =============================================================================
+# Skill Creation Tests
+# =============================================================================
+
+
+def test_symbolic_environment_create_skill():
     """Test skill creation via factory method."""
-    from railroad.environment.symbolic import SimpleSymbolicEnvironment
     from railroad.environment.skill import SymbolicSkill
 
-    env = SimpleSymbolicEnvironment(
-        initial_state=State(0.0, set(), []),
+    env = SymbolicEnvironment(
+        state=State(0.0, set(), []),
         objects_by_type={},
-        objects_at_locations={},
+        operators=[],
     )
 
     op = Operator(
@@ -93,15 +219,14 @@ def test_simple_symbolic_environment_create_skill():
     assert isinstance(skill, SymbolicSkill)
 
 
-def test_simple_symbolic_environment_create_move_skill():
+def test_symbolic_environment_create_move_skill():
     """Test move skill creation via factory method."""
-    from railroad.environment.symbolic import SimpleSymbolicEnvironment
-    from railroad.environment.skill import SymbolicSkill
+    from railroad.environment.skill import InterruptableMoveSymbolicSkill
 
-    env = SimpleSymbolicEnvironment(
-        initial_state=State(0.0, set(), []),
+    env = SymbolicEnvironment(
+        state=State(0.0, set(), []),
         objects_by_type={},
-        objects_at_locations={},
+        operators=[],
     )
 
     op = Operator(
@@ -123,22 +248,91 @@ def test_simple_symbolic_environment_create_move_skill():
     skill = env.create_skill(action, time=0.0)
 
     # Move skills ARE interruptible by default in the new design
-    from railroad.environment.skill import InterruptableMoveSymbolicSkill
     assert isinstance(skill, InterruptableMoveSymbolicSkill)
     assert skill.is_interruptible
 
 
-def test_simple_symbolic_environment_revelation():
+def test_symbolic_environment_create_search_skill():
+    """Test search skill creation via factory method."""
+    from railroad.environment.skill import SymbolicSkill
+    from railroad import operators
+
+    env = SymbolicEnvironment(
+        state=State(0.0, set(), []),
+        objects_by_type={"robot": {"r1"}, "location": {"kitchen"}, "object": {"Knife"}},
+        operators=[],
+    )
+
+    search_op = operators.construct_search_operator(
+        object_find_prob=0.5,
+        search_time=3.0,
+    )
+    actions = search_op.instantiate(env.objects_by_type)
+    search_action = [a for a in actions if "r1" in a.name and "kitchen" in a.name and "Knife" in a.name][0]
+
+    skill = env.create_skill(search_action, time=0.0)
+
+    assert isinstance(skill, SymbolicSkill)
+    assert not skill.is_interruptible  # Search skills are not interruptible
+
+
+def test_symbolic_environment_create_pick_skill():
+    """Test pick skill creation via factory method."""
+    from railroad.environment.skill import SymbolicSkill
+    from railroad import operators
+
+    env = SymbolicEnvironment(
+        state=State(0.0, set(), []),
+        objects_by_type={"robot": {"r1"}, "location": {"kitchen"}, "object": {"Knife"}},
+        operators=[],
+        true_object_locations={"kitchen": {"Knife"}},
+    )
+
+    pick_op = operators.construct_pick_operator_blocking(pick_time=2.0)
+    actions = pick_op.instantiate(env.objects_by_type)
+    pick_action = [a for a in actions if "r1" in a.name and "kitchen" in a.name and "Knife" in a.name][0]
+
+    skill = env.create_skill(pick_action, time=0.0)
+
+    assert isinstance(skill, SymbolicSkill)
+    assert not skill.is_interruptible  # Pick skills are not interruptible
+
+
+def test_symbolic_environment_create_place_skill():
+    """Test place skill creation via factory method."""
+    from railroad.environment.skill import SymbolicSkill
+    from railroad import operators
+
+    env = SymbolicEnvironment(
+        state=State(0.0, set(), []),
+        objects_by_type={"robot": {"r1"}, "location": {"bedroom"}, "object": {"Knife"}},
+        operators=[],
+    )
+
+    place_op = operators.construct_place_operator_blocking(place_time=2.0)
+    actions = place_op.instantiate(env.objects_by_type)
+    place_action = [a for a in actions if "r1" in a.name and "bedroom" in a.name and "Knife" in a.name][0]
+
+    skill = env.create_skill(place_action, time=0.0)
+
+    assert isinstance(skill, SymbolicSkill)
+    assert not skill.is_interruptible  # Place skills are not interruptible
+
+
+# =============================================================================
+# Revelation Tests (Object Discovery)
+# =============================================================================
+
+
+def test_symbolic_environment_revelation():
     """Test that searching a location reveals objects at that location."""
-    from railroad.environment.symbolic import SimpleSymbolicEnvironment
-
     fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
-    objects_at_locations = {"kitchen": {"Knife", "Fork"}}
 
-    env = SimpleSymbolicEnvironment(
-        initial_state=State(0.0, fluents, []),
+    env = SymbolicEnvironment(
+        state=State(0.0, fluents, []),
         objects_by_type={"robot": {"robot1"}, "location": {"kitchen"}},
-        objects_at_locations=objects_at_locations,
+        operators=[],
+        true_object_locations={"kitchen": {"Knife", "Fork"}},
     )
 
     # Simulate a search completing (searched fluent added)
@@ -156,34 +350,33 @@ def test_simple_symbolic_environment_revelation():
     assert F("at", "Fork", "kitchen") in env.fluents
 
 
-def test_simple_symbolic_environment_objects_at_locations():
+# =============================================================================
+# Object Location Tracking Tests
+# =============================================================================
+
+
+def test_symbolic_environment_objects_at_locations():
     """Test internal objects_at_locations tracking."""
-    from railroad.environment.symbolic import SimpleSymbolicEnvironment
-
-    objects_at_locations = {"kitchen": {"Knife", "Fork"}}
-
-    env = SimpleSymbolicEnvironment(
-        initial_state=State(0.0, set(), []),
+    env = SymbolicEnvironment(
+        state=State(0.0, set(), []),
         objects_by_type={},
-        objects_at_locations=objects_at_locations,
+        operators=[],
+        true_object_locations={"kitchen": {"Knife", "Fork"}},
     )
 
-    # Access internal state for verification (get_objects_at_location is now private)
+    # Access internal state for verification
     assert env._objects_at_locations["kitchen"] == {"Knife", "Fork"}
     assert env._objects_at_locations.get("bedroom", set()) == set()
 
 
-def test_simple_symbolic_environment_object_location_from_fluents():
+def test_symbolic_environment_object_location_from_fluents():
     """Test that object locations are derived from fluents."""
-    from railroad.environment.symbolic import SimpleSymbolicEnvironment
-
     # Initial ground truth: Knife and Fork at kitchen
-    objects_at_locations = {"kitchen": {"Knife", "Fork"}}
-
-    env = SimpleSymbolicEnvironment(
-        initial_state=State(0.0, set(), []),
+    env = SymbolicEnvironment(
+        state=State(0.0, set(), []),
         objects_by_type={},
-        objects_at_locations=objects_at_locations,
+        operators=[],
+        true_object_locations={"kitchen": {"Knife", "Fork"}},
     )
 
     # Before any fluents, objects are at initial locations
@@ -202,15 +395,14 @@ def test_simple_symbolic_environment_object_location_from_fluents():
     assert env._is_object_at_location("Knife", "bedroom")
 
 
-def test_simple_symbolic_environment_fluent_overrides_ground_truth():
+def test_symbolic_environment_fluent_overrides_ground_truth():
     """Test that fluents override initial ground truth for object locations."""
-    from railroad.environment.symbolic import SimpleSymbolicEnvironment
-
     # Initial ground truth: Knife at kitchen
-    env = SimpleSymbolicEnvironment(
-        initial_state=State(0.0, set(), []),
+    env = SymbolicEnvironment(
+        state=State(0.0, set(), []),
         objects_by_type={},
-        objects_at_locations={"kitchen": {"Knife"}},
+        operators=[],
+        true_object_locations={"kitchen": {"Knife"}},
     )
 
     # Initial: Knife is at kitchen (from ground truth)
@@ -223,15 +415,19 @@ def test_simple_symbolic_environment_fluent_overrides_ground_truth():
     assert env._is_object_at_location("Knife", "bedroom")
 
 
-def test_simple_symbolic_environment_resolve_probabilistic_effect():
-    """Test resolving probabilistic effects based on ground truth."""
-    from railroad.environment.symbolic import SimpleSymbolicEnvironment
+# =============================================================================
+# Probabilistic Effect Resolution Tests
+# =============================================================================
 
+
+def test_symbolic_environment_resolve_probabilistic_effect():
+    """Test resolving probabilistic effects based on ground truth."""
     # Create an environment where "obj" IS at "loc"
-    env = SimpleSymbolicEnvironment(
-        initial_state=State(0.0, set(), []),
+    env = SymbolicEnvironment(
+        state=State(0.0, set(), []),
         objects_by_type={},
-        objects_at_locations={"loc": {"obj"}},  # obj is at loc
+        operators=[],
+        true_object_locations={"loc": {"obj"}},  # obj is at loc
     )
 
     # Create a deterministic effect
@@ -266,19 +462,24 @@ def test_simple_symbolic_environment_resolve_probabilistic_effect():
     assert effects[0] == branch1_effect
 
     # Now test when object is NOT at location
-    env2 = SimpleSymbolicEnvironment(
-        initial_state=State(0.0, set(), []),
+    env2 = SymbolicEnvironment(
+        state=State(0.0, set(), []),
         objects_by_type={},
-        objects_at_locations={"other_loc": {"obj"}},  # obj is at other_loc, not loc
+        operators=[],
+        true_object_locations={"other_loc": {"obj"}},  # obj is at other_loc, not loc
     )
     effects2, _ = env2.resolve_probabilistic_effect(prob_effect, set())
     assert len(effects2) == 1
     assert effects2[0] == branch2_effect  # failure branch
 
 
+# =============================================================================
+# Search Action Integration Tests
+# =============================================================================
+
+
 def test_search_skill_resolves_probabilistically():
     """Test that search skill resolves probabilistic effects via environment."""
-    from railroad.environment.symbolic import SymbolicEnvironment
     from railroad.core import get_action_by_name
     from railroad import operators
 
@@ -310,7 +511,6 @@ def test_search_skill_resolves_probabilistically():
 
 def test_search_skill_fails_when_object_not_at_location():
     """Test that search fails when object is NOT at the searched location."""
-    from railroad.environment.symbolic import SymbolicEnvironment
     from railroad.core import get_action_by_name
     from railroad import operators
 
@@ -339,78 +539,13 @@ def test_search_skill_fails_when_object_not_at_location():
     assert F("free", "robot1") in env.state.fluents
 
 
-def test_simple_symbolic_environment_create_search_skill():
-    """Test search skill creation via factory method."""
-    from railroad.environment.symbolic import SimpleSymbolicEnvironment
-    from railroad.environment.skill import SymbolicSkill
-    from railroad import operators
-
-    env = SimpleSymbolicEnvironment(
-        initial_state=State(0.0, set(), []),
-        objects_by_type={"robot": {"r1"}, "location": {"kitchen"}, "object": {"Knife"}},
-        objects_at_locations={},
-    )
-
-    search_op = operators.construct_search_operator(
-        object_find_prob=0.5,
-        search_time=3.0,
-    )
-    actions = search_op.instantiate(env.objects_by_type)
-    search_action = [a for a in actions if "r1" in a.name and "kitchen" in a.name and "Knife" in a.name][0]
-
-    skill = env.create_skill(search_action, time=0.0)
-
-    assert isinstance(skill, SymbolicSkill)
-    assert not skill.is_interruptible  # Search skills are not interruptible
-
-
-def test_simple_symbolic_environment_create_pick_skill():
-    """Test pick skill creation via factory method."""
-    from railroad.environment.symbolic import SimpleSymbolicEnvironment
-    from railroad.environment.skill import SymbolicSkill
-    from railroad import operators
-
-    env = SimpleSymbolicEnvironment(
-        initial_state=State(0.0, set(), []),
-        objects_by_type={"robot": {"r1"}, "location": {"kitchen"}, "object": {"Knife"}},
-        objects_at_locations={"kitchen": {"Knife"}},
-    )
-
-    pick_op = operators.construct_pick_operator_blocking(pick_time=2.0)
-    actions = pick_op.instantiate(env.objects_by_type)
-    pick_action = [a for a in actions if "r1" in a.name and "kitchen" in a.name and "Knife" in a.name][0]
-
-    skill = env.create_skill(pick_action, time=0.0)
-
-    assert isinstance(skill, SymbolicSkill)
-    assert not skill.is_interruptible  # Pick skills are not interruptible
-
-
-def test_simple_symbolic_environment_create_place_skill():
-    """Test place skill creation via factory method."""
-    from railroad.environment.symbolic import SimpleSymbolicEnvironment
-    from railroad.environment.skill import SymbolicSkill
-    from railroad import operators
-
-    env = SimpleSymbolicEnvironment(
-        initial_state=State(0.0, set(), []),
-        objects_by_type={"robot": {"r1"}, "location": {"bedroom"}, "object": {"Knife"}},
-        objects_at_locations={},
-    )
-
-    place_op = operators.construct_place_operator_blocking(place_time=2.0)
-    actions = place_op.instantiate(env.objects_by_type)
-    place_action = [a for a in actions if "r1" in a.name and "bedroom" in a.name and "Knife" in a.name][0]
-
-    skill = env.create_skill(place_action, time=0.0)
-
-    assert isinstance(skill, SymbolicSkill)
-    assert not skill.is_interruptible  # Place skills are not interruptible
+# =============================================================================
+# Pick/Place Action Integration Tests
+# =============================================================================
 
 
 def test_pick_skill_updates_fluents():
     """Test that pick skill updates fluents correctly."""
-    from railroad.environment.symbolic import SymbolicEnvironment
     from railroad.core import get_action_by_name
     from railroad import operators
 
@@ -446,7 +581,6 @@ def test_pick_skill_updates_fluents():
 
 def test_place_skill_updates_fluents():
     """Test that place skill updates fluents correctly."""
-    from railroad.environment.symbolic import SymbolicEnvironment
     from railroad.core import get_action_by_name
     from railroad import operators
 
