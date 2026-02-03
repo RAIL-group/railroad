@@ -5,10 +5,11 @@ used in PDDL planning and simulation.
 
 Usage:
     from railroad.environment import (
-        Environment,           # Protocol for environments
+        Environment,           # Abstract base class for environments
         ActiveSkill,          # Protocol for skill execution
         SymbolicSkill,        # Symbolic skill implementation
         SymbolicEnvironment,  # Environment for symbolic execution
+        SimpleSymbolicEnvironment,  # Alias for backward compatibility
         EnvironmentInterfaceV2,     # Main interface for planning/execution
     )
 
@@ -19,20 +20,23 @@ Legacy classes have been moved to railroad.experimental.environment:
     )
 """
 
+from .environment import Environment
+from .interface_v2 import EnvironmentInterfaceV2
 from .skill import (
     ActiveSkill,
-    Environment,
+    InterruptableMoveSymbolicSkill,
     SymbolicSkill,
 )
-
-from .symbolic import SymbolicEnvironment
-
-from .interface_v2 import EnvironmentInterfaceV2
+from .symbolic import SimpleSymbolicEnvironment, SymbolicEnvironment
 
 __all__ = [
+    # Legacy
+    "EnvironmentInterfaceV2",
+    # New architecture
     "ActiveSkill",
     "Environment",
-    "SymbolicSkill",
+    "InterruptableMoveSymbolicSkill",
+    "SimpleSymbolicEnvironment",
     "SymbolicEnvironment",
-    "EnvironmentInterfaceV2",
+    "SymbolicSkill",
 ]

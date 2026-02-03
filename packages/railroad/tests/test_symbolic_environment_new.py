@@ -69,3 +69,16 @@ def test_simple_symbolic_environment_alias():
     )
 
     assert F("at", "robot1", "kitchen") in env.fluents
+
+
+def test_public_api_exports():
+    """Test that new classes are exported from railroad.environment."""
+    from railroad.environment import (
+        Environment,
+        SymbolicEnvironment,
+        SimpleSymbolicEnvironment,
+    )
+
+    assert Environment is not None
+    assert SymbolicEnvironment is not None
+    assert SimpleSymbolicEnvironment is not None
