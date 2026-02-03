@@ -90,3 +90,70 @@ class Environment(ABC):
     ) -> Tuple[List[GroundedEffect], Set[Fluent]]:
         """Resolve which branch of a probabilistic effect occurs."""
         ...
+
+    @property
+    def state(self) -> State:
+        """Assemble state from fluents + upcoming effects from active skills."""
+        self._update_skills()
+
+        effects: List[Tuple[float, GroundedEffect]] = []
+        for skill in self._active_skills:
+            effects.extend(skill.upcoming_effects)
+
+        return State(
+            self._time,
+            self.fluents,
+            sorted(effects, key=lambda el: el[0]),
+        )
+
+    def _update_skills(self) -> None:
+        """Advance skills to current time and remove completed ones."""
+        for skill in self._active_skills:
+            skill.advance(self._time, self)
+        self._active_skills = [s for s in self._active_skills if not s.is_done]
+
+    def get_actions(self) -> List[Action]:
+        """Instantiate available actions from operators."""
+        objects_by_type = self.objects_by_type
+
+        # Add robot intermediate locations (robot_loc) to location set
+        robot_locs = {
+            f"{rob}_loc"
+            for rob in objects_by_type.get("robot", set())
+            if Fluent("at", rob, f"{rob}_loc") in self.fluents
+        }
+        objects_with_rloc: Dict[str, Collection[str]] = {
+            k: set(v) for k, v in objects_by_type.items()
+        }
+        objects_with_rloc["location"] = (
+            set(objects_with_rloc.get("location", set())) | robot_locs
+        )
+
+        all_actions: List[Action] = list(
+            itertools.chain.from_iterable(
+                op.instantiate(objects_with_rloc) for op in self._operators
+            )
+        )
+
+        return [a for a in all_actions if self._is_valid_action(a)]
+
+    def _is_valid_action(self, action: Action) -> bool:
+        """Filter actions with infinite effects or invalid destinations."""
+        if any(math.isinf(eff.time) for eff in action.effects):
+            return False
+        parts = action.name.split()
+        if parts[0] == "move" and len(parts) > 3 and "_loc" in parts[3]:
+            return False
+        if parts[0] == "place" and len(parts) > 2 and "_loc" in parts[2]:
+            return False
+        if parts[0] == "search" and len(parts) > 2 and "_loc" in parts[2]:
+            return False
+        return True
+
+    def is_goal_reached(self, goal_fluents: Collection[Fluent]) -> bool:
+        """Check if all goal fluents are satisfied."""
+        return all(f in self.state.fluents for f in goal_fluents)
+
+    def _any_robot_free(self) -> bool:
+        """Check if any robot is free."""
+        return any(f.name == "free" for f in self.fluents)
