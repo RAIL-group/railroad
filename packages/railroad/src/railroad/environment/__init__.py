@@ -8,7 +8,7 @@ Usage:
         Environment,           # Protocol for environments
         ActiveSkill,          # Protocol for skill execution
         SymbolicSkill,        # Symbolic skill implementation
-        SimpleSymbolicEnvironment,  # Simple environment for symbolic execution
+        SymbolicEnvironment,  # Environment for symbolic execution
         EnvironmentInterfaceV2,     # Main interface for planning/execution
     )
 
@@ -25,7 +25,7 @@ from .skill import (
     SymbolicSkill,
 )
 
-from .symbolic import SimpleSymbolicEnvironment
+from .symbolic import SymbolicEnvironment
 
 from .interface_v2 import EnvironmentInterfaceV2
 
@@ -33,6 +33,6 @@ __all__ = [
     "ActiveSkill",
     "Environment",
     "SymbolicSkill",
-    "SimpleSymbolicEnvironment",
+    "SymbolicEnvironment",
     "EnvironmentInterfaceV2",
 ]
