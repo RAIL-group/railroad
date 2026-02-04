@@ -29,12 +29,9 @@ def _lazy_import(module_name: str, fn_name: str = "main") -> Callable[[], None]:
 
 def _procthor_available() -> bool:
     """Check if procthor dependencies are installed."""
-    try:
-        import ai2thor  # noqa: F401
+    from railroad.environment.procthor import is_available
 
-        return True
-    except ImportError:
-        return False
+    return is_available()
 
 
 EXAMPLES: Dict[str, ExampleInfo] = {
