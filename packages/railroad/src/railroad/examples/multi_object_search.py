@@ -125,7 +125,7 @@ def main() -> None:
                 break
 
             action = get_action_by_name(all_actions, action_name)
-            env.act(action, do_interrupt=False)
+            env.act(action)
             actions_taken.append(action_name)
 
             tree_trace = mcts.get_trace_from_last_mcts_tree()

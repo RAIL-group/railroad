@@ -157,14 +157,12 @@ class Environment(ABC):
     def act(
         self,
         action: Action,
-        do_interrupt: bool = True,
         loop_callback_fn: Optional[Callable[[], None]] = None,
     ) -> State:
         """Execute action, return state when a robot is free for new dispatch.
 
         Args:
             action: The action to execute.
-            do_interrupt: Whether to interrupt interruptible skills when done.
             loop_callback_fn: Optional callback called each iteration.
 
         Returns:
@@ -207,10 +205,9 @@ class Environment(ABC):
                 loop_callback_fn()
 
         # Interrupt interruptible skills if requested
-        if do_interrupt:
-            for skill in self._active_skills:
-                if skill.is_interruptible and not skill.is_done:
-                    skill.interrupt(self)
+        for skill in self._active_skills:
+            if skill.is_interruptible and not skill.is_done:
+                skill.interrupt(self)
 
         self._active_skills = [s for s in self._active_skills if not s.is_done]
         return self.state

@@ -100,7 +100,7 @@ def test_environment_act_executes_action():
     actions = env.get_actions()
     move_action = next(a for a in actions if a.name == "move robot1 kitchen bedroom")
 
-    result_state = env.act(move_action, do_interrupt=False)
+    result_state = env.act(move_action)
 
     assert env.time == pytest.approx(5.0, abs=0.1)
     assert F("at", "robot1", "bedroom") in result_state.fluents
