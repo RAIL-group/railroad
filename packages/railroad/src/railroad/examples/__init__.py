@@ -47,6 +47,10 @@ EXAMPLES: Dict[str, ExampleInfo] = {
         "main": _lazy_import("find_and_move_couch"),
         "description": "Cooperative task requiring two robots (demonstrates wait operators)",
     },
+    "heterogeneous-robots": {
+        "main": _lazy_import("heterogeneous_robots"),
+        "description": "Heterogeneous robots with different capabilities (drone, rover, crawler)",
+    },
 }
 
 # Only show procthor example if dependencies are installed
