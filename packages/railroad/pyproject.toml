@@ -25,8 +25,16 @@ bench = [
     "dash-bootstrap-components>=1.6.0",
     "plotly",
 ]
+procthor = [
+    "ai2thor>=5.0.0",
+    "sentence-transformers>=5.1.2",
+    "prior>=1.0.3",
+    "shapely",
+    "networkx",
+    "scikit-image",
+]
 all = [
-    "railroad[test,bench]",
+    "railroad[test,bench,procthor]",
 ]
 
 [project.scripts]
