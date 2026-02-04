@@ -167,7 +167,7 @@ def construct_search_operator(
         object_find_prob: Probability or function for finding the object.
             Function signature: (robot, location, object) -> float
         search_time: Time or function for search duration.
-            Function signature: (robot, location) -> float
+            Function signature: (robot, location, object) -> float
 
     Returns:
         Operator for searching a location.
@@ -189,7 +189,7 @@ def construct_search_operator(
         effects=[
             Effect(time=0, resulting_fluents={F("not free ?r"), F("lock-search ?loc")}),
             Effect(
-                time=(search_time_fn, ["?r", "?loc"]),
+                time=(search_time_fn, ["?r", "?loc", "?obj"]),
                 resulting_fluents={
                     F("free ?r"),
                     F("searched ?loc ?obj"),

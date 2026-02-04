@@ -32,6 +32,7 @@ def main() -> None:
 
     # Build operators
     move_cost_fn = scene.get_move_cost_fn()
+    # All skill time functions take (robot, location, object) -> float
     search_time_fn = lambda r, l, o: 15.0 if r == "robot1" else 10.0
     pick_time_fn = lambda r, l, o: 15.0 if r == "robot1" else 10.0
     place_time_fn = lambda r, l, o: 15.0 if r == "robot1" else 10.0
