@@ -136,7 +136,7 @@ def main() -> None:
                 heuristic_value=h_value,
             )
 
-        dashboard.print_history(env.state, actions_taken)
+    dashboard.print_history(env.state, actions_taken)
 
     print(f"\nTotal actions: {len(actions_taken)}")
     print(f"Final time: {env.state.time:.1f}")
@@ -160,10 +160,13 @@ def main() -> None:
     ax2.set_title(f"Multi-Robot Trajectories (Total time: {env.state.time:.1f}s)")
 
     # Save figure
-    save_dir.mkdir(parents=True, exist_ok=True)
-    figpath = save_dir / f"procthor_search_{seed}.png"
+    figpath = Path(save_dir) / f'procthor_run_{seed}.png'
+    figpath.parent.mkdir(parents=True, exist_ok=True)
+
+    figpath_str = figpath if figpath.as_posix().startswith(("/", "./", "../")) else f"./{figpath}"
     plt.savefig(figpath, dpi=300)
-    print(f"\nSaved plot to {figpath}")
+
+    dashboard.console.print(f"\nSaved plot to [yellow]{figpath_str}[/yellow]")
 
 
 if __name__ == "__main__":
