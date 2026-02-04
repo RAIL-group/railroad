@@ -73,8 +73,10 @@ def test_symbolic_environment_act():
 
 def test_symbolic_environment_multi_robot_interrupt():
     """Test that robot1's move is interrupted when robot2 becomes free."""
-    from railroad.environment import InterruptableMoveSymbolicSkill
+    import numpy as np
+    from railroad.environment import InterruptableMoveSymbolicSkill, LocationRegistry
     from railroad.core import get_action_by_name
+    from railroad.environment import LocationRegistry
 
     # Two robots: robot1 at kitchen, robot2 at bedroom
     initial_fluents = {
@@ -109,6 +111,7 @@ def test_symbolic_environment_multi_robot_interrupt():
         objects_by_type={"robot": {"robot1", "robot2"}, "location": {"kitchen", "bedroom", "living_room"}},
         operators=[move_op, wait_op],
         skill_overrides={"move": InterruptableMoveSymbolicSkill},
+        location_registry=LocationRegistry({}),  # Optional, but avoids warning
     )
     actions = env.get_actions()
 

@@ -39,32 +39,27 @@ trap cleanup EXIT
 
 # Copy package to temp directory (simulating a standalone checkout)
 log_info "Copying $PACKAGE_NAME package to isolated directory..."
-cp -r "$PACKAGE_DIR"/* "$TEMP_DIR/"
+cp -r "$PACKAGE_DIR" "$TEMP_DIR/$PACKAGE_NAME"
 
 cd "$TEMP_DIR"
 
-# Create isolated virtual environment
-log_info "Creating isolated virtual environment..."
-uv venv .venv
-
-# Install the package
-log_info "Installing $PACKAGE_NAME package (standalone)..."
-uv pip install --python .venv/bin/python .
-
-# Install test dependencies
-log_info "Installing test dependencies..."
-uv pip install --python .venv/bin/python pytest pytest-timeout
-
-# Run tests
-log_info "Running tests..."
-.venv/bin/python -m pytest -v tests/
+# Create a wrapper project that depends on the package (replicates monorepo setup)
+log_info "Creating wrapper project..."
+uv init --name test-standalone --no-readme
 
 # Run an example to verify all runtime dependencies are installed
-log_info "Running example to verify dependencies..."
-.venv/bin/railroad example clear-table
+log_info "Intstall base package and running example..."
+uv add "./$PACKAGE_NAME"
+uv run railroad example clear-table
+
+# Install the package with test dependencies + run tests
+log_info "Installing $PACKAGE_NAME package with test dependencies and running tests..."
+uv add "./$PACKAGE_NAME[test]"
+uv run pytest "$PACKAGE_NAME/tests"
 
 # Test benchmarks discovery (dry-run to avoid running actual benchmarks)
 log_info "Testing benchmark discovery..."
-.venv/bin/railroad benchmarks run --dry-run
+uv add "./$PACKAGE_NAME[bench]"
+uv run railroad benchmarks run --dry-run
 
 log_info "Standalone install test completed successfully!"

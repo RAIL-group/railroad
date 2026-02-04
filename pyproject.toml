@@ -5,21 +5,18 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    # Local packages
+    "railroad[all]",
+    "procthor",
+    "common",
+    "gridmap",
+    "environments",
+    # External dependencies
     "networkx",
     "matplotlib",
     "scipy",
     "pyqt5",
     "black",
-    "pyright",
-    "pytest-html",
-    "pytest-pyright",
-    "pytest-timeout",
-    "rich",
-    "railroad",
-    "procthor",
-    "common",
-    "gridmap",
-    "environments",
     "prior>=1.0.3",
     "ai2thor>=5.0.0",
     "sentence-transformers>=5.1.2",
@@ -28,15 +25,13 @@ dependencies = [
     "google-generativeai>=0.8.5",
     "openai>=2.8.1",
     "python-dotenv>=1.2.1",
-    "pandas>=2.3.3",
-    "pytest-xdist>=3.8.0",
     "roslibpy",
-    "mlflow>=2.19.0",
-    "dash>=3.3.0",
-    "dash-bootstrap-components>=1.6.0",
     "ty>=0.0.12",
     "pyrobosim>=4.3.3",
     "imageio[ffmpeg]>=2.37.2",
+    # Testing (monorepo-level)
+    "pytest-html",
+    "pytest-xdist>=3.8.0",
 ]
 
 [tool.uv.sources]

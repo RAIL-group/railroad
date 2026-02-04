@@ -11,11 +11,22 @@ dependencies = [
     "numpy",
     "click>=8.0",
     "rich",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-timeout",
+]
+bench = [
     "mlflow",
     "pandas",
     "dash>=3.3.0",
     "dash-bootstrap-components>=1.6.0",
     "plotly",
+]
+all = [
+    "railroad[test,bench]",
 ]
 
 [project.scripts]
