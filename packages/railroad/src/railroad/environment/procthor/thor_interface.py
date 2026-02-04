@@ -5,7 +5,7 @@ import json
 import pickle
 import random
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 from shapely import geometry
@@ -132,7 +132,7 @@ class ThorInterface:
         """Set grid coordinate offset."""
         self.grid_offset = np.array([min_x, min_y])
 
-    def scale_to_grid(self, point: Tuple[float, float]) -> Tuple[int, int]:
+    def scale_to_grid(self, point: Union[Tuple[float, float], Sequence[float]]) -> Tuple[int, int]:
         """Convert world coordinates to grid coordinates."""
         x = round((point[0] - self.grid_offset[0]) / self.grid_resolution)
         y = round((point[1] - self.grid_offset[1]) / self.grid_resolution)
@@ -141,8 +141,7 @@ class ThorInterface:
     def _get_robot_pose(self) -> Tuple[int, int]:
         """Get initial robot pose in grid coordinates."""
         position = self.agent['position']
-        position = np.array([position['x'], position['z']])
-        return self.scale_to_grid(position)
+        return self.scale_to_grid((position['x'], position['z']))
 
     def _get_occupancy_grid(self) -> np.ndarray:
         """Build occupancy grid from reachable positions."""

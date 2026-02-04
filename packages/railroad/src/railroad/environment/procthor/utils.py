@@ -1,6 +1,6 @@
 """Utility functions for ProcTHOR environments."""
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, cast
 
 import networkx as nx
 import numpy as np
@@ -182,10 +182,10 @@ def get_edges_for_connected_graph(
 def _get_disconnected_components(
     node_indices: List[int],
     edges: List[Tuple[int, int]]
-) -> List[set]:
+) -> List[set[int]]:
     """Get disconnected components sorted by size."""
-    G = nx.Graph()
+    G: nx.Graph[int] = nx.Graph()
     G.add_nodes_from(node_indices)
     G.add_edges_from(edges)
-    components = list(nx.connected_components(G))
-    return sorted(components, key=len)
+    components: List[set[int]] = list(nx.connected_components(G))
+    return cast(List[set[int]], sorted(components, key=len))
