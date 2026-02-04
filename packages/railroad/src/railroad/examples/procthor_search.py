@@ -4,6 +4,8 @@ Demonstrates using ProcTHOR environment with MCTS planning
 for multi-robot object search and retrieval.
 """
 
+from pathlib import Path
+
 
 def main() -> None:
     """Run ProcTHOR multi-robot search example."""
@@ -15,17 +17,23 @@ def main() -> None:
         print("\nInstall ProcTHOR dependencies with: pip install railroad[procthor]")
         return
 
+    import matplotlib.pyplot as plt
     from railroad import operators
     from railroad.core import Fluent as F, get_action_by_name, ff_heuristic
     from railroad.dashboard import PlannerDashboard
     from railroad.planner import MCTSPlanner
     from railroad._bindings import State
+    from railroad.environment.procthor.plotting import (
+        extract_robot_poses,
+        plot_multi_robot_trajectories,
+    )
 
     # Configuration
     seed = 4001
     robot_names = ["robot1", "robot2"]
     target_objects = ["teddybear_6", "pencil_17"]
     target_location = "garbagecan_5"
+    save_dir = Path("./data/test_logs")
 
     print(f"Loading ProcTHOR scene (seed={seed})...")
     scene = ProcTHORScene(seed=seed)
@@ -132,6 +140,30 @@ def main() -> None:
 
     print(f"\nTotal actions: {len(actions_taken)}")
     print(f"Final time: {env.state.time:.1f}")
+
+    # Plot results
+    robot_locations = {name: "start_loc" for name in robot_names}
+    robot_poses = extract_robot_poses(actions_taken, robot_locations, scene.locations)
+
+    plt.figure(figsize=(16, 8))
+
+    # Left panel: top-down view
+    ax1 = plt.subplot(1, 2, 1)
+    top_down_image = scene.get_top_down_image(orthographic=True)
+    ax1.imshow(top_down_image)
+    ax1.axis("off")
+    ax1.set_title("Top-down View")
+
+    # Right panel: trajectory plot
+    ax2 = plt.subplot(1, 2, 2)
+    plot_multi_robot_trajectories(ax2, scene.grid, robot_poses, scene.scene_graph)
+    ax2.set_title(f"Multi-Robot Trajectories (Total time: {env.state.time:.1f}s)")
+
+    # Save figure
+    save_dir.mkdir(parents=True, exist_ok=True)
+    figpath = save_dir / f"procthor_search_{seed}.png"
+    plt.savefig(figpath, dpi=300)
+    print(f"\nSaved plot to {figpath}")
 
 
 if __name__ == "__main__":
