@@ -27,6 +27,16 @@ def _lazy_import(module_name: str, fn_name: str = "main") -> Callable[[], None]:
     return wrapper
 
 
+def _procthor_available() -> bool:
+    """Check if procthor dependencies are installed."""
+    try:
+        import ai2thor  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 EXAMPLES: Dict[str, ExampleInfo] = {
     "clear-table": {
         "main": _lazy_import("clear_the_table"),
@@ -40,8 +50,11 @@ EXAMPLES: Dict[str, ExampleInfo] = {
         "main": _lazy_import("find_and_move_couch"),
         "description": "Cooperative task requiring two robots (demonstrates wait operators)",
     },
-    "procthor-search": {
-        "main": _lazy_import("procthor_search"),
-        "description": "Multi-robot search in ProcTHOR 3D environment (requires railroad[procthor])",
-    },
 }
+
+# Only show procthor example if dependencies are installed
+if _procthor_available():
+    EXAMPLES["procthor-search"] = {
+        "main": _lazy_import("procthor_search"),
+        "description": "Multi-robot search in ProcTHOR 3D environment",
+    }
