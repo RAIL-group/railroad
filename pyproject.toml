@@ -7,7 +7,6 @@ requires-python = ">=3.13"
 dependencies = [
     # Local packages
     "railroad[all]",
-    "procthor",
     "common",
     "gridmap",
     "environments",
@@ -39,7 +38,6 @@ railroad = { path = "packages/railroad", editable = true }
 common = { path = "packages/common", editable = true }
 gridmap = { path = "packages/gridmap", editable = true }
 environments = { path = "packages/environments", editable = true }
-procthor = { path = "packages/procthor", editable = true }
 
 [tool.ty.src]
 exclude = ["**/scratch/**"]
@@ -49,7 +47,6 @@ extra-paths = [
     "packages/railroad/src",
     "packages/common/src",
     "packages/gridmap/src",
-    "packages/procthor/src",
     "packages/environments/src",
 ]
 
