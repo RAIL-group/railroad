@@ -236,6 +236,9 @@ def test_interrupt_then_move_to_different_destination():
     assert F("at", "robot1", "living_room") in env.state.fluents
     assert F("free", "robot1") in env.state.fluents
 
+    # Verify that robot2's wait action is not interrupted, so it's not free
+    assert F("free robot2") not in env.state.fluents
+
     # Verify the move took the expected time: sqrt((10-5)^2 + (5-0)^2) = sqrt(50)
     expected_move_time = math.sqrt(50)  # ~7.07
     actual_move_time = env.time - time_before_move
