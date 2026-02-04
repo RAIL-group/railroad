@@ -12,11 +12,15 @@ can perform which actions, leading to interesting coordination strategies.
 
 import numpy as np
 
-from railroad.core import Fluent as F, get_action_by_name, ff_heuristic
+from railroad.core import Fluent as F, get_action_by_name
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
 from railroad import operators
 from railroad.environment import SymbolicEnvironment
+from railroad.environment.symbolic import (
+    InterruptableMoveSymbolicSkill,
+    LocationRegistry,
+)
 from railroad._bindings import State
 
 
@@ -61,15 +65,38 @@ def get_skill_time(skill_name: str):
     return skill_time_fn
 
 
-def get_move_time(robot: str, loc_from: str, loc_to: str) -> float:
-    """Compute move time based on distance and robot speed."""
-    distance = float(np.linalg.norm(LOCATIONS[loc_from] - LOCATIONS[loc_to]))
-    speed = SPEED_MULTIPLIER.get(robot, 1.0)
-    return distance / speed
+def make_move_time_fn(registry: LocationRegistry | None = None):
+    """Create a move time function, optionally using a LocationRegistry.
+
+    When a registry is provided, it supports dynamically-created intermediate
+    locations from interrupted moves.
+    """
+    def get_move_time(robot: str, loc_from: str, loc_to: str) -> float:
+        """Compute move time based on distance and robot speed."""
+        if registry is not None:
+            start = registry.get(loc_from)
+            end = registry.get(loc_to)
+            if start is None or end is None:
+                return float("inf")
+            diff = end - start
+            distance = float((diff @ diff) ** 0.5)
+        else:
+            if loc_from not in LOCATIONS or loc_to not in LOCATIONS:
+                return float("inf")
+            distance = float(np.linalg.norm(LOCATIONS[loc_from] - LOCATIONS[loc_to]))
+        speed = SPEED_MULTIPLIER.get(robot, 1.0)
+        return distance / speed
+    return get_move_time
 
 
-def main() -> None:
-    """Run the heterogeneous robots example."""
+def main(use_interruptible_moves: bool = False) -> None:
+    """Run the heterogeneous robots example.
+
+    Args:
+        use_interruptible_moves: If True, move actions can be interrupted when
+            another robot becomes free. This creates intermediate locations
+            and allows for more flexible replanning.
+    """
     # Available robots - each is a different type with different capabilities
     available_robots = ["rover", "drone", "crawler"]
 
@@ -95,8 +122,16 @@ def main() -> None:
         objects_here = OBJECTS_AT_LOCATIONS.get(loc, set())
         return 0.9 if obj in objects_here else 0.1
 
+    # Set up location registry for interruptible moves (if enabled)
+    location_registry: LocationRegistry | None = None
+    skill_overrides: dict | None = None
+    if use_interruptible_moves:
+        location_registry = LocationRegistry(LOCATIONS)
+        skill_overrides = {"move": InterruptableMoveSymbolicSkill}
+
     # Create operators with robot-type-specific times
-    move_op = operators.construct_move_operator_blocking(get_move_time)
+    move_time_fn = make_move_time_fn(location_registry)
+    move_op = operators.construct_move_operator_blocking(move_time_fn)
     search_op = operators.construct_search_operator(
         object_find_prob, get_skill_time("search")
     )
@@ -111,6 +146,8 @@ def main() -> None:
         objects_by_type=objects_by_type,
         operators=[no_op, move_op, search_op, pick_op, place_op],
         true_object_locations=OBJECTS_AT_LOCATIONS,
+        skill_overrides=skill_overrides,
+        location_registry=location_registry,
     )
 
     # Planning loop
@@ -167,4 +204,13 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Heterogeneous robots example")
+    parser.add_argument(
+        "--interruptible-moves",
+        action="store_true",
+        help="Enable interruptible move actions",
+    )
+    args = parser.parse_args()
+    main(use_interruptible_moves=args.interruptible_moves)
