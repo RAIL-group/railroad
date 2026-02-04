@@ -135,6 +135,113 @@ def test_symbolic_environment_multi_robot_interrupt():
     assert F("at", "robot1", "living_room") not in env.state.fluents  # Did NOT reach destination
 
 
+def test_interrupt_then_move_to_different_destination():
+    """Test that after interruption, robot can move to a new destination with correct cost.
+
+    Scenario:
+    - Robot starts at kitchen (0,0) moving to bedroom (10,0)
+    - Gets interrupted at 50% -> ends up at (5,0)
+    - Then moves to living_room (10,5)
+    - Expected cost: sqrt((10-5)^2 + (5-0)^2) = sqrt(50) ≈ 7.07
+    """
+    import math
+    import numpy as np
+    from railroad.environment import InterruptableMoveSymbolicSkill, LocationRegistry
+    from railroad.core import get_action_by_name
+
+    # Create registry with locations
+    locations = {
+        "kitchen": np.array([0.0, 0.0]),
+        "bedroom": np.array([10.0, 0.0]),
+        "living_room": np.array([10.0, 5.0]),
+    }
+    registry = LocationRegistry(locations)
+    move_time = registry.move_time_fn(velocity=1.0)
+
+    # Two robots: robot1 at kitchen (free), robot2 at bedroom (becomes free at t=5)
+    initial_fluents = {
+        F("at", "robot1", "kitchen"),
+        F("at", "robot2", "bedroom"),
+        F("free", "robot1"),
+        # robot2 starts not free, becomes free at t=5 via initial effect
+    }
+    # Initial effect to make robot2 free at t=5, triggering interrupt
+    initial_effects = [
+        (5.0, GroundedEffect(5.0, {F("free", "robot2")})),
+    ]
+
+    # Move operator with dynamic time based on distance
+    move_op = Operator(
+        name="move",
+        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F("at", "?robot", "?from"), F("free", "?robot")],
+        effects=[
+            Effect(time=0.0, resulting_fluents={~F("free", "?robot")}),
+            Effect(
+                time=(move_time, ["?robot", "?from", "?to"]),
+                resulting_fluents={~F("at", "?robot", "?from"), F("at", "?robot", "?to"), F("free", "?robot")},
+            ),
+        ]
+    )
+
+    # Wait operator for robot2 to advance time
+    wait_op = Operator(
+        name="wait",
+        parameters=[("?robot", "robot")],
+        preconditions=[F("free", "?robot")],
+        effects=[
+            Effect(time=0.0, resulting_fluents={~F("free", "?robot")}),
+            Effect(time=10.0, resulting_fluents={F("free", "?robot")}),
+        ]
+    )
+
+    env = SymbolicEnvironment(
+        state=State(0.0, initial_fluents, initial_effects),
+        objects_by_type={"robot": {"robot1", "robot2"}, "location": {"kitchen", "bedroom", "living_room"}},
+        operators=[move_op, wait_op],
+        skill_overrides={"move": InterruptableMoveSymbolicSkill},
+        location_registry=registry,
+    )
+
+    # Robot1 starts moving from kitchen (0,0) to bedroom (10,0) - takes 10s
+    # At t=5, robot2 becomes free (initial effect), interrupting robot1
+    actions = env.get_actions()
+    move_action = get_action_by_name(actions, "move robot1 kitchen bedroom")
+    env.act(move_action)
+
+    # At t=5, robot1 should be at intermediate location
+    assert env.time == pytest.approx(5.0, abs=0.1)
+    assert F("at", "robot1", "robot1_loc") in env.state.fluents
+    assert F("free", "robot1") in env.state.fluents
+
+    # Verify intermediate coordinates are correct (50% of way from kitchen to bedroom)
+    intermediate_pos = registry.get("robot1_loc")
+    assert intermediate_pos is not None
+    assert np.allclose(intermediate_pos, np.array([5.0, 0.0]))
+
+    # Now robot1 moves from intermediate location (5,0) to living_room (10,5)
+    actions = env.get_actions()
+    move_to_living = get_action_by_name(actions, "move robot1 robot1_loc living_room")
+    assert move_to_living is not None, "Move action from intermediate location should be available"
+
+    time_before_move = env.time
+    env.act(move_to_living)
+
+    # Robot2 does a long wait to advance time past robot1's move (~7.07s)
+    actions = env.get_actions()
+    wait_action = get_action_by_name(actions, "wait robot2")
+    env.act(wait_action)
+
+    # Verify robot1 reached living_room
+    assert F("at", "robot1", "living_room") in env.state.fluents
+    assert F("free", "robot1") in env.state.fluents
+
+    # Verify the move took the expected time: sqrt((10-5)^2 + (5-0)^2) = sqrt(50)
+    expected_move_time = math.sqrt(50)  # ~7.07
+    actual_move_time = env.time - time_before_move
+    assert actual_move_time == pytest.approx(expected_move_time, abs=0.1)
+
+
 # =============================================================================
 # Effect Application Tests
 # =============================================================================
