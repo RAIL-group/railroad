@@ -4,6 +4,7 @@ Rich-based progress visualization for benchmark execution.
 Provides live terminal display with progress bars and statistics.
 """
 
+import os
 from rich.console import Console, Group, RenderableType
 from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, ProgressColumn, Task as ProgressTask
 from rich.table import Table
@@ -13,6 +14,34 @@ from rich.text import Text
 from rich.style import Style
 from collections import defaultdict
 from .plan import ExecutionPlan, Task, TaskStatus
+
+
+def _is_headless_environment() -> bool:
+    """Detect if running in a headless environment where live dashboards don't work well.
+
+    Checks for:
+    - CI environments (GitHub Actions, GitLab CI, etc.) via CI env var
+    - Claude Code via CLAUDECODE env var
+    - Google Colab via COLAB_RELEASE_TAG env var
+    - Jupyter notebooks via JPY_PARENT_PID or VSCODE_PID env vars
+    """
+    # CI environments (GitHub Actions, GitLab, Jenkins, etc.)
+    if os.environ.get("CI"):
+        return True
+
+    # Claude Code
+    if os.environ.get("CLAUDECODE"):
+        return True
+
+    # Google Colab
+    if os.environ.get("COLAB_RELEASE_TAG") or os.environ.get("COLAB_GPU"):
+        return True
+
+    # Jupyter environments
+    if os.environ.get("JPY_PARENT_PID"):
+        return True
+
+    return False
 
 
 class StatusBarColumn(BarColumn):
@@ -139,23 +168,45 @@ class ProgressDisplay:
     Rich-based live progress display.
 
     Shows overall progress + per-benchmark breakdown + statistics table.
+
+    In non-interactive mode (CI, Claude Code, Colab, piped output),
+    falls back to printing results one case at a time as they complete.
     """
 
     # Maximum number of cases to show at once (to fit on screen)
     MAX_CASES_PER_PAGE = 20
 
-    def __init__(self, plan: ExecutionPlan, num_workers: int = 1):
+    def __init__(
+        self,
+        plan: ExecutionPlan,
+        num_workers: int = 1,
+        force_interactive: bool | None = None,
+    ):
         """
         Initialize progress display for a given execution plan.
 
         Args:
             plan: Execution plan with tasks to track
             num_workers: Number of parallel workers
+            force_interactive: Override interactive detection (True=live dashboard,
+                               False=simple output, None=auto-detect)
         """
         self.plan = plan
         self.console = Console()
         self.num_workers = num_workers
         self.running_tasks = 0  # Track currently running tasks
+
+        # Determine if we should use interactive mode
+        if force_interactive is not None:
+            self._interactive = force_interactive
+        elif _is_headless_environment():
+            self._interactive = False
+        else:
+            self._interactive = self.console.is_interactive
+
+        # In non-interactive mode, show one case at a time
+        if not self._interactive:
+            self.MAX_CASES_PER_PAGE = 1
 
         # Per-benchmark and per-case statistics
         self.benchmark_stats = defaultdict(lambda: {
@@ -337,24 +388,36 @@ class ProgressDisplay:
 
         self.live = None
 
-    def __enter__(self):
-        """Start live display."""
-        self.live = Live(
-            self._make_layout(),
-            console=self.console,
-            refresh_per_second=4,
-            vertical_overflow="visible"
-        )
-        self.live.__enter__()
+    @property
+    def is_interactive(self) -> bool:
+        """Return whether the display is running in interactive mode."""
+        return self._interactive
+
+    def __enter__(self) -> "ProgressDisplay":
+        """Start live display (interactive mode only)."""
+        if self._interactive:
+            self.live = Live(
+                self._make_layout(),
+                console=self.console,
+                refresh_per_second=4,
+                vertical_overflow="visible"
+            )
+            self.live.__enter__()
+        else:
+            # Non-interactive mode: print a simple header
+            self.live = None
+            self.console.print("[bold]Benchmark runner starting...[/bold]")
+            self.console.print(f"[dim]Running {self.plan.total_tasks} tasks with {self.num_workers} workers[/dim]")
+            self.console.print()
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Stop live display."""
         if self.live:
             self.live.__exit__(exc_type, exc_val, exc_tb)
             self.live = None
 
-    def print_final_error_summary(self):
+    def print_final_error_summary(self) -> None:
         """Print a final summary of all errors after benchmarks complete."""
         if not self.error_tasks:
             return
@@ -535,7 +598,7 @@ class ProgressDisplay:
 
         return f"  Case {case_idx:{case_width}d}: {param_str}  {result_str}{metrics_str}"
 
-    def _print_benchmark_header(self, benchmark_name: str):
+    def _print_benchmark_header(self, benchmark_name: str) -> None:
         """
         Print benchmark header with name, tags, and description.
 
@@ -561,7 +624,7 @@ class ProgressDisplay:
         if description:
             self.console.print(f"  [italic dim]{description}[/italic dim]")
 
-    def _print_error_details(self, benchmark_name: str, case_indices: list):
+    def _print_error_details(self, benchmark_name: str, case_indices: list) -> None:
         """
         Print stderr for error tasks in specified cases.
 
@@ -604,17 +667,17 @@ class ProgressDisplay:
                 for line in task.stderr.strip().split('\n'):
                     self.console.print(f"      [dim]{line}[/dim]")
 
-    def _print_page_summary(self, benchmark_name: str, page_idx: int):
+    def _print_page_summary(self, benchmark_name: str, page_idx: int) -> None:
         """
         Print completed page summary above the live view.
+
+        In interactive mode, prints above the Live display.
+        In non-interactive mode, prints directly to console.
 
         Args:
             benchmark_name: Name of benchmark
             page_idx: Index of completed page
         """
-        if not self.live:
-            return
-
         page_cases = self.benchmark_pages[benchmark_name][page_idx]
         total_pages = len(self.benchmark_pages[benchmark_name])
 
@@ -637,17 +700,17 @@ class ProgressDisplay:
         if page_idx == total_pages - 1:
             self.console.print()
 
-    def _print_benchmark_summary(self, benchmark_name: str):
+    def _print_benchmark_summary(self, benchmark_name: str) -> None:
         """
         Print completed benchmark summary above the live view.
         Only prints for single-page benchmarks (multi-page already printed per-page).
 
+        In interactive mode, prints above the Live display.
+        In non-interactive mode, prints directly to console.
+
         Args:
             benchmark_name: Name of completed benchmark
         """
-        if not self.live:
-            return
-
         # Check if this is a multi-page benchmark
         total_pages = len(self.benchmark_pages[benchmark_name])
 
@@ -675,7 +738,7 @@ class ProgressDisplay:
 
         self.console.print()
 
-    def mark_task_started(self, task: Task):
+    def mark_task_started(self, task: Task) -> None:
         """
         Mark a task as started.
 
@@ -689,13 +752,16 @@ class ProgressDisplay:
         if self.active_benchmark is None:
             self.active_benchmark = task.benchmark_name
 
-        # Refresh layout to show the active benchmark
-        if self.live:
+        # Refresh layout to show the active benchmark (interactive mode only)
+        if self._interactive and self.live:
             self.live.update(self._make_layout())
 
-    def update_task(self, task: Task):
+    def update_task(self, task: Task) -> None:
         """
         Update progress after task completion.
+
+        In interactive mode, updates the live display.
+        In non-interactive mode, prints case results as pages complete.
 
         Args:
             task: Completed task
@@ -828,6 +894,6 @@ class ProgressDisplay:
                         self.active_benchmark = bname
                         break
 
-        # Refresh layout
-        if self.live:
+        # Refresh layout (interactive mode only)
+        if self._interactive and self.live:
             self.live.update(self._make_layout())
