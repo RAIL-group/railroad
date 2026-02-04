@@ -4,7 +4,7 @@ This module provides integration with ProcTHOR 3D indoor environments.
 Requires optional dependencies: pip install railroad[procthor]
 """
 
-__all__ = ["ProcTHORScene", "ProcTHOREnvironment", "is_available"]
+__all__ = ["ProcTHORScene", "ProcTHOREnvironment", "is_available", "ensure_all_resources"]
 
 _INSTALL_MSG = (
     "ProcTHOR dependencies not installed. "
@@ -36,6 +36,12 @@ def __getattr__(name: str):
         try:
             from .environment import ProcTHOREnvironment
             return ProcTHOREnvironment
+        except ImportError as e:
+            raise ImportError(_INSTALL_MSG) from e
+    elif name == "ensure_all_resources":
+        try:
+            from .resources import ensure_all_resources
+            return ensure_all_resources
         except ImportError as e:
             raise ImportError(_INSTALL_MSG) from e
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

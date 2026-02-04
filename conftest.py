@@ -1,8 +1,6 @@
 # conftest.py
 import pathlib
 import pytest
-from filelock import FileLock
-from procthor import ensure_all_resources
 
 DATA_DIR = pathlib.Path(__file__).parent / "resources"
 
@@ -12,5 +10,6 @@ def pytest_configure(config):
     if not hasattr(config, "workerinput"):
         # controller process
         if not (DATA_DIR / ".download_complete").exists():
+            from railroad.environment.procthor import ensure_all_resources
             ensure_all_resources()
             (DATA_DIR / ".download_complete").touch()

@@ -1,21 +1,15 @@
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-import procthor
 from pathlib import Path
 
-
 import numpy as np
 from matplotlib.collections import LineCollection
-import matplotlib.cm as cm
 
-
-import numpy as np
-from matplotlib.collections import LineCollection
-import matplotlib.cm as cm
+from railroad.environment.procthor.plotting import make_plotting_grid
 
 
 def plot_grid(ax, grid):
-    plotting_grid = procthor.plotting.make_plotting_grid(grid.T)
+    plotting_grid = make_plotting_grid(grid.T)
     ax.imshow(plotting_grid, cmap='gray', origin='upper')
 
 
