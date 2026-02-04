@@ -22,6 +22,7 @@ from .environment import Environment
 from .skill import ActiveSkill
 from .symbolic import (
     InterruptableMoveSymbolicSkill,
+    LocationRegistry,
     SymbolicEnvironment,
     SymbolicSkill,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "ActiveSkill",
     "Environment",
     "InterruptableMoveSymbolicSkill",
+    "LocationRegistry",
     "SymbolicEnvironment",
     "SymbolicSkill",
 ]
