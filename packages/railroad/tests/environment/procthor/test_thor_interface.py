@@ -3,12 +3,12 @@
 import pytest
 import numpy as np
 
+from railroad.environment.procthor.thor_interface import ThorInterface
+
 
 @pytest.fixture
 def thor_interface():
     """Create ThorInterface for testing."""
-    pytest.importorskip("ai2thor")
-    from railroad.environment.procthor.thor_interface import ThorInterface
     return ThorInterface(seed=0, resolution=0.05)
 
 

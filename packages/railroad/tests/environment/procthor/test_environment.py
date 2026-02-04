@@ -2,12 +2,15 @@
 
 import pytest
 
+from railroad.environment.procthor import ProcTHORScene, ProcTHOREnvironment
+from railroad.core import Fluent as F
+from railroad._bindings import State
+from railroad import operators
+
 
 @pytest.fixture
 def scene():
     """Create ProcTHORScene for testing."""
-    pytest.importorskip("ai2thor")
-    from railroad.environment.procthor import ProcTHORScene
     return ProcTHORScene(seed=4001)
 
 
@@ -55,11 +58,6 @@ def test_scene_move_cost_fn(scene):
 @pytest.mark.timeout(30)
 def test_environment_creation(scene):
     """Test ProcTHOREnvironment can be created."""
-    from railroad.environment.procthor import ProcTHOREnvironment
-    from railroad.core import Fluent as F
-    from railroad._bindings import State
-    from railroad import operators
-
     move_op = operators.construct_move_operator_blocking(scene.get_move_cost_fn())
 
     initial_state = State(0.0, {
@@ -89,10 +87,6 @@ def test_environment_creation(scene):
 @pytest.mark.timeout(30)
 def test_environment_validation_invalid_location(scene):
     """Test validation catches invalid locations."""
-    from railroad.environment.procthor import ProcTHOREnvironment
-    from railroad.core import Fluent as F
-    from railroad._bindings import State
-
     initial_state = State(0.0, {F("at robot1 start_loc")})
 
     with pytest.raises(ValueError, match="not found in scene"):
@@ -112,10 +106,6 @@ def test_environment_validation_invalid_location(scene):
 @pytest.mark.timeout(30)
 def test_environment_validation_invalid_object(scene):
     """Test validation catches invalid objects."""
-    from railroad.environment.procthor import ProcTHOREnvironment
-    from railroad.core import Fluent as F
-    from railroad._bindings import State
-
     initial_state = State(0.0, {F("at robot1 start_loc")})
 
     with pytest.raises(ValueError, match="not found in scene"):
