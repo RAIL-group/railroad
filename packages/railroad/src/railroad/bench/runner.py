@@ -16,7 +16,7 @@ from typing import List, Optional
 from .plan import ExecutionPlan, Task
 from .registry import Benchmark
 from .tracking import MLflowTracker
-from .progress import ProgressDisplay
+from .progress import ProgressDisplay, get_cases_per_page
 
 
 class BenchmarkRunner:
@@ -91,7 +91,7 @@ class BenchmarkRunner:
 
         # Collate tasks: queue by benchmark, then page, then repeat, then case
         # This ensures cases on the current page are run first
-        PAGE_SIZE = 20  # Match MAX_CASES_PER_PAGE from ProgressDisplay
+        cases_per_page = get_cases_per_page()
 
         for benchmark in benchmarks:
             # Determine number of repeats for this benchmark
@@ -103,8 +103,8 @@ class BenchmarkRunner:
             # Split cases into pages
             case_list = list(enumerate(benchmark.cases))
 
-            for page_start in range(0, len(case_list), PAGE_SIZE):
-                page_cases = case_list[page_start:page_start + PAGE_SIZE]
+            for page_start in range(0, len(case_list), cases_per_page):
+                page_cases = case_list[page_start:page_start + cases_per_page]
 
                 for repeat_idx in range(num_repeats):
                     for case_idx, params in page_cases:

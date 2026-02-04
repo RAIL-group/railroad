@@ -44,6 +44,16 @@ def _is_headless_environment() -> bool:
     return False
 
 
+def get_cases_per_page() -> int:
+    """Get the number of cases to display/process per page.
+
+    In interactive mode, shows 20 cases per page for efficient batching.
+    In non-interactive mode (CI, Claude Code, etc.), uses 1 case per page
+    so each case completes all repeats before moving to the next.
+    """
+    return 1 if _is_headless_environment() else 20
+
+
 class StatusBarColumn(BarColumn):
     """Custom bar column that changes color based on task status."""
 
@@ -173,9 +183,6 @@ class ProgressDisplay:
     falls back to printing results one case at a time as they complete.
     """
 
-    # Maximum number of cases to show at once (to fit on screen)
-    MAX_CASES_PER_PAGE = 20
-
     def __init__(
         self,
         plan: ExecutionPlan,
@@ -204,9 +211,8 @@ class ProgressDisplay:
         else:
             self._interactive = self.console.is_interactive
 
-        # In non-interactive mode, show one case at a time
-        if not self._interactive:
-            self.MAX_CASES_PER_PAGE = 1
+        # Number of cases to show per page (shared with runner.py via get_cases_per_page())
+        self.cases_per_page = get_cases_per_page()
 
         # Per-benchmark and per-case statistics
         self.benchmark_stats = defaultdict(lambda: {
@@ -278,8 +284,8 @@ class ProgressDisplay:
 
             # Split cases into pages if there are too many
             pages = []
-            for i in range(0, len(sorted_case_indices), self.MAX_CASES_PER_PAGE):
-                page_cases = sorted_case_indices[i:i + self.MAX_CASES_PER_PAGE]
+            for i in range(0, len(sorted_case_indices), self.cases_per_page):
+                page_cases = sorted_case_indices[i:i + self.cases_per_page]
                 pages.append(page_cases)
 
             self.benchmark_pages[benchmark_name] = pages
