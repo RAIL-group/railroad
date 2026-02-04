@@ -19,7 +19,7 @@ def main() -> None:
 
     import matplotlib.pyplot as plt
     from railroad import operators
-    from railroad.core import Fluent as F, get_action_by_name, ff_heuristic
+    from railroad.core import Fluent as F, get_action_by_name
     from railroad.dashboard import PlannerDashboard
     from railroad.planner import MCTSPlanner
     from railroad._bindings import State
@@ -85,14 +85,13 @@ def main() -> None:
         operators=[no_op, pick_op, place_op, move_op, search_op],
     )
 
-    print(f"Planning to place {target_objects} at {target_location}...")
-    print(f"Scene has {len(scene.locations)} locations and {len(scene.objects)} objects")
-
     # Planning loop
     actions_taken = []
     max_iterations = 60
 
-    h_value = ff_heuristic(env.state, goal, env.get_actions())
+    all_actions = env.get_actions()
+    mcts = MCTSPlanner(all_actions)
+    h_value = mcts.heuristic(env.state, goal)
     with PlannerDashboard(goal, initial_heuristic=h_value) as dashboard:
         dashboard.update(state=env.state)
 
@@ -121,7 +120,8 @@ def main() -> None:
             actions_taken.append(action_name)
 
             tree_trace = mcts.get_trace_from_last_mcts_tree()
-            h_value = ff_heuristic(env.state, goal, env.get_actions())
+            h_value = mcts.heuristic(env.state, goal)
+
             relevant_fluents = {
                 f
                 for f in env.state.fluents
@@ -137,9 +137,6 @@ def main() -> None:
             )
 
     dashboard.print_history(env.state, actions_taken)
-
-    print(f"\nTotal actions: {len(actions_taken)}")
-    print(f"Final time: {env.state.time:.1f}")
 
     # Plot results
     robot_locations = {name: "start_loc" for name in robot_names}
@@ -162,10 +159,8 @@ def main() -> None:
     # Save figure
     figpath = Path(save_dir) / f'procthor_run_{seed}.png'
     figpath.parent.mkdir(parents=True, exist_ok=True)
-
     figpath_str = figpath if figpath.as_posix().startswith(("/", "./", "../")) else f"./{figpath}"
     plt.savefig(figpath, dpi=300)
-
     dashboard.console.print(f"\nSaved plot to [yellow]{figpath_str}[/yellow]")
 
 
