@@ -114,7 +114,9 @@ def test_location_registry_basic():
     registry = LocationRegistry(locations)
 
     # Test get
-    assert np.array_equal(registry.get("kitchen"), np.array([0.0, 0.0]))
+    kitchen_pos = registry.get("kitchen")
+    assert kitchen_pos is not None
+    assert np.array_equal(kitchen_pos, np.array([0.0, 0.0]))
     assert registry.get("unknown") is None
 
     # Test contains
@@ -124,7 +126,9 @@ def test_location_registry_basic():
     # Test register
     registry.register("living_room", np.array([5.0, 5.0]))
     assert "living_room" in registry
-    assert np.array_equal(registry.get("living_room"), np.array([5.0, 5.0]))
+    living_room_pos = registry.get("living_room")
+    assert living_room_pos is not None
+    assert np.array_equal(living_room_pos, np.array([5.0, 5.0]))
 
 
 def test_location_registry_move_time_fn():
