@@ -40,4 +40,8 @@ EXAMPLES: Dict[str, ExampleInfo] = {
         "main": _lazy_import("find_and_move_couch"),
         "description": "Cooperative task requiring two robots (demonstrates wait operators)",
     },
+    "procthor-search": {
+        "main": _lazy_import("procthor_search"),
+        "description": "Multi-robot search in ProcTHOR 3D environment (requires railroad[procthor])",
+    },
 }
