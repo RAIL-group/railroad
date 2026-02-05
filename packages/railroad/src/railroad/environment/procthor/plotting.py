@@ -4,6 +4,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from .utils import get_trajectory
+
 try:
     import matplotlib.pyplot as plt
     from matplotlib.collections import LineCollection
@@ -145,6 +147,7 @@ def plot_grid(ax: Any, grid: np.ndarray) -> None:
 def plot_robot_trajectory(
     ax: Any,
     waypoints: List[Tuple[float, float]],
+    grid: np.ndarray,
     graph: Any,
     robot_name: str,
     color_map: str = "viridis",
@@ -154,7 +157,8 @@ def plot_robot_trajectory(
 
     Args:
         ax: Matplotlib axes
-        waypoints: List of (x, y) grid coordinates
+        waypoints: List of (x, y) grid coordinates (location waypoints)
+        grid: Occupancy grid for path planning
         graph: SceneGraph for location name lookup
         robot_name: Name of the robot for labeling
         color_map: Matplotlib colormap name
@@ -166,9 +170,15 @@ def plot_robot_trajectory(
     if len(waypoints) < 2:
         return
 
+    # Compute obstacle-respecting trajectory through waypoints
+    trajectory = get_trajectory(grid, waypoints)
+
+    if len(trajectory) < 2:
+        return
+
     # Draw trajectory lines with color gradient
-    x = [p[0] for p in waypoints]
-    y = [p[1] for p in waypoints]
+    x = [p[0] for p in trajectory]
+    y = [p[1] for p in trajectory]
 
     points = np.array([x, y]).T.reshape(-1, 1, 2)
     segments = np.concatenate([points[:-1], points[1:]], axis=1)
@@ -217,4 +227,4 @@ def plot_multi_robot_trajectories(
 
     for i, (robot_name, waypoints) in enumerate(robots_data.items()):
         cmap = colormaps[i % len(colormaps)]
-        plot_robot_trajectory(ax, waypoints, graph, robot_name, cmap, robot_id=i)
+        plot_robot_trajectory(ax, waypoints, grid, graph, robot_name, cmap, robot_id=i)
