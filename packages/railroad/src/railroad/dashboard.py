@@ -131,7 +131,14 @@ def render_timeline(actions: List[Tuple[str, float]], robots: Set[str],
     pos = lambda t: int((t - min_t) / (max_t - min_t) * (width * 2 - 1))
 
     robots_list = sorted(robots)
-    nw = max(len(r) for r in robots_list)  # name width
+    # Calculate name width considering both individual names and paired names (for braille rows)
+    individual_nw = max(len(r) for r in robots_list)
+    # Paired names are joined with commas, with 'robot' shortened to 'r'
+    paired_nw = max(
+        len(','.join(r.replace('robot', 'r') for r in robots_list[i:i + 2]))
+        for i in range(0, len(robots_list), 2)
+    )
+    nw = max(individual_nw, paired_nw)  # name width
     lines = [f"{' ' * nw} |{min_t:.1f}{' ' * (width - len(f'{min_t:.1f}') - len(f'{max_t:.1f}'))}{max_t:.1f}|"]
 
     # Braille rows (2 robots per row)
