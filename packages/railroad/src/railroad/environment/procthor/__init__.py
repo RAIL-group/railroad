@@ -2,7 +2,12 @@
 
 This module provides integration with ProcTHOR 3D indoor environments.
 Requires optional dependencies: pip install railroad[procthor]
+
+Resources are automatically downloaded on first import when dependencies are
+available. Set PROCTHOR_AUTO_DOWNLOAD=0 to disable auto-download.
 """
+
+import os
 
 __all__ = ["ProcTHORScene", "ProcTHOREnvironment", "is_available", "ensure_all_resources"]
 
@@ -23,6 +28,13 @@ def is_available() -> bool:
     import importlib.util
 
     return all(importlib.util.find_spec(pkg) is not None for pkg in _REQUIRED_PACKAGES)
+
+
+# Auto-download resources on import if dependencies are available
+if os.environ.get("PROCTHOR_AUTO_DOWNLOAD", "1") != "0" and is_available():
+    from .resources import ensure_all_resources
+
+    ensure_all_resources()
 
 
 def __getattr__(name: str):
