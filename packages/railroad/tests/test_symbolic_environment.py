@@ -3,7 +3,7 @@
 import pytest
 from railroad._bindings import Fluent as F, GroundedEffect, State
 from railroad.core import Effect, Operator
-from railroad.environment import SymbolicEnvironment
+from railroad.environment import LocationRegistry, SymbolicEnvironment
 
 
 # =============================================================================
@@ -360,6 +360,7 @@ def test_symbolic_environment_create_move_skill():
         objects_by_type={},
         operators=[],
         skill_overrides={"move": InterruptableMoveSymbolicSkill},
+        location_registry=LocationRegistry({}),
     )
     skill_interruptible = env_with_override.create_skill(action, time=0.0)
     assert isinstance(skill_interruptible, InterruptableMoveSymbolicSkill)

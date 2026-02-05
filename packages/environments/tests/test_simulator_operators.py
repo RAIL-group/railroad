@@ -67,7 +67,7 @@ def test_search_operator():
         "location": {"roomA", "roomB"},
         "object": {"objA", "objB"}
     }
-    search_time = lambda r, l: 10 if r == "r1" else 15  # noqa E731, E741
+    search_time = lambda r, l, o: 10 if r == "r1" else 15  # noqa E731, E741
     object_find_prob = lambda r, l, o: 0.8 if l == "roomA" else 0.2  # noqa E731, E741
     search_op = operators.construct_search_operator(
         object_find_prob=object_find_prob, search_time=search_time)

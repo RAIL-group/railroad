@@ -117,8 +117,9 @@ def compute_cost_grid_from_position(
         Otherwise:
             Tuple of (cost_grid, get_path function)
     """
-    if len(np.array(start).shape) > 1:
-        starts = start.T
+    start_arr = np.array(start)
+    if len(start_arr.shape) > 1:
+        starts = start_arr.T
     else:
         starts = [start]
 
@@ -173,11 +174,14 @@ def get_cost(grid: np.ndarray, robot_pose: Tuple[int, int], end: Tuple[int, int]
     occ_grid[int(robot_pose[0])][int(robot_pose[1])] = 0
     occ_grid[end[0], end[1]] = 0
 
-    cost_grid = compute_cost_grid_from_position(
-        occ_grid,
-        start=[robot_pose[0], robot_pose[1]],
-        use_soft_cost=True,
-        only_return_cost_grid=True
+    cost_grid = cast(
+        np.ndarray,
+        compute_cost_grid_from_position(
+            occ_grid,
+            start=[robot_pose[0], robot_pose[1]],
+            use_soft_cost=True,
+            only_return_cost_grid=True
+        )
     )
     return cost_grid[end[0], end[1]]
 
