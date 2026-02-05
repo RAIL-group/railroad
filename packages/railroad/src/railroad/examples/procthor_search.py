@@ -17,6 +17,8 @@ def main() -> None:
         print("\nInstall ProcTHOR dependencies with: pip install railroad[procthor]")
         return
 
+    import matplotlib
+    matplotlib.use('Agg')  # Use headless backend for file output
     import matplotlib.pyplot as plt
     from railroad import operators
     from railroad.core import Fluent as F, get_action_by_name
