@@ -726,3 +726,107 @@ def test_place_skill_updates_fluents():
     assert F("holding", "robot1", "Knife") not in env.state.fluents
     # Object location is derived from fluents
     assert env._is_object_at_location("Knife", "bedroom")
+
+
+# =============================================================================
+# Nested Effects Timing Tests (Issue #6)
+# =============================================================================
+
+
+def test_nested_effects_with_timing_are_scheduled():
+    """Test that nested effects inside prob_effects with time > 0 are scheduled correctly.
+
+    This is a regression test for issue #6: nested effects inside prob_effects
+    were being applied immediately instead of being scheduled at their proper time.
+    """
+    from railroad import operators
+    from railroad.core import get_action_by_name
+
+    move_time = 5.0
+    pick_time = 3.0
+
+    # construct_search_and_pick_operator has nested effects with timing:
+    # - Effect at move_time with prob_effects containing:
+    #   - Effect(time=0, ...) - immediate
+    #   - Effect(time=pick_time, ...) - should be delayed
+    search_pick_op = operators.construct_search_and_pick_operator(
+        object_find_prob=1.0,  # Always find - takes success branch
+        move_time=move_time,
+        pick_time=pick_time,
+    )
+
+    initial_fluents = {
+        F("at", "robot1", "living_room"),
+        F("free", "robot1"),
+    }
+
+    env = SymbolicEnvironment(
+        state=State(0.0, initial_fluents, []),
+        objects_by_type={
+            "robot": {"robot1"},
+            "location": {"living_room", "kitchen"},
+            "object": {"Knife"},
+        },
+        operators=[search_pick_op],
+        true_object_locations={"kitchen": {"Knife"}},  # Object is actually there
+    )
+
+    actions = env.get_actions()
+    action = get_action_by_name(actions, "search robot1 living_room kitchen Knife")
+
+    env.act(action)
+
+    # Key assertions - these failed before the fix:
+    # 1. Robot should be holding the knife (from nested Effect(time=pick_time))
+    assert F("holding", "robot1", "Knife") in env.state.fluents, \
+        "Nested effect with timing was not applied - holding fluent missing"
+
+    # 2. Time should be move_time + pick_time (not just move_time)
+    expected_time = move_time + pick_time
+    assert env.time == pytest.approx(expected_time, abs=0.1), \
+        f"Time should be {expected_time} but was {env.time} - nested timing not respected"
+
+    # 3. Robot should be free after picking (from the same nested effect)
+    assert F("free", "robot1") in env.state.fluents
+
+    # 4. Robot should be at kitchen
+    assert F("at", "robot1", "kitchen") in env.state.fluents
+
+
+def test_nested_effects_immediate_still_work():
+    """Test that nested effects with time=0 are still applied immediately."""
+    from railroad import operators
+    from railroad.core import get_action_by_name
+
+    # Use regular search operator which has nested effects with time=0
+    search_op = operators.construct_search_operator(
+        object_find_prob=1.0,  # Always find
+        search_time=3.0,
+    )
+
+    initial_fluents = {
+        F("at", "robot1", "kitchen"),
+        F("free", "robot1"),
+    }
+
+    env = SymbolicEnvironment(
+        state=State(0.0, initial_fluents, []),
+        objects_by_type={
+            "robot": {"robot1"},
+            "location": {"kitchen"},
+            "object": {"Knife"},
+        },
+        operators=[search_op],
+        true_object_locations={"kitchen": {"Knife"}},
+    )
+
+    actions = env.get_actions()
+    action = get_action_by_name(actions, "search robot1 kitchen Knife")
+
+    env.act(action)
+
+    # Verify the search completed correctly
+    assert F("found", "Knife") in env.state.fluents
+    assert F("searched", "kitchen", "Knife") in env.state.fluents
+    assert F("free", "robot1") in env.state.fluents
+    assert env.time == pytest.approx(3.0, abs=0.1)

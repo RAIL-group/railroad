@@ -141,8 +141,17 @@ class SymbolicSkill(ActiveSkill):
         ]
         self._upcoming_effects = self._upcoming_effects[len(due_effects):]
 
-        for _, effect in due_effects:
-            env.apply_effect(effect)
+        for effect_time, effect in due_effects:
+            # Apply effect and get any delayed effects that need scheduling
+            delayed = env.apply_effect(effect)
+            for relative_time, delayed_effect in delayed:
+                # Schedule delayed effect relative to when parent effect fired
+                abs_time = effect_time + relative_time
+                self._upcoming_effects.append((abs_time, delayed_effect))
+
+        # Re-sort if we added delayed effects
+        if due_effects:
+            self._upcoming_effects.sort(key=lambda el: el[0])
 
     def interrupt(self, env: "Environment") -> None:
         """Interrupt this skill. No-op for base SymbolicSkill."""
@@ -361,8 +370,17 @@ class SymbolicEnvironment(Environment):
 
         return SymbolicSkill(action=action, start_time=time)
 
-    def apply_effect(self, effect: GroundedEffect) -> None:
-        """Apply an effect, handling adds, removes, and probabilistic branches."""
+    def apply_effect(
+        self, effect: GroundedEffect
+    ) -> List[Tuple[float, GroundedEffect]]:
+        """Apply an effect, handling adds, removes, and probabilistic branches.
+
+        Returns:
+            List of (relative_time, effect) tuples for effects that should be
+            scheduled later (nested effects with time > 0).
+        """
+        delayed_effects: List[Tuple[float, GroundedEffect]] = []
+
         # Apply deterministic resulting_fluents
         for fluent in effect.resulting_fluents:
             if fluent.negated:
@@ -376,10 +394,17 @@ class SymbolicEnvironment(Environment):
                 effect, self._fluents
             )
             for nested in nested_effects:
-                self.apply_effect(nested)
+                if nested.time > 1e-9:
+                    # Schedule for later - time is relative to when parent fired
+                    delayed_effects.append((nested.time, nested))
+                else:
+                    # Apply immediately and collect any further delayed effects
+                    delayed_effects.extend(self.apply_effect(nested))
 
         # Handle revelation (objects discovered when locations searched)
         self._handle_revelation()
+
+        return delayed_effects
 
     def _handle_revelation(self) -> None:
         """Reveal objects when locations are searched."""

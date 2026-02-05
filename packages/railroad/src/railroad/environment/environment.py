@@ -74,8 +74,16 @@ class Environment(ABC):
         ...
 
     @abstractmethod
-    def apply_effect(self, effect: GroundedEffect) -> None:
-        """Apply an effect to the environment."""
+    def apply_effect(
+        self, effect: GroundedEffect
+    ) -> List[Tuple[float, GroundedEffect]]:
+        """Apply an effect to the environment.
+
+        Returns:
+            List of (relative_time, effect) tuples for effects that should be
+            scheduled later (e.g., nested effects inside prob_effects with time > 0).
+            The caller is responsible for scheduling these at current_time + relative_time.
+        """
         ...
 
     @abstractmethod
