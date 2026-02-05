@@ -106,18 +106,31 @@ def benchmarks_dashboard() -> None:
     run_dashboard()
 
 
-def _make_example_command(name: str, description: str) -> None:
+def _make_example_command(name: str, info: dict) -> None:
     """Create and register a click command for an example."""
+    description = info["description"]
+    options = info.get("options", [])
 
+    # Build the command with options
     @example.command(name, help=description)
-    def _run() -> None:
+    @click.pass_context
+    def _run(ctx: click.Context, **kwargs: object) -> None:
         from railroad.examples import EXAMPLES
 
         example_info = EXAMPLES[name]
         click.echo(f"Running example: {name}")
         click.echo(f"  {example_info['description']}\n")
         example_fn = example_info["main"]
-        example_fn()
+        example_fn(**kwargs)
+
+    # Add options dynamically
+    for opt in reversed(options):  # Reversed so decorators apply in correct order
+        option_name = opt["name"]
+        param_name = opt.get("param_name", option_name.lstrip("-").replace("-", "_"))
+        if opt.get("is_flag", False):
+            _run = click.option(option_name, param_name, is_flag=True, default=opt.get("default", False), help=opt.get("help", ""))(_run)
+        else:
+            _run = click.option(option_name, param_name, default=opt.get("default"), help=opt.get("help", ""))(_run)
 
 
 # Register each example as a direct subcommand
@@ -125,7 +138,7 @@ def _register_examples() -> None:
     from railroad.examples import EXAMPLES
 
     for name, info in EXAMPLES.items():
-        _make_example_command(name, info["description"])
+        _make_example_command(name, info)
 
 
 _register_examples()

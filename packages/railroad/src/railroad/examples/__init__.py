@@ -4,25 +4,36 @@ This module provides runnable examples demonstrating various planning capabiliti
 Examples can be run via the CLI: `railroad example run <name>`
 """
 
-from typing import Callable, Dict, TypedDict
+from typing import Any, Callable, Dict, List, TypedDict
 
 
-class ExampleInfo(TypedDict):
+class OptionInfo(TypedDict, total=False):
+    """Information about a CLI option for an example."""
+
+    name: str  # e.g., "--interruptible-moves"
+    is_flag: bool  # True for boolean flags
+    default: Any  # Default value
+    help: str  # Help text
+    param_name: str  # Python parameter name (e.g., "use_interruptible_moves")
+
+
+class ExampleInfo(TypedDict, total=False):
     """Information about an example."""
 
-    main: Callable[[], None]
+    main: Callable[..., None]
     description: str
+    options: List[OptionInfo]  # Optional CLI options
 
 
-def _lazy_import(module_name: str, fn_name: str = "main") -> Callable[[], None]:
+def _lazy_import(module_name: str, fn_name: str = "main") -> Callable[..., None]:
     """Lazy import to avoid loading all examples at startup."""
 
-    def wrapper() -> None:
+    def wrapper(**kwargs: Any) -> None:
         import importlib
 
         mod = importlib.import_module(f"railroad.examples.{module_name}")
         fn = getattr(mod, fn_name)
-        return fn()
+        return fn(**kwargs)
 
     return wrapper
 
@@ -50,6 +61,15 @@ EXAMPLES: Dict[str, ExampleInfo] = {
     "heterogeneous-robots": {
         "main": _lazy_import("heterogeneous_robots"),
         "description": "Heterogeneous robots with different capabilities (drone, rover, crawler)",
+        "options": [
+            {
+                "name": "--interruptible-moves",
+                "is_flag": True,
+                "default": False,
+                "help": "Enable interruptible move actions",
+                "param_name": "use_interruptible_moves",
+            },
+        ],
     },
 }
 
