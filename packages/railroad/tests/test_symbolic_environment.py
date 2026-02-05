@@ -794,6 +794,79 @@ def test_nested_effects_with_timing_are_scheduled():
     assert F("at", "robot1", "kitchen") in env.state.fluents
 
 
+def test_search_with_certainty_probability_object_not_present():
+    """Test search with object_find_prob=1.0 when object is NOT at location.
+
+    This is a regression test: when ground truth says object isn't there,
+    the environment should deterministically return the failure branch,
+    even when the failure branch has probability 0.0 (from 1.0 - 1.0).
+    """
+    from railroad.core import get_action_by_name
+    from railroad import operators
+
+    fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
+
+    # Probability of 1.0 means failure branch has probability 0.0
+    search_op = operators.construct_search_operator(
+        object_find_prob=1.0,  # 100% find probability
+        search_time=3.0,
+    )
+
+    env = SymbolicEnvironment(
+        state=State(0.0, fluents, []),
+        objects_by_type={"robot": {"robot1"}, "location": {"kitchen", "bedroom"}, "object": {"Knife"}},
+        operators=[search_op],
+        true_object_locations={"bedroom": {"Knife"}},  # Knife is NOT at kitchen
+    )
+    actions = env.get_actions()
+    search_action = get_action_by_name(actions, "search robot1 kitchen Knife")
+
+    # This should NOT raise "Total of weights must be greater than zero"
+    env.act(search_action)
+
+    # Search should complete but NOT find the object (ground truth overrides probability)
+    assert F("searched", "kitchen", "Knife") in env.state.fluents
+    assert F("found", "Knife") not in env.state.fluents
+    assert F("free", "robot1") in env.state.fluents
+
+
+def test_search_with_zero_probability_object_present():
+    """Test search with object_find_prob=0.0 when object IS at location.
+
+    When ground truth says object is there, the environment should
+    deterministically return the success branch, even when the success
+    branch has probability 0.0.
+    """
+    from railroad.core import get_action_by_name
+    from railroad import operators
+
+    fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
+
+    # Probability of 0.0 means success branch has probability 0.0
+    search_op = operators.construct_search_operator(
+        object_find_prob=0.0,  # 0% find probability
+        search_time=3.0,
+    )
+
+    env = SymbolicEnvironment(
+        state=State(0.0, fluents, []),
+        objects_by_type={"robot": {"robot1"}, "location": {"kitchen"}, "object": {"Knife"}},
+        operators=[search_op],
+        true_object_locations={"kitchen": {"Knife"}},  # Knife IS at kitchen
+    )
+    actions = env.get_actions()
+    search_action = get_action_by_name(actions, "search robot1 kitchen Knife")
+
+    # This should NOT raise any errors - ground truth determines outcome
+    env.act(search_action)
+
+    # Search should find the object (ground truth overrides probability)
+    assert F("searched", "kitchen", "Knife") in env.state.fluents
+    assert F("found", "Knife") in env.state.fluents
+    assert F("at", "Knife", "kitchen") in env.state.fluents
+    assert F("free", "robot1") in env.state.fluents
+
+
 def test_nested_effects_immediate_still_work():
     """Test that nested effects with time=0 are still applied immediately."""
     from railroad import operators

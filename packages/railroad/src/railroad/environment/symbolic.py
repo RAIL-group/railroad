@@ -458,11 +458,11 @@ class SymbolicEnvironment(Environment):
             if self._is_object_at_location(target_object, location):
                 _, effects = success_branch
                 return list(effects), current_fluents
-            # Object not at location - sample from non-success branches
+            # Object not at location - return failure branch deterministically
             other_branches = [b for b in branches if b is not success_branch]
             if other_branches:
-                probs = [p for p, _ in other_branches]
-                _, effects = random.choices(other_branches, weights=probs, k=1)[0]
+                # No need to sample - ground truth determines the outcome
+                _, effects = other_branches[0]
                 return list(effects), current_fluents
 
         # Can't determine from ground truth - sample from distribution
