@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
-RAIL_mrppddl_dev is a research repository for Multi-Robot Probabilistic Planning using PDDL (Planning Domain Definition Language) with a focus on embodied AI tasks in simulated indoor environments. The system combines a C++-accelerated PDDL planning core with Python bindings, integrated with AI2-THOR/ProcTHOR simulators for realistic 3D environment simulation.
+Railroad is a research repository for Multi-Robot Probabilistic Planning using PDDL (Planning Domain Definition Language). The system combines a C++-accelerated planning core with Python bindings, optionally integrated with AI2-THOR/ProcTHOR simulators for realistic 3D environment simulation.
 
 ## Build System
 
-This project uses `uv` as the package manager and build tool. The build system automatically handles C++ compilation when needed. `uv run` handles all building and rebuilding any time the code is changed.
+This project uses `uv` as the package manager and build tool. The build system automatically handles C++ compilation when needed.
 
 ### Key Commands
 
@@ -21,48 +21,50 @@ This project uses `uv` as the package manager and build tool. The build system a
 
 ### Important Build Notes
 
-- Build is automatic via `uv run`, which will automatically detect changes to code (including the C++ code) and rebuild as necessary. Do not run `uv sync`, as it is not needed.
+- Build is automatic via `uv run`, which detects changes to code (including C++) and rebuilds as necessary. Do not run `uv sync` unless explicitly needed.
 
 ## Architecture
 
-### Multi-Package Structure
+### Package Structure
 
 The repository is organized as a monorepo with several interdependent packages:
 
-#### Core Planning (`railroad/`)
-- **C++ Core**: High-performance planning algorithms implemented in C++ (headers in `include/`, bindings in `src/railroad/_bindings.cpp`)
+#### Core Planning (`packages/railroad/`)
+
+- **C++ Core** (`include/`, `src/railroad/_bindings.cpp`):
   - A* search, MCTS planning
   - State management and action grounding
   - FF heuristic for forward planning
-- **Python Layer**: Python wrapper and utilities (`src/railroad/`)
-  - `core.py`: Effect, Operator, Action, State, Fluent classes
-  - `planner.py`: MCTSPlanner wrapper with automatic negative precondition handling
-  - `helper.py`: Helper functions to construct common operators (move, search, pick, place, wait)
-- **Testing**: Comprehensive tests in `tests/` including unit tests and integration tests
 
-#### Environment Module (`railroad/environment/`)
-The environment module provides abstractions for planning execution:
+- **Python Layer** (`src/railroad/`):
+  - `core.py`: Main classes (`Fluent`, `State`, `Action`, `Effect`, `Operator`, `Goal`) - re-exports C++ types and adds Python utilities
+  - `operators/`: Helper functions to construct common operators (move, search, pick, place, wait)
+  - `planner.py`: `MCTSPlanner` wrapper with automatic negative precondition handling
+  - `helper.py`: Goal formatting utilities
 
-- **`Environment`** (`environment.py`): Abstract base class for all environments
+- **Testing**: Tests in `tests/` including unit tests and integration tests
+
+#### Environment Module (`packages/railroad/src/railroad/environment/`)
+
+Provides abstractions for planning execution:
+
+- **`environment.py`**: `Environment` abstract base class
   - Active skill tracking and time management
   - State assembly (fluents + upcoming effects)
   - Action instantiation from operators
   - The `act()` loop that executes until a robot is free
 
-- **`SymbolicEnvironment`** (`symbolic.py`): Concrete implementation for symbolic execution
-  - Manages fluents and derives object locations from state
-  - Creates `SymbolicSkill` instances for action execution
-  - Handles probabilistic effect resolution
-  - Supports skill overrides for custom behavior (e.g., `InterruptableMoveSymbolicSkill`)
-
-- **`ActiveSkill`** (`skill.py`): Protocol for skill execution
-  - `SymbolicSkill`: Standard skill implementation
+- **`symbolic.py`**: `SymbolicEnvironment` and skill implementations
+  - `SymbolicEnvironment`: Concrete environment for symbolic execution
+  - `SymbolicSkill`: Standard skill implementation (non-interruptible)
   - `InterruptableMoveSymbolicSkill`: Moves that can be interrupted mid-execution
   - `LocationRegistry`: Coordinates robot locations during interruptible moves
 
+- **`skill.py`**: `ActiveSkill` protocol defining the skill interface
+
 - **`procthor/`**: ProcTHOR simulator interface (optional dependency)
   - `ThorInterface`: Main interface to AI2-THOR/ProcTHOR scenes
-  - `ProcTHORScene`: Data provider wrapping ThorInterface for planning
+  - `ProcTHORScene`: Data provider wrapping ThorInterface
   - `ProcTHOREnvironment`: Full environment implementation
   - `SceneGraph`: Scene graph representation
   - Install with: `pip install railroad[procthor]`
@@ -72,11 +74,11 @@ The environment module provides abstractions for planning execution:
   - Preserved for backward compatibility
 
 #### External Packages
-- **`environments/`**: Additional environment implementations (PyRoboSim, etc.)
-- **`gridmap/`**: Occupancy grid mapping and planning
-- **`common/`**: Shared utilities (Pose class, etc.)
+- **`packages/environments/`**: Additional environment implementations (PyRoboSim)
+- **`packages/gridmap/`**: Occupancy grid mapping and planning
+- **`packages/common/`**: Shared utilities (Pose class, etc.)
 
-#### Benchmarking (`railroad/bench/`)
+#### Benchmarking (`packages/railroad/src/railroad/bench/`)
 - `registry.py`: Benchmark registration via `@benchmark` decorator
 - `runner.py`: Parallel benchmark execution with MLflow tracking
 - `dashboard/`: Interactive Plotly Dash visualization
@@ -87,60 +89,65 @@ The environment module provides abstractions for planning execution:
 #### PDDL Planning Flow
 1. Define `Operator` with parameters, preconditions, and `Effect`s
 2. Instantiate operators with objects to create grounded `Action`s
-3. `MCTSPlanner` or A* searches over actions to reach goal fluents
+3. `MCTSPlanner` searches over actions to reach goal
 4. Planner automatically converts negative preconditions to positive equivalents
 
 #### State and Fluents
-- `Fluent`: Symbolic predicate like "at robot1 kitchen" or "free robot1"
-- Negation: Use `~Fluent(...)` or `Fluent("not ...")`
-- `State`: Collection of fluents representing world state
+- `Fluent`: Symbolic predicate like `F("at robot1 kitchen")` or `F("free robot1")`
+- Negation: Use `~F(...)` or `F("not ...")`
+- `State`: Collection of fluents + time + upcoming effects
 - Effects modify state at specific times (supports probabilistic outcomes)
 
 #### Actions and Effects
 - Actions have preconditions (what must be true) and effects (what changes)
 - Effects can be deterministic or probabilistic with multiple outcomes
 - Effects happen at specified times (e.g., move takes time based on distance)
-- Effects can produce resulting fluents (additions/removals from state)
 
-#### Goals and the Goal API
-Goals specify planning objectives using complex logical expressions:
+#### Goals
+
+Goals specify planning objectives. Use Python operators for simple cases:
+
+```python
+from railroad.core import Fluent as F
+
+# Simple goals using & and |
+goal = F("found Knife") & F("found Fork")  # AND
+goal = F("at robot1 kitchen") | F("at robot1 bedroom")  # OR
+goal = ~F("at Knife table")  # NOT (knife must not be on table)
+```
+
+For multiple fluents, use `reduce`:
 
 ```python
 from functools import reduce
 from operator import and_, or_
-from railroad.core import Fluent as F
 
-# AND goal: all conditions must be true
-goal = reduce(and_, [F("at robot1 kitchen"), F("found Knife")])
+# All objects must be found
+goal = reduce(and_, [F(f"found {obj}") for obj in ["Knife", "Fork", "Spoon"]])
 
-# OR goal: at least one condition must be true
-goal = reduce(or_, [F("at robot1 kitchen"), F("at robot1 bedroom")])
-
-# Negated goal: condition must be FALSE
-goal = ~F("at Book table")  # Book must NOT be at table
-
-# "None" pattern: no objects at location
+# "Clear the table" - no objects at table
 goal = reduce(and_, [~F(f"at {obj} table") for obj in objects])
 ```
 
 Key points:
-- Use `reduce(and_, [...])` for "all" conditions, `reduce(or_, [...])` for "any"
-- Use `~F(...)` for negative conditions (must be FALSE)
-- MCTSPlanner handles negative goal fluents via automatic mapping conversion
-- Use `ff_heuristic_goal` for heuristic computation with Goal objects
+- MCTSPlanner handles negative goal fluents automatically
 - Use `goal.evaluate(state.fluents)` to check if goal is satisfied
+- Use `ff_heuristic_goal` for heuristic computation with Goal objects
 
 #### Environment Execution
+
 The `SymbolicEnvironment` provides a clean API for executing plans:
 
 ```python
 from railroad.environment import SymbolicEnvironment
 from railroad._bindings import State
+from railroad.core import Fluent as F
 
 env = SymbolicEnvironment(
     state=State(0.0, initial_fluents, []),
-    objects_by_type={"robot": {"robot1"}, "location": {"kitchen", "bedroom"}},
+    objects_by_type={"robot": {"robot1"}, "location": {"kitchen", "bedroom"}, "object": {"Knife"}},
     operators=[move_op, search_op],
+    objects_at_locations={"kitchen": {"Knife"}},  # Ground truth for probabilistic resolution
 )
 
 # Get available actions
@@ -150,16 +157,16 @@ actions = env.get_actions()
 new_state = env.act(action)
 
 # Check goal
-if env.is_goal_reached(goal_fluents):
+if goal.evaluate(env.state.fluents):
     print("Done!")
 ```
 
 ## Testing Strategy
 
 Tests are organized by component:
-- `railroad/tests/`: Core PDDL functionality, planners, state transitions, environment
-- `railroad/tests/environment/procthor/`: ProcTHOR integration tests (skipped if deps not installed)
-- `environments/tests/`, `gridmap/tests/`: Component-specific tests
+- `packages/railroad/tests/`: Core PDDL functionality, planners, environment
+- `packages/railroad/tests/environment/procthor/`: ProcTHOR integration tests (skipped if deps not installed)
+- `packages/environments/tests/`, `packages/gridmap/tests/`: Component-specific tests
 
 Key test patterns:
 - Use fixtures for common test setups
@@ -190,20 +197,19 @@ uv run pytest -vk test_fluent_equality
 ```
 
 ### Creating a New PDDL Problem
-The typical flow:
-1. Define environment with locations and objects
-2. Create operators using helpers from `railroad.operators`
-3. Create a `SymbolicEnvironment` with initial state and operators
-4. Define goal using the Goal API: `goal = reduce(and_, [F(...), F(...)])`
-5. Run planner with `env.state` and goal: `planner(env.state, goal, ...)`
-6. Execute actions via `env.act(action)`
+1. Define objects by type: `{"robot": {"r1"}, "location": {"kitchen", "bedroom"}, "object": {"Knife"}}`
+2. Create operators using `railroad.operators` helpers
+3. Create a `SymbolicEnvironment` with initial state, operators, and ground truth object locations
+4. Define goal: `goal = F("found Knife")`
+5. Run planner: `action_name = planner(env.state, goal, max_iterations=1000)`
+6. Execute: `env.act(action)`
 
 ## Common Gotchas
 
 - **Negative Preconditions**: MCTSPlanner automatically converts them - no manual handling needed
-- **Negative Goals**: MCTSPlanner also handles negative goal fluents automatically by extending the mapping
-- **Goal API**: Use `reduce(and_, [...])` or `reduce(or_, [...])` from `functools` and `operator` modules
+- **Negative Goals**: MCTSPlanner handles negative goal fluents automatically by extending the mapping
+- **Operators Module**: Use `from railroad import operators` (not `helper.py`)
 - **ProcTHOR Dependencies**: Install with `pip install railroad[procthor]`. Check availability with `from railroad.environment.procthor import is_available`
-- **Resource Downloads**: ProcTHOR auto-downloads resources on first import. Large downloads may take time
-- **Cache**: ProcTHOR caches scenes in `resources/procthor-10k/cache/` for faster loading
+- **Resource Downloads**: ProcTHOR auto-downloads resources on first import (~2GB)
 - **Skill Interruptibility**: `SymbolicSkill` is non-interruptible by default. Use `InterruptableMoveSymbolicSkill` with `skill_overrides` for interrupt behavior
+- **State vs Fluents**: `State` includes time and upcoming effects; `state.fluents` is just the current facts
