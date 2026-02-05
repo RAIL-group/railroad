@@ -7,7 +7,8 @@ A high-performance planning framework for multi-robot systems that combines symb
 - **Fast C++ Planning Core**: A* and MCTS planners with Python bindings
 - **Probabilistic Effects**: Handle uncertain action outcomes in planning
 - **Multi-Robot Coordination**: Plan and execute coordinated multi-robot tasks
-- **ProcTHOR Integration**: Realistic 3D indoor environment simulation via AI2-THOR
+- **Environment Abstraction**: Clean `SymbolicEnvironment` API for plan execution
+- **ProcTHOR Integration**: Optional realistic 3D indoor environment simulation via AI2-THOR
 - **Occupancy Grid Planning**: Built-in mapping and path planning utilities
 
 ## Installation
@@ -26,7 +27,39 @@ cd RAIL_mrppddl_dev
 uv sync
 ```
 
+### Optional Dependencies
+
+The `railroad` package supports optional dependency groups:
+
+```bash
+# Install with ProcTHOR support (AI2-THOR simulator)
+pip install railroad[procthor]
+
+# Install with benchmarking tools
+pip install railroad[bench]
+
+# Install everything
+pip install railroad[all]
+```
+
 ## Quick Start
+
+### Running Built-in Examples
+
+```bash
+# List available examples
+uv run railroad example
+
+# Run examples
+uv run railroad example run clear-table
+uv run railroad example run multi-object-search
+uv run railroad example run find-and-move-couch
+uv run railroad example run heterogeneous-robots
+uv run railroad example run heterogeneous-robots --interruptible-moves
+
+# ProcTHOR example (requires: pip install railroad[procthor])
+uv run railroad example run procthor-search
+```
 
 ### Basic PDDL Planning Example
 
@@ -34,20 +67,24 @@ uv sync
 from functools import reduce
 from operator import and_
 
-from railroad.core import Fluent as F, State
-from railroad.helper import construct_move_operator, construct_search_operator
+from railroad.core import Fluent as F
+from railroad._bindings import State
+from railroad import operators
 from railroad.planner import MCTSPlanner
 
 # Define initial state
-initial_state = State(fluents={
-    F("at robot1 bedroom"),
-    F("at robot2 kitchen"),
-    F("free robot1"),
-    F("free robot2"),
-})
+initial_state = State(
+    time=0,
+    fluents={
+        F("at robot1 bedroom"),
+        F("at robot2 kitchen"),
+        F("free robot1"),
+        F("free robot2"),
+    },
+    upcoming_effects=[],
+)
 
 # Define goal using the Goal API
-# reduce(and_, [...]) creates an AndGoal that requires ALL fluents to be true
 goal = reduce(and_, [
     F("found Knife"),
     F("found Notebook"),
@@ -55,20 +92,22 @@ goal = reduce(and_, [
 
 # Define available objects and locations
 objects_by_type = {
-    "robot": ["robot1", "robot2"],
-    "location": ["bedroom", "kitchen", "living_room"],
-    "object": ["Knife", "Notebook"],
+    "robot": {"robot1", "robot2"},
+    "location": {"bedroom", "kitchen", "living_room"},
+    "object": {"Knife", "Notebook"},
 }
 
-# Create operators and instantiate actions
-move_op = construct_move_operator(move_time=lambda r, from_loc, to_loc: 5.0)
-search_op = construct_search_operator(
-    object_find_prob=lambda r, loc, obj: 0.8,  # 80% chance of finding object
-    move_time=lambda r, from_loc, to_loc: 5.0,
-    pick_time=3.0
+# Create operators
+move_op = operators.construct_move_operator_blocking(
+    move_time=lambda r, from_loc, to_loc: 5.0
+)
+search_op = operators.construct_search_operator(
+    object_find_prob=lambda r, loc, obj: 0.8,
+    search_time=lambda r, loc, obj: 3.0,
 )
 
-actions = move_op.instantiate(objects_by_type) + search_op.instantiate(objects_by_type)
+# Instantiate actions from operators
+actions = list(move_op.instantiate(objects_by_type)) + list(search_op.instantiate(objects_by_type))
 
 # Run MCTS planner
 planner = MCTSPlanner(actions)
@@ -76,33 +115,70 @@ next_action_name = planner(initial_state, goal, max_iterations=10000, c=10)
 
 print(f"Next action to execute: {next_action_name}")
 ```
-This will yield:
-> Next action to execute: search robot1 bedroom living_room Notebook
 
+### Using the SymbolicEnvironment
+
+The `SymbolicEnvironment` provides a clean API for executing plans:
+
+```python
+from railroad.environment import SymbolicEnvironment
+from railroad._bindings import State
+from railroad.core import Fluent as F, get_action_by_name
+
+# Create environment
+env = SymbolicEnvironment(
+    state=State(0.0, initial_fluents, []),
+    objects_by_type=objects_by_type,
+    operators=[move_op, search_op],
+    objects_at_locations={"kitchen": {"Knife"}, "bedroom": {"Notebook"}},
+)
+
+# Planning and execution loop
+while not goal.evaluate(env.state.fluents):
+    # Get next action from planner
+    action_name = planner(env.state, goal, max_iterations=1000)
+    action = get_action_by_name(env.get_actions(), action_name)
+
+    # Execute action (returns when a robot is free)
+    env.act(action)
+
+print(f"Goal reached at time {env.time}!")
+```
 
 ### Using with ProcTHOR Simulation
 
-See `scripts/obf_door_example.py` for a complete example of planning and execution in a ProcTHOR environment with:
-- Scene loading and caching
-- Occupancy grid mapping
-- Robot navigation
-- Object search tasks
+ProcTHOR integration requires optional dependencies:
 
-### Example: Multi-Robot Search Task
+```bash
+pip install railroad[procthor]
+```
 
-[TODO: Add the Multi-Robot Search Example.]
+```python
+from railroad.environment.procthor import ProcTHOREnvironment, is_available
+
+if is_available():
+    env = ProcTHOREnvironment(scene_id="train_0")
+    # ... use environment for planning and execution
+```
+
+Run the built-in example:
+```bash
+uv run railroad example run procthor-search
+```
 
 ## Project Structure
 
-The repository is organized as a monorepo with the following structure:
+The repository is organized as a monorepo:
 
-- **`packages/`** - All packages are located this directory:
+- **`packages/`** - All packages:
     - **`railroad/`** - Core PDDL planning engine (C++ with Python bindings)
-    - **`procthor/`** - ProcTHOR simulator interface and utilities
-    - **`environments/`** - Environment abstractions and implementations
+      - `src/railroad/environment/` - Environment abstractions (`SymbolicEnvironment`, `ActiveSkill`)
+      - `src/railroad/environment/procthor/` - ProcTHOR simulator interface (optional)
+      - `src/railroad/bench/` - Benchmarking harness with MLflow tracking
+      - `src/railroad/examples/` - Built-in runnable examples
+    - **`environments/`** - Additional environment implementations (PyRoboSim)
     - **`gridmap/`** - Occupancy grid mapping and planning utilities
     - **`common/`** - Shared utilities (Pose class, etc.)
-    - **`bench/`** - Benchmarking harness with MLflow tracking and dashboard
 - **`scripts/`** - Example scripts and demonstrations
 - **`resources/`** - Downloaded resources (ProcTHOR data, models, etc.)
 
@@ -124,24 +200,23 @@ uv run pytest -vk search
 ### Type Checking
 
 ```bash
-# Type check in `packages` dir (currently only `railroad` and `bench` have type hints, more coverage coming later)
-uv run ty check packages
+uv run ty check
 ```
 
 ### Running Benchmarks
 
 ```bash
 # Run all benchmarks
-uv run benchmarks-run
+uv run railroad benchmarks run
 
 # Dry run to see what will execute
-uv run benchmarks-run --dry-run
+uv run railroad benchmarks run --dry-run
 
 # Run with filters and options
-uv run benchmarks-run -k movie_night --repeat-max 3 --parallel 4
+uv run railroad benchmarks run -k movie_night --repeat-max 3 --parallel 4
 
 # Launch interactive dashboard
-uv run benchmarks-dashboard
+uv run railroad benchmarks dashboard
 ```
 
 ### Rebuilding C++ Extensions
@@ -149,8 +224,6 @@ uv run benchmarks-dashboard
 If you modify C++ code or encounter import errors:
 
 ```bash
-make rebuild-cpp
-# or equivalently:
 uv sync --reinstall-package railroad
 ```
 
@@ -225,18 +298,29 @@ from railroad._bindings import GoalType
 goal_type = goal.get_type()  # GoalType.AND, GoalType.OR, GoalType.LITERAL, etc.
 ```
 
-#### Using Goals with Planners
+### Environment and Skills
+
+The `SymbolicEnvironment` manages plan execution:
+
+- **Environment** owns ground truth fluents; state is assembled on demand
+- **Skills** encapsulate action execution with time-based effect scheduling
+- **Probabilistic effects** are resolved at execution time
+- **Interruptible skills** allow moves to be interrupted when another robot becomes free
 
 ```python
-from railroad.planner import MCTSPlanner
-from railroad._bindings import ff_heuristic_goal
+from railroad.environment import (
+    SymbolicEnvironment,
+    InterruptableMoveSymbolicSkill,
+    LocationRegistry,
+)
 
-# Plan with goal object
-planner = MCTSPlanner(actions)
-action_name = planner(state, goal, max_iterations=1000, c=10)
-
-# Compute heuristic for goal
-h_value = ff_heuristic_goal(state, goal, actions)
+# For interruptible moves, use LocationRegistry and skill_overrides
+registry = LocationRegistry({"kitchen": np.array([0, 0]), "bedroom": np.array([10, 0])})
+env = SymbolicEnvironment(
+    ...,
+    location_registry=registry,
+    skill_overrides={"move": InterruptableMoveSymbolicSkill},
+)
 ```
 
 ### Effects and Timing
@@ -264,6 +348,20 @@ The C++ extension needs to be rebuilt:
 uv sync --reinstall-package railroad
 ```
 
+### ProcTHOR Dependencies Not Found
+
+Install optional dependencies:
+```bash
+pip install railroad[procthor]
+```
+
+Check if available in code:
+```python
+from railroad.environment.procthor import is_available
+if is_available():
+    # ProcTHOR is ready to use
+```
+
 ### ProcTHOR Resource Downloads
 
 On first import, ProcTHOR automatically downloads required resources (scenes, models). This may take several minutes. To disable auto-download:
@@ -275,7 +373,7 @@ export PROCTHOR_AUTO_DOWNLOAD=0
 
 Rebuild C++ extensions if headers or bindings changed:
 ```bash
-make rebuild-cpp
+uv sync --reinstall-package railroad
 ```
 
 ## License
@@ -289,23 +387,3 @@ If you use this code in your research, please cite:
 ```
 [Add citation information here]
 ```
-
-
-## TODO Items
-
-**FF Heuristic & Action Filtering**
-- [X] *Combine `get_usable_actions` with `ff_heuristic`* There is considerable duplicated code here and they really have the same functionality under the hood. Can I try passing a pointer for `visited_actions` to `ff_heuristic` and use that to return values if desired? Then the `get_usable_actions` function could just be a wrapper around it. Also, I can have `ff_heuristic` only optionally take in a goal function, since it isn't needed for determining which actions are reachable from some initial state.
-- [ ] **Feature** *Handle 'fluent outcome likelihood' correctly within the `ff_heuristic`.* Currently, the maximum probability of a fluent within `ff_heuristic.hpp` keeps only the most likley *per successor/outcome*. Instead, they should be aggregated on a per-action basis, to keep around the total probability of making that fluent true. (If one outcome is 60% likely and another is 40% likely but both have a fluent 'F' in their outcomes, it should register as 100% for that fluent.)
-- [ ] **Feature** *Keep only K-most-likely actions.* In previous work dealing with probabilistic outcomes, I would keep around only the K actions most likely to make that fluent true. To implement a similar functionality we can use the following steps: (1) determine which fluents are probabilistic and (2) for each fluent, determine which actions may result in that fluent as an outcome and then sort those and select the top-K of those, and (3) aggregate all of those actions in addition to all the deterministic actions. I will also write some tests for this purpose, to confirm that only probabilistic actions are limited.
-- [ ] **Feature** *Select the K-most-likely actions and the K-least-expensive-ways-to-get-a-fluent*. Let's say I have a fluent 'F'. I think we can use the heuristic calculation on a goal function that includes all the positive conditions for any action that has some probability of resulting in 'F' being true. We could use the result as an estimate of how much time it would take to complete that action. Then we could use both (1) cost-to-action + action-cost (a measure of how long it will then take to accomplish a particular fluent) and (2) the probability of making a particular fluent true.
-- [ ] **Bug** *Fix issue with 'wait' actions and action pruning.* When I enable action pruning via 'get_usable_actions' in `mcts` in planner.hpp, the wait tests fail for some reason. I suspect something about the relaxed graph either means they are pruned and/or that the heuristic calculation is not quite right. *EDIT: this seems somewhat unreliable anyway. I will need to look into it. I think the heuristic is no longer quite right.*
-
-**Wait Actions**
-- [ ] **Bug** There is an issue with how the Simulator handles 'wait' actions that I'm unsure how to fix. The way that 'wait' actions are processed within the transition function seems to cause issues with how the Simulator determines how much time has passed. Wait actions don't actually advance time, which is their entire intended purpose. Right now, 'wait' actions are incompatible with the Simulator. It is not entirely clear to me if this is actually a bug with the `transition` function, so we may need more tests to investigate.
-
-
-**Complex Goals**
-- [ ] The live visualization doesn't handle the new goal function and still expects the 'goal_fluents' to be passed. We should fix that.
-- [X] I also want to be able to handle 'any' and 'all' and 'none' conditions in the goals. To do some of these, I may need to pass the set of available objects, but I think that's okay. *Implemented: Use `reduce(and_, [...])` for all, `reduce(or_, [...])` for any, `reduce(and_, [~F(...) for ...])` for none.*
-- [X] The trick with some of the negative conditions will be to handle the 'mapping' correctly. I need to be sure that's handled in the new implementation and add some test for it. At the moment, I don't think those are handled correctly, but are important for getting a good value out of the heuristic function. *Fixed: MCTSPlanner dynamically extends the mapping when goals with negative fluents are encountered.*
-- [X] It would also be nice to be able to use python built-ins to specify goal functions: 'and' and 'or' should be able to do most of the basics. It would be a bit 'abuse of notation' to overload the 'and' operator for two fluents, but I think that might be okay for usability. *Implemented: Use `&` and `|` operators on Fluent, or `reduce(and_, [...])` and `reduce(or_, [...])`.*
