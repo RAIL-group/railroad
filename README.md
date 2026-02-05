@@ -19,17 +19,13 @@ This project requires Python 3.13+ and uses `uv` for dependency management.
 # Install uv if you don't have it
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Clone the repository
-git clone <repository-url>
-cd RAIL_mrppddl_dev
-
-# Install all dependencies and build C++ extensions
+# Clone and install
+git clone https://github.com/RAIL-group/railroad.git
+cd railroad
 uv sync
 ```
 
 ### Optional Dependencies
-
-The `railroad` package supports optional dependency groups:
 
 ```bash
 # Install with ProcTHOR support (AI2-THOR simulator)
@@ -44,184 +40,206 @@ pip install railroad[all]
 
 ## Quick Start
 
-### Running Built-in Examples
+### 1. Run a Built-in Example
+
+The fastest way to see Railroad in action:
 
 ```bash
 # List available examples
 uv run railroad example
 
-# Run examples
+# Run the clear-the-table example
 uv run railroad example run clear-table
+```
+
+You'll see a live dashboard showing robots planning and executing tasks:
+
+```
+Planning: clear-table
+Goal: Move all objects off the table
+
+  0.0                                              42.0
+r1,r2 |⠀⠀⠀⠀⠁⠀⠂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠀⠐⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀|
+   r1  M·····Sp···M·····Pp
+   r2  M·····Sp·········M·····Pp
+
+Step 3 | Time: 42.0 | Heuristic: 0
+```
+
+Other examples to try:
+```bash
 uv run railroad example run multi-object-search
 uv run railroad example run find-and-move-couch
 uv run railroad example run heterogeneous-robots
 uv run railroad example run heterogeneous-robots --interruptible-moves
-
-# ProcTHOR example (requires: pip install railroad[procthor])
-uv run railroad example run procthor-search
 ```
 
-### Basic PDDL Planning Example
+### 2. Minimal Planning Example
+
+Here's the simplest possible planning example:
 
 ```python
-from functools import reduce
-from operator import and_
-
 from railroad.core import Fluent as F
 from railroad._bindings import State
 from railroad import operators
 from railroad.planner import MCTSPlanner
 
-# Define initial state
+# Two robots need to find a knife
 initial_state = State(
     time=0,
-    fluents={
-        F("at robot1 bedroom"),
-        F("at robot2 kitchen"),
-        F("free robot1"),
-        F("free robot2"),
-    },
+    fluents={F("at robot1 kitchen"), F("at robot2 bedroom"), F("free robot1"), F("free robot2")},
     upcoming_effects=[],
 )
+goal = F("found Knife")
 
-# Define goal using the Goal API
-goal = reduce(and_, [
-    F("found Knife"),
-    F("found Notebook"),
-])
+# Create move and search operators
+move_op = operators.construct_move_operator_blocking(move_time=5.0)
+search_op = operators.construct_search_operator(object_find_prob=0.8, search_time=3.0)
 
-# Define available objects and locations
-objects_by_type = {
-    "robot": {"robot1", "robot2"},
-    "location": {"bedroom", "kitchen", "living_room"},
-    "object": {"Knife", "Notebook"},
-}
+# Instantiate actions
+objects = {"robot": {"robot1", "robot2"}, "location": {"kitchen", "bedroom"}, "object": {"Knife"}}
+actions = list(move_op.instantiate(objects)) + list(search_op.instantiate(objects))
 
-# Create operators
-move_op = operators.construct_move_operator_blocking(
-    move_time=lambda r, from_loc, to_loc: 5.0
-)
-search_op = operators.construct_search_operator(
-    object_find_prob=lambda r, loc, obj: 0.8,
-    search_time=lambda r, loc, obj: 3.0,
-)
-
-# Instantiate actions from operators
-actions = list(move_op.instantiate(objects_by_type)) + list(search_op.instantiate(objects_by_type))
-
-# Run MCTS planner
+# Plan!
 planner = MCTSPlanner(actions)
-next_action_name = planner(initial_state, goal, max_iterations=10000, c=10)
-
-print(f"Next action to execute: {next_action_name}")
+print(planner(initial_state, goal, max_iterations=1000))
+# Output: "search robot1 kitchen Knife" or "search robot2 bedroom Knife"
 ```
 
-### Using the SymbolicEnvironment
+### 3. Planning with Execution Loop
 
-The `SymbolicEnvironment` provides a clean API for executing plans:
+Use `SymbolicEnvironment` to execute plans step-by-step:
 
 ```python
-from railroad.environment import SymbolicEnvironment
-from railroad._bindings import State
 from railroad.core import Fluent as F, get_action_by_name
+from railroad._bindings import State
+from railroad import operators
+from railroad.environment import SymbolicEnvironment
+from railroad.planner import MCTSPlanner
 
-# Create environment
+# Setup
+initial_fluents = {F("at robot1 kitchen"), F("free robot1")}
+objects = {"robot": {"robot1"}, "location": {"kitchen", "bedroom"}, "object": {"Knife"}}
+goal = F("found Knife")
+
+move_op = operators.construct_move_operator_blocking(move_time=5.0)
+search_op = operators.construct_search_operator(object_find_prob=0.8, search_time=3.0)
+
+# Create environment (knows where objects actually are)
 env = SymbolicEnvironment(
     state=State(0.0, initial_fluents, []),
-    objects_by_type=objects_by_type,
+    objects_by_type=objects,
     operators=[move_op, search_op],
-    objects_at_locations={"kitchen": {"Knife"}, "bedroom": {"Notebook"}},
+    objects_at_locations={"bedroom": {"Knife"}},  # Knife is in bedroom
 )
 
-# Planning and execution loop
+# Create planner
+planner = MCTSPlanner(list(move_op.instantiate(objects)) + list(search_op.instantiate(objects)))
+
+# Plan and execute until goal reached
 while not goal.evaluate(env.state.fluents):
-    # Get next action from planner
     action_name = planner(env.state, goal, max_iterations=1000)
     action = get_action_by_name(env.get_actions(), action_name)
-
-    # Execute action (returns when a robot is free)
+    print(f"t={env.time:.1f}: Executing {action_name}")
     env.act(action)
 
-print(f"Goal reached at time {env.time}!")
+print(f"Goal reached at t={env.time:.1f}!")
 ```
 
-### Using with ProcTHOR Simulation
+Output:
+```
+t=0.0: Executing search robot1 kitchen Knife
+t=3.0: Executing move robot1 kitchen bedroom
+t=8.0: Executing search robot1 bedroom Knife
+Goal reached at t=11.0!
+```
 
-ProcTHOR integration requires optional dependencies:
+### 4. Complex Goals
+
+Use Python operators for complex goal expressions:
+
+```python
+from functools import reduce
+from operator import and_, or_
+from railroad.core import Fluent as F
+
+# AND: all must be true
+goal = F("found Knife") & F("found Fork")
+
+# OR: at least one must be true
+goal = F("at robot1 kitchen") | F("at robot1 bedroom")
+
+# Combining multiple fluents
+goal = reduce(and_, [F("found Knife"), F("found Fork"), F("found Spoon")])
+
+# Negation: object must NOT be at location
+goal = ~F("at Knife table")  # Knife must not be on table
+
+# "Clear the table" pattern
+objects = ["Knife", "Fork", "Spoon"]
+goal = reduce(and_, [~F(f"at {obj} table") for obj in objects])
+```
+
+### 5. ProcTHOR 3D Simulation (Optional)
+
+For realistic 3D environments, install ProcTHOR dependencies:
 
 ```bash
 pip install railroad[procthor]
+uv run railroad example run procthor-search
 ```
 
 ```python
 from railroad.environment.procthor import ProcTHOREnvironment, is_available
 
 if is_available():
+    # Load a ProcTHOR scene
     env = ProcTHOREnvironment(scene_id="train_0")
-    # ... use environment for planning and execution
-```
 
-Run the built-in example:
-```bash
-uv run railroad example run procthor-search
+    # Use like any other environment
+    actions = env.get_actions()
+    state = env.state
+    # ... plan and execute
 ```
 
 ## Project Structure
 
-The repository is organized as a monorepo:
-
-- **`packages/`** - All packages:
-    - **`railroad/`** - Core PDDL planning engine (C++ with Python bindings)
-      - `src/railroad/environment/` - Environment abstractions (`SymbolicEnvironment`, `ActiveSkill`)
-      - `src/railroad/environment/procthor/` - ProcTHOR simulator interface (optional)
-      - `src/railroad/bench/` - Benchmarking harness with MLflow tracking
-      - `src/railroad/examples/` - Built-in runnable examples
-    - **`environments/`** - Additional environment implementations (PyRoboSim)
-    - **`gridmap/`** - Occupancy grid mapping and planning utilities
-    - **`common/`** - Shared utilities (Pose class, etc.)
-- **`scripts/`** - Example scripts and demonstrations
-- **`resources/`** - Downloaded resources (ProcTHOR data, models, etc.)
+```
+railroad/
+├── packages/
+│   ├── railroad/          # Core planning engine
+│   │   ├── src/railroad/
+│   │   │   ├── environment/        # SymbolicEnvironment, skills
+│   │   │   ├── environment/procthor/  # ProcTHOR integration (optional)
+│   │   │   ├── bench/              # Benchmarking tools
+│   │   │   └── examples/           # Built-in examples
+│   │   └── include/                # C++ headers
+│   ├── environments/      # Additional environments (PyRoboSim)
+│   ├── gridmap/           # Occupancy grid utilities
+│   └── common/            # Shared utilities
+├── scripts/               # Standalone scripts
+└── resources/             # Downloaded data (ProcTHOR scenes, etc.)
+```
 
 ## Development
 
-### Running Tests
-
 ```bash
-# Run all tests
+# Run tests
 uv run pytest
 
 # Run specific test
 uv run pytest -vk test_name
 
-# Run tests matching pattern
-uv run pytest -vk search
-```
-
-### Type Checking
-
-```bash
+# Type checking
 uv run ty check
-```
 
-### Running Benchmarks
-
-```bash
-# Run all benchmarks
-uv run railroad benchmarks run
-
-# Dry run to see what will execute
-uv run railroad benchmarks run --dry-run
-
-# Run with filters and options
-uv run railroad benchmarks run -k movie_night --repeat-max 3 --parallel 4
-
-# Launch interactive dashboard
-uv run railroad benchmarks dashboard
+# Run benchmarks
+uv run railroad benchmarks run --dry-run  # Preview
+uv run railroad benchmarks run            # Run all
+uv run railroad benchmarks dashboard      # Launch dashboard
 ```
 
 ### Rebuilding C++ Extensions
-
-If you modify C++ code or encounter import errors:
 
 ```bash
 uv sync --reinstall-package railroad
@@ -229,161 +247,52 @@ uv sync --reinstall-package railroad
 
 ## Key Concepts
 
-### Operators and Actions
-
-- **Operators** are parameterized action templates (e.g., "move from ?from to ?to")
-- **Actions** are grounded instances with specific objects (e.g., "move robot1 from kitchen to bedroom")
-
-### Fluents and State
-
-- **Fluents** are symbolic predicates representing facts (e.g., "at robot1 kitchen")
-- **State** is a set of fluents representing the current world state
-- Use `~Fluent(...)` for negation
-
-### Goals and the Goal API
-
-Goals specify what conditions must be satisfied to complete planning. The system supports complex goal expressions using Python operators.
-
-#### Basic Goal Types
-
-```python
-from functools import reduce
-from operator import and_, or_
-from railroad.core import Fluent as F
-
-# Single literal goal
-goal = F("at robot1 kitchen")
-
-# AND goal: all conditions must be true
-goal = reduce(and_, [F("at robot1 kitchen"), F("found Knife")])
-
-# OR goal: at least one condition must be true
-goal = reduce(or_, [F("at robot1 kitchen"), F("at robot1 bedroom")])
-
-# Negated goal: condition must be FALSE
-goal = ~F("at Book table")  # Book must NOT be at table
-```
-
-#### Complex Goal Patterns
-
-```python
-# "Clear the table" - remove all objects from a location
-objects_on_table = ["Book", "Mug", "Vase"]
-goal = reduce(and_, [~F(f"at {obj} table") for obj in objects_on_table])
-
-# "Move any object to destination"
-objects = ["Book", "Mug"]
-goal = reduce(or_, [F(f"at {obj} shelf") for obj in objects])
-
-# Nested goals with AND and OR
-from railroad._bindings import AndGoal, OrGoal, LiteralGoal
-goal = AndGoal([
-    OrGoal([LiteralGoal(F("at Remote den")), LiteralGoal(F("at Plate den"))]),
-    OrGoal([LiteralGoal(F("at Cookie den")), LiteralGoal(F("at Couch den"))]),
-])
-```
-
-#### Goal Methods
-
-```python
-# Check if goal is satisfied
-if goal.evaluate(current_state.fluents):
-    print("Goal achieved!")
-
-# Get all literal fluents in the goal
-all_literals = goal.get_all_literals()
-
-# Get goal type
-from railroad._bindings import GoalType
-goal_type = goal.get_type()  # GoalType.AND, GoalType.OR, GoalType.LITERAL, etc.
-```
+| Concept | Description |
+|---------|-------------|
+| **Fluent** | A fact about the world: `F("at robot1 kitchen")` |
+| **State** | Set of fluents + time + pending effects |
+| **Operator** | Action template: `move ?robot ?from ?to` |
+| **Action** | Grounded operator: `move robot1 kitchen bedroom` |
+| **Effect** | State change at a specific time (can be probabilistic) |
+| **Goal** | Target condition(s) to achieve |
 
 ### Environment and Skills
 
-The `SymbolicEnvironment` manages plan execution:
-
-- **Environment** owns ground truth fluents; state is assembled on demand
-- **Skills** encapsulate action execution with time-based effect scheduling
-- **Probabilistic effects** are resolved at execution time
-- **Interruptible skills** allow moves to be interrupted when another robot becomes free
+The `SymbolicEnvironment` executes plans by managing skills:
 
 ```python
+import numpy as np
 from railroad.environment import (
     SymbolicEnvironment,
     InterruptableMoveSymbolicSkill,
     LocationRegistry,
 )
 
-# For interruptible moves, use LocationRegistry and skill_overrides
-registry = LocationRegistry({"kitchen": np.array([0, 0]), "bedroom": np.array([10, 0])})
+# For interruptible moves (robot can be redirected mid-movement)
+registry = LocationRegistry({
+    "kitchen": np.array([0, 0]),
+    "bedroom": np.array([10, 0]),
+})
+
 env = SymbolicEnvironment(
-    ...,
+    state=initial_state,
+    objects_by_type=objects,
+    operators=[move_op],
     location_registry=registry,
     skill_overrides={"move": InterruptableMoveSymbolicSkill},
 )
 ```
 
-### Effects and Timing
+## Troubleshooting
 
-- Effects can happen at different times (e.g., movement takes 5 seconds)
-- Effects can be probabilistic with multiple possible outcomes
-- The planner reasons about time and probability to find optimal plans
-
-### Planning Algorithms
-
-- **MCTS (Monte Carlo Tree Search)**: Good for probabilistic domains, handles uncertainty
-- **A***: Optimal for deterministic domains with good heuristics
+| Problem | Solution |
+|---------|----------|
+| `_bindings` import error | `uv sync --reinstall-package railroad` |
+| ProcTHOR not found | `pip install railroad[procthor]` |
+| Slow first ProcTHOR import | Normal - downloads ~2GB of resources |
+| Tests fail after git pull | Rebuild: `uv sync --reinstall-package railroad` |
 
 ## Resources
 
-- **AI2-THOR Documentation**: https://ai2thor.allenai.org/
-- **ProcTHOR Dataset**: https://procthor.allenai.org/
-
-## Troubleshooting
-
-### Import Error: "_bindings is missing"
-
-The C++ extension needs to be rebuilt:
-```bash
-uv sync --reinstall-package railroad
-```
-
-### ProcTHOR Dependencies Not Found
-
-Install optional dependencies:
-```bash
-pip install railroad[procthor]
-```
-
-Check if available in code:
-```python
-from railroad.environment.procthor import is_available
-if is_available():
-    # ProcTHOR is ready to use
-```
-
-### ProcTHOR Resource Downloads
-
-On first import, ProcTHOR automatically downloads required resources (scenes, models). This may take several minutes. To disable auto-download:
-```bash
-export PROCTHOR_AUTO_DOWNLOAD=0
-```
-
-### Tests Failing After Git Pull
-
-Rebuild C++ extensions if headers or bindings changed:
-```bash
-uv sync --reinstall-package railroad
-```
-
-## License
-
-[Add your license information here]
-
-## Citation
-
-If you use this code in your research, please cite:
-
-```
-[Add citation information here]
-```
+- [AI2-THOR Documentation](https://ai2thor.allenai.org/)
+- [ProcTHOR Dataset](https://procthor.allenai.org/)
