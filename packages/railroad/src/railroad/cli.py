@@ -2,6 +2,8 @@
 
 import click
 
+from railroad.examples import ExampleInfo
+
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(package_name="railroad")
@@ -106,7 +108,7 @@ def benchmarks_dashboard() -> None:
     run_dashboard()
 
 
-def _make_example_command(name: str, info: dict) -> None:
+def _make_example_command(name: str, info: ExampleInfo) -> None:
     """Create and register a click command for an example."""
     description = info["description"]
     options = info.get("options", [])
