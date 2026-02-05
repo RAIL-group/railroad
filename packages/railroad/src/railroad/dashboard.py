@@ -106,6 +106,31 @@ def action_color(action: str) -> str:
     return "white"
 
 
+def _shorten_name(name: str) -> str:
+    """Shorten a name by keeping first letter of each word (camelCase) and trailing numbers.
+
+    Examples:
+        "crawler" -> "c"
+        "robot1" -> "r1"
+        "BigRedRobot" -> "BRR"
+        "myRobot3" -> "mR3"
+    """
+    import re
+    # Extract trailing digits
+    match = re.match(r'^(.*?)(\d*)$', name)
+    base, digits = match.groups() if match else (name, '')
+
+    # Find camelCase word boundaries: start + uppercase letters
+    initials = []
+    if base:
+        initials.append(base[0])
+        for c in base[1:]:
+            if c.isupper():
+                initials.append(c)
+
+    return ''.join(initials) + digits
+
+
 def render_timeline(actions: List[Tuple[str, float]], robots: Set[str],
                     width: int = 50, end_time: Optional[float] = None) -> str:
     """Render Braille timeline. Each robot uses 2 vertical dots; 2 robots per row."""
@@ -131,11 +156,13 @@ def render_timeline(actions: List[Tuple[str, float]], robots: Set[str],
     pos = lambda t: int((t - min_t) / (max_t - min_t) * (width * 2 - 1))
 
     robots_list = sorted(robots)
-    # Calculate name width considering both individual names and paired names (for braille rows)
-    individual_nw = max(len(r) for r in robots_list)
-    # Paired names are joined with commas, with 'robot' shortened to 'r'
+    # Build short name mapping
+    short_names = {r: _shorten_name(r) for r in robots_list}
+
+    # Calculate name width from shortened names (individual and paired)
+    individual_nw = max(len(short_names[r]) for r in robots_list)
     paired_nw = max(
-        len(','.join(r.replace('robot', 'r') for r in robots_list[i:i + 2]))
+        len(','.join(short_names[r] for r in robots_list[i:i + 2]))
         for i in range(0, len(robots_list), 2)
     )
     nw = max(individual_nw, paired_nw)  # name width
@@ -152,7 +179,7 @@ def render_timeline(actions: List[Tuple[str, float]], robots: Set[str],
                     ci, sub = pos(t) // 2, pos(t) % 2
                     if 0 <= ci < width:
                         chars[ci] |= (L if sub == 0 else R)[slot] | (L if sub == 0 else R)[slot + 1]
-        lines.append(f"{','.join(r.replace('robot', 'r') for r in chunk):>{nw}} |{''.join(chr(c) for c in chars)}|")
+        lines.append(f"{','.join(short_names[r] for r in chunk):>{nw}} |{''.join(chr(c) for c in chars)}|")
 
     # Label rows (with color coding)
     for robot in robots_list:
@@ -173,7 +200,7 @@ def render_timeline(actions: List[Tuple[str, float]], robots: Set[str],
             label_parts.append(f"[{color}]{char}[/]")
             last_ci = ci
         label_parts.append(" " * (width - last_ci - 1))  # trailing spaces
-        lines.append(f"{robot:>{nw}}  {''.join(label_parts)} ")
+        lines.append(f"{short_names[robot]:>{nw}}  {''.join(label_parts)} ")
 
     return "\n".join(lines)
 
