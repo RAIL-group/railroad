@@ -159,13 +159,14 @@ def render_timeline(actions: List[Tuple[str, float]], robots: Set[str],
     # Build short name mapping
     short_names = {r: _shorten_name(r) for r in robots_list}
 
-    # Calculate name width from shortened names (individual and paired)
+    # Calculate name width from shortened names (individual and paired) and full names for label rows
     individual_nw = max(len(short_names[r]) for r in robots_list)
     paired_nw = max(
         len(','.join(short_names[r] for r in robots_list[i:i + 2]))
         for i in range(0, len(robots_list), 2)
     )
-    nw = max(individual_nw, paired_nw)  # name width
+    full_nw = max(len(r) for r in robots_list)  # full names used in label rows
+    nw = max(individual_nw, paired_nw, full_nw)  # name width
     lines = [f"{' ' * nw} |{min_t:.1f}{' ' * (width - len(f'{min_t:.1f}') - len(f'{max_t:.1f}'))}{max_t:.1f}|"]
 
     # Braille rows (2 robots per row)
@@ -200,7 +201,7 @@ def render_timeline(actions: List[Tuple[str, float]], robots: Set[str],
             label_parts.append(f"[{color}]{char}[/]")
             last_ci = ci
         label_parts.append(" " * (width - last_ci - 1))  # trailing spaces
-        lines.append(f"{short_names[robot]:>{nw}}  {''.join(label_parts)} ")
+        lines.append(f"{robot:>{nw}}  {''.join(label_parts)} ")
 
     return "\n".join(lines)
 
