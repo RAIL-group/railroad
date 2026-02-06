@@ -2,6 +2,14 @@
 
 A high-performance planning framework for multi-robot systems that combines symbolic PDDL-style planning with probabilistic reasoning and realistic 3D simulation environments.
 
+## Quickstart
+
+```bash
+uv venv
+uv pip install 'git+https://github.com/RAIL-group/railroad.git@main#subdirectory=packages/railroad'
+uv run railroad example multi-object-search
+```
+
 ## Features
 
 - **Fast C++ Planning Core**: A* and MCTS planners with Python bindings
