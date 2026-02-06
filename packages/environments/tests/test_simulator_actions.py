@@ -107,7 +107,8 @@ def test_search_action():
         locations=LOCATIONS, objects_at_locations=OBJECTS_AT_LOCATIONS, robot_locations=robot_locations)
 
     search_time = env.get_skills_time_fn(skill_name='search')
-    object_find_prob = lambda r, l, o: 0.8 if l == "roomA" else 0.2  # noqa: E731, E741
+    def object_find_prob(r, loc, o):
+        return 0.8 if loc == "roomA" else 0.2
     search_op = operators.construct_search_operator(object_find_prob, search_time)
 
     sim = EnvironmentInterface(initial_state, objects_by_type, [search_op], env)
@@ -276,7 +277,8 @@ def test_no_oscillation_pick_place_move_search():
     search_time = env.get_skills_time_fn(skill_name='search')
     pick_time = env.get_skills_time_fn(skill_name='pick')
     place_time = env.get_skills_time_fn(skill_name='place')
-    object_find_prob = lambda r, loc, o: 1.0
+    def object_find_prob(r, loc, o):
+        return 1.0
 
     move_op = operators.construct_move_operator_blocking(move_time_fn)
     search_op = operators.construct_search_operator(object_find_prob, search_time)

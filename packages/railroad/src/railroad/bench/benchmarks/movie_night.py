@@ -95,7 +95,8 @@ def bench_movie_night(case: BenchmarkCase):
     )
 
     # Search operator with 80% success rate when object is actually present
-    object_find_prob = lambda r, loc, o: 0.8 if o in objects_at_locations.get(loc, dict()).get("object", dict()) else 0.2
+    def object_find_prob(r, loc, o):
+        return 0.8 if o in objects_at_locations.get(loc, dict()).get("object", dict()) else 0.2
     search_op = operators.construct_search_operator(
         object_find_prob=object_find_prob,
         search_time=env.get_skills_time_fn('search')

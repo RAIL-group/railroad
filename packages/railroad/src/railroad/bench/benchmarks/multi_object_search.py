@@ -81,7 +81,7 @@ def bench_multi_object_search_base(case: BenchmarkCase):
 
     # Search operator with 80% success rate when object is actually present
     search_op = operators.construct_search_operator(
-        object_find_prob=lambda r, l, o: 0.6 if 'kitchen' in l else 0.4,
+        object_find_prob=lambda r, loc, o: 0.6 if 'kitchen' in loc else 0.4,
         search_time=env.get_skills_time_fn('search')
     )
 
