@@ -23,6 +23,7 @@ def sample_objects_and_location(scene, num_objects: int, seed: int | None = None
         random.choice(all_locations),
     )
 
+
 def main(
     seed: int | None = None,
     num_objects: int = 2,
@@ -30,6 +31,8 @@ def main(
     save_plot: str | None = None,
     show_plot: bool = False,
     save_video: str | None = None,
+    estimate_object_find_prob: bool = False,
+    nn_model_path: str | None = "./resources/models/procthor_obj_prob_net.pt",
     video_fps: int = 60,
     video_dpi: int = 150,
 ) -> None:
@@ -47,6 +50,7 @@ def main(
     from railroad.dashboard import PlannerDashboard
     from railroad.planner import MCTSPlanner
     from railroad._bindings import State
+    from pathlib import Path
 
     # Configuration
     robot_names = [f"robot{i + 1}" for i in range(num_robots)]
@@ -64,18 +68,28 @@ def main(
         scene = ProcTHORScene(seed=scene_seed)
         target_objects, target_location = sample_objects_and_location(scene, num_objects=num_objects, seed=seed)
 
-    ## Build operators
+    # Build operators
     move_cost_fn = scene.get_move_cost_fn()
 
-    # Create probability function based on ground truth
-    def object_find_prob(robot: str, location: str, obj: str) -> float:
-        for loc, objs in scene.object_locations.items():
-            if obj in objs:
-                return 0.8 if loc == location else 0.1
-        return 0.1
+    # If estimate_object_find_prob is True, use learned model to get object find probabilities
+    if estimate_object_find_prob:
+        if not Path(nn_model_path).exists():
+            raise FileNotFoundError(
+                f"Trained neural network model not found at {nn_model_path} to estimate object find probabilities. "
+                "Please provide a valid path or omit the --estimate-object-find-prob flag."
+            )
+        object_find_prob_fn = scene.get_object_find_prob_fn(nn_model_path=nn_model_path,
+                                                            objects_to_find=target_objects)
+    else:
+        # Otherwise, create probability function based on ground truth
+        def object_find_prob_fn(robot: str, location: str, obj: str) -> float:
+            for loc, objs in scene.object_locations.items():
+                if obj in objs:
+                    return 0.8 if loc == location else 0.1
+            return 0.1
 
     move_op = operators.construct_move_operator_blocking(move_cost_fn)
-    search_op = operators.construct_search_operator(object_find_prob, 10.0)
+    search_op = operators.construct_search_operator(object_find_prob_fn, 10.0)
     pick_op = operators.construct_pick_operator_blocking(10.0)
     place_op = operators.construct_place_operator_blocking(10.0)
     no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)

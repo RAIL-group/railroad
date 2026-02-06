@@ -99,7 +99,19 @@ if _procthor_available():
                 "help": "Number of robots",
                 "param_name": "num_robots",
             },
+            {
+                "name": "--estimate-object-find-prob",
+                "is_flag": True,
+                "default": False,
+                "help": "Use learned model to estimate object find probabilities",
+                "param_name": "estimate_object_find_prob",
+            },
+            {
+                "name": "--nn-model-path",
+                "type": str,
+                "default": "./resources/models/procthor_obj_prob_net.pt",
+                "help": "Path to trained neural network model for estimating object find probabilities (used if --estimate-object-find-prob is set)",
+                "param_name": "nn_model_path",
+            }
         ],
     }
-
-
