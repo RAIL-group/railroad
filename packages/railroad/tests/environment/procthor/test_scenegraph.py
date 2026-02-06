@@ -1,4 +1,3 @@
-import pytest
 from railroad.environment.procthor.scenegraph import SceneGraph
 
 

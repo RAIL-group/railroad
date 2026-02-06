@@ -12,7 +12,7 @@ objectives.
 
 import numpy as np
 
-from railroad.core import Fluent as F, get_action_by_name, ff_heuristic
+from railroad.core import Fluent as F, get_action_by_name
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
 from railroad import operators

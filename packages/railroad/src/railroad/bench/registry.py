@@ -7,7 +7,6 @@ Benchmarks are automatically registered when decorated.
 
 from dataclasses import dataclass, field
 from typing import Dict, Any, Callable, List, Optional
-import inspect
 from pathlib import Path
 
 

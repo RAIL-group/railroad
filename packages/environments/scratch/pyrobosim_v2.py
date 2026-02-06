@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Set, Tuple
 
 from railroad._bindings import Action, Fluent, GroundedEffect
-from railroad.environment import ActiveSkill, Environment, SymbolicSkill
+from railroad.environment import ActiveSkill, Environment
 
 if TYPE_CHECKING:
     import pyrobosim
@@ -191,7 +191,6 @@ class PyRoboSimEnvironment:
             record_plots: Whether to record frames for video export.
         """
         from pyrobosim.core.yaml_utils import WorldYamlLoader
-        from pyrobosim.utils.knowledge import query_to_entity, graph_node_from_entity
 
         self._world = WorldYamlLoader().from_file(Path(world_file))
 
@@ -345,7 +344,6 @@ class PyRoboSimEnvironment:
             A function (robot, loc_from, loc_to) -> float that returns the
             estimated time to move based on path length and robot velocity.
         """
-        from pyrobosim.utils.knowledge import query_to_entity, graph_node_from_entity
 
         def get_move_time(robot: str, loc_from: str, loc_to: str) -> float:
             # Get feasible poses for the robot at the from and to locations
