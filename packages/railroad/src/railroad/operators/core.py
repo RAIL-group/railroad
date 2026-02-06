@@ -12,15 +12,9 @@ Naming convention:
 - `_constrained` suffix indicates operators with additional constraints (e.g., "not visited")
 """
 
-from typing import Callable, Union
-
 from railroad.core import Fluent, Operator, Effect
 
-from ._utils import _make_callable, _invert_prob
-
-# Type aliases
-Num = Union[float, int]
-OptCallable = Union[Num, Callable[..., float]]
+from ._utils import OptNumeric, _to_numeric
 
 F = Fluent
 
@@ -30,7 +24,7 @@ F = Fluent
 # =============================================================================
 
 
-def construct_move_operator(move_time: OptCallable) -> Operator:
+def construct_move_operator(move_time: OptNumeric) -> Operator:
     """Construct a basic move operator (non-blocking).
 
     Args:
@@ -40,7 +34,7 @@ def construct_move_operator(move_time: OptCallable) -> Operator:
     Returns:
         Operator for moving a robot between locations.
     """
-    move_time_fn = _make_callable(move_time)
+    move_time_fn = _to_numeric(move_time)
     return Operator(
         name="move",
         parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
@@ -55,7 +49,7 @@ def construct_move_operator(move_time: OptCallable) -> Operator:
     )
 
 
-def construct_move_operator_blocking(move_time: OptCallable) -> Operator:
+def construct_move_operator_blocking(move_time: OptNumeric) -> Operator:
     """Construct a move operator with just-moved blocking precondition.
 
     This prevents immediate consecutive moves by the same robot.
@@ -67,9 +61,7 @@ def construct_move_operator_blocking(move_time: OptCallable) -> Operator:
     Returns:
         Operator for moving with blocking precondition.
     """
-    move_time_fn = _make_callable(move_time)
-    def move_time_plus_eps(*args) -> float:
-        return move_time_fn(*args) + 0.1
+    move_time_fn = _to_numeric(move_time)
     return Operator(
         name="move",
         parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
@@ -81,14 +73,14 @@ def construct_move_operator_blocking(move_time: OptCallable) -> Operator:
                 resulting_fluents={F("free ?r"), F("at ?r ?to"), F("just-moved ?r")},
             ),
             Effect(
-                time=(move_time_plus_eps, ["?r", "?from", "?to"]),
+                time=(move_time_fn + 0.1, ["?r", "?from", "?to"]),
                 resulting_fluents={~F("just-moved ?r")},
             ),
         ],
     )
 
 
-def construct_move_visited_operator(move_time: OptCallable) -> Operator:
+def construct_move_visited_operator(move_time: OptNumeric) -> Operator:
     """Construct a move operator that tracks visited locations.
 
     Does not have a "not visited" precondition, allowing revisits.
@@ -100,7 +92,7 @@ def construct_move_visited_operator(move_time: OptCallable) -> Operator:
     Returns:
         Operator that marks destinations as visited upon arrival.
     """
-    move_time_fn = _make_callable(move_time)
+    move_time_fn = _to_numeric(move_time)
     return Operator(
         name="move",
         parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
@@ -120,7 +112,7 @@ def construct_move_visited_operator(move_time: OptCallable) -> Operator:
     )
 
 
-def construct_move_visited_operator_constrained(move_time: OptCallable) -> Operator:
+def construct_move_visited_operator_constrained(move_time: OptNumeric) -> Operator:
     """Construct a move operator that only allows visiting unvisited locations.
 
     Has a "not visited ?to" precondition, preventing revisits.
@@ -132,7 +124,7 @@ def construct_move_visited_operator_constrained(move_time: OptCallable) -> Opera
     Returns:
         Operator that only allows moves to unvisited locations.
     """
-    move_time_fn = _make_callable(move_time)
+    move_time_fn = _to_numeric(move_time)
     return Operator(
         name="move",
         parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
@@ -158,7 +150,7 @@ def construct_move_visited_operator_constrained(move_time: OptCallable) -> Opera
 
 
 def construct_search_operator(
-    object_find_prob: OptCallable, search_time: OptCallable
+    object_find_prob: OptNumeric, search_time: OptNumeric
 ) -> Operator:
     """Construct a search-only operator.
 
@@ -173,9 +165,8 @@ def construct_search_operator(
     Returns:
         Operator for searching a location.
     """
-    object_find_prob_fn = _make_callable(object_find_prob)
-    inv_object_find_prob = _invert_prob(object_find_prob)
-    search_time_fn = _make_callable(search_time)
+    object_find_prob_fn = _to_numeric(object_find_prob)
+    search_time_fn = _to_numeric(search_time)
     return Operator(
         name="search",
         parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
@@ -202,7 +193,7 @@ def construct_search_operator(
                         [Effect(time=0, resulting_fluents={F("found ?obj"), F("at ?obj ?loc")})],
                     ),
                     (
-                        (inv_object_find_prob, ["?r", "?loc", "?obj"]),
+                        (1 - object_find_prob_fn, ["?r", "?loc", "?obj"]),
                         [],
                     ),
                 ],
@@ -212,7 +203,7 @@ def construct_search_operator(
 
 
 def construct_search_and_pick_operator(
-    object_find_prob: OptCallable, move_time: OptCallable, pick_time: OptCallable
+    object_find_prob: OptNumeric, move_time: OptNumeric, pick_time: OptNumeric
 ) -> Operator:
     """Construct a combined search-move-pick operator.
 
@@ -229,10 +220,9 @@ def construct_search_and_pick_operator(
     Returns:
         Operator combining search, move, and pick actions.
     """
-    object_find_prob_fn = _make_callable(object_find_prob)
-    inv_object_find_prob = _invert_prob(object_find_prob)
-    move_time_fn = _make_callable(move_time)
-    pick_time_fn = _make_callable(pick_time)
+    object_find_prob_fn = _to_numeric(object_find_prob)
+    move_time_fn = _to_numeric(move_time)
+    pick_time_fn = _to_numeric(pick_time)
     return Operator(
         name="search",
         parameters=[
@@ -274,7 +264,7 @@ def construct_search_and_pick_operator(
                         ],
                     ),
                     (
-                        (inv_object_find_prob, ["?robot", "?loc_to", "?object"]),
+                        (1 - object_find_prob_fn, ["?robot", "?loc_to", "?object"]),
                         [Effect(time=0, resulting_fluents={Fluent("free ?robot")})],
                     ),
                 ],
@@ -288,7 +278,7 @@ def construct_search_and_pick_operator(
 # =============================================================================
 
 
-def construct_pick_operator(pick_time: OptCallable) -> Operator:
+def construct_pick_operator(pick_time: OptNumeric) -> Operator:
     """Construct a basic pick operator (non-blocking).
 
     Args:
@@ -298,7 +288,7 @@ def construct_pick_operator(pick_time: OptCallable) -> Operator:
     Returns:
         Operator for picking up an object.
     """
-    pick_time_fn = _make_callable(pick_time)
+    pick_time_fn = _to_numeric(pick_time)
     return Operator(
         name="pick",
         parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
@@ -313,7 +303,7 @@ def construct_pick_operator(pick_time: OptCallable) -> Operator:
     )
 
 
-def construct_pick_operator_blocking(pick_time: OptCallable) -> Operator:
+def construct_pick_operator_blocking(pick_time: OptNumeric) -> Operator:
     """Construct a pick operator with just-placed blocking precondition.
 
     Prevents immediately picking up an object that was just placed.
@@ -325,9 +315,7 @@ def construct_pick_operator_blocking(pick_time: OptCallable) -> Operator:
     Returns:
         Operator for picking with blocking precondition.
     """
-    pick_time_fn = _make_callable(pick_time)
-    def pick_time_plus_eps(*args) -> float:
-        return pick_time_fn(*args) + 0.1
+    pick_time_fn = _to_numeric(pick_time)
     return Operator(
         name="pick",
         parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
@@ -350,7 +338,7 @@ def construct_pick_operator_blocking(pick_time: OptCallable) -> Operator:
                 },
             ),
             Effect(
-                time=(pick_time_plus_eps, ["?r", "?loc", "?obj"]),
+                time=(pick_time_fn + 0.1, ["?r", "?loc", "?obj"]),
                 resulting_fluents={~F("just-picked ?r ?obj")},
             ),
         ],
@@ -362,7 +350,7 @@ def construct_pick_operator_blocking(pick_time: OptCallable) -> Operator:
 # =============================================================================
 
 
-def construct_place_operator(place_time: OptCallable) -> Operator:
+def construct_place_operator(place_time: OptNumeric) -> Operator:
     """Construct a basic place operator (non-blocking).
 
     Args:
@@ -372,7 +360,7 @@ def construct_place_operator(place_time: OptCallable) -> Operator:
     Returns:
         Operator for placing an object.
     """
-    place_time_fn = _make_callable(place_time)
+    place_time_fn = _to_numeric(place_time)
     return Operator(
         name="place",
         parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
@@ -387,7 +375,7 @@ def construct_place_operator(place_time: OptCallable) -> Operator:
     )
 
 
-def construct_place_operator_blocking(place_time: OptCallable) -> Operator:
+def construct_place_operator_blocking(place_time: OptNumeric) -> Operator:
     """Construct a place operator with just-picked blocking precondition.
 
     Prevents immediately placing an object that was just picked up.
@@ -399,9 +387,7 @@ def construct_place_operator_blocking(place_time: OptCallable) -> Operator:
     Returns:
         Operator for placing with blocking precondition.
     """
-    place_time_fn = _make_callable(place_time)
-    def place_time_plus_eps(*args) -> float:
-        return place_time_fn(*args) + 0.1
+    place_time_fn = _to_numeric(place_time)
     return Operator(
         name="place",
         parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
@@ -424,7 +410,7 @@ def construct_place_operator_blocking(place_time: OptCallable) -> Operator:
                 },
             ),
             Effect(
-                time=(place_time_plus_eps, ["?r", "?loc", "?obj"]),
+                time=(place_time_fn + 0.1, ["?r", "?loc", "?obj"]),
                 resulting_fluents={~F("just-placed ?r ?obj")},
             ),
         ],
@@ -452,7 +438,7 @@ def construct_wait_operator() -> Operator:
     )
 
 
-def construct_no_op_operator(no_op_time: OptCallable, extra_cost: float = 0.0) -> Operator:
+def construct_no_op_operator(no_op_time: OptNumeric, extra_cost: float = 0.0) -> Operator:
     """Construct a no-op (do nothing) operator.
 
     Sometimes patience is a virtuous skill.
@@ -465,7 +451,7 @@ def construct_no_op_operator(no_op_time: OptCallable, extra_cost: float = 0.0) -
     Returns:
         Operator for waiting in place.
     """
-    no_op_time_fn = _make_callable(no_op_time)
+    no_op_time_fn = _to_numeric(no_op_time)
     return Operator(
         name="no_op",
         parameters=[("?r", "robot")],

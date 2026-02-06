@@ -33,7 +33,6 @@ Num = Union[float, int]
 
 Binding = Dict[str, str]
 Bindable = Callable[[Binding], Num]
-OptCallable = Union[Num, Callable[..., float]]
 OptExpr = Union[float, Tuple[Callable[..., float], List[str]]]
 
 
