@@ -41,10 +41,11 @@ from .core import (
 )
 
 from ._utils import (
-    _make_callable,
-    _invert_prob,
+    Numeric,
+    numeric,
+    _to_numeric,
     Num,
-    OptCallable,
+    OptNumeric,
 )
 
 __all__ = [
@@ -66,8 +67,9 @@ __all__ = [
     "construct_wait_operator",
     "construct_no_op_operator",
     # Utilities
-    "_make_callable",
-    "_invert_prob",
+    "Numeric",
+    "numeric",
+    "_to_numeric",
     "Num",
-    "OptCallable",
+    "OptNumeric",
 ]
