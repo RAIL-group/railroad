@@ -12,6 +12,15 @@ import re
 from time import sleep, perf_counter
 from typing import List, Dict, Set, Union, Tuple, Optional
 
+from railroad._bindings import (
+    Goal,
+    LiteralGoal,
+    AndGoal,
+    GoalType,
+    Fluent,
+    State,
+)
+
 
 def _is_headless_environment() -> bool:
     """Detect if running in a headless environment where live dashboards don't work well.
@@ -39,15 +48,6 @@ def _is_headless_environment() -> bool:
         return True
 
     return False
-
-from railroad._bindings import (
-    Goal,
-    LiteralGoal,
-    AndGoal,
-    GoalType,
-    Fluent,
-    State,
-)
 
 
 # =============================================================================
@@ -328,7 +328,8 @@ def render_timeline(actions: List[Tuple[str, float]], robots: Set[str],
     min_t, max_t = 0.0, end_time if end_time else max(e[1] for e in events)
     if max_t <= min_t:
         max_t = min_t + 1.0
-    pos = lambda t: int((t - min_t) / (max_t - min_t) * (width * 2 - 1))
+    def pos(t):
+        return int((t - min_t) / (max_t - min_t) * (width * 2 - 1))
 
     robots_list = sorted(robots)
     # Build short name mapping

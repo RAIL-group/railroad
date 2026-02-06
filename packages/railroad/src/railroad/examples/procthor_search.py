@@ -43,9 +43,14 @@ def main() -> None:
     # Build operators
     move_cost_fn = scene.get_move_cost_fn()
     # All skill time functions take (robot, location, object) -> float
-    search_time_fn = lambda r, l, o: 15.0 if r == "robot1" else 10.0
-    pick_time_fn = lambda r, l, o: 15.0 if r == "robot1" else 10.0
-    place_time_fn = lambda r, l, o: 15.0 if r == "robot1" else 10.0
+    def search_time_fn(r, loc, o):
+        return 15.0 if r == "robot1" else 10.0
+
+    def pick_time_fn(r, loc, o):
+        return 15.0 if r == "robot1" else 10.0
+
+    def place_time_fn(r, loc, o):
+        return 15.0 if r == "robot1" else 10.0
 
     # Create probability function based on ground truth
     def object_find_prob(robot: str, location: str, obj: str) -> float:

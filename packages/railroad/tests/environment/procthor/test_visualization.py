@@ -108,10 +108,17 @@ def test_single_robot_plotting(scene, target_objects, target_locations):
 
     # Create operators
     move_cost_fn = scene.get_move_cost_fn()
-    search_time_fn = lambda r, l, o: 10.0
-    pick_time_fn = lambda r, l, o: 5.0
-    place_time_fn = lambda r, l, o: 5.0
-    object_find_prob = lambda r, l, o: 1.0  # Perfect search for faster tests
+    def search_time_fn(r, loc, o):
+        return 10.0
+
+    def pick_time_fn(r, loc, o):
+        return 5.0
+
+    def place_time_fn(r, loc, o):
+        return 5.0
+
+    def object_find_prob(r, loc, o):
+        return 1.0  # Perfect search for faster tests
 
     move_op = operators.construct_move_operator_blocking(move_cost_fn)
     search_op = operators.construct_search_operator(object_find_prob, search_time_fn)
@@ -204,9 +211,14 @@ def test_multi_robot_unknown_plotting(scene, target_objects, target_locations):
 
     # Create operators
     move_cost_fn = scene.get_move_cost_fn()
-    search_time_fn = lambda r, l, o: 10.0
-    pick_time_fn = lambda r, l, o: 5.0
-    place_time_fn = lambda r, l, o: 5.0
+    def search_time_fn(r, loc, o):
+        return 10.0
+
+    def pick_time_fn(r, loc, o):
+        return 5.0
+
+    def place_time_fn(r, loc, o):
+        return 5.0
 
     # Probability based on ground truth
     def object_find_prob(robot: str, location: str, obj: str) -> float:
@@ -324,8 +336,11 @@ def test_multi_robot_known_plotting(scene, target_objects, target_locations):
 
     # Create operators (no search needed)
     move_cost_fn = scene.get_move_cost_fn()
-    pick_time_fn = lambda r, l, o: 5.0
-    place_time_fn = lambda r, l, o: 5.0
+    def pick_time_fn(r, loc, o):
+        return 5.0
+
+    def place_time_fn(r, loc, o):
+        return 5.0
 
     move_op = operators.construct_move_operator_blocking(move_cost_fn)
     pick_op = operators.construct_pick_operator_blocking(pick_time_fn)

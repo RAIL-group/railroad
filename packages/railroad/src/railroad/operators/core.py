@@ -68,7 +68,8 @@ def construct_move_operator_blocking(move_time: OptCallable) -> Operator:
         Operator for moving with blocking precondition.
     """
     move_time_fn = _make_callable(move_time)
-    move_time_plus_eps: Callable[..., float] = lambda *args: move_time_fn(*args) + 0.1
+    def move_time_plus_eps(*args) -> float:
+        return move_time_fn(*args) + 0.1
     return Operator(
         name="move",
         parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
@@ -325,7 +326,8 @@ def construct_pick_operator_blocking(pick_time: OptCallable) -> Operator:
         Operator for picking with blocking precondition.
     """
     pick_time_fn = _make_callable(pick_time)
-    pick_time_plus_eps: Callable[..., float] = lambda *args: pick_time_fn(*args) + 0.1
+    def pick_time_plus_eps(*args) -> float:
+        return pick_time_fn(*args) + 0.1
     return Operator(
         name="pick",
         parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
@@ -398,7 +400,8 @@ def construct_place_operator_blocking(place_time: OptCallable) -> Operator:
         Operator for placing with blocking precondition.
     """
     place_time_fn = _make_callable(place_time)
-    place_time_plus_eps: Callable[..., float] = lambda *args: place_time_fn(*args) + 0.1
+    def place_time_plus_eps(*args) -> float:
+        return place_time_fn(*args) + 0.1
     return Operator(
         name="place",
         parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],

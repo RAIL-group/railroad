@@ -14,10 +14,10 @@ import tempfile
 # Suppress MLflow database initialization logs by redirecting stderr during import
 _stderr = sys.stderr
 sys.stderr = StringIO()
-import mlflow
+import mlflow  # noqa: E402
 sys.stderr = _stderr
 
-from .plan import Task, TaskStatus
+from .plan import Task, TaskStatus  # noqa: E402
 
 
 class MLflowTracker:
@@ -92,7 +92,7 @@ class MLflowTracker:
         Args:
             task: Completed task with results
         """
-        with mlflow.start_run(run_name=task.id) as run:  # type: ignore[possibly-missing-attribute]
+        with mlflow.start_run(run_name=task.id):  # type: ignore[possibly-missing-attribute]
             # Log parameters (inputs)
             params = {
                 "benchmark_name": task.benchmark_name,
@@ -183,7 +183,7 @@ class MLflowTracker:
         Args:
             summary: Summary statistics dictionary
         """
-        with mlflow.start_run(run_name="__summary__") as run:  # type: ignore[possibly-missing-attribute]
+        with mlflow.start_run(run_name="__summary__"):  # type: ignore[possibly-missing-attribute]
             # Log all summary values as metrics
             metrics = {k: float(v) for k, v in summary.items() if isinstance(v, (int, float))}
             mlflow.log_metrics(metrics)  # type: ignore[possibly-missing-attribute]

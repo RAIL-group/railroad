@@ -2,19 +2,11 @@
 from typing import Callable, List, Tuple, Dict, Set, Union, Sequence, Collection, Mapping, Optional, cast
 import itertools
 
-try:
-    from railroad import _bindings  # noqa: F401
-except ImportError as e:
-    raise ImportError(
-        "railroad's native extension (_bindings) is missing.\n"
-        "To rebuild the package, run:\n"
-        "    uv sync --reinstall-package railroad\n"
-        "or 'make rebuild-cpp'\n"
-    ) from e
-
 from railroad._bindings import GroundedEffect, Fluent, Action, State
-from railroad._bindings import transition  # noqa: F401
+from railroad._bindings import transition
 from railroad._bindings import LiteralGoal, AndGoal, OrGoal, Goal
+
+__all__ = ["transition"]  # re-exported from _bindings
 from railroad._bindings import ff_heuristic as _ff_heuristic_cpp
 
 

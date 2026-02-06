@@ -44,7 +44,8 @@ def main(args):
 
     # Create operators - move uses distance-based time from environment
     move_time_fn = env.get_skills_time_fn('move')
-    object_find_prob = lambda r, l, o: 0.8 if l == 'my_desk' and o == 'apple0' else 0.2
+    def object_find_prob(r, loc, o):
+        return 0.8 if loc == 'my_desk' and o == 'apple0' else 0.2
     move_op = operators.construct_move_operator_blocking(move_time_fn)
     search_op = operators.construct_search_operator(object_find_prob, SEARCH_TIME)
     pick_op = operators.construct_pick_operator_blocking(PICK_TIME)
