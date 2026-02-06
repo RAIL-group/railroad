@@ -33,6 +33,7 @@ procthor = [
     "networkx",
     "scikit-image",
     "matplotlib",
+    "shapely>=2.1.2",
 ]
 all = [
     "railroad[test,bench,procthor]",
