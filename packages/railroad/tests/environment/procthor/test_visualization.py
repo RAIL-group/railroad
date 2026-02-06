@@ -6,8 +6,6 @@ were migrated to use the consolidated railroad.environment.procthor module.
 """
 
 import random
-from functools import reduce
-from operator import and_
 from pathlib import Path
 
 import matplotlib

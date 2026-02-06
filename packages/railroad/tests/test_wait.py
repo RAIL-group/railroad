@@ -264,7 +264,7 @@ def test_couch_carry_with_wait():
     # Step 1: r1 starts moving to l3
     state = transition(state, move_r1_l1_l3)[0][0]
     print(f"\nAfter 'move r1 l1 l3' (t={state.time}):")
-    print(f"  - r1 is moving (not free)")
+    print("  - r1 is moving (not free)")
     assert state.time == 0
     assert F("free r1") not in state.fluents
     assert F("at r1 l1") not in state.fluents
@@ -272,8 +272,8 @@ def test_couch_carry_with_wait():
     # Step 2: r2 starts moving to l3
     state = transition(state, move_r2_l2_l3)[0][0]
     print(f"\nAfter 'move r2 l2 l3' (t={state.time}):")
-    print(f"  - r2 is moving (not free)")
-    print(f"  - Time advances to t=2 when r2 arrives at l3")
+    print("  - r2 is moving (not free)")
+    print("  - Time advances to t=2 when r2 arrives at l3")
     assert state.time == 2  # Time advances to when r2 finishes
     assert F("free r2") in state.fluents
     assert F("at r2 l3") in state.fluents
@@ -282,8 +282,8 @@ def test_couch_carry_with_wait():
     # Step 3: r2 waits for r1
     state = transition(state, wait_r2_r1)[0][0]
     print(f"\nAfter 'wait r2 r1' (t={state.time}):")
-    print(f"  - r2 is waiting (not free)")
-    print(f"  - Time advances to t=5 when r1 arrives at l3")
+    print("  - r2 is waiting (not free)")
+    print("  - Time advances to t=5 when r1 arrives at l3")
     assert state.time == 5  # Time advances to when r1 finishes
     assert F("free r1") in state.fluents
     assert F("at r1 l3") in state.fluents
@@ -293,9 +293,9 @@ def test_couch_carry_with_wait():
     # Step 4: Both robots lift the couch
     state = transition(state, lift_couch)[0][0]
     print(f"\nAfter 'lift-couch-together r1 r2 couch1 l3' (t={state.time}):")
-    print(f"  - Couch is no longer on floor")
-    print(f"  - r1 is primary carrier (becomes free after 1 second)")
-    print(f"  - r2 is helper (stays not-free)")
+    print("  - Couch is no longer on floor")
+    print("  - r1 is primary carrier (becomes free after 1 second)")
+    print("  - r2 is helper (stays not-free)")
     assert state.time == 6  # 5 + 1 second lift time
     assert F("on-floor couch1") not in state.fluents
     assert F("carrying-primary r1 couch1") in state.fluents
@@ -306,7 +306,7 @@ def test_couch_carry_with_wait():
     # Step 5: Move couch to l4
     state = transition(state, move_couch)[0][0]
     print(f"\nAfter 'move-couch r1 r2 couch1 l3 l4' (t={state.time}):")
-    print(f"  - Couch and both robots at l4")
+    print("  - Couch and both robots at l4")
     assert state.time == 9  # 6 + 3 seconds travel
     assert F("at r1 l4") in state.fluents
     assert F("at r2 l4") in state.fluents
@@ -317,8 +317,8 @@ def test_couch_carry_with_wait():
     # Step 6: Put down couch
     state = transition(state, put_down_couch)[0][0]
     print(f"\nAfter 'put-down-couch-together r1 r2 couch1 l4' (t={state.time}):")
-    print(f"  - Couch is on floor at l4")
-    print(f"  - Both robots are free")
+    print("  - Couch is on floor at l4")
+    print("  - Both robots are free")
     assert state.time == 10  # 9 + 1 second put-down time
     assert F("on-floor couch1") in state.fluents
     assert F("at couch1 l4") in state.fluents
@@ -328,7 +328,7 @@ def test_couch_carry_with_wait():
     assert F("free r2") in state.fluents
 
     # Verify goal is achieved
-    print(f"\nGoal achieved: couch1 is at l4 and on floor")
+    print("\nGoal achieved: couch1 is at l4 and on floor")
     print(f"Total time: {state.time} seconds")
     assert F("at couch1 l4") in state.fluents
     assert F("on-floor couch1") in state.fluents
@@ -587,7 +587,7 @@ def test_couch_carry_with_operators_and_planner():
 
         print(f"\nStep {step + 1}: {action_name}")
         print(f"  Time: {state.time}")
-        print(f"  Key fluents:")
+        print("  Key fluents:")
 
         # Print relevant fluents
         for fluent_str in sorted(str(f) for f in state.fluents):

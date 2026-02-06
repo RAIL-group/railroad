@@ -17,10 +17,9 @@ import time
 import itertools
 import numpy as np
 from railroad.core import Fluent as F, State, get_action_by_name, ff_heuristic
-from railroad._bindings import LiteralGoal
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
-from railroad.experimental.environment import AbstractEnvironment, EnvironmentInterface, SimpleEnvironment
+from railroad.experimental.environment import EnvironmentInterface, SimpleEnvironment
 from railroad import operators
 from rich.console import Console
 

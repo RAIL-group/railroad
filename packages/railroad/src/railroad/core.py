@@ -524,8 +524,6 @@ def convert_goal_to_positive_preconditions(
     from railroad._bindings import (
         GoalType,
         LiteralGoal,
-        AndGoal,
-        OrGoal,
         TrueGoal,
         FalseGoal,
     )

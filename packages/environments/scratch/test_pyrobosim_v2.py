@@ -1,7 +1,6 @@
 """Tests for PyRoboSimEnvironment (pyrobosim_v2)."""
 
-import pytest
-from environments.pyrobosim_v2 import PyRoboSimEnvironment, PhysicalSkill, MatplotlibWorldCanvas
+from environments.pyrobosim_v2 import PyRoboSimEnvironment, MatplotlibWorldCanvas
 
 
 def test_pyrobosim_environment_init():

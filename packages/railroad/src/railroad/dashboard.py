@@ -44,7 +44,6 @@ from railroad._bindings import (
     Goal,
     LiteralGoal,
     AndGoal,
-    OrGoal,
     GoalType,
     Fluent,
     State,
