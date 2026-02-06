@@ -1,42 +1,26 @@
 [project]
-name = "rail-pddl"
+name = "railroad-monorepo"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     # Local packages
     "railroad[all]",
-    "common",
-    "gridmap",
     "environments",
     # External dependencies
-    "networkx",
     "matplotlib",
-    "scipy",
     "pyqt5",
-    "black",
-    "prior>=1.0.3",
-    "ai2thor>=5.0.0",
-    "sentence-transformers>=5.1.2",
-    "scikit-image>=0.25.2",
-    "shapely>=2.1.2",
-    "google-generativeai>=0.8.5",
-    "openai>=2.8.1",
-    "python-dotenv>=1.2.1",
     "roslibpy",
-    "ty>=0.0.12",
-    "pyrobosim>=4.3.3",
-    "imageio[ffmpeg]>=2.37.2",
-    # Testing (monorepo-level)
+    # Testing and formatting (monorepo-level)
     "pytest-html",
     "pytest-xdist>=3.8.0",
+    "ruff",
+    "ty>=0.0.12",
 ]
 
 [tool.uv.sources]
 railroad = { path = "packages/railroad", editable = true }
-common = { path = "packages/common", editable = true }
-gridmap = { path = "packages/gridmap", editable = true }
 environments = { path = "packages/environments", editable = true }
 
 [tool.ty.src]
@@ -45,8 +29,6 @@ exclude = ["**/scratch/**"]
 [tool.ty.environment]
 extra-paths = [
     "packages/railroad/src",
-    "packages/common/src",
-    "packages/gridmap/src",
     "packages/environments/src",
 ]
 
