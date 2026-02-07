@@ -177,6 +177,11 @@ def main(use_interruptible_moves: bool = False) -> None:
             env.act(action)
             dashboard.update(mcts, action_name)
 
+    import matplotlib.pyplot as plt
+    location_coords = {name: (float(c[0]), float(c[1])) for name, c in LOCATIONS.items()}
+    dashboard.plot_trajectories(location_coords=location_coords)
+    plt.show()
+
 
 if __name__ == "__main__":
     import argparse
