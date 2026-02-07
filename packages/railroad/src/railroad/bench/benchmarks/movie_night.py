@@ -129,7 +129,8 @@ def bench_movie_night(case: BenchmarkCase):
 
     # Dashboard with recording console
     recording_console = Console(record=True, force_terminal=True, width=120)
-    fluent_filter = lambda f: any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
+    def fluent_filter(f):
+        return any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
     dashboard = PlannerDashboard(goal, sim, fluent_filter=fluent_filter, print_on_exit=False, console=recording_console)
 
     for iteration in range(max_iterations):

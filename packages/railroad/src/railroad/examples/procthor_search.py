@@ -96,7 +96,8 @@ def main() -> None:
     max_iterations = 60
     actions_taken: list[str] = []
 
-    fluent_filter = lambda f: any(kw in f.name for kw in ["at", "holding", "found", "searched"])
+    def fluent_filter(f):
+        return any(kw in f.name for kw in ["at", "holding", "found", "searched"])
     with PlannerDashboard(goal, env, fluent_filter=fluent_filter) as dashboard:
         for iteration in range(max_iterations):
             if goal.evaluate(env.state.fluents):

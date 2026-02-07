@@ -63,7 +63,8 @@ def main(args):
     # Planning loop
     max_iterations = 60  # Limit iterations to avoid infinite loops
 
-    fluent_filter = lambda f: any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
+    def fluent_filter(f):
+        return any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
     with PlannerDashboard(goal, env_interface, fluent_filter=fluent_filter) as dashboard:
         for iteration in range(max_iterations):
             # Check if goal is reached
