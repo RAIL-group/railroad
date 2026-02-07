@@ -1493,7 +1493,8 @@ class PlannerDashboard:
                 [pos0[0]], [pos0[1]], "o", color=cmap(0.8),
                 markersize=8, zorder=10, label=entity,
             )
-            trail = ax.scatter([], [], s=4, cmap=colormaps[idx % len(colormaps)], zorder=5, alpha=0.7)
+            trail = ax.scatter([], [], s=4, zorder=5, alpha=0.7)
+            trail.set_cmap(colormaps[idx % len(colormaps)])
             trail.set_clim(0.0, t_end)
             markers.append(marker)
             trails.append(trail)
