@@ -1,19 +1,27 @@
-# Railroad
+# `railroad` : PDDL-like concurrent multi-agent, probabilistic planning
 
-**Concurrent multi-agent planning with probabilistic effects, powered by C++.**
+**Multi-Agent Task Planning, supporting concurrency and probabilistic effects.**
 
-Railroad lets you define planning problems where multiple robots act *simultaneously*
-in a shared world with uncertain outcomes. Actions take time, effects can be
-probabilistic, and the MCTS planner automatically coordinates agents to reach a goal.
+The `railroad` planning framework is meant to support **concurrent multi-robot task planning under uncertainty**. Operators are PDDL-like and defined in Python, so that learned estimators can be used to specify timing, probabilities, and costs. Planning is C++-based for efficiency, and use MCTS with an uncertainty-aware h-sum heuristic (_still a work in progress_) as its value function.
 
-Think PDDL, but with a built-in notion of time that enables true multi-robot concurrency
--- robot 1 can be navigating to the kitchen while robot 2 searches the bedroom,
-and the planner reasons about all of it.
+*Developed by the [Robot Anticipatory Intelligence & Learning (RAIL) Group @ GMU](https://people.cs.gmu.edu/~gjstein/), led by Prof. Gregory J. Stein.*
+
+#### Key properties
+- **States store both active fluents and upcoming effects**: actions add effects to a queue, which update the active fluents as time advances.
+- **Concurrency**: state transitions advance time until an agent is marked `(free {agent_name})`, letting multiple robots act concurrently.
+- **Probabilistic state transitions**: effects can be probabilistic
+- **Planning via MCTS**: planning via Monte Carlo Tree Search over joint action spaces
+
+#### Quickstart via the [`uv`](https://docs.astral.sh/uv/) package manager
+```bash
+mkdir railroad-env && cd railroad-env && uv venv
+uv pip install 'git+https://github.com/RAIL-group/railroad.git@gjstein/code-cleanup#subdirectory=packages/railroad'
+uv run railroad example multi-object-search
+```
 
 ## Quick Example: Two-Robot Object Search
 
-Two robots must find a Knife and a Cup hidden across five rooms.
-Neither robot knows where the objects are -- they must search rooms to discover them.
+Two robots concurrently move and search to find a Knife and a Cup in a five-room space.
 
 ```python
 import numpy as np
@@ -140,9 +148,8 @@ uv run railroad example <name>
 ## Key Concepts
 
 - **Fluent** -- A fact about the world: `F("at robot1 kitchen")`, `F("free robot1")`
-- **State** -- The current set of fluents, a clock, and any pending (future) effects
+- **State** -- The current set of fluents, the time, and any upcoming effects
 - **Operator** -- An action template with typed parameters: `move ?robot ?from ?to`
-- **Action** -- A grounded operator: `move robot1 kitchen bedroom`
 - **Effect** -- A state change that happens at a specified time; can be probabilistic
 - **Goal** -- A target condition to achieve, built from fluents with `&`, `|`, and `~`
 
@@ -161,7 +168,7 @@ F("at robot1 kitchen") | F("at robot1 bed")   # OR  -- at least one
 goal = (F("found Knife") | F("found Spoon")) & ~F("at Cup table")
 ```
 
-## Installation
+## Running via this Repo
 
 Requires Python 3.13+ and [`uv`](https://docs.astral.sh/uv/):
 
