@@ -43,9 +43,14 @@ def main() -> None:
     # Build operators
     move_cost_fn = scene.get_move_cost_fn()
     # All skill time functions take (robot, location, object) -> float
-    search_time_fn = lambda r, l, o: 15.0 if r == "robot1" else 10.0
-    pick_time_fn = lambda r, l, o: 15.0 if r == "robot1" else 10.0
-    place_time_fn = lambda r, l, o: 15.0 if r == "robot1" else 10.0
+    def search_time_fn(r, loc, o):
+        return 15.0 if r == "robot1" else 10.0
+
+    def pick_time_fn(r, loc, o):
+        return 15.0 if r == "robot1" else 10.0
+
+    def place_time_fn(r, loc, o):
+        return 15.0 if r == "robot1" else 10.0
 
     # Create probability function based on ground truth
     def object_find_prob(robot: str, location: str, obj: str) -> float:
@@ -88,15 +93,12 @@ def main() -> None:
     )
 
     # Planning loop
-    actions_taken = []
     max_iterations = 60
+    actions_taken: list[str] = []
 
-    all_actions = env.get_actions()
-    mcts = MCTSPlanner(all_actions)
-    h_value = mcts.heuristic(env.state, goal)
-    with PlannerDashboard(goal, initial_heuristic=h_value) as dashboard:
-        dashboard.update(state=env.state)
-
+    def fluent_filter(f):
+        return any(kw in f.name for kw in ["at", "holding", "found", "searched"])
+    with PlannerDashboard(goal, env, fluent_filter=fluent_filter) as dashboard:
         for iteration in range(max_iterations):
             if goal.evaluate(env.state.fluents):
                 dashboard.console.print("[green]Goal reached![/green]")
@@ -120,25 +122,7 @@ def main() -> None:
             action = get_action_by_name(all_actions, action_name)
             env.act(action)
             actions_taken.append(action_name)
-
-            tree_trace = mcts.get_trace_from_last_mcts_tree()
-            h_value = mcts.heuristic(env.state, goal)
-
-            relevant_fluents = {
-                f
-                for f in env.state.fluents
-                if any(kw in f.name for kw in ["at", "holding", "found", "searched"])
-            }
-            dashboard.update(
-                state=env.state,
-                relevant_fluents=relevant_fluents,
-                tree_trace=tree_trace,
-                step_index=iteration,
-                last_action_name=action_name,
-                heuristic_value=h_value,
-            )
-
-    dashboard.print_history(env.state, actions_taken)
+            dashboard.update(mcts, action_name)
 
     # Plot results
     robot_locations = {name: "start_loc" for name in robot_names}

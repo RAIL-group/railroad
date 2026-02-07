@@ -12,7 +12,8 @@ def test_move_operator():
         "robot": {"r1", "r2"},
         "location": {"start", "roomA", "roomB", "roomC"},
     }
-    move_time = lambda r, f, t: 10 if r == "r1" else 15  # noqa E731, E741
+    def move_time(r, f, t):
+        return 10 if r == "r1" else 15
     move_op = operators.construct_move_operator(move_time=move_time)
 
     initial_state = State(
@@ -67,8 +68,11 @@ def test_search_operator():
         "location": {"roomA", "roomB"},
         "object": {"objA", "objB"}
     }
-    search_time = lambda r, l, o: 10 if r == "r1" else 15  # noqa E731, E741
-    object_find_prob = lambda r, l, o: 0.8 if l == "roomA" else 0.2  # noqa E731, E741
+    def search_time(r, loc, o):
+        return 10 if r == "r1" else 15
+
+    def object_find_prob(r, loc, o):
+        return 0.8 if loc == "roomA" else 0.2
     search_op = operators.construct_search_operator(
         object_find_prob=object_find_prob, search_time=search_time)
 
@@ -120,8 +124,11 @@ def test_pick_and_place_operator():
         "object": {"objA", "objB"}
     }
 
-    pick_time = lambda r, l, o: 10 if r == "r1" else 15  # noqa E731, E741
-    place_time = lambda r, l, o: 10 if r == "r1" else 15  # noqa E731, E741
+    def pick_time(r, loc, o):
+        return 10 if r == "r1" else 15
+
+    def place_time(r, loc, o):
+        return 10 if r == "r1" else 15
 
     initial_state = State(
         time=0,

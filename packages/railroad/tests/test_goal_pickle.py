@@ -1,10 +1,9 @@
 """Tests for Goal pickling support (required for multiprocessing in benchmarks)."""
 
 import pickle
-import pytest
 
 from railroad.core import Fluent as F
-from railroad._bindings import TrueGoal, FalseGoal, LiteralGoal, AndGoal, OrGoal
+from railroad._bindings import TrueGoal, FalseGoal
 
 
 class TestGoalPickle:

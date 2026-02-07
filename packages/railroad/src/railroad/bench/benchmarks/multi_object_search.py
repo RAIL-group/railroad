@@ -16,11 +16,10 @@ Uses the new Goal API for defining planning objectives.
 import time
 import itertools
 import numpy as np
-from railroad.core import Fluent as F, State, get_action_by_name, ff_heuristic
-from railroad._bindings import LiteralGoal
+from railroad.core import Fluent as F, State, get_action_by_name
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
-from railroad.experimental.environment import AbstractEnvironment, EnvironmentInterface, SimpleEnvironment
+from railroad.experimental.environment import EnvironmentInterface, SimpleEnvironment
 from railroad import operators
 from rich.console import Console
 
@@ -82,7 +81,7 @@ def bench_multi_object_search_base(case: BenchmarkCase):
 
     # Search operator with 80% success rate when object is actually present
     search_op = operators.construct_search_operator(
-        object_find_prob=lambda r, l, o: 0.6 if 'kitchen' in l else 0.4,
+        object_find_prob=lambda r, loc, o: 0.6 if 'kitchen' in loc else 0.4,
         search_time=env.get_skills_time_fn('search')
     )
 
@@ -108,7 +107,6 @@ def bench_multi_object_search_base(case: BenchmarkCase):
     )
 
     # Planning loop
-    actions_taken = []
     max_iterations = 60  # Limit iterations to avoid infinite loops
 
     # Run planning loop
@@ -116,8 +114,9 @@ def bench_multi_object_search_base(case: BenchmarkCase):
 
     # Dashboard with recording console
     recording_console = Console(record=True, force_terminal=True, width=120)
-    h_value = ff_heuristic(initial_state, goal, sim.get_actions())
-    dashboard = PlannerDashboard(goal, initial_heuristic=h_value, console=recording_console)
+    def fluent_filter(f):
+        return any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
+    dashboard = PlannerDashboard(goal, sim, fluent_filter=fluent_filter, print_on_exit=False, console=recording_console)
 
     for iteration in range(max_iterations):
         # Check if goal is reached
@@ -141,27 +140,12 @@ def bench_multi_object_search_base(case: BenchmarkCase):
 
         # Execute action
         action = get_action_by_name(all_actions, action_name)
-
         sim.advance(action, do_interrupt=False)
-        actions_taken.append(action_name)
-
-        # Print relevant state information
-        tree_trace = mcts.get_trace_from_last_mcts_tree()
-        relevant_fluents = {
-            f for f in sim.state.fluents
-            if any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
-        }
-        dashboard.update(
-            state=sim.state,
-            relevant_fluents=relevant_fluents,
-            tree_trace=tree_trace,
-            step_index=iteration,
-            last_action_name=action_name,
-            heuristic_value=h_value,
-        )
+        dashboard.update(mcts, action_name)
 
     # Export the recorded console output as HTML
-    dashboard.print_history(sim.state, actions_taken)
+    actions_taken = [name for name, _ in dashboard.actions_taken]
+    dashboard.print_history()
     html_output = recording_console.export_html(inline_styles=True)
 
     return {

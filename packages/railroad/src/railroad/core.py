@@ -2,19 +2,11 @@
 from typing import Callable, List, Tuple, Dict, Set, Union, Sequence, Collection, Mapping, Optional, cast
 import itertools
 
-try:
-    from railroad import _bindings  # noqa: F401
-except ImportError as e:
-    raise ImportError(
-        "railroad's native extension (_bindings) is missing.\n"
-        "To rebuild the package, run:\n"
-        "    uv sync --reinstall-package railroad\n"
-        "or 'make rebuild-cpp'\n"
-    ) from e
-
 from railroad._bindings import GroundedEffect, Fluent, Action, State
-from railroad._bindings import transition  # noqa: F401
+from railroad._bindings import transition
 from railroad._bindings import LiteralGoal, AndGoal, OrGoal, Goal
+
+__all__ = ["transition"]  # re-exported from _bindings
 from railroad._bindings import ff_heuristic as _ff_heuristic_cpp
 
 
@@ -41,7 +33,6 @@ Num = Union[float, int]
 
 Binding = Dict[str, str]
 Bindable = Callable[[Binding], Num]
-OptCallable = Union[Num, Callable[..., float]]
 OptExpr = Union[float, Tuple[Callable[..., float], List[str]]]
 
 
@@ -524,8 +515,6 @@ def convert_goal_to_positive_preconditions(
     from railroad._bindings import (
         GoalType,
         LiteralGoal,
-        AndGoal,
-        OrGoal,
         TrueGoal,
         FalseGoal,
     )

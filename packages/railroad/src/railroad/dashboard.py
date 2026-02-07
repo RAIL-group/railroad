@@ -10,7 +10,29 @@ from rich.text import Text
 import os
 import re
 from time import sleep, perf_counter
-from typing import List, Dict, Set, Union, Tuple, Optional
+from typing import List, Dict, Set, Union, Tuple, Optional, Callable, runtime_checkable, Protocol
+
+from railroad._bindings import (
+    Action,
+    Goal,
+    LiteralGoal,
+    AndGoal,
+    GoalType,
+    Fluent,
+    State,
+)
+
+
+@runtime_checkable
+class DashboardEnvironment(Protocol):
+    @property
+    def state(self) -> State: ...
+    def get_actions(self) -> list[Action]: ...
+
+
+class DashboardPlanner(Protocol):
+    def heuristic(self, state: State, goal: Union[Goal, Fluent]) -> float: ...
+    def get_trace_from_last_mcts_tree(self) -> str: ...
 
 
 def _is_headless_environment() -> bool:
@@ -40,16 +62,182 @@ def _is_headless_environment() -> bool:
 
     return False
 
-from railroad._bindings import (
-    Goal,
-    LiteralGoal,
-    AndGoal,
-    OrGoal,
-    GoalType,
-    Fluent,
-    State,
-)
-from railroad.helper import format_goal, get_best_branch, get_satisfied_branch
+
+# =============================================================================
+# Goal formatting and analysis functions
+# =============================================================================
+
+
+def format_goal(goal: Goal, indent: int = 0, compact: bool = False) -> str:
+    """Format a goal as a readable string.
+
+    Args:
+        goal: A Goal object (LiteralGoal, AndGoal, OrGoal, etc.)
+        indent: Current indentation level (for nested goals)
+        compact: If True, use single-line format for simple goals
+
+    Returns:
+        A formatted string representation of the goal.
+
+    Example output:
+        AND(
+          (at r1 kitchen)
+          OR(
+            (holding r1 cup)
+            (holding r1 plate)
+          )
+        )
+    """
+    goal_type = goal.get_type()
+    prefix = "  " * indent
+
+    if goal_type == GoalType.LITERAL:
+        assert isinstance(goal, LiteralGoal)
+        return f"{prefix}{goal.fluent()}"
+
+    elif goal_type == GoalType.TRUE_GOAL:
+        return f"{prefix}TRUE"
+
+    elif goal_type == GoalType.FALSE_GOAL:
+        return f"{prefix}FALSE"
+
+    elif goal_type == GoalType.AND:
+        children = list(goal.children())
+        if compact and len(children) <= 2 and all(
+            c.get_type() == GoalType.LITERAL for c in children
+        ):
+            child_strs = [str(c.fluent()) for c in children if isinstance(c, LiteralGoal)]
+            return f"{prefix}AND({', '.join(child_strs)})"
+        else:
+            lines = [f"{prefix}AND("]
+            for child in children:
+                lines.append(format_goal(child, indent + 1, compact))
+            lines.append(f"{prefix})")
+            return "\n".join(lines)
+
+    elif goal_type == GoalType.OR:
+        children = list(goal.children())
+        if compact and len(children) <= 2 and all(
+            c.get_type() == GoalType.LITERAL for c in children
+        ):
+            child_strs = [str(c.fluent()) for c in children if isinstance(c, LiteralGoal)]
+            return f"{prefix}OR({', '.join(child_strs)})"
+        else:
+            lines = [f"{prefix}OR("]
+            for child in children:
+                lines.append(format_goal(child, indent + 1, compact))
+            lines.append(f"{prefix})")
+            return "\n".join(lines)
+
+    else:
+        return f"{prefix}<unknown goal type>"
+
+
+def get_satisfied_branch(goal: Goal, fluents: Set[Fluent]) -> Union[Goal, None]:
+    """Find the minimal satisfied branch of a goal.
+
+    For OR goals, returns the first satisfied child.
+    For AND goals, returns an AND of all satisfied children's branches.
+    For literals, returns the literal if satisfied, None otherwise.
+
+    Args:
+        goal: A Goal object
+        fluents: Set of fluents representing current state
+
+    Returns:
+        A Goal representing the satisfied portion, or None if not satisfied.
+    """
+    if not goal.evaluate(fluents):
+        return None
+
+    goal_type = goal.get_type()
+
+    if goal_type == GoalType.LITERAL:
+        return goal
+
+    elif goal_type == GoalType.TRUE_GOAL:
+        return goal
+
+    elif goal_type == GoalType.FALSE_GOAL:
+        return None
+
+    elif goal_type == GoalType.OR:
+        # Return the first satisfied branch
+        for child in goal.children():
+            if child.evaluate(fluents):
+                return get_satisfied_branch(child, fluents)
+        return None
+
+    elif goal_type == GoalType.AND:
+        # Return AND of all satisfied branches
+        satisfied_children = []
+        for child in goal.children():
+            branch = get_satisfied_branch(child, fluents)
+            if branch is not None:
+                satisfied_children.append(branch)
+        if len(satisfied_children) == 1:
+            return satisfied_children[0]
+        elif len(satisfied_children) > 1:
+            return AndGoal(satisfied_children)
+        return None
+
+    return None
+
+
+def get_best_branch(goal: Goal, fluents: Set[Fluent]) -> Goal:
+    """Find the most promising branch of a goal (highest completion ratio).
+
+    For OR goals, returns the child with highest completion ratio.
+    For AND goals, returns an AND of the best branches from each child.
+    For literals, returns the literal itself.
+
+    Args:
+        goal: A Goal object
+        fluents: Set of fluents representing current state
+
+    Returns:
+        A Goal representing the best branch to pursue.
+    """
+    goal_type = goal.get_type()
+
+    if goal_type == GoalType.LITERAL:
+        return goal
+
+    elif goal_type in (GoalType.TRUE_GOAL, GoalType.FALSE_GOAL):
+        return goal
+
+    elif goal_type == GoalType.OR:
+        # Find child with best completion ratio
+        best_child = None
+        best_ratio = -1.0
+
+        for child in goal.children():
+            child_literals = child.get_all_literals()
+            total = len(child_literals)
+            achieved = child.goal_count(fluents)
+            ratio = achieved / total if total > 0 else 0.0
+
+            if ratio > best_ratio:
+                best_ratio = ratio
+                best_child = child
+
+        if best_child is not None:
+            return get_best_branch(best_child, fluents)
+        return goal
+
+    elif goal_type == GoalType.AND:
+        # Return AND of best branches from each child
+        best_children = []
+        for child in goal.children():
+            best_children.append(get_best_branch(child, fluents))
+
+        if len(best_children) == 1:
+            return best_children[0]
+        elif len(best_children) > 1:
+            return AndGoal(best_children)
+        return goal
+
+    return goal
 
 
 def split_markdown_flat(text: str) -> List[Dict[str, str]]:
@@ -153,7 +341,8 @@ def render_timeline(actions: List[Tuple[str, float]], robots: Set[str],
     min_t, max_t = 0.0, end_time if end_time else max(e[1] for e in events)
     if max_t <= min_t:
         max_t = min_t + 1.0
-    pos = lambda t: int((t - min_t) / (max_t - min_t) * (width * 2 - 1))
+    def pos(t):
+        return int((t - min_t) / (max_t - min_t) * (width * 2 - 1))
 
     robots_list = sorted(robots)
     # Build short name mapping
@@ -224,8 +413,12 @@ class PlannerDashboard:
     def __init__(
         self,
         goal: Union[Goal, Fluent],
-        initial_heuristic=None,
-        console=None,
+        env: DashboardEnvironment,
+        *,
+        fluent_filter: Callable[[Fluent], bool] | None = None,
+        planner_factory: Callable[[list[Action]], DashboardPlanner] | None = None,
+        print_on_exit: bool = True,
+        console: Console | None = None,
         force_interactive: bool | None = None,
     ):
         """Initialize the planner dashboard.
@@ -233,7 +426,10 @@ class PlannerDashboard:
         Args:
             goal: A Goal object (AndGoal, OrGoal, LiteralGoal, etc.),
                   or a bare Fluent (which will be wrapped in LiteralGoal)
-            initial_heuristic: Initial heuristic value for progress tracking
+            env: Environment providing state and actions
+            fluent_filter: Optional filter for selecting relevant fluents to display
+            planner_factory: Factory to create a planner from actions (default: MCTSPlanner)
+            print_on_exit: Whether to automatically call print_history() on __exit__
             console: Optional Rich console for output
             force_interactive: Override interactive detection (True=live dashboard,
                                False=simple output, None=auto-detect)
@@ -242,6 +438,11 @@ class PlannerDashboard:
             self.console = console
         else:
             self.console = Console(record=True)
+
+        self._env = env
+        self._fluent_filter = fluent_filter
+        self._print_on_exit = print_on_exit
+        self._step_index = 0
 
         # Determine if we should use interactive mode
         # Check for explicit override first, then headless environments, then console detection
@@ -260,8 +461,13 @@ class PlannerDashboard:
         self.goal_fluents = list(goal.get_all_literals())
 
         self.num_goals = len(self.goal_fluents)
-        self.initial_heuristic = initial_heuristic
         self._start_time = perf_counter()
+
+        # Compute initial heuristic
+        from railroad.planner import MCTSPlanner
+        factory = planner_factory or MCTSPlanner
+        planner = factory(env.get_actions())
+        self.initial_heuristic = planner.heuristic(env.state, self.goal)
 
         # Actions stored as (action_name, start_time) tuples
         self.actions_taken: List[Tuple[str, float]] = []
@@ -315,6 +521,11 @@ class PlannerDashboard:
         """Return whether the dashboard is running in interactive mode."""
         return self._interactive
 
+    def _compute_relevant_fluents(self, state: State) -> set[Fluent]:
+        if self._fluent_filter is not None:
+            return {f for f in state.fluents if self._fluent_filter(f)}
+        return set(state.fluents)
+
     def __enter__(self) -> "PlannerDashboard":
         if self._interactive:
             self._live = Live(
@@ -329,12 +540,19 @@ class PlannerDashboard:
             # Non-interactive mode: just print initial message
             self._live = None
             self.console.print("[bold]Planner starting...[/bold]")
+        # Auto-call initial update
+        self._do_update(
+            state=self._env.state,
+            relevant_fluents=self._compute_relevant_fluents(self._env.state),
+        )
         return self
 
     def __exit__(self, exc_type, exc, tb):
         if self._live is not None:
             self._live.__exit__(exc_type, exc, tb)
             self._live = None
+        if self._print_on_exit:
+            self.print_history()
 
     def start(self):
         if not hasattr(self, "_live"):
@@ -708,21 +926,23 @@ class PlannerDashboard:
 
         return "\n".join(lines)
 
-    def print_history(self, final_state=None, actions_taken=None):
+    def print_history(self):
         """Pretty-print the full history using Rich.
 
         In non-interactive mode, skips the step-by-step history (already printed
         during update calls) and only prints the final summary.
         """
         local_console = self.console
+        final_state = self._env.state
+        actions_taken = [name for name, _ in self.actions_taken]
 
         if not self.history:
             local_console.print("[yellow]No history recorded.[/yellow]")
             return
 
-        # In interactive mode (or when there's no final_state), print full history
+        # In interactive mode, print full history
         # In non-interactive mode, history was already printed during updates
-        if self._interactive or not final_state:
+        if self._interactive:
             split_text = split_markdown_flat(self.format_history_as_text())
             for item in split_text:
                 text_type = item['type']
@@ -735,55 +955,54 @@ class PlannerDashboard:
                 elif text_type == 'h2':
                     local_console.print(f"[bold red]{text}[/]")
 
-        if final_state and actions_taken:
-            if self._is_goal_satisfied(final_state):
-                local_console.rule("[bold green]Success!! :: Execution Summary[/]")
-            else:
-                local_console.rule("[bold red]Task Not Completed :: Execution Summary[/]")
+        if self._is_goal_satisfied(final_state):
+            local_console.rule("[bold green]Success!! :: Execution Summary[/]")
+        else:
+            local_console.rule("[bold red]Task Not Completed :: Execution Summary[/]")
 
-            # Actions section: header, timeline, then action list
-            local_console.print(f"[bold blue]Actions Taken ({len(actions_taken)})[/]")
+        # Actions section: header, timeline, then action list
+        local_console.print(f"[bold blue]Actions Taken ({len(actions_taken)})[/]")
 
-            # Timeline (no separate label)
-            max_by_actions = 6 * max(2, len(self.actions_taken))
-            timeline_width = min(max_by_actions, max(20, local_console.width - 15))
-            timeline_str = render_timeline(
-                self.actions_taken, self.known_robots,
-                width=timeline_width, end_time=final_state.time
-            )
-            if timeline_str:
-                for line in timeline_str.split('\n'):
-                    local_console.print(f"  {line}")
-                local_console.print()  # blank line
+        # Timeline (no separate label)
+        max_by_actions = 6 * max(2, len(self.actions_taken))
+        timeline_width = min(max_by_actions, max(20, local_console.width - 15))
+        timeline_str = render_timeline(
+            self.actions_taken, self.known_robots,
+            width=timeline_width, end_time=final_state.time
+        )
+        if timeline_str:
+            for line in timeline_str.split('\n'):
+                local_console.print(f"  {line}")
+            local_console.print()  # blank line
 
-            # Action list (with color coding)
-            for i, action in enumerate(actions_taken, 1):
-                color = action_color(action)
-                local_console.print(f"  [{color}]{i}[/]. {action}")
+        # Action list (with color coding)
+        for i, action in enumerate(actions_taken, 1):
+            color = action_color(action)
+            local_console.print(f"  [{color}]{i}[/]. {action}")
 
-            # Show full goal structure
-            local_console.print("\n[bold blue]Full Goal:[/]")
-            full_goal_str = format_goal(self.goal, compact=True)
-            for line in full_goal_str.split('\n'):
+        # Show full goal structure
+        local_console.print("\n[bold blue]Full Goal:[/]")
+        full_goal_str = format_goal(self.goal, compact=True)
+        for line in full_goal_str.split('\n'):
+            local_console.print(f"  {self._colorize_goal_line(line, final_state.fluents)}")
+
+        # Show satisfied branch (if goal was met)
+        if self._is_goal_satisfied(final_state):
+            satisfied_branch = get_satisfied_branch(self.goal, final_state.fluents)
+            if satisfied_branch:
+                local_console.print("\n[bold green]Satisfied Branch:[/]")
+                satisfied_str = format_goal(satisfied_branch, compact=True)
+                for line in satisfied_str.split('\n'):
+                    local_console.print(f"  {self._colorize_goal_line(line, final_state.fluents)}")
+        else:
+            # Show best branch (closest to completion)
+            best_branch = get_best_branch(self.goal, final_state.fluents)
+            local_console.print("\n[bold yellow]Best Branch (incomplete):[/]")
+            best_str = format_goal(best_branch, compact=True)
+            for line in best_str.split('\n'):
                 local_console.print(f"  {self._colorize_goal_line(line, final_state.fluents)}")
 
-            # Show satisfied branch (if goal was met)
-            if self._is_goal_satisfied(final_state):
-                satisfied_branch = get_satisfied_branch(self.goal, final_state.fluents)
-                if satisfied_branch:
-                    local_console.print("\n[bold green]Satisfied Branch:[/]")
-                    satisfied_str = format_goal(satisfied_branch, compact=True)
-                    for line in satisfied_str.split('\n'):
-                        local_console.print(f"  {self._colorize_goal_line(line, final_state.fluents)}")
-            else:
-                # Show best branch (closest to completion)
-                best_branch = get_best_branch(self.goal, final_state.fluents)
-                local_console.print("\n[bold yellow]Best Branch (incomplete):[/]")
-                best_str = format_goal(best_branch, compact=True)
-                for line in best_str.split('\n'):
-                    local_console.print(f"  {self._colorize_goal_line(line, final_state.fluents)}")
-
-            local_console.print(f"\n[bold red]Total cost (time): {final_state.time:.1f} seconds [/]")
+        local_console.print(f"\n[bold red]Total cost (time): {final_state.time:.1f} seconds [/]")
 
 
     def save_history(self, path: str):
@@ -793,6 +1012,33 @@ class PlannerDashboard:
 
     def update(
         self,
+        mcts: DashboardPlanner,
+        action_name: str,
+    ):
+        """Update the dashboard after an action has been executed.
+
+        Args:
+            mcts: The planner used for this step (provides heuristic and trace)
+            action_name: The name of the action that was just executed
+        """
+        state = self._env.state
+        relevant_fluents = self._compute_relevant_fluents(state)
+        tree_trace = mcts.get_trace_from_last_mcts_tree()
+        heuristic_value = mcts.heuristic(state, self.goal)
+        step_index = self._step_index
+        self._step_index += 1
+
+        self._do_update(
+            state=state,
+            relevant_fluents=relevant_fluents,
+            tree_trace=tree_trace,
+            step_index=step_index,
+            last_action_name=action_name,
+            heuristic_value=heuristic_value,
+        )
+
+    def _do_update(
+        self,
         state: State,
         relevant_fluents: Set = set(),
         tree_trace: str | None = None,
@@ -800,13 +1046,7 @@ class PlannerDashboard:
         last_action_name: str | None = None,
         heuristic_value: float | None = None,
     ):
-        """
-        Update the whole dashboard:
-
-        - progress bar (based on goal fluents achieved)
-        - left panel: active + goal fluents
-        - right panel: MCTS trace
-        """
+        """Internal update implementation shared by update() and __enter__."""
         # Extract robots from (free NAME) fluents
         for fluent in state.fluents:
             fluent_str = str(fluent)

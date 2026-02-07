@@ -1,6 +1,5 @@
 import threading
 import functools
-import warnings
 from pyrobosim.core.yaml_utils import WorldYamlLoader
 from railroad.experimental.environment import BaseEnvironment, SkillStatus
 import time

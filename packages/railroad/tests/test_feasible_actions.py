@@ -1,11 +1,11 @@
 from railroad.core import Fluent as F, State, transition, get_action_by_name
 from railroad.planner import MCTSPlanner
-from railroad.operators import _make_callable
-from railroad.core import OptCallable, Operator, Effect
+from railroad.operators import _to_numeric, OptNumeric
+from railroad.core import Operator, Effect
 
 
-def construct_move_visited_operator(move_time: OptCallable):
-    move_time = _make_callable(move_time)
+def construct_move_visited_operator(move_time: OptNumeric):
+    move_time = _to_numeric(move_time)
     return Operator(
         name="move",
         parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],

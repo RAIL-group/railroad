@@ -1,6 +1,5 @@
 # conftest.py
 import pathlib
-import pytest
 
 DATA_DIR = pathlib.Path(__file__).parent / "resources"
 
