@@ -7,10 +7,11 @@ from rich.table import Table
 from rich.rule import Rule
 from rich.text import Text
 
+import math
 import os
 import re
 from time import sleep, perf_counter
-from typing import List, Dict, Set, Union, Tuple, Optional, Callable, runtime_checkable, Protocol
+from typing import Any, Collection, List, Dict, Set, Union, Tuple, Optional, Callable, runtime_checkable, Protocol
 
 from railroad._bindings import (
     Action,
@@ -395,6 +396,25 @@ def render_timeline(actions: List[Tuple[str, float]], robots: Set[str],
     return "\n".join(lines)
 
 
+def _generate_coordinates(location_names: Collection[str]) -> dict[str, tuple[float, float]]:
+    """Generate circular layout coordinates for locations lacking real coordinates.
+
+    Places locations evenly around a unit circle. This is a simple placeholder
+    layout — callers with real coordinates should provide them instead.
+    """
+    names = sorted(location_names)
+    n = len(names)
+    if n == 0:
+        return {}
+    if n == 1:
+        return {names[0]: (0.0, 0.0)}
+    coords: dict[str, tuple[float, float]] = {}
+    for i, name in enumerate(names):
+        angle = 2 * math.pi * i / n
+        coords[name] = (math.cos(angle), math.sin(angle))
+    return coords
+
+
 class PlannerDashboard:
     """
     Rich-based dashboard for the robot task planner.
@@ -478,6 +498,9 @@ class PlannerDashboard:
 
         self.history: list[dict] = []
 
+        # Trajectory tracking: entity_name -> [(time, location_name, (x,y) or None), ...]
+        self._entity_positions: dict[str, list[tuple[float, str, tuple[float, float] | None]]] = {}
+
         # Root layout
         self.layout = self._make_layout()
 
@@ -525,6 +548,49 @@ class PlannerDashboard:
         if self._fluent_filter is not None:
             return {f for f in state.fluents if self._fluent_filter(f)}
         return set(state.fluents)
+
+    def _get_location_coords(self) -> tuple[
+        dict[str, tuple[float, float]],  # location_name -> (x, y)
+        Any,                              # occupancy grid or None
+        Any,                              # scene graph or None
+    ]:
+        """Get location coordinates from the environment.
+
+        Three-tier detection:
+        1. ProcTHOR: env.scene with .locations, .grid, .scene_graph
+        2. LocationRegistry: env.location_registry with .get()
+        3. Pure symbolic: empty dict (coordinates deferred to plot time)
+        """
+        env = self._env
+        coords: dict[str, tuple[float, float]] = {}
+        grid = None
+        graph = None
+
+        # Tier 1: ProcTHOR environment
+        scene = getattr(env, "scene", None)
+        if scene is not None and hasattr(scene, "locations"):
+            for name, xy in scene.locations.items():
+                coords[name] = (float(xy[0]), float(xy[1]))
+            grid = getattr(scene, "grid", None)
+            graph = getattr(scene, "scene_graph", None)
+            return coords, grid, graph
+
+        # Tier 2: LocationRegistry
+        registry = getattr(env, "location_registry", None)
+        if registry is not None:
+            # Collect all location names from current entity positions
+            all_locs: set[str] = set()
+            for positions in self._entity_positions.values():
+                for _, loc_name, _ in positions:
+                    all_locs.add(loc_name)
+            for loc in all_locs:
+                c = registry.get(loc)
+                if c is not None:
+                    coords[loc] = (float(c[0]), float(c[1]))
+            return coords, None, None
+
+        # Tier 3: Pure symbolic — no coordinates available
+        return coords, None, None
 
     def __enter__(self) -> "PlannerDashboard":
         if self._interactive:
@@ -1010,6 +1076,169 @@ class PlannerDashboard:
         with open(path, "w", encoding="utf-8") as f:
             f.write(self.format_history_as_text())
 
+    def plot_trajectories(
+        self,
+        ax: Any = None,
+        *,
+        show_objects: bool = False,
+        location_coords: dict[str, tuple[float, float]] | None = None,
+    ) -> Any:
+        """Plot entity trajectories collected during planning.
+
+        Works across all environment types:
+        - ProcTHOR: uses occupancy grid background and obstacle-respecting paths
+        - LocationRegistry: uses Euclidean coordinates with gradient-colored lines
+        - Pure symbolic: auto-generates circular layout coordinates
+
+        Args:
+            ax: Matplotlib axes. If None, a new figure/axes is created.
+            show_objects: If True, also plot object trajectories as dashed lines.
+            location_coords: Optional explicit location->(x,y) mapping that
+                overrides any environment-provided coordinates.
+
+        Returns:
+            The matplotlib axes with the plotted trajectories.
+        """
+        try:
+            import matplotlib.pyplot as plt
+            from matplotlib.collections import LineCollection
+            import matplotlib.cm as cm
+        except ImportError:
+            raise ImportError(
+                "Trajectory plotting requires matplotlib: pip install matplotlib"
+            )
+
+        # Create axes if not provided
+        if ax is None:
+            _, ax = plt.subplots(1, 1, figsize=(10, 8))
+
+        # Get environment coordinates + grid + graph
+        env_coords, grid, graph = self._get_location_coords()
+
+        # Merge explicit overrides on top
+        if location_coords is not None:
+            env_coords.update(location_coords)
+
+        # Collect all location names that still lack coordinates
+        all_location_names: set[str] = set()
+        for positions in self._entity_positions.values():
+            for _, loc_name, _ in positions:
+                all_location_names.add(loc_name)
+        missing = all_location_names - set(env_coords.keys())
+        if missing:
+            generated = _generate_coordinates(missing)
+            # Offset generated coords so they don't collide with real ones
+            env_coords.update(generated)
+
+        # Plot grid background if available (ProcTHOR tier)
+        if grid is not None:
+            try:
+                from railroad.environment.procthor.plotting import plot_grid
+                plot_grid(ax, grid)
+            except ImportError:
+                pass
+
+        # Separate entities into robots and objects
+        robot_entities = {}
+        object_entities = {}
+        for entity, positions in self._entity_positions.items():
+            if entity in self.known_robots:
+                robot_entities[entity] = positions
+            else:
+                object_entities[entity] = positions
+
+        # Colormaps for distinguishing robots
+        colormaps = [
+            "viridis", "plasma", "inferno", "magma", "cividis",
+            "spring", "summer", "autumn", "winter", "cool",
+        ]
+
+        # Plot robot trajectories
+        for robot_id, (entity, positions) in enumerate(sorted(robot_entities.items())):
+            # Build waypoint list using stored coords or resolved fallback
+            waypoints: list[tuple[float, float]] = []
+            for _, loc_name, stored_coords in positions:
+                if stored_coords is not None:
+                    waypoints.append(stored_coords)
+                elif loc_name in env_coords:
+                    waypoints.append(env_coords[loc_name])
+
+            if len(waypoints) < 2:
+                continue
+
+            cmap_name = colormaps[robot_id % len(colormaps)]
+
+            if grid is not None and graph is not None:
+                # ProcTHOR tier: use obstacle-respecting trajectory plotting
+                try:
+                    from railroad.environment.procthor.plotting import plot_robot_trajectory
+                    plot_robot_trajectory(
+                        ax, waypoints, grid, graph, entity,
+                        color_map=cmap_name, robot_id=robot_id,
+                    )
+                    continue
+                except ImportError:
+                    pass
+
+            # Non-grid tier: draw LineCollection with colormap gradient
+            x = [p[0] for p in waypoints]
+            y = [p[1] for p in waypoints]
+            import numpy as np
+            points = np.array([x, y]).T.reshape(-1, 1, 2)
+            segments = np.concatenate([points[:-1], points[1:]], axis=1)
+
+            norm = plt.Normalize(0, len(x))
+            lc = LineCollection(segments.tolist(), cmap=cmap_name, norm=norm)
+            lc.set_array(np.arange(len(x)))
+            lc.set_linewidth(2)
+            ax.add_collection(lc)
+
+            # Plot waypoint markers
+            ax.scatter(x, y, s=20, zorder=5, color="black")
+
+            # Label start
+            ax.annotate(
+                entity, (x[0], y[0]),
+                fontsize=7, fontweight="bold", color="brown",
+            )
+
+            # Label waypoints with location names
+            for i, (_, loc_name, _) in enumerate(positions):
+                if i < len(waypoints):
+                    ax.annotate(
+                        loc_name, waypoints[i],
+                        fontsize=5, color="brown",
+                        xytext=(3, 3), textcoords="offset points",
+                    )
+
+        # Optionally plot object trajectories
+        if show_objects and object_entities:
+            for entity, positions in sorted(object_entities.items()):
+                waypoints = []
+                for _, loc_name, stored_coords in positions:
+                    if stored_coords is not None:
+                        waypoints.append(stored_coords)
+                    elif loc_name in env_coords:
+                        waypoints.append(env_coords[loc_name])
+
+                if len(waypoints) < 2:
+                    continue
+
+                x = [p[0] for p in waypoints]
+                y = [p[1] for p in waypoints]
+                ax.plot(x, y, linestyle="--", linewidth=1, alpha=0.6, label=entity)
+                ax.scatter(x, y, s=10, zorder=5, alpha=0.6)
+
+            ax.legend(fontsize=6)
+
+        # Auto-scale for non-grid plots
+        if grid is None:
+            ax.autoscale()
+            ax.set_aspect("equal", adjustable="datalim")
+
+        ax.set_title("Entity Trajectories")
+        return ax
+
     def update(
         self,
         mcts: DashboardPlanner,
@@ -1053,6 +1282,19 @@ class PlannerDashboard:
             if fluent_str.startswith("(free ") and fluent_str.endswith(")"):
                 robot_name = fluent_str[6:-1].strip()
                 self.known_robots.add(robot_name)
+
+        # Extract entity positions from (at entity location) fluents
+        coord_lookup, _, _ = self._get_location_coords()
+        for fluent in state.fluents:
+            if fluent.name == "at" and len(fluent.args) >= 2:
+                entity_name = fluent.args[0]
+                location_name = fluent.args[1]
+                coords = coord_lookup.get(location_name)
+                if entity_name not in self._entity_positions:
+                    self._entity_positions[entity_name] = []
+                positions = self._entity_positions[entity_name]
+                if not positions or positions[-1][1] != location_name:
+                    positions.append((state.time, location_name, coords))
 
         # Use best branch progress for OR goals
         achieved, total, label = self._get_best_branch_progress(state)

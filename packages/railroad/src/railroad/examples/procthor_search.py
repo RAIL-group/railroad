@@ -25,11 +25,6 @@ def main() -> None:
     from railroad.dashboard import PlannerDashboard
     from railroad.planner import MCTSPlanner
     from railroad._bindings import State
-    from railroad.environment.procthor.plotting import (
-        extract_robot_poses,
-        plot_multi_robot_trajectories,
-    )
-
     # Configuration
     seed = 4001
     robot_names = ["robot1", "robot2"]
@@ -94,7 +89,6 @@ def main() -> None:
 
     # Planning loop
     max_iterations = 60
-    actions_taken: list[str] = []
 
     def fluent_filter(f):
         return any(kw in f.name for kw in ["at", "holding", "found", "searched"])
@@ -121,13 +115,9 @@ def main() -> None:
 
             action = get_action_by_name(all_actions, action_name)
             env.act(action)
-            actions_taken.append(action_name)
             dashboard.update(mcts, action_name)
 
     # Plot results
-    robot_locations = {name: "start_loc" for name in robot_names}
-    robot_poses = extract_robot_poses(actions_taken, robot_locations, scene.locations)
-
     plt.figure(figsize=(16, 8))
 
     # Left panel: top-down view
@@ -139,7 +129,7 @@ def main() -> None:
 
     # Right panel: trajectory plot
     ax2 = plt.subplot(1, 2, 2)
-    plot_multi_robot_trajectories(ax2, scene.grid, robot_poses, scene.scene_graph)
+    dashboard.plot_trajectories(ax=ax2)
     ax2.set_title(f"Multi-Robot Trajectories (Total time: {env.state.time:.1f}s)")
 
     # Save figure
