@@ -21,7 +21,6 @@ from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
 from railroad.experimental.environment import EnvironmentInterface as Simulator, SimpleEnvironment
 from railroad import operators
-from railroad.core import ff_heuristic
 from rich.console import Console
 
 from railroad.bench import benchmark, BenchmarkCase
@@ -123,7 +122,6 @@ def bench_movie_night(case: BenchmarkCase):
     )
 
     # Planning loop
-    actions_taken = []
     max_iterations = 60  # Limit iterations to avoid infinite loops
 
     # Run planning loop
@@ -131,8 +129,8 @@ def bench_movie_night(case: BenchmarkCase):
 
     # Dashboard with recording console
     recording_console = Console(record=True, force_terminal=True, width=120)
-    h_value = ff_heuristic(initial_state, goal, sim.get_actions())
-    dashboard = PlannerDashboard(goal, initial_heuristic=h_value, console=recording_console)
+    fluent_filter = lambda f: any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
+    dashboard = PlannerDashboard(goal, sim, fluent_filter=fluent_filter, print_on_exit=False, console=recording_console)
 
     for iteration in range(max_iterations):
         # Check if goal is reached
@@ -156,25 +154,11 @@ def bench_movie_night(case: BenchmarkCase):
         # Execute action
         action = get_action_by_name(all_actions, action_name)
         sim.advance(action, do_interrupt=False)
-        actions_taken.append(action_name)
-
-        tree_trace = mcts.get_trace_from_last_mcts_tree()
-        h_value = ff_heuristic(sim.state, goal, sim.get_actions())
-        relevant_fluents = {
-            f for f in sim.state.fluents
-            if any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
-        }
-        dashboard.update(
-            state=sim.state,
-            relevant_fluents=relevant_fluents,
-            tree_trace=tree_trace,
-            step_index=iteration,
-            last_action_name=action_name,
-            heuristic_value=h_value,
-        )
+        dashboard.update(mcts, action_name)
 
     # Export the recorded console output as HTML
-    dashboard.print_history(sim.state, actions_taken)
+    actions_taken = [name for name, _ in dashboard.actions_taken]
+    dashboard.print_history()
     html_output = recording_console.export_html(inline_styles=True)
 
     return {

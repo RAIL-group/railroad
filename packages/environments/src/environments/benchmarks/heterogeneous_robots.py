@@ -10,7 +10,6 @@ from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
 from railroad.experimental.environment import EnvironmentInterface, SimpleEnvironment
 from railroad import operators
-from railroad._bindings import ff_heuristic
 from rich.console import Console
 from railroad.bench import benchmark, BenchmarkCase
 
@@ -131,7 +130,6 @@ def bench_heterogeneous_robots(case: BenchmarkCase):
     )
 
     # Planning loop
-    actions_taken = []
     max_iterations = 60  # Limit iterations to avoid infinite loops
 
     # Run planning loop
@@ -139,8 +137,8 @@ def bench_heterogeneous_robots(case: BenchmarkCase):
 
     # Dashboard with recording console
     recording_console = Console(record=True, force_terminal=True, width=120)
-    h_value = ff_heuristic(initial_state, goal, env_interface.get_actions())
-    dashboard = PlannerDashboard(goal, initial_heuristic=h_value, console=recording_console)
+    fluent_filter = lambda f: any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
+    dashboard = PlannerDashboard(goal, env_interface, fluent_filter=fluent_filter, print_on_exit=False, console=recording_console)
 
     for iteration in range(max_iterations):
         # Check if goal is reached
@@ -163,25 +161,11 @@ def bench_heterogeneous_robots(case: BenchmarkCase):
         # Execute action
         action = get_action_by_name(all_actions, action_name)
         env_interface.advance(action, do_interrupt=case.do_interrupt)
-        actions_taken.append(action_name)
-
-        tree_trace = mcts.get_trace_from_last_mcts_tree()
-        h_value = ff_heuristic(env_interface.state, goal, env_interface.get_actions())
-        relevant_fluents = {
-            f for f in env_interface.state.fluents
-            if any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
-        }
-        dashboard.update(
-            state=env_interface.state,
-            relevant_fluents=relevant_fluents,
-            tree_trace=tree_trace,
-            step_index=iteration,
-            last_action_name=action_name,
-            heuristic_value=h_value,
-        )
+        dashboard.update(mcts, action_name)
 
     # Export the recorded console output as HTML
-    dashboard.print_history(env_interface.state, actions_taken)
+    actions_taken = [name for name, _ in dashboard.actions_taken]
+    dashboard.print_history()
     html_output = recording_console.export_html(inline_styles=True)
 
     return {
