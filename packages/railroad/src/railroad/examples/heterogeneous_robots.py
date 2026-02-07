@@ -153,7 +153,8 @@ def main(use_interruptible_moves: bool = False) -> None:
     # Planning loop
     max_iterations = 60
 
-    fluent_filter = lambda f: any(kw in f.name for kw in ["at", "holding", "found", "searched", "free"])
+    def fluent_filter(f):
+        return any(kw in f.name for kw in ["at", "holding", "found", "searched", "free"])
     with PlannerDashboard(goal, env, fluent_filter=fluent_filter) as dashboard:
         for iteration in range(max_iterations):
             if goal.evaluate(env.state.fluents):

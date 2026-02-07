@@ -94,7 +94,8 @@ def main() -> None:
     # Planning loop
     max_iterations = 40
 
-    fluent_filter = lambda f: any(kw in f.name for kw in ["at", "holding", "found"])
+    def fluent_filter(f):
+        return any(kw in f.name for kw in ["at", "holding", "found"])
     with PlannerDashboard(goal, env, fluent_filter=fluent_filter) as dashboard:
         for iteration in range(max_iterations):
             # Check if goal is reached
