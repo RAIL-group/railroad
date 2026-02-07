@@ -125,7 +125,7 @@ def _make_example_command(name: str, info: ExampleInfo) -> None:
         example_fn = example_info["main"]
         example_fn(**kwargs)
 
-    # Add options dynamically
+    # Add example-specific options dynamically
     for opt in reversed(options):  # Reversed so decorators apply in correct order
         option_name = opt["name"]
         param_name = opt.get("param_name", option_name.lstrip("-").replace("-", "_"))
@@ -133,6 +133,11 @@ def _make_example_command(name: str, info: ExampleInfo) -> None:
             _run = click.option(option_name, param_name, is_flag=True, default=opt.get("default", False), help=opt.get("help", ""))(_run)
         else:
             _run = click.option(option_name, param_name, default=opt.get("default"), help=opt.get("help", ""))(_run)
+
+    # Add global plot/video options to every example command
+    _run = click.option("--save-video", "save_video", default=None, help="Save trajectory animation to file (e.g. out.gif, out.mp4)")(_run)
+    _run = click.option("--show-plot", "show_plot", is_flag=True, default=False, help="Show trajectory plot interactively")(_run)
+    _run = click.option("--save-plot", "save_plot", default=None, help="Save trajectory plot to file (e.g. out.png)")(_run)
 
 
 # Register each example as a direct subcommand

@@ -1160,6 +1160,126 @@ class PlannerDashboard:
                     if not positions or positions[-1][1] != location_name:
                         positions.append((effect_time, location_name, coords))
 
+    def _build_entity_trajectories(
+        self,
+        *,
+        location_coords: dict[str, tuple[float, float]] | None = None,
+        include_objects: bool = False,
+    ) -> tuple[
+        dict[str, tuple[list[tuple[float, float]], list[float]]],  # entity -> (waypoints, times)
+        dict[str, tuple[float, float]],  # resolved env_coords
+        Any,  # grid (for plot_grid background)
+    ]:
+        """Build resolved and expanded entity trajectories.
+
+        Handles: environment coordinate lookup, ``location_coords`` conflict
+        check, missing-coordinate generation, robot/object separation, and
+        scene ``get_trajectory`` expansion.
+
+        Args:
+            location_coords: Optional explicit location->(x,y) mapping.
+                Raises ValueError if any stored positions already have
+                coordinates from the environment.
+            include_objects: If True, also include non-robot entities.
+
+        Returns:
+            (trajectories, env_coords, grid) where *trajectories* maps entity
+            names to (waypoints, times) lists with scene-expanded paths.
+        """
+        # Get environment coordinates + grid
+        env_coords, grid, _graph = self._get_location_coords()
+
+        # Handle explicit location_coords
+        if location_coords is not None:
+            for entity, positions in self._entity_positions.items():
+                for _, loc_name, stored_coords in positions:
+                    if stored_coords is not None:
+                        raise ValueError(
+                            f"Cannot pass location_coords when positions already "
+                            f"have coordinates from the environment "
+                            f"(entity={entity!r}, location={loc_name!r}). "
+                            f"Use location_coords only when the environment does "
+                            f"not provide coordinates."
+                        )
+            env_coords.update(location_coords)
+
+        # Generate coordinates for locations that still lack them
+        all_location_names: set[str] = set()
+        for positions in self._entity_positions.values():
+            for _, loc_name, _ in positions:
+                all_location_names.add(loc_name)
+        missing = all_location_names - set(env_coords.keys())
+        if missing:
+            env_coords.update(_generate_coordinates(missing))
+
+        # Separate entities into robots and objects
+        robot_entities: dict[str, list[tuple[float, str, tuple[float, float] | None]]] = {}
+        object_entities: dict[str, list[tuple[float, str, tuple[float, float] | None]]] = {}
+        for entity, positions in self._entity_positions.items():
+            if entity in self.known_robots:
+                robot_entities[entity] = positions
+            else:
+                object_entities[entity] = positions
+
+        # Scene-aware trajectory expansion
+        scene = getattr(self._env, "scene", None)
+        get_trajectory_fn = getattr(scene, "get_trajectory", None)
+
+        trajectories: dict[str, tuple[list[tuple[float, float]], list[float]]] = {}
+
+        # Build robot trajectories (with scene expansion)
+        for entity, positions in sorted(robot_entities.items()):
+            waypoints: list[tuple[float, float]] = []
+            times: list[float] = []
+            for t, loc_name, stored_coords in positions:
+                if stored_coords is not None:
+                    waypoints.append(stored_coords)
+                    times.append(t)
+                elif loc_name in env_coords:
+                    waypoints.append(env_coords[loc_name])
+                    times.append(t)
+
+            if len(waypoints) < 2:
+                trajectories[entity] = (waypoints, times)
+                continue
+
+            # Expand through scene trajectory if available
+            if get_trajectory_fn is not None:
+                import numpy as np
+                expanded_wps: list[tuple[float, float]] = []
+                expanded_ts: list[float] = []
+                for seg_i in range(len(waypoints) - 1):
+                    path = get_trajectory_fn([waypoints[seg_i], waypoints[seg_i + 1]])
+                    if not path or len(path) < 2:
+                        path = [waypoints[seg_i], waypoints[seg_i + 1]]
+                    pts = np.array(path)
+                    cum_dist = np.concatenate(([0], np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))))
+                    t0, t1 = times[seg_i], times[seg_i + 1]
+                    seg_times = (t0 + (t1 - t0) * cum_dist / max(cum_dist[-1], 1e-9)).tolist()
+                    start = 1 if expanded_wps else 0
+                    expanded_wps.extend(path[start:])
+                    expanded_ts.extend(seg_times[start:])
+                waypoints = expanded_wps
+                times = expanded_ts
+
+            trajectories[entity] = (waypoints, times)
+
+        # Build object trajectories (no scene expansion)
+        if include_objects:
+            for entity, positions in sorted(object_entities.items()):
+                waypoints = []
+                times = []
+                for t, loc_name, stored_coords in positions:
+                    if stored_coords is not None:
+                        waypoints.append(stored_coords)
+                        times.append(t)
+                    elif loc_name in env_coords:
+                        waypoints.append(env_coords[loc_name])
+                        times.append(t)
+                trajectories[entity] = (waypoints, times)
+
+        return trajectories, env_coords, grid
+
     def plot_trajectories(
         self,
         ax: Any = None,
@@ -1197,34 +1317,11 @@ class PlannerDashboard:
         if ax is None:
             _, ax = plt.subplots(1, 1, figsize=(10, 8))
 
-        # Get environment coordinates + grid
-        env_coords, grid, _graph = self._get_location_coords()
-
-        # Handle explicit location_coords
-        if location_coords is not None:
-            # Check for conflict: error if any stored positions already have coords
-            for entity, positions in self._entity_positions.items():
-                for _, loc_name, stored_coords in positions:
-                    if stored_coords is not None:
-                        raise ValueError(
-                            f"Cannot pass location_coords when positions already "
-                            f"have coordinates from the environment "
-                            f"(entity={entity!r}, location={loc_name!r}). "
-                            f"Use location_coords only when the environment does "
-                            f"not provide coordinates."
-                        )
-            env_coords.update(location_coords)
-
-        # Collect all location names that still lack coordinates
-        all_location_names: set[str] = set()
-        for positions in self._entity_positions.values():
-            for _, loc_name, _ in positions:
-                all_location_names.add(loc_name)
-        missing = all_location_names - set(env_coords.keys())
-        if missing:
-            generated = _generate_coordinates(missing)
-            # Offset generated coords so they don't collide with real ones
-            env_coords.update(generated)
+        # Build trajectories using shared helper
+        trajectories, env_coords, grid = self._build_entity_trajectories(
+            location_coords=location_coords,
+            include_objects=show_objects,
+        )
 
         # Plot grid background if available (ProcTHOR tier)
         if grid is not None:
@@ -1234,19 +1331,6 @@ class PlannerDashboard:
             except ImportError:
                 pass
 
-        # Separate entities into robots and objects
-        robot_entities = {}
-        object_entities = {}
-        for entity, positions in self._entity_positions.items():
-            if entity in self.known_robots:
-                robot_entities[entity] = positions
-            else:
-                object_entities[entity] = positions
-
-        # Check if the scene provides obstacle-aware trajectories
-        scene = getattr(self._env, "scene", None)
-        get_trajectory_fn = getattr(scene, "get_trajectory", None)
-
         # Colormaps for distinguishing robots
         colormaps = [
             "viridis", "plasma", "inferno", "magma", "cividis",
@@ -1254,42 +1338,23 @@ class PlannerDashboard:
         ]
 
         # Plot robot trajectories as interpolated scatter colored by time
-        for robot_id, (entity, positions) in enumerate(sorted(robot_entities.items())):
-            # Build waypoint and time lists using stored coords or resolved fallback
-            waypoints: list[tuple[float, float]] = []
-            times: list[float] = []
-            for t, loc_name, stored_coords in positions:
-                if stored_coords is not None:
-                    waypoints.append(stored_coords)
-                    times.append(t)
-                elif loc_name in env_coords:
-                    waypoints.append(env_coords[loc_name])
-                    times.append(t)
-
+        robot_id = 0
+        for entity in sorted(self.known_robots & set(trajectories.keys())):
+            waypoints, times = trajectories[entity]
             if len(waypoints) < 2:
                 continue
 
             cmap_name = colormaps[robot_id % len(colormaps)]
-            location_waypoints = waypoints  # preserve for markers/labels
+            robot_id += 1
 
-            # Expand waypoints through scene trajectory if available
-            if get_trajectory_fn is not None and len(waypoints) >= 2:
-                import numpy as np
-                expanded_wps: list[tuple[float, float]] = []
-                expanded_ts: list[float] = []
-                for seg_i in range(len(waypoints) - 1):
-                    path = get_trajectory_fn([waypoints[seg_i], waypoints[seg_i + 1]])
-                    if not path or len(path) < 2:
-                        path = [waypoints[seg_i], waypoints[seg_i + 1]]
-                    pts = np.array(path)
-                    cum_dist = np.concatenate(([0], np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))))
-                    t0, t1 = times[seg_i], times[seg_i + 1]
-                    seg_times = (t0 + (t1 - t0) * cum_dist / max(cum_dist[-1], 1e-9)).tolist()
-                    start = 1 if expanded_wps else 0
-                    expanded_wps.extend(path[start:])
-                    expanded_ts.extend(seg_times[start:])
-                waypoints = expanded_wps
-                times = expanded_ts
+            # Get original positions for location markers/labels
+            positions = self._entity_positions[entity]
+            location_waypoints: list[tuple[float, float]] = []
+            for _, loc_name, stored_coords in positions:
+                if stored_coords is not None:
+                    location_waypoints.append(stored_coords)
+                elif loc_name in env_coords:
+                    location_waypoints.append(env_coords[loc_name])
 
             xs, ys, ts = _interpolate_trajectory(
                 waypoints, times,
@@ -1318,15 +1383,10 @@ class PlannerDashboard:
                     )
 
         # Optionally plot object trajectories
-        if show_objects and object_entities:
-            for entity, positions in sorted(object_entities.items()):
-                waypoints = []
-                for _, loc_name, stored_coords in positions:
-                    if stored_coords is not None:
-                        waypoints.append(stored_coords)
-                    elif loc_name in env_coords:
-                        waypoints.append(env_coords[loc_name])
-
+        if show_objects:
+            object_entities = {e: trajectories[e] for e in trajectories if e not in self.known_robots}
+            for entity in sorted(object_entities):
+                waypoints, _times = object_entities[entity]
                 if len(waypoints) < 2:
                     continue
 
@@ -1335,7 +1395,8 @@ class PlannerDashboard:
                 ax.plot(x, y, linestyle="--", linewidth=1, alpha=0.6, label=entity)
                 ax.scatter(x, y, s=10, zorder=5, alpha=0.6)
 
-            ax.legend(fontsize=6)
+            if object_entities:
+                ax.legend(fontsize=6)
 
         # Auto-scale for non-grid plots
         if grid is None:
@@ -1344,6 +1405,205 @@ class PlannerDashboard:
 
         ax.set_title("Entity Trajectories")
         return ax
+
+    def get_entity_positions_at_times(
+        self,
+        times: Any,
+        *,
+        location_coords: dict[str, tuple[float, float]] | None = None,
+        include_objects: bool = False,
+    ) -> dict[str, Any]:
+        """Interpolate entity positions at arbitrary query times.
+
+        Uses numpy.interp on x and y independently. Clamps to first position
+        before trajectory start and last position after trajectory end.
+
+        Args:
+            times: Query times as a numpy array or list of floats.
+            location_coords: Optional explicit location->(x,y) mapping.
+            include_objects: If True, include non-robot entities.
+
+        Returns:
+            ``{entity_name: (N, 2) ndarray}`` of interpolated positions.
+        """
+        import numpy as np
+
+        query_times = np.asarray(times, dtype=float)
+        trajectories, _env_coords, _grid = self._build_entity_trajectories(
+            location_coords=location_coords,
+            include_objects=include_objects,
+        )
+
+        result: dict[str, Any] = {}
+        for entity, (waypoints, traj_times) in trajectories.items():
+            if len(waypoints) < 2:
+                continue
+            wp_arr = np.array(waypoints)
+            t_arr = np.array(traj_times)
+            x_interp = np.interp(query_times, t_arr, wp_arr[:, 0])
+            y_interp = np.interp(query_times, t_arr, wp_arr[:, 1])
+            result[entity] = np.column_stack([x_interp, y_interp])
+
+        return result
+
+    def save_trajectory_video(
+        self,
+        path: str,
+        *,
+        location_coords: dict[str, tuple[float, float]] | None = None,
+        fps: int = 30,
+        duration: float = 10.0,
+        figsize: tuple[float, float] = (10, 8),
+    ) -> None:
+        """Save an animated trajectory video/GIF.
+
+        Args:
+            path: Output file path. Extension determines writer:
+                ``.gif`` uses PillowWriter, ``.mp4``/``.avi`` uses FFMpegWriter.
+            location_coords: Optional explicit location->(x,y) mapping.
+            fps: Frames per second.
+            duration: Total animation duration in seconds.
+            figsize: Figure size in inches.
+        """
+        import numpy as np
+        import matplotlib.pyplot as plt
+        from matplotlib.animation import FuncAnimation
+
+        trajectories, env_coords, grid = self._build_entity_trajectories(
+            location_coords=location_coords,
+            include_objects=False,
+        )
+
+        # Determine time range
+        t_end = self._goal_time or 0.0
+        for _entity, (_wps, traj_times) in trajectories.items():
+            if traj_times:
+                t_end = max(t_end, max(traj_times))
+        if t_end <= 0.0:
+            return
+
+        n_frames = int(fps * duration)
+        frame_times = np.linspace(0.0, t_end, n_frames)
+
+        # Pre-compute all positions
+        all_positions = self.get_entity_positions_at_times(
+            frame_times, location_coords=location_coords,
+        )
+        if not all_positions:
+            return
+
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Static background: grid
+        if grid is not None:
+            try:
+                from railroad.environment.procthor.plotting import plot_grid
+                plot_grid(ax, grid)
+            except ImportError:
+                pass
+
+        # Static background: location markers + labels
+        plotted_locs: set[str] = set()
+        for positions in self._entity_positions.values():
+            for _, loc_name, stored_coords in positions:
+                if loc_name in plotted_locs:
+                    continue
+                plotted_locs.add(loc_name)
+                coord = stored_coords if stored_coords is not None else env_coords.get(loc_name)
+                if coord is not None:
+                    ax.plot(coord[0], coord[1], "ks", markersize=4, zorder=4)
+                    ax.annotate(
+                        loc_name, coord,
+                        fontsize=5, color="brown",
+                        xytext=(3, 3), textcoords="offset points",
+                    )
+
+        colormaps = [
+            "viridis", "plasma", "inferno", "magma", "cividis",
+            "spring", "summer", "autumn", "winter", "cool",
+        ]
+        entity_names = sorted(all_positions.keys())
+
+        # Create artists: current position marker + trail scatter per entity
+        markers = []
+        trails = []
+        for idx, entity in enumerate(entity_names):
+            cmap = plt.get_cmap(colormaps[idx % len(colormaps)])
+            pos0 = all_positions[entity][0]
+            (marker,) = ax.plot(
+                [pos0[0]], [pos0[1]], "o", color=cmap(0.8),
+                markersize=8, zorder=10, label=entity,
+            )
+            trail = ax.scatter([], [], s=4, cmap=colormaps[idx % len(colormaps)], zorder=5, alpha=0.7)
+            markers.append(marker)
+            trails.append(trail)
+
+        ax.legend(fontsize=7, loc="upper right")
+        ax.set_title("Entity Trajectories")
+
+        if grid is None:
+            ax.autoscale()
+            ax.set_aspect("equal", adjustable="datalim")
+
+        def _update(frame: int):
+            for idx, entity in enumerate(entity_names):
+                pos = all_positions[entity]
+                # Update current position marker
+                markers[idx].set_data([pos[frame, 0]], [pos[frame, 1]])
+                # Update trail (all positions up to current frame)
+                trail_data = pos[:frame + 1]
+                trails[idx].set_offsets(trail_data)
+                trails[idx].set_array(frame_times[:frame + 1])
+            return markers + trails
+
+        anim = FuncAnimation(fig, _update, frames=n_frames, blit=False, interval=1000 / fps)
+
+        # Select writer by extension
+        ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+        if ext == "gif":
+            from matplotlib.animation import PillowWriter
+            writer = PillowWriter(fps=fps)
+        else:
+            from matplotlib.animation import FFMpegWriter
+            writer = FFMpegWriter(fps=fps)
+
+        anim.save(path, writer=writer)
+        plt.close(fig)
+
+    def show_plots(
+        self,
+        *,
+        save_plot: str | None = None,
+        show_plot: bool = False,
+        save_video: str | None = None,
+        location_coords: dict[str, tuple[float, float]] | None = None,
+    ) -> None:
+        """Convenience method that handles plot/video output based on CLI flags.
+
+        Args:
+            save_plot: If set, save the trajectory plot to this file path.
+            show_plot: If True, display the trajectory plot interactively.
+            save_video: If set, save a trajectory animation to this file path.
+            location_coords: Optional explicit location->(x,y) mapping.
+        """
+        if not save_plot and not show_plot and not save_video:
+            return
+
+        if save_plot or show_plot:
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots(1, 1, figsize=(10, 8))
+            self.plot_trajectories(ax=ax, location_coords=location_coords)
+            if save_plot:
+                fig.savefig(save_plot, dpi=300)
+                self.console.print(f"Saved plot to [yellow]{save_plot}[/yellow]")
+            if show_plot:
+                plt.show()
+            else:
+                plt.close(fig)
+
+        if save_video:
+            self.save_trajectory_video(save_video, location_coords=location_coords)
+            self.console.print(f"Saved video to [yellow]{save_video}[/yellow]")
 
     def update(
         self,
