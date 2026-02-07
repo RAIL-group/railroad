@@ -422,76 +422,53 @@ def _interpolate_trajectory(
     *,
     max_time: float | None = None,
     points_per_segment: int = 500,
-    grid: Any = None,
 ) -> tuple[list[float], list[float], list[float]]:
     """Interpolate a trajectory into dense (x, y, t) points for scatter plotting.
 
-    For each consecutive waypoint pair, generates interpolated points with
-    timestamps proportional to cumulative distance. Supports obstacle-aware
-    paths via ProcTHOR grid when available.
+    Generates uniformly-spaced interpolated points between each consecutive
+    waypoint pair, with timestamps linearly interpolated.
 
     Args:
         waypoints: List of (x, y) coordinates.
         times: List of timestamps corresponding to each waypoint.
-        max_time: If set, stop adding points once time exceeds this value.
-        points_per_segment: Number of interpolated points per segment (no-grid).
-        grid: Optional ProcTHOR occupancy grid for obstacle-aware interpolation.
+        max_time: If set, truncate trajectory at this time.
+        points_per_segment: Number of interpolated points per segment.
 
     Returns:
         Tuple of (xs, ys, ts) lists of interpolated coordinates and timestamps.
     """
-    xs: list[float] = []
-    ys: list[float] = []
-    ts: list[float] = []
+    import numpy as np
 
-    for i in range(len(waypoints) - 1):
-        if max_time is not None and times[i] >= max_time:
-            break
+    if len(waypoints) < 2:
+        return [], [], []
 
-        t_start = times[i]
-        t_end = times[i + 1]
-        if max_time is not None:
-            t_end = min(t_end, max_time)
+    # Build (x, y, t) array of waypoints
+    pts = np.column_stack([np.array(waypoints), np.array(times)])
 
-        wp_start = waypoints[i]
-        wp_end = waypoints[i + 1]
+    # Truncate at max_time if set
+    if max_time is not None:
+        mask = pts[:, 2] <= max_time
+        # Keep at least one point past max_time for interpolation of the last segment
+        first_over = np.searchsorted(pts[:, 2], max_time, side="right")
+        mask[:min(first_over + 1, len(pts))] = True
+        pts = pts[mask]
+        if len(pts) >= 2 and pts[-1, 2] > max_time:
+            # Lerp the last point to exactly max_time
+            frac = (max_time - pts[-2, 2]) / (pts[-1, 2] - pts[-2, 2])
+            pts[-1] = pts[-2] + frac * (pts[-1] - pts[-2])
 
-        # Try grid-based trajectory
-        path: list[tuple[float, float]] | None = None
-        if grid is not None:
-            try:
-                from railroad.environment.procthor.utils import get_trajectory
-                path = get_trajectory(grid, [wp_start, wp_end])
-            except (ImportError, Exception):
-                path = None
+    if len(pts) < 2:
+        return [], [], []
 
-        if path is not None and len(path) >= 2:
-            # Assign timestamps proportional to cumulative Euclidean distance
-            dists = [0.0]
-            for j in range(1, len(path)):
-                dx = path[j][0] - path[j - 1][0]
-                dy = path[j][1] - path[j - 1][1]
-                dists.append(dists[-1] + math.sqrt(dx * dx + dy * dy))
-            total_dist = dists[-1] if dists[-1] > 0 else 1.0
-            for j, (px, py) in enumerate(path):
-                t = t_start + (t_end - t_start) * dists[j] / total_dist
-                if max_time is not None and t > max_time:
-                    break
-                xs.append(px)
-                ys.append(py)
-                ts.append(t)
-        else:
-            # Linear interpolation
-            for j in range(points_per_segment):
-                frac = j / max(1, points_per_segment - 1)
-                t = t_start + (t_end - t_start) * frac
-                if max_time is not None and t > max_time:
-                    break
-                xs.append(wp_start[0] + (wp_end[0] - wp_start[0]) * frac)
-                ys.append(wp_start[1] + (wp_end[1] - wp_start[1]) * frac)
-                ts.append(t)
+    # Interpolate each segment
+    all_pts = []
+    for i in range(len(pts) - 1):
+        fracs = np.linspace(0, 1, points_per_segment, endpoint=(i == len(pts) - 2))
+        seg = pts[i] + np.outer(fracs, pts[i + 1] - pts[i])
+        all_pts.append(seg)
 
-    return xs, ys, ts
+    result = np.concatenate(all_pts)
+    return result[:, 0].tolist(), result[:, 1].tolist(), result[:, 2].tolist()
 
 
 class PlannerDashboard:
@@ -1220,8 +1197,8 @@ class PlannerDashboard:
         if ax is None:
             _, ax = plt.subplots(1, 1, figsize=(10, 8))
 
-        # Get environment coordinates + grid + graph
-        env_coords, grid, graph = self._get_location_coords()
+        # Get environment coordinates + grid
+        env_coords, grid, _graph = self._get_location_coords()
 
         # Handle explicit location_coords
         if location_coords is not None:
@@ -1266,6 +1243,10 @@ class PlannerDashboard:
             else:
                 object_entities[entity] = positions
 
+        # Check if the scene provides obstacle-aware trajectories
+        scene = getattr(self._env, "scene", None)
+        get_trajectory_fn = getattr(scene, "get_trajectory", None)
+
         # Colormaps for distinguishing robots
         colormaps = [
             "viridis", "plasma", "inferno", "magma", "cividis",
@@ -1289,33 +1270,49 @@ class PlannerDashboard:
                 continue
 
             cmap_name = colormaps[robot_id % len(colormaps)]
+            location_waypoints = waypoints  # preserve for markers/labels
 
-            # Interpolate trajectory into dense points
+            # Expand waypoints through scene trajectory if available
+            if get_trajectory_fn is not None and len(waypoints) >= 2:
+                import numpy as np
+                expanded_wps: list[tuple[float, float]] = []
+                expanded_ts: list[float] = []
+                for seg_i in range(len(waypoints) - 1):
+                    path = get_trajectory_fn([waypoints[seg_i], waypoints[seg_i + 1]])
+                    if not path or len(path) < 2:
+                        path = [waypoints[seg_i], waypoints[seg_i + 1]]
+                    pts = np.array(path)
+                    cum_dist = np.concatenate(([0], np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))))
+                    t0, t1 = times[seg_i], times[seg_i + 1]
+                    seg_times = (t0 + (t1 - t0) * cum_dist / max(cum_dist[-1], 1e-9)).tolist()
+                    start = 1 if expanded_wps else 0
+                    expanded_wps.extend(path[start:])
+                    expanded_ts.extend(seg_times[start:])
+                waypoints = expanded_wps
+                times = expanded_ts
+
             xs, ys, ts = _interpolate_trajectory(
                 waypoints, times,
                 max_time=self._goal_time,
-                grid=grid,
             )
 
             if xs:
                 ax.scatter(xs, ys, c=ts, cmap=cmap_name, s=4, zorder=5, alpha=0.7)
 
-            # Plot waypoint markers
-            wx = [p[0] for p in waypoints]
-            wy = [p[1] for p in waypoints]
+            # Plot location markers and labels
+            wx = [p[0] for p in location_waypoints]
+            wy = [p[1] for p in location_waypoints]
             ax.scatter(wx, wy, s=20, zorder=6, color="black")
 
-            # Label start
             ax.annotate(
                 entity, (wx[0], wy[0]),
                 fontsize=7, fontweight="bold", color="brown",
             )
 
-            # Label waypoints with location names
             for i, (_, loc_name, _) in enumerate(positions):
-                if i < len(waypoints):
+                if i < len(location_waypoints):
                     ax.annotate(
-                        loc_name, waypoints[i],
+                        loc_name, location_waypoints[i],
                         fontsize=5, color="brown",
                         xytext=(3, 3), textcoords="offset points",
                     )
