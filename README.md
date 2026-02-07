@@ -1,306 +1,206 @@
-# Railroad: Multi-Robot Probabilistic PDDL Planning
+# Railroad
 
-A high-performance planning framework for multi-robot systems that combines symbolic PDDL-style planning with probabilistic reasoning and realistic 3D simulation environments.
+**Concurrent multi-agent planning with probabilistic effects, powered by C++.**
 
-## Quickstart
+Railroad lets you define planning problems where multiple robots act *simultaneously*
+in a shared world with uncertain outcomes. Actions take time, effects can be
+probabilistic, and the MCTS planner automatically coordinates agents to reach a goal.
 
-```bash
-uv venv
-uv pip install 'git+https://github.com/RAIL-group/railroad.git@main#subdirectory=packages/railroad'
-uv run railroad example multi-object-search
+Think PDDL, but with a built-in notion of time that enables true multi-robot concurrency
+-- robot 1 can be navigating to the kitchen while robot 2 searches the bedroom,
+and the planner reasons about all of it.
+
+## Quick Example: Two-Robot Object Search
+
+Two robots must find a Knife and a Cup hidden across five rooms.
+Neither robot knows where the objects are -- they must search rooms to discover them.
+
+```python
+import numpy as np
+from railroad.core import Fluent as F, get_action_by_name, State, Operator, Effect
+import railroad.operators
+from railroad.environment import SymbolicEnvironment
+from railroad.planner import MCTSPlanner
+from railroad.dashboard import PlannerDashboard
+
+locations = {
+    "den":     np.array([5, 5]),
+    "kitchen": np.array([0, 0]),
+    "bedroom": np.array([10, 0]),
+    "office":  np.array([0, 8]),
+    "garage":  np.array([10, 8]),
+}
+objects_by_type = {
+    "robot":    {"robot1", "robot2"},
+    "location": set(locations),
+    "object":   {"Knife", "Cup"},
+}
+# Ground truth object locations (unknown to robots initially)
+true_object_locations = {"kitchen": {"Cup"}, "garage": {"Knife"}}
+
+def move_time(robot, loc_from, loc_to):
+    return float(np.linalg.norm(locations[loc_from] - locations[loc_to]))
+
+move = Operator(
+    name="move",
+    parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
+    preconditions=[F("at ?r ?from"), F("free ?r")],
+    effects=[  # not free at t=0, free again at destination after move_time
+        Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?r ?from")}),
+        Effect(time=(move_time, ["?r", "?from", "?to"]),
+               resulting_fluents={F("free ?r"), F("at ?r ?to")}),
+    ],
+)
+
+@railroad.operators.numeric  # decorator to allow algebraic "1 - prob"
+def object_find_prob(robot: str, loc: str, obj: str) -> float:
+    objects_here = true_object_locations.get(loc, set())
+    return 0.9 if obj in objects_here else 0.2
+
+search = Operator(
+    name="search",
+    parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
+    preconditions=[F("at ?r ?loc"), F("free ?r"), F("not found ?obj"),
+                   F("not revealed ?loc"), F("not searched ?loc ?obj")],
+    effects=[  # after 5s, location is searched, revealing if object is there
+        Effect(time=0, resulting_fluents={F("not free ?r")}),
+        Effect(time=5.0, resulting_fluents={F("free ?r"), F("searched ?loc ?obj")},
+               prob_effects=[  # find object with p=object_find_prob
+                   ((object_find_prob, ["?r", "?loc", "?obj"]),
+                    [Effect(time=0, resulting_fluents={F("found ?obj"), F("at ?obj ?loc")})]),
+                   ((1 - object_find_prob, ["?r", "?loc", "?obj"]), []),
+               ]),
+    ],
+)
+
+# Both robots start free in the den
+initial_state = State(0.0, {
+    F("free robot1"), F("free robot2"),
+    F("at robot1 den"), F("at robot2 den"),
+    F("revealed den"),
+})
+
+goal = F("found Knife") & F("found Cup")
+
+env = SymbolicEnvironment(
+    state=initial_state, objects_by_type=objects_by_type,
+    operators=[move, search],
+    true_object_locations=true_object_locations,
+)
+
+def fluent_filter(f):
+    return any(kw in f.name for kw in ["at", "holding", "found"])
+
+with PlannerDashboard(goal, env, fluent_filter=fluent_filter) as dashboard:
+    # Plan-act loop: replan whenever a robot becomes free
+    for _ in range(20):
+        if goal.evaluate(env.state.fluents):
+            break
+
+        actions = env.get_actions()
+        planner = MCTSPlanner(actions)
+        action_name = planner(env.state, goal, max_iterations=10000, c=200)
+        action = get_action_by_name(actions, action_name)
+        env.act(action)
+        dashboard.update(planner, action_name)
 ```
 
-## Features
+The planner dispatches both robots in parallel. Sample dashboard output:
 
-- **Fast C++ Planning Core**: A* and MCTS planners with Python bindings
-- **Probabilistic Effects**: Handle uncertain action outcomes in planning
-- **Multi-Robot Coordination**: Plan and execute coordinated multi-robot tasks
-- **Environment Abstraction**: Clean `SymbolicEnvironment` API for plan execution
-- **ProcTHOR Integration**: Optional realistic 3D indoor environment simulation via AI2-THOR
-- **Occupancy Grid Planning**: Built-in mapping and path planning utilities
+```
+Actions Taken (5)
+         |0.0                       12.1|
+  robot1 |1                4            |
+  robot2 |2             3           5   |
+
+  1. move robot1 den kitchen
+  2. move robot2 den garage
+  3. search robot2 garage Knife
+  4. search robot1 kitchen Cup
+  5. move robot2 garage office
+
+Goal:
+  AND(✓(found Knife), ✓(found Cup))
+
+Total cost: 12.1 (seconds)
+```
+
+## Built-in Examples
+
+```bash
+uv run railroad example <name>
+```
+
+- **`multi-object-search`** -- Search for and collect multiple objects with multiple robots
+- **`clear-table`** -- Clear objects from a table (demonstrates negative goals)
+- **`find-and-move-couch`** -- Cooperative task requiring two robots (demonstrates wait operators)
+- **`heterogeneous-robots`** -- Drone, rover, and crawler with different speeds and capabilities
+  - Add `--interruptible-moves` to allow rerouting robots mid-transit
+
+## Key Concepts
+
+- **Fluent** -- A fact about the world: `F("at robot1 kitchen")`, `F("free robot1")`
+- **State** -- The current set of fluents, a clock, and any pending (future) effects
+- **Operator** -- An action template with typed parameters: `move ?robot ?from ?to`
+- **Action** -- A grounded operator: `move robot1 kitchen bedroom`
+- **Effect** -- A state change that happens at a specified time; can be probabilistic
+- **Goal** -- A target condition to achieve, built from fluents with `&`, `|`, and `~`
+
+## Goal Expressions
+
+Goals compose with Python operators:
+
+```python
+from railroad.core import Fluent as F
+
+F("found Knife") & F("found Fork")           # AND -- both must be true
+F("at robot1 kitchen") | F("at robot1 bed")   # OR  -- at least one
+~F("at Knife table")                          # NOT -- must not hold
+
+# Combine freely
+goal = (F("found Knife") | F("found Spoon")) & ~F("at Cup table")
+```
 
 ## Installation
 
-This project requires Python 3.13+ and uses `uv` for dependency management.
+Requires Python 3.13+ and [`uv`](https://docs.astral.sh/uv/):
 
 ```bash
-# Install uv if you don't have it
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Clone and install
 git clone https://github.com/RAIL-group/railroad.git
 cd railroad
-uv sync
+uv run railroad example multi-object-search   # builds automatically on first run
 ```
 
-### Optional Dependencies
+## Architecture
 
-```bash
-# Install with ProcTHOR support (AI2-THOR simulator)
-pip install railroad[procthor]
-
-# Install with benchmarking tools
-pip install railroad[bench]
-
-# Install everything
-pip install railroad[all]
-```
-
-## Quick Start
-
-### 1. Run a Built-in Example
-
-The fastest way to see Railroad in action:
-
-```bash
-# List available examples
-uv run railroad example
-
-# Run the clear-the-table example
-uv run railroad example run clear-table
-```
-
-You'll see a live dashboard showing robots planning and executing tasks:
+Railroad is organized as a monorepo. The core planning engine lives in `packages/railroad/`:
 
 ```
-Planning: clear-table
-Goal: Move all objects off the table
-
-  0.0                                              42.0
-r1,r2 |⠀⠀⠀⠀⠁⠀⠂⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠈⠀⠐⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀|
-   r1  M·····Sp···M·····Pp
-   r2  M·····Sp·········M·····Pp
-
-Step 3 | Time: 42.0 | Heuristic: 0
+packages/railroad/
+  include/               # C++ headers (A* search, MCTS, FF heuristic)
+  src/railroad/
+    _bindings.cpp        # pybind11 bridge
+    core.py              # Fluent, State, Action, Operator, Effect, Goal
+    planner.py           # MCTSPlanner (wraps C++ MCTS with automatic preprocessing)
+    operators/           # Helper constructors for move, search, pick, place, wait
+    environment/
+      environment.py     # Abstract Environment base class
+      symbolic.py        # SymbolicEnvironment for simulation and testing
+      skill.py           # ActiveSkill protocol
+      procthor/          # Optional AI2-THOR/ProcTHOR 3D simulator integration
+    examples/            # Built-in runnable examples
+    bench/               # Benchmarking framework with MLflow + Plotly Dash
 ```
 
-Other examples to try:
-```bash
-uv run railroad example run multi-object-search
-uv run railroad example run find-and-move-couch
-uv run railroad example run heterogeneous-robots
-uv run railroad example run heterogeneous-robots --interruptible-moves
-```
-
-### 2. Minimal Planning Example
-
-Here's the simplest possible planning example:
-
-```python
-from railroad.core import Fluent as F
-from railroad._bindings import State
-from railroad import operators
-from railroad.planner import MCTSPlanner
-
-# Two robots need to find a knife
-initial_state = State(
-    time=0,
-    fluents={F("at robot1 kitchen"), F("at robot2 bedroom"), F("free robot1"), F("free robot2")},
-    upcoming_effects=[],
-)
-goal = F("found Knife")
-
-# Create move and search operators
-move_op = operators.construct_move_operator_blocking(move_time=5.0)
-search_op = operators.construct_search_operator(object_find_prob=0.8, search_time=3.0)
-
-# Instantiate actions
-objects = {"robot": {"robot1", "robot2"}, "location": {"kitchen", "bedroom"}, "object": {"Knife"}}
-actions = list(move_op.instantiate(objects)) + list(search_op.instantiate(objects))
-
-# Plan!
-planner = MCTSPlanner(actions)
-print(planner(initial_state, goal, max_iterations=1000))
-# Output: "search robot1 kitchen Knife" or "search robot2 bedroom Knife"
-```
-
-### 3. Planning with Execution Loop
-
-Use `SymbolicEnvironment` to execute plans step-by-step:
-
-```python
-from railroad.core import Fluent as F, get_action_by_name
-from railroad._bindings import State
-from railroad import operators
-from railroad.environment import SymbolicEnvironment
-from railroad.planner import MCTSPlanner
-
-# Setup
-initial_fluents = {F("at robot1 kitchen"), F("free robot1")}
-objects = {"robot": {"robot1"}, "location": {"kitchen", "bedroom"}, "object": {"Knife"}}
-goal = F("found Knife")
-
-move_op = operators.construct_move_operator_blocking(move_time=5.0)
-search_op = operators.construct_search_operator(object_find_prob=0.8, search_time=3.0)
-
-# Create environment (knows where objects actually are)
-env = SymbolicEnvironment(
-    state=State(0.0, initial_fluents, []),
-    objects_by_type=objects,
-    operators=[move_op, search_op],
-    objects_at_locations={"bedroom": {"Knife"}},  # Knife is in bedroom
-)
-
-# Create planner
-planner = MCTSPlanner(list(move_op.instantiate(objects)) + list(search_op.instantiate(objects)))
-
-# Plan and execute until goal reached
-while not goal.evaluate(env.state.fluents):
-    action_name = planner(env.state, goal, max_iterations=1000)
-    action = get_action_by_name(env.get_actions(), action_name)
-    print(f"t={env.time:.1f}: Executing {action_name}")
-    env.act(action)
-
-print(f"Goal reached at t={env.time:.1f}!")
-```
-
-Output:
-```
-t=0.0: Executing search robot1 kitchen Knife
-t=3.0: Executing move robot1 kitchen bedroom
-t=8.0: Executing search robot1 bedroom Knife
-Goal reached at t=11.0!
-```
-
-### 4. Complex Goals
-
-Use Python operators for complex goal expressions:
-
-```python
-from functools import reduce
-from operator import and_, or_
-from railroad.core import Fluent as F
-
-# AND: all must be true
-goal = F("found Knife") & F("found Fork")
-
-# OR: at least one must be true
-goal = F("at robot1 kitchen") | F("at robot1 bedroom")
-
-# Combining multiple fluents
-goal = reduce(and_, [F("found Knife"), F("found Fork"), F("found Spoon")])
-
-# Negation: object must NOT be at location
-goal = ~F("at Knife table")  # Knife must not be on table
-
-# "Clear the table" pattern
-objects = ["Knife", "Fork", "Spoon"]
-goal = reduce(and_, [~F(f"at {obj} table") for obj in objects])
-```
-
-### 5. ProcTHOR 3D Simulation (Optional)
-
-For realistic 3D environments, install ProcTHOR dependencies:
-
-```bash
-pip install railroad[procthor]
-uv run railroad example run procthor-search
-```
-
-```python
-from railroad.environment.procthor import ProcTHOREnvironment, is_available
-
-if is_available():
-    # Load a ProcTHOR scene
-    env = ProcTHOREnvironment(scene_id="train_0")
-
-    # Use like any other environment
-    actions = env.get_actions()
-    state = env.state
-    # ... plan and execute
-```
-
-## Project Structure
-
-```
-railroad/
-├── packages/
-│   ├── railroad/          # Core planning engine
-│   │   ├── src/railroad/
-│   │   │   ├── environment/        # SymbolicEnvironment, skills
-│   │   │   ├── environment/procthor/  # ProcTHOR integration (optional)
-│   │   │   ├── bench/              # Benchmarking tools
-│   │   │   └── examples/           # Built-in examples
-│   │   └── include/                # C++ headers
-│   ├── environments/      # Additional environments (PyRoboSim)
-│   ├── gridmap/           # Occupancy grid utilities
-│   └── common/            # Shared utilities
-├── scripts/               # Standalone scripts
-└── resources/             # Downloaded data (ProcTHOR scenes, etc.)
-```
+Additional packages:
+- `packages/environments/` -- Extra environment backends (e.g. PyRoboSim)
 
 ## Development
 
 ```bash
-# Run tests
-uv run pytest
-
-# Run specific test
-uv run pytest -vk test_name
-
-# Type checking
-uv run ty check
-
-# Run benchmarks
-uv run railroad benchmarks run --dry-run  # Preview
-uv run railroad benchmarks run            # Run all
-uv run railroad benchmarks dashboard      # Launch dashboard
+uv run ty check              # type-check (fast, run first)
+uv run pytest                # full test suite
+uv run pytest -vk <filter>   # run specific tests
 ```
 
-### Rebuilding C++ Extensions
-
-```bash
-uv sync --reinstall-package railroad
-```
-
-## Key Concepts
-
-| Concept | Description |
-|---------|-------------|
-| **Fluent** | A fact about the world: `F("at robot1 kitchen")` |
-| **State** | Set of fluents + time + pending effects |
-| **Operator** | Action template: `move ?robot ?from ?to` |
-| **Action** | Grounded operator: `move robot1 kitchen bedroom` |
-| **Effect** | State change at a specific time (can be probabilistic) |
-| **Goal** | Target condition(s) to achieve |
-
-### Environment and Skills
-
-The `SymbolicEnvironment` executes plans by managing skills:
-
-```python
-import numpy as np
-from railroad.environment import (
-    SymbolicEnvironment,
-    InterruptableMoveSymbolicSkill,
-    LocationRegistry,
-)
-
-# For interruptible moves (robot can be redirected mid-movement)
-registry = LocationRegistry({
-    "kitchen": np.array([0, 0]),
-    "bedroom": np.array([10, 0]),
-})
-
-env = SymbolicEnvironment(
-    state=initial_state,
-    objects_by_type=objects,
-    operators=[move_op],
-    location_registry=registry,
-    skill_overrides={"move": InterruptableMoveSymbolicSkill},
-)
-```
-
-## Troubleshooting
-
-| Problem | Solution |
-|---------|----------|
-| `_bindings` import error | `uv sync --reinstall-package railroad` |
-| ProcTHOR not found | `pip install railroad[procthor]` |
-| Slow first ProcTHOR import | Normal - downloads ~2GB of resources |
-| Tests fail after git pull | Rebuild: `uv sync --reinstall-package railroad` |
-
-## Resources
-
-- [AI2-THOR Documentation](https://ai2thor.allenai.org/)
-- [ProcTHOR Dataset](https://procthor.allenai.org/)
+`uv run` automatically detects changes to source files (including C++) and rebuilds as needed.
