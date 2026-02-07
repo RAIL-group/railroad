@@ -1093,8 +1093,11 @@ class PlannerDashboard:
         Args:
             ax: Matplotlib axes. If None, a new figure/axes is created.
             show_objects: If True, also plot object trajectories as dashed lines.
-            location_coords: Optional explicit location->(x,y) mapping that
-                overrides any environment-provided coordinates.
+            location_coords: Optional explicit location->(x,y) mapping used to
+                resolve positions that lack coordinates (stored as None). If
+                provided, any positions that already have non-None coordinates
+                from the environment will raise a ValueError to prevent
+                conflicting coordinate sources.
 
         Returns:
             The matplotlib axes with the plotted trajectories.
@@ -1115,8 +1118,19 @@ class PlannerDashboard:
         # Get environment coordinates + grid + graph
         env_coords, grid, graph = self._get_location_coords()
 
-        # Merge explicit overrides on top
+        # Handle explicit location_coords
         if location_coords is not None:
+            # Check for conflict: error if any stored positions already have coords
+            for entity, positions in self._entity_positions.items():
+                for _, loc_name, stored_coords in positions:
+                    if stored_coords is not None:
+                        raise ValueError(
+                            f"Cannot pass location_coords when positions already "
+                            f"have coordinates from the environment "
+                            f"(entity={entity!r}, location={loc_name!r}). "
+                            f"Use location_coords only when the environment does "
+                            f"not provide coordinates."
+                        )
             env_coords.update(location_coords)
 
         # Collect all location names that still lack coordinates
