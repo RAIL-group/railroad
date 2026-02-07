@@ -21,6 +21,8 @@ uv run railroad example multi-object-search
 
 ## Quick Example: Two-Robot Object Search
 
+*[Run this example in a Google Colab notebook](https://colab.research.google.com/drive/1jdUtZmKc9OA9LiCSeDdteCqZMGRHik2U?usp=sharing).*
+
 Two robots concurrently move and search to find a Knife and a Cup in a five-room space.
 
 ```python
