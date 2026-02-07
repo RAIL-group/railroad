@@ -1404,9 +1404,9 @@ class PlannerDashboard:
         path: str,
         *,
         location_coords: dict[str, tuple[float, float]] | None = None,
-        fps: int = 30,
+        fps: int = 60,
         duration: float = 10.0,
-        figsize: tuple[float, float] = (10, 8),
+        figsize: tuple[float, float] = (12.8, 7.2),
     ) -> None:
         """Save an animated trajectory video/GIF.
 
@@ -1455,10 +1455,27 @@ class PlannerDashboard:
         from matplotlib.gridspec import GridSpec
         from matplotlib.colors import Normalize
 
+        # Check if ProcTHOR scene provides a top-down image
+        scene = getattr(self._env, "scene", None)
+        get_top_down = getattr(scene, "get_top_down_image", None)
+        has_overhead = get_top_down is not None
+
         fig = plt.figure(figsize=figsize)
-        gs = GridSpec(1, 2, width_ratios=[3, 1], figure=fig)
-        ax = fig.add_subplot(gs[0, 0])
-        sidebar_ax = fig.add_subplot(gs[0, 1])
+        if has_overhead:
+            gs = GridSpec(1, 3, width_ratios=[1, 2, 1], figure=fig)
+            overhead_ax = fig.add_subplot(gs[0, 0])
+            ax = fig.add_subplot(gs[0, 1])
+            sidebar_ax = fig.add_subplot(gs[0, 2])
+            # Render the overhead map
+            assert get_top_down is not None
+            top_down_image = get_top_down(orthographic=True)
+            overhead_ax.imshow(top_down_image)
+            overhead_ax.axis("off")
+            overhead_ax.set_title("Top-down View", fontsize=8)
+        else:
+            gs = GridSpec(1, 2, width_ratios=[3, 1], figure=fig)
+            ax = fig.add_subplot(gs[0, 0])
+            sidebar_ax = fig.add_subplot(gs[0, 1])
         sidebar_ax.set_axis_off()
 
         # Static background: grid
@@ -1494,14 +1511,23 @@ class PlannerDashboard:
         marker_colors = ["tab:red", "tab:blue", "tab:green", "tab:orange",
                          "tab:purple", "tab:cyan", "tab:pink", "tab:olive"]
 
-        # --- Sidebar: colormap strips with robot markers on top ---
+        # --- Sidebar layout: compute goal section height first, then colorbars fill above ---
         n_entities = len(entity_names)
-        # Layout: colormaps on the left portion, actions on the right
         cbar_width = 0.06  # width of each colorbar strip in axes fraction
         cbar_gap = 0.03    # gap between strips
         cbar_left = 0.05   # left margin
-        cbar_bottom = 0.05
-        cbar_top = 0.88    # leave room for marker + label at top
+
+        # Goal section: measure how tall it needs to be
+        goal_str = format_goal(self.goal, compact=False)
+        goal_lines = goal_str.split("\n")
+        goal_line_spacing = 0.035
+        goal_section_height = (len(goal_lines) + 1) * goal_line_spacing + 0.04  # +1 for header
+        goal_section_bottom = 0.03
+        goal_section_top = goal_section_bottom + goal_section_height
+
+        # Colorbars fill the space above the goal section
+        cbar_bottom = goal_section_top + 0.04
+        cbar_top = 0.88  # leave room for marker + label at top
         cbar_height = cbar_top - cbar_bottom
 
         # Total width used by colorbar strips
@@ -1519,7 +1545,7 @@ class PlannerDashboard:
             cbar_ax.imshow(gradient, aspect="auto", cmap=cmap_name, origin="lower",
                            extent=(0, 1, 0, t_end))
             cbar_ax.set_xlim(0, 1)
-            cbar_ax.set_ylim(0, t_end)
+            cbar_ax.set_ylim(t_end, 0)  # invert: t=0 at top, t_end at bottom
             cbar_ax.set_xticks([])
             if idx == 0:
                 cbar_ax.set_ylabel("time", fontsize=6)
@@ -1540,13 +1566,41 @@ class PlannerDashboard:
                 transform=sidebar_ax.transAxes,
             )
 
+        # --- Sidebar: goal progress section ---
+        # Pre-compute goal snapshots: sorted list of (time, {literal_str: bool})
+        goal_snapshots: list[tuple[float, dict[str, bool]]] = []
+        for entry in self.history:
+            goal_snapshots.append((entry["time"], entry["goals"]))
+
+        # Render goal lines as text artists
+        sidebar_ax.text(
+            cbar_left, goal_section_top - 0.01, "Goal:",
+            fontsize=7, fontfamily="monospace", fontweight="bold",
+            ha="left", va="top", transform=sidebar_ax.transAxes,
+        )
+        goal_text_artists: list[tuple[Any, str | None]] = []
+        for i, line in enumerate(goal_lines):
+            y_pos = goal_section_top - 0.01 - (i + 1) * goal_line_spacing
+            # Detect if this line contains a literal: matches (name args...)
+            stripped = line.strip()
+            literal_str: str | None = None
+            if stripped.startswith("(") and stripped.endswith(")") and "(" not in stripped[1:]:
+                literal_str = stripped
+            txt = sidebar_ax.text(
+                cbar_left, y_pos, line,
+                fontsize=6, fontfamily="monospace",
+                color="red" if literal_str else "gray",
+                ha="left", va="top", transform=sidebar_ax.transAxes,
+            )
+            goal_text_artists.append((txt, literal_str))
+
         # --- Sidebar: action list (text artists, initially hidden) ---
         # Position actions proportionally by start time, with a minimum
         # gap so labels don't overlap.
         actions = self.actions_taken  # List[(action_name, start_time)]
         n_actions = len(actions)
-        action_y_top = 0.92
-        action_y_bottom = 0.05
+        action_y_top = cbar_top
+        action_y_bottom = cbar_bottom
         min_gap = 0.025  # minimum vertical spacing in axes fraction
 
         # Compute ideal y positions proportional to time (top = t=0)
@@ -1627,7 +1681,20 @@ class PlannerDashboard:
             for txt, act_time in action_texts:
                 if current_time >= act_time:
                     txt.set_alpha(1.0)
-            return markers + labels + trails + [txt for txt, _ in action_texts]
+            # Update goal literal colors based on latest snapshot <= current_time
+            current_goals: dict[str, bool] = {}
+            for snap_time, snap_goals in goal_snapshots:
+                if snap_time <= current_time:
+                    current_goals = snap_goals
+                else:
+                    break
+            for txt, literal_str in goal_text_artists:
+                if literal_str is not None:
+                    satisfied = current_goals.get(literal_str, False)
+                    txt.set_color("green" if satisfied else "red")
+            return (markers + labels + trails
+                    + [txt for txt, _ in action_texts]
+                    + [txt for txt, _ in goal_text_artists])
 
         anim = FuncAnimation(fig, _update, frames=n_frames, blit=False, interval=1000 / fps)
 
@@ -1640,7 +1707,7 @@ class PlannerDashboard:
             from matplotlib.animation import FFMpegWriter
             writer = FFMpegWriter(fps=fps)
 
-        anim.save(path, writer=writer)
+        anim.save(path, writer=writer, dpi=150)
         plt.close(fig)
 
     def show_plots(
