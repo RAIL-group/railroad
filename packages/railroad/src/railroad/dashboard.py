@@ -416,60 +416,6 @@ def _generate_coordinates(location_names: Collection[str]) -> dict[str, tuple[fl
     return coords
 
 
-def _interpolate_trajectory(
-    waypoints: list[tuple[float, float]],
-    times: list[float],
-    *,
-    max_time: float | None = None,
-    points_per_segment: int = 500,
-) -> tuple[list[float], list[float], list[float]]:
-    """Interpolate a trajectory into dense (x, y, t) points for scatter plotting.
-
-    Generates uniformly-spaced interpolated points between each consecutive
-    waypoint pair, with timestamps linearly interpolated.
-
-    Args:
-        waypoints: List of (x, y) coordinates.
-        times: List of timestamps corresponding to each waypoint.
-        max_time: If set, truncate trajectory at this time.
-        points_per_segment: Number of interpolated points per segment.
-
-    Returns:
-        Tuple of (xs, ys, ts) lists of interpolated coordinates and timestamps.
-    """
-    import numpy as np
-
-    if len(waypoints) < 2:
-        return [], [], []
-
-    # Build (x, y, t) array of waypoints
-    pts = np.column_stack([np.array(waypoints), np.array(times)])
-
-    # Truncate at max_time if set
-    if max_time is not None:
-        mask = pts[:, 2] <= max_time
-        # Keep at least one point past max_time for interpolation of the last segment
-        first_over = np.searchsorted(pts[:, 2], max_time, side="right")
-        mask[:min(first_over + 1, len(pts))] = True
-        pts = pts[mask]
-        if len(pts) >= 2 and pts[-1, 2] > max_time:
-            # Lerp the last point to exactly max_time
-            frac = (max_time - pts[-2, 2]) / (pts[-1, 2] - pts[-2, 2])
-            pts[-1] = pts[-2] + frac * (pts[-1] - pts[-2])
-
-    if len(pts) < 2:
-        return [], [], []
-
-    # Interpolate each segment
-    all_pts = []
-    for i in range(len(pts) - 1):
-        fracs = np.linspace(0, 1, points_per_segment, endpoint=(i == len(pts) - 2))
-        seg = pts[i] + np.outer(fracs, pts[i + 1] - pts[i])
-        all_pts.append(seg)
-
-    result = np.concatenate(all_pts)
-    return result[:, 0].tolist(), result[:, 1].tolist(), result[:, 2].tolist()
-
 
 class PlannerDashboard:
     """
@@ -1337,6 +1283,17 @@ class PlannerDashboard:
             "spring", "summer", "autumn", "winter", "cool",
         ]
 
+        # Dense interpolation for smooth scatter trails
+        import numpy as np
+        t_end = self._goal_time or 0.0
+        for _entity, (_wps, traj_times) in trajectories.items():
+            if traj_times:
+                t_end = max(t_end, max(traj_times))
+        dense_times = np.linspace(0.0, t_end, 2000) if t_end > 0 else np.array([0.0])
+        dense_positions = self.get_entity_positions_at_times(
+            dense_times, location_coords=location_coords,
+        )
+
         # Plot robot trajectories as interpolated scatter colored by time
         robot_id = 0
         for entity in sorted(self.known_robots & set(trajectories.keys())):
@@ -1356,13 +1313,9 @@ class PlannerDashboard:
                 elif loc_name in env_coords:
                     location_waypoints.append(env_coords[loc_name])
 
-            xs, ys, ts = _interpolate_trajectory(
-                waypoints, times,
-                max_time=self._goal_time,
-            )
-
-            if xs:
-                ax.scatter(xs, ys, c=ts, cmap=cmap_name, s=4, zorder=5, alpha=0.7)
+            if entity in dense_positions:
+                pts = dense_positions[entity]
+                ax.scatter(pts[:, 0], pts[:, 1], c=dense_times, cmap=cmap_name, s=4, zorder=5, alpha=0.7)
 
             # Plot location markers and labels
             wx = [p[0] for p in location_waypoints]
@@ -1485,12 +1438,19 @@ class PlannerDashboard:
         n_frames = int(fps * duration)
         frame_times = np.linspace(0.0, t_end, n_frames)
 
-        # Pre-compute all positions
-        all_positions = self.get_entity_positions_at_times(
+        # Pre-compute dense trail positions (same resolution as static plot)
+        dense_trail_times = np.linspace(0.0, t_end, 2000)
+        dense_positions = self.get_entity_positions_at_times(
+            dense_trail_times, location_coords=location_coords,
+        )
+        if not dense_positions:
+            return
+
+        # Pre-compute low-res positions for the moving marker
+        marker_positions = self.get_entity_positions_at_times(
             frame_times, location_coords=location_coords,
         )
-        if not all_positions:
-            return
+        entity_names = sorted(dense_positions.keys())
 
         fig, ax = plt.subplots(figsize=figsize)
 
@@ -1522,19 +1482,19 @@ class PlannerDashboard:
             "viridis", "plasma", "inferno", "magma", "cividis",
             "spring", "summer", "autumn", "winter", "cool",
         ]
-        entity_names = sorted(all_positions.keys())
 
         # Create artists: current position marker + trail scatter per entity
         markers = []
         trails = []
         for idx, entity in enumerate(entity_names):
             cmap = plt.get_cmap(colormaps[idx % len(colormaps)])
-            pos0 = all_positions[entity][0]
+            pos0 = marker_positions[entity][0]
             (marker,) = ax.plot(
                 [pos0[0]], [pos0[1]], "o", color=cmap(0.8),
                 markersize=8, zorder=10, label=entity,
             )
             trail = ax.scatter([], [], s=4, cmap=colormaps[idx % len(colormaps)], zorder=5, alpha=0.7)
+            trail.set_clim(0.0, t_end)
             markers.append(marker)
             trails.append(trail)
 
@@ -1546,14 +1506,17 @@ class PlannerDashboard:
             ax.set_aspect("equal", adjustable="datalim")
 
         def _update(frame: int):
+            current_time = frame_times[frame]
             for idx, entity in enumerate(entity_names):
-                pos = all_positions[entity]
-                # Update current position marker
+                # Update current position marker (low-res is fine)
+                pos = marker_positions[entity]
                 markers[idx].set_data([pos[frame, 0]], [pos[frame, 1]])
-                # Update trail (all positions up to current frame)
-                trail_data = pos[:frame + 1]
-                trails[idx].set_offsets(trail_data)
-                trails[idx].set_array(frame_times[:frame + 1])
+                # Update trail from the dense pre-computed data,
+                # sliced up to the current frame time
+                if entity in dense_positions:
+                    mask = dense_trail_times <= current_time
+                    trails[idx].set_offsets(dense_positions[entity][mask])
+                    trails[idx].set_array(dense_trail_times[mask])
             return markers + trails
 
         anim = FuncAnimation(fig, _update, frames=n_frames, blit=False, interval=1000 / fps)
