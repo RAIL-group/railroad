@@ -16,6 +16,7 @@ from typing import Any, Collection, List, Dict, Set, Union, Tuple, Optional, Cal
 from railroad._bindings import (
     Action,
     Goal,
+    GroundedEffect,
     LiteralGoal,
     AndGoal,
     GoalType,
@@ -415,6 +416,84 @@ def _generate_coordinates(location_names: Collection[str]) -> dict[str, tuple[fl
     return coords
 
 
+def _interpolate_trajectory(
+    waypoints: list[tuple[float, float]],
+    times: list[float],
+    *,
+    max_time: float | None = None,
+    points_per_segment: int = 500,
+    grid: Any = None,
+) -> tuple[list[float], list[float], list[float]]:
+    """Interpolate a trajectory into dense (x, y, t) points for scatter plotting.
+
+    For each consecutive waypoint pair, generates interpolated points with
+    timestamps proportional to cumulative distance. Supports obstacle-aware
+    paths via ProcTHOR grid when available.
+
+    Args:
+        waypoints: List of (x, y) coordinates.
+        times: List of timestamps corresponding to each waypoint.
+        max_time: If set, stop adding points once time exceeds this value.
+        points_per_segment: Number of interpolated points per segment (no-grid).
+        grid: Optional ProcTHOR occupancy grid for obstacle-aware interpolation.
+
+    Returns:
+        Tuple of (xs, ys, ts) lists of interpolated coordinates and timestamps.
+    """
+    xs: list[float] = []
+    ys: list[float] = []
+    ts: list[float] = []
+
+    for i in range(len(waypoints) - 1):
+        if max_time is not None and times[i] >= max_time:
+            break
+
+        t_start = times[i]
+        t_end = times[i + 1]
+        if max_time is not None:
+            t_end = min(t_end, max_time)
+
+        wp_start = waypoints[i]
+        wp_end = waypoints[i + 1]
+
+        # Try grid-based trajectory
+        path: list[tuple[float, float]] | None = None
+        if grid is not None:
+            try:
+                from railroad.environment.procthor.utils import get_trajectory
+                path = get_trajectory(grid, [wp_start, wp_end])
+            except (ImportError, Exception):
+                path = None
+
+        if path is not None and len(path) >= 2:
+            # Assign timestamps proportional to cumulative Euclidean distance
+            dists = [0.0]
+            for j in range(1, len(path)):
+                dx = path[j][0] - path[j - 1][0]
+                dy = path[j][1] - path[j - 1][1]
+                dists.append(dists[-1] + math.sqrt(dx * dx + dy * dy))
+            total_dist = dists[-1] if dists[-1] > 0 else 1.0
+            for j, (px, py) in enumerate(path):
+                t = t_start + (t_end - t_start) * dists[j] / total_dist
+                if max_time is not None and t > max_time:
+                    break
+                xs.append(px)
+                ys.append(py)
+                ts.append(t)
+        else:
+            # Linear interpolation
+            for j in range(points_per_segment):
+                frac = j / max(1, points_per_segment - 1)
+                t = t_start + (t_end - t_start) * frac
+                if max_time is not None and t > max_time:
+                    break
+                xs.append(wp_start[0] + (wp_end[0] - wp_start[0]) * frac)
+                ys.append(wp_start[1] + (wp_end[1] - wp_start[1]) * frac)
+                ts.append(t)
+
+    return xs, ys, ts
+
+
 class PlannerDashboard:
     """
     Rich-based dashboard for the robot task planner.
@@ -500,6 +579,7 @@ class PlannerDashboard:
 
         # Trajectory tracking: entity_name -> [(time, location_name, (x,y) or None), ...]
         self._entity_positions: dict[str, list[tuple[float, str, tuple[float, float] | None]]] = {}
+        self._goal_time: float | None = None
 
         # Root layout
         self.layout = self._make_layout()
@@ -617,6 +697,7 @@ class PlannerDashboard:
         if self._live is not None:
             self._live.__exit__(exc_type, exc, tb)
             self._live = None
+        self.finalize_trajectories()
         if self._print_on_exit:
             self.print_history()
 
@@ -1076,6 +1157,32 @@ class PlannerDashboard:
         with open(path, "w", encoding="utf-8") as f:
             f.write(self.format_history_as_text())
 
+    def finalize_trajectories(self) -> None:
+        """Record pending robot positions from upcoming effects without mutating the environment.
+
+        When the planning loop ends (goal reached), some robots may still be
+        mid-action with pending effects. This method scans upcoming effects for
+        future (at entity location) fluents and records them so that
+        plot_trajectories() can show complete paths.
+
+        Sets _goal_time so that plotted trajectories are truncated at goal time.
+        """
+        state = self._env.state
+        self._goal_time = state.time
+
+        coord_lookup, _, _ = self._get_location_coords()
+        for effect_time, effect in state.upcoming_effects:
+            for fluent in effect.resulting_fluents:
+                if fluent.name == "at" and len(fluent.args) >= 2:
+                    entity_name = fluent.args[0]
+                    location_name = fluent.args[1]
+                    coords = coord_lookup.get(location_name)
+                    if entity_name not in self._entity_positions:
+                        self._entity_positions[entity_name] = []
+                    positions = self._entity_positions[entity_name]
+                    if not positions or positions[-1][1] != location_name:
+                        positions.append((effect_time, location_name, coords))
+
     def plot_trajectories(
         self,
         ax: Any = None,
@@ -1104,8 +1211,6 @@ class PlannerDashboard:
         """
         try:
             import matplotlib.pyplot as plt
-            from matplotlib.collections import LineCollection
-            import matplotlib.cm as cm
         except ImportError:
             raise ImportError(
                 "Trajectory plotting requires matplotlib: pip install matplotlib"
@@ -1167,52 +1272,42 @@ class PlannerDashboard:
             "spring", "summer", "autumn", "winter", "cool",
         ]
 
-        # Plot robot trajectories
+        # Plot robot trajectories as interpolated scatter colored by time
         for robot_id, (entity, positions) in enumerate(sorted(robot_entities.items())):
-            # Build waypoint list using stored coords or resolved fallback
+            # Build waypoint and time lists using stored coords or resolved fallback
             waypoints: list[tuple[float, float]] = []
-            for _, loc_name, stored_coords in positions:
+            times: list[float] = []
+            for t, loc_name, stored_coords in positions:
                 if stored_coords is not None:
                     waypoints.append(stored_coords)
+                    times.append(t)
                 elif loc_name in env_coords:
                     waypoints.append(env_coords[loc_name])
+                    times.append(t)
 
             if len(waypoints) < 2:
                 continue
 
             cmap_name = colormaps[robot_id % len(colormaps)]
 
-            if grid is not None and graph is not None:
-                # ProcTHOR tier: use obstacle-respecting trajectory plotting
-                try:
-                    from railroad.environment.procthor.plotting import plot_robot_trajectory
-                    plot_robot_trajectory(
-                        ax, waypoints, grid, graph, entity,
-                        color_map=cmap_name, robot_id=robot_id,
-                    )
-                    continue
-                except ImportError:
-                    pass
+            # Interpolate trajectory into dense points
+            xs, ys, ts = _interpolate_trajectory(
+                waypoints, times,
+                max_time=self._goal_time,
+                grid=grid,
+            )
 
-            # Non-grid tier: draw LineCollection with colormap gradient
-            x = [p[0] for p in waypoints]
-            y = [p[1] for p in waypoints]
-            import numpy as np
-            points = np.array([x, y]).T.reshape(-1, 1, 2)
-            segments = np.concatenate([points[:-1], points[1:]], axis=1)
-
-            norm = plt.Normalize(0, len(x))
-            lc = LineCollection(segments.tolist(), cmap=cmap_name, norm=norm)
-            lc.set_array(np.arange(len(x)))
-            lc.set_linewidth(2)
-            ax.add_collection(lc)
+            if xs:
+                ax.scatter(xs, ys, c=ts, cmap=cmap_name, s=4, zorder=5, alpha=0.7)
 
             # Plot waypoint markers
-            ax.scatter(x, y, s=20, zorder=5, color="black")
+            wx = [p[0] for p in waypoints]
+            wy = [p[1] for p in waypoints]
+            ax.scatter(wx, wy, s=20, zorder=6, color="black")
 
             # Label start
             ax.annotate(
-                entity, (x[0], y[0]),
+                entity, (wx[0], wy[0]),
                 fontsize=7, fontweight="bold", color="brown",
             )
 
@@ -1280,6 +1375,20 @@ class PlannerDashboard:
             heuristic_value=heuristic_value,
         )
 
+    def _record_entity_positions(self, state: State) -> None:
+        """Extract and record entity positions from (at entity location) fluents."""
+        coord_lookup, _, _ = self._get_location_coords()
+        for fluent in state.fluents:
+            if fluent.name == "at" and len(fluent.args) >= 2:
+                entity_name = fluent.args[0]
+                location_name = fluent.args[1]
+                coords = coord_lookup.get(location_name)
+                if entity_name not in self._entity_positions:
+                    self._entity_positions[entity_name] = []
+                positions = self._entity_positions[entity_name]
+                if not positions or positions[-1][1] != location_name:
+                    positions.append((state.time, location_name, coords))
+
     def _do_update(
         self,
         state: State,
@@ -1297,18 +1406,7 @@ class PlannerDashboard:
                 robot_name = fluent_str[6:-1].strip()
                 self.known_robots.add(robot_name)
 
-        # Extract entity positions from (at entity location) fluents
-        coord_lookup, _, _ = self._get_location_coords()
-        for fluent in state.fluents:
-            if fluent.name == "at" and len(fluent.args) >= 2:
-                entity_name = fluent.args[0]
-                location_name = fluent.args[1]
-                coords = coord_lookup.get(location_name)
-                if entity_name not in self._entity_positions:
-                    self._entity_positions[entity_name] = []
-                positions = self._entity_positions[entity_name]
-                if not positions or positions[-1][1] != location_name:
-                    positions.append((state.time, location_name, coords))
+        self._record_entity_positions(state)
 
         # Use best branch progress for OR goals
         achieved, total, label = self._get_best_branch_progress(state)
