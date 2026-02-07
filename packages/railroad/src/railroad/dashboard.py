@@ -1157,7 +1157,7 @@ class PlannerDashboard:
                     if entity_name not in self._entity_positions:
                         self._entity_positions[entity_name] = []
                     positions = self._entity_positions[entity_name]
-                    if not positions or positions[-1][1] != location_name:
+                    if not positions or positions[-1][1] != location_name or positions[-1][0] != effect_time:
                         positions.append((effect_time, location_name, coords))
 
     def _build_entity_trajectories(
@@ -1643,7 +1643,11 @@ class PlannerDashboard:
                 if entity_name not in self._entity_positions:
                     self._entity_positions[entity_name] = []
                 positions = self._entity_positions[entity_name]
-                if not positions or positions[-1][1] != location_name:
+                # Record when location changes OR when time advances at the
+                # same location (e.g. pick/place actions).  The duplicate
+                # waypoint creates a "hold" segment so interpolation shows
+                # the entity as stationary during non-movement actions.
+                if not positions or positions[-1][1] != location_name or positions[-1][0] != state.time:
                     positions.append((state.time, location_name, coords))
 
     def _do_update(
