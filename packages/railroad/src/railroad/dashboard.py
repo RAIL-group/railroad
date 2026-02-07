@@ -1452,7 +1452,14 @@ class PlannerDashboard:
         )
         entity_names = sorted(dense_positions.keys())
 
-        fig, ax = plt.subplots(figsize=figsize)
+        from matplotlib.gridspec import GridSpec
+        from matplotlib.colors import Normalize
+
+        fig = plt.figure(figsize=figsize)
+        gs = GridSpec(1, 2, width_ratios=[3, 1], figure=fig)
+        ax = fig.add_subplot(gs[0, 0])
+        sidebar_ax = fig.add_subplot(gs[0, 1])
+        sidebar_ax.set_axis_off()
 
         # Static background: grid
         if grid is not None:
@@ -1487,7 +1494,86 @@ class PlannerDashboard:
         marker_colors = ["tab:red", "tab:blue", "tab:green", "tab:orange",
                          "tab:purple", "tab:cyan", "tab:pink", "tab:olive"]
 
-        # Create artists: current position marker + label + trail scatter per entity
+        # --- Sidebar: colormap strips with robot markers on top ---
+        n_entities = len(entity_names)
+        # Layout: colormaps on the left portion, actions on the right
+        cbar_width = 0.06  # width of each colorbar strip in axes fraction
+        cbar_gap = 0.03    # gap between strips
+        cbar_left = 0.05   # left margin
+        cbar_bottom = 0.05
+        cbar_top = 0.88    # leave room for marker + label at top
+        cbar_height = cbar_top - cbar_bottom
+
+        # Total width used by colorbar strips
+        cbar_total_width = n_entities * cbar_width + (n_entities - 1) * cbar_gap
+        actions_left = cbar_left + cbar_total_width + 0.08  # action list starts here
+
+        for idx, entity in enumerate(entity_names):
+            cmap_name = colormaps[idx % len(colormaps)]
+            mcolor = marker_colors[idx % len(marker_colors)]
+            x0 = cbar_left + idx * (cbar_width + cbar_gap)
+
+            # Create an inset axes for each colorbar strip
+            cbar_ax = sidebar_ax.inset_axes((x0, cbar_bottom, cbar_width, cbar_height))
+            gradient = np.linspace(0, 1, 256).reshape(-1, 1)
+            cbar_ax.imshow(gradient, aspect="auto", cmap=cmap_name, origin="lower",
+                           extent=(0, 1, 0, t_end))
+            cbar_ax.set_xlim(0, 1)
+            cbar_ax.set_ylim(0, t_end)
+            cbar_ax.set_xticks([])
+            if idx == 0:
+                cbar_ax.set_ylabel("time", fontsize=6)
+                cbar_ax.tick_params(axis="y", labelsize=5)
+            else:
+                cbar_ax.set_yticks([])
+
+            # Robot marker at top of the strip
+            sidebar_ax.plot(
+                x0 + cbar_width / 2, cbar_top + 0.04, "o",
+                color=mcolor, markeredgecolor="black", markeredgewidth=0.8,
+                markersize=8, transform=sidebar_ax.transAxes, clip_on=False,
+            )
+            sidebar_ax.text(
+                x0 + cbar_width / 2, cbar_top + 0.08, entity,
+                fontsize=5, fontfamily="monospace", fontweight="bold",
+                ha="center", va="bottom",
+                transform=sidebar_ax.transAxes,
+            )
+
+        # --- Sidebar: action list (text artists, initially hidden) ---
+        # Position actions proportionally by start time, with a minimum
+        # gap so labels don't overlap.
+        actions = self.actions_taken  # List[(action_name, start_time)]
+        n_actions = len(actions)
+        action_y_top = 0.92
+        action_y_bottom = 0.05
+        min_gap = 0.025  # minimum vertical spacing in axes fraction
+
+        # Compute ideal y positions proportional to time (top = t=0)
+        action_y_positions: list[float] = []
+        if n_actions > 0:
+            y_range_avail = action_y_top - action_y_bottom
+            for _act_name, act_time in actions:
+                frac = act_time / t_end if t_end > 0 else 0.0
+                action_y_positions.append(action_y_top - frac * y_range_avail)
+            # Enforce minimum gap: walk top-to-bottom pushing overlaps down
+            for i in range(1, n_actions):
+                if action_y_positions[i] > action_y_positions[i - 1] - min_gap:
+                    action_y_positions[i] = action_y_positions[i - 1] - min_gap
+
+        action_texts = []
+        for i, (act_name, act_time) in enumerate(actions):
+            y_pos = action_y_positions[i]
+            txt = sidebar_ax.text(
+                actions_left, y_pos, f"{i+1}. {act_name}",
+                fontsize=5, fontfamily="monospace",
+                ha="left", va="top",
+                transform=sidebar_ax.transAxes,
+                alpha=0.0,  # hidden initially
+            )
+            action_texts.append((txt, act_time))
+
+        # --- Main plot: entity artists ---
         markers = []
         labels = []
         trails = []
@@ -1537,7 +1623,11 @@ class PlannerDashboard:
                     mask = dense_trail_times <= current_time
                     trails[idx].set_offsets(dense_positions[entity][mask])
                     trails[idx].set_array(dense_trail_times[mask])
-            return markers + labels + trails
+            # Reveal actions whose start time has passed
+            for txt, act_time in action_texts:
+                if current_time >= act_time:
+                    txt.set_alpha(1.0)
+            return markers + labels + trails + [txt for txt, _ in action_texts]
 
         anim = FuncAnimation(fig, _update, frames=n_frames, blit=False, interval=1000 / fps)
 
