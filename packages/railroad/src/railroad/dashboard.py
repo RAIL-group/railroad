@@ -1483,20 +1483,33 @@ class PlannerDashboard:
             "spring", "summer", "autumn", "winter", "cool",
         ]
 
-        # Create artists: current position marker + trail scatter per entity
+        # Distinct marker colors per entity
+        marker_colors = ["tab:red", "tab:blue", "tab:green", "tab:orange",
+                         "tab:purple", "tab:cyan", "tab:pink", "tab:olive"]
+
+        # Create artists: current position marker + label + trail scatter per entity
         markers = []
+        labels = []
         trails = []
         for idx, entity in enumerate(entity_names):
-            cmap = plt.get_cmap(colormaps[idx % len(colormaps)])
             pos0 = marker_positions[entity][0]
             (marker,) = ax.plot(
-                [pos0[0]], [pos0[1]], "o", color=cmap(0.8),
-                markersize=8, zorder=10, label=entity,
+                [pos0[0]], [pos0[1]], "o",
+                color=marker_colors[idx % len(marker_colors)],
+                markeredgecolor="black", markeredgewidth=1.0,
+                markersize=11, zorder=10, label=entity,
+            )
+            label = ax.text(
+                pos0[0], pos0[1], entity,
+                fontsize=6, fontfamily="monospace", fontweight="bold",
+                ha="center", va="bottom",
+                zorder=11,
             )
             trail = ax.scatter([], [], s=4, zorder=5, alpha=0.7)
             trail.set_cmap(colormaps[idx % len(colormaps)])
             trail.set_clim(0.0, t_end)
             markers.append(marker)
+            labels.append(label)
             trails.append(trail)
 
         ax.legend(fontsize=7, loc="upper right")
@@ -1506,19 +1519,25 @@ class PlannerDashboard:
             ax.autoscale()
             ax.set_aspect("equal", adjustable="datalim")
 
+        # Compute label offset in data coords (fraction of y-axis range)
+        y_range = ax.get_ylim()
+        label_offset = (y_range[1] - y_range[0]) * 0.02
+
         def _update(frame: int):
             current_time = frame_times[frame]
             for idx, entity in enumerate(entity_names):
-                # Update current position marker (low-res is fine)
+                # Update current position marker
                 pos = marker_positions[entity]
                 markers[idx].set_data([pos[frame, 0]], [pos[frame, 1]])
+                # Update label position (just above the marker)
+                labels[idx].set_position((pos[frame, 0], pos[frame, 1] + label_offset))
                 # Update trail from the dense pre-computed data,
                 # sliced up to the current frame time
                 if entity in dense_positions:
                     mask = dense_trail_times <= current_time
                     trails[idx].set_offsets(dense_positions[entity][mask])
                     trails[idx].set_array(dense_trail_times[mask])
-            return markers + trails
+            return markers + labels + trails
 
         anim = FuncAnimation(fig, _update, frames=n_frames, blit=False, interval=1000 / fps)
 
