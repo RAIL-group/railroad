@@ -4,10 +4,11 @@ Demonstrates using ProcTHOR environment with MCTS planning
 for multi-robot object search and retrieval.
 """
 
-from pathlib import Path
-
-
-def main() -> None:
+def main(
+    save_plot: str | None = None,
+    show_plot: bool = False,
+    save_video: str | None = None,
+) -> None:
     """Run ProcTHOR multi-robot search example."""
     # Lazy import to avoid loading heavy dependencies at startup
     try:
@@ -17,9 +18,6 @@ def main() -> None:
         print("\nInstall ProcTHOR dependencies with: pip install railroad[procthor]")
         return
 
-    import matplotlib
-    matplotlib.use('Agg')  # Use headless backend for file output
-    import matplotlib.pyplot as plt
     from railroad import operators
     from railroad.core import Fluent as F, get_action_by_name
     from railroad.dashboard import PlannerDashboard
@@ -30,7 +28,6 @@ def main() -> None:
     robot_names = ["robot1", "robot2"]
     target_objects = ["teddybear_6", "pencil_17"]
     target_location = "garbagecan_5"
-    save_dir = Path("./data/test_logs")
 
     print(f"Loading ProcTHOR scene (seed={seed})...")
     scene = ProcTHORScene(seed=seed)
@@ -117,27 +114,9 @@ def main() -> None:
             env.act(action)
             dashboard.update(mcts, action_name)
 
-    # Plot results
-    plt.figure(figsize=(16, 8))
-
-    # Left panel: top-down view
-    ax1 = plt.subplot(1, 2, 1)
-    top_down_image = scene.get_top_down_image(orthographic=True)
-    ax1.imshow(top_down_image)
-    ax1.axis("off")
-    ax1.set_title("Top-down View")
-
-    # Right panel: trajectory plot
-    ax2 = plt.subplot(1, 2, 2)
-    dashboard.plot_trajectories(ax=ax2)
-    ax2.set_title(f"Multi-Robot Trajectories (Total time: {env.state.time:.1f}s)")
-
-    # Save figure
-    figpath = Path(save_dir) / f'procthor_run_{seed}.png'
-    figpath.parent.mkdir(parents=True, exist_ok=True)
-    figpath_str = figpath if figpath.as_posix().startswith(("/", "./", "../")) else f"./{figpath}"
-    plt.savefig(figpath, dpi=300)
-    dashboard.console.print(f"\nSaved plot to [yellow]{figpath_str}[/yellow]")
+    dashboard.show_plots(
+        save_plot=save_plot, show_plot=show_plot, save_video=save_video,
+    )
 
 
 if __name__ == "__main__":

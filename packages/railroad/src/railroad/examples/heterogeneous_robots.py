@@ -89,13 +89,21 @@ def make_move_time_fn(registry: LocationRegistry | None = None):
     return get_move_time
 
 
-def main(use_interruptible_moves: bool = False) -> None:
+def main(
+    use_interruptible_moves: bool = False,
+    save_plot: str | None = None,
+    show_plot: bool = False,
+    save_video: str | None = None,
+) -> None:
     """Run the heterogeneous robots example.
 
     Args:
         use_interruptible_moves: If True, move actions can be interrupted when
             another robot becomes free. This creates intermediate locations
             and allows for more flexible replanning.
+        save_plot: Save trajectory plot to file.
+        show_plot: Show trajectory plot interactively.
+        save_video: Save trajectory animation to file.
     """
     # Available robots - each is a different type with different capabilities
     available_robots = ["rover", "drone", "crawler"]
@@ -177,10 +185,11 @@ def main(use_interruptible_moves: bool = False) -> None:
             env.act(action)
             dashboard.update(mcts, action_name)
 
-    import matplotlib.pyplot as plt
     location_coords = {name: (float(c[0]), float(c[1])) for name, c in LOCATIONS.items()}
-    dashboard.plot_trajectories(location_coords=location_coords)
-    plt.show()
+    dashboard.show_plots(
+        save_plot=save_plot, show_plot=show_plot, save_video=save_video,
+        location_coords=location_coords,
+    )
 
 
 if __name__ == "__main__":
@@ -192,5 +201,13 @@ if __name__ == "__main__":
         action="store_true",
         help="Enable interruptible move actions",
     )
+    parser.add_argument("--save-plot", default=None, help="Save trajectory plot to file")
+    parser.add_argument("--show-plot", action="store_true", help="Show trajectory plot")
+    parser.add_argument("--save-video", default=None, help="Save trajectory animation to file")
     args = parser.parse_args()
-    main(use_interruptible_moves=args.interruptible_moves)
+    main(
+        use_interruptible_moves=args.interruptible_moves,
+        save_plot=args.save_plot,
+        show_plot=args.show_plot,
+        save_video=args.save_video,
+    )
