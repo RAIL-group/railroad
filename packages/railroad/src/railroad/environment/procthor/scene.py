@@ -176,6 +176,20 @@ class ProcTHORScene:
         coords = procthor_utils.get_coordinates_at_time(path, elapsed_time)
         return int(coords[0]), int(coords[1])
 
+    def get_trajectory(
+        self,
+        waypoints: list[tuple[float, float]],
+    ) -> list[tuple[float, float]]:
+        """Compute obstacle-respecting trajectory through waypoints.
+
+        Args:
+            waypoints: List of (x, y) grid coordinates to visit in order.
+
+        Returns:
+            List of (x, y) coordinates forming the complete path.
+        """
+        return procthor_utils.get_trajectory(self._thor.occupancy_grid, waypoints)
+
     def get_top_down_image(self, orthographic: bool = True) -> np.ndarray:
         """Get top-down view image of the scene."""
         return self._thor.get_top_down_image(orthographic=orthographic)
