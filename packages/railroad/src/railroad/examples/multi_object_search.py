@@ -45,7 +45,11 @@ PICK_TIME = 5.0
 PLACE_TIME = 5.0
 
 
-def main() -> None:
+def main(
+    save_plot: str | None = None,
+    show_plot: bool = False,
+    save_video: str | None = None,
+) -> None:
     """Run the multi-object search example."""
     # Define the objects we're looking for
     objects_of_interest = ["Knife", "Notebook", "Clock", "Mug", "Pillow"]
@@ -125,6 +129,12 @@ def main() -> None:
             action = get_action_by_name(all_actions, action_name)
             env.act(action)
             dashboard.update(mcts, action_name)
+
+    location_coords = {name: (float(c[0]), float(c[1])) for name, c in LOCATIONS.items()}
+    dashboard.show_plots(
+        save_plot=save_plot, show_plot=show_plot, save_video=save_video,
+        location_coords=location_coords,
+    )
 
 
 if __name__ == "__main__":

@@ -1,8 +1,7 @@
 """Integration tests for ProcTHOR visualization with multi-robot planning.
 
-These tests verify end-to-end planning with MCTS and trajectory visualization.
-They were originally in packages/environments/tests/test_visualization.py and
-were migrated to use the consolidated railroad.environment.procthor module.
+These tests verify end-to-end planning with MCTS and trajectory visualization
+using PlannerDashboard.plot_trajectories().
 """
 
 import random
@@ -16,14 +15,8 @@ import pytest
 from railroad import operators
 from railroad._bindings import State
 from railroad.core import Fluent as F, get_action_by_name
+from railroad.dashboard import PlannerDashboard
 from railroad.environment.procthor import ProcTHORScene, ProcTHOREnvironment
-from railroad.environment.procthor.plotting import (
-    extract_robot_poses,
-    plot_multi_robot_trajectories,
-    plot_robot_trajectory,
-    plot_grid,
-)
-from railroad.environment.procthor.utils import get_trajectory
 from railroad.planner import MCTSPlanner
 
 
@@ -80,22 +73,6 @@ def target_locations(scene, target_objects):
     return targets[:2] if len(targets) >= 2 else [targets[0], targets[0]]
 
 
-def compute_trajectory_cost(grid, waypoints):
-    """Compute total trajectory cost through waypoints."""
-    trajectory = get_trajectory(grid, waypoints)
-    if len(trajectory) < 2:
-        return 0.0, trajectory
-
-    # Cost is total path length
-    total_cost = 0.0
-    for i in range(len(trajectory) - 1):
-        dx = trajectory[i + 1][0] - trajectory[i][0]
-        dy = trajectory[i + 1][1] - trajectory[i][1]
-        total_cost += (dx * dx + dy * dy) ** 0.5
-
-    return total_cost, trajectory
-
-
 @pytest.mark.timeout(120)
 def test_single_robot_plotting(scene, target_objects, target_locations):
     """Test visualization for single robot pick-and-place scenario.
@@ -148,46 +125,32 @@ def test_single_robot_plotting(scene, target_objects, target_locations):
         operators=[move_op, search_op, pick_op, place_op, no_op],
     )
 
-    # Planning loop
-    actions_taken = []
-    all_actions = env.get_actions()
-    mcts = MCTSPlanner(all_actions)
+    # Planning loop with dashboard
+    with PlannerDashboard(goal, env, force_interactive=False, print_on_exit=False) as dashboard:
+        for _ in range(50):
+            all_actions = env.get_actions()
+            mcts = MCTSPlanner(all_actions)
+            action_name = mcts(
+                env.state, goal,
+                max_iterations=4000,
+                c=300,
+                heuristic_multiplier=2
+            )
 
-    for _ in range(50):
-        all_actions = env.get_actions()
-        mcts = MCTSPlanner(all_actions)
-        action_name = mcts(
-            env.state, goal,
-            max_iterations=4000,
-            c=300,
-            heuristic_multiplier=2
-        )
+            if action_name == 'NONE':
+                break
 
-        if action_name == 'NONE':
-            break
+            action = get_action_by_name(all_actions, action_name)
+            env.act(action)
+            dashboard.update(mcts, action_name)
 
-        action = get_action_by_name(all_actions, action_name)
-        env.act(action)
-        actions_taken.append(action_name)
-
-        if goal.evaluate(env.state.fluents):
-            break
-
-    # Extract robot trajectory
-    robot_locations = {'robot1': 'start_loc'}
-    robot_poses_dict = extract_robot_poses(actions_taken, robot_locations, scene.locations)
-    robot_waypoints = robot_poses_dict.get('robot1', [])
-
-    # Compute trajectory cost
-    cost, trajectory = compute_trajectory_cost(scene.grid, robot_waypoints)
+            if goal.evaluate(env.state.fluents):
+                break
 
     # Plot
-    plt.figure(figsize=(8, 8))
-    ax = plt.subplot(111)
-    plot_grid(ax, scene.grid)
-    if len(robot_waypoints) >= 2:
-        plot_robot_trajectory(ax, robot_waypoints, scene.grid, scene.scene_graph, "robot1")
-    plt.title(f"Single Robot Trajectory Cost: {cost:.1f}\nGoal: {goal}")
+    fig, ax = plt.subplots(figsize=(8, 8))
+    dashboard.plot_trajectories(ax=ax)
+    plt.title(f"Single Robot Trajectory\nGoal: {goal}")
 
     # Save
     figpath = SAVE_DIR / f'test_visualization_single_robot_{SEED}.png'
@@ -253,55 +216,41 @@ def test_multi_robot_unknown_plotting(scene, target_objects, target_locations):
         operators=[move_op, search_op, pick_op, place_op, no_op],
     )
 
-    # Planning loop with early termination on consecutive no-ops
-    actions_taken = []
+    # Planning loop with dashboard
     consecutive_no_op = 0
-    all_actions = env.get_actions()
-    mcts = MCTSPlanner(all_actions)
+    with PlannerDashboard(goal, env, force_interactive=False, print_on_exit=False) as dashboard:
+        for _ in range(60):
+            all_actions = env.get_actions()
+            mcts = MCTSPlanner(all_actions)
+            action_name = mcts(
+                env.state, goal,
+                max_iterations=4000,
+                c=300,
+                heuristic_multiplier=2
+            )
 
-    for _ in range(60):
-        all_actions = env.get_actions()
-        mcts = MCTSPlanner(all_actions)
-        action_name = mcts(
-            env.state, goal,
-            max_iterations=4000,
-            c=300,
-            heuristic_multiplier=2
-        )
-
-        if action_name == 'NONE':
-            break
-
-        action = get_action_by_name(all_actions, action_name)
-        env.act(action)
-        actions_taken.append(action_name)
-
-        # Track consecutive no-ops for early termination
-        if action_name.split()[0] == 'no_op':
-            consecutive_no_op += 1
-            if consecutive_no_op > 4:
+            if action_name == 'NONE':
                 break
-        else:
-            consecutive_no_op = 0
 
-        if goal.evaluate(env.state.fluents):
-            break
+            action = get_action_by_name(all_actions, action_name)
+            env.act(action)
+            dashboard.update(mcts, action_name)
 
-    # Extract trajectories for both robots
-    robot_locations = {'robot1': 'start_loc', 'robot2': 'start_loc'}
-    robot_poses_dict = extract_robot_poses(actions_taken, robot_locations, scene.locations)
+            # Track consecutive no-ops for early termination
+            if action_name.split()[0] == 'no_op':
+                consecutive_no_op += 1
+                if consecutive_no_op > 4:
+                    break
+            else:
+                consecutive_no_op = 0
 
-    # Compute total cost
-    total_cost = 0.0
-    for robot_name, waypoints in robot_poses_dict.items():
-        cost, _ = compute_trajectory_cost(scene.grid, waypoints)
-        total_cost += cost
+            if goal.evaluate(env.state.fluents):
+                break
 
     # Plot
-    plt.figure(figsize=(8, 8))
-    ax = plt.subplot(111)
-    plot_multi_robot_trajectories(ax, scene.grid, robot_poses_dict, scene.scene_graph)
-    plt.title(f"Multi Robot (Unknown) Trajectory Cost: {total_cost:.1f}\nGoal: {goal}")
+    fig, ax = plt.subplots(figsize=(8, 8))
+    dashboard.plot_trajectories(ax=ax)
+    plt.title(f"Multi Robot (Unknown) Trajectory\nGoal: {goal}")
 
     figpath = SAVE_DIR / f'test_visualization_unknown_multi_robot_{SEED}.png'
     figpath.parent.mkdir(parents=True, exist_ok=True)
@@ -369,46 +318,32 @@ def test_multi_robot_known_plotting(scene, target_objects, target_locations):
         operators=[move_op, pick_op, place_op, no_op],
     )
 
-    # Planning loop
-    actions_taken = []
-    all_actions = env.get_actions()
-    mcts = MCTSPlanner(all_actions)
+    # Planning loop with dashboard
+    with PlannerDashboard(goal, env, force_interactive=False, print_on_exit=False) as dashboard:
+        for _ in range(20):
+            all_actions = env.get_actions()
+            mcts = MCTSPlanner(all_actions)
+            action_name = mcts(
+                env.state, goal,
+                max_iterations=4000,
+                c=300,
+                heuristic_multiplier=2
+            )
 
-    for _ in range(20):
-        all_actions = env.get_actions()
-        mcts = MCTSPlanner(all_actions)
-        action_name = mcts(
-            env.state, goal,
-            max_iterations=4000,
-            c=300,
-            heuristic_multiplier=2
-        )
+            if action_name == 'NONE':
+                break
 
-        if action_name == 'NONE':
-            break
+            action = get_action_by_name(all_actions, action_name)
+            env.act(action)
+            dashboard.update(mcts, action_name)
 
-        action = get_action_by_name(all_actions, action_name)
-        env.act(action)
-        actions_taken.append(action_name)
-
-        if goal.evaluate(env.state.fluents):
-            break
-
-    # Extract trajectories
-    robot_locations = {'robot1': 'start_loc', 'robot2': 'start_loc'}
-    robot_poses_dict = extract_robot_poses(actions_taken, robot_locations, scene.locations)
-
-    # Compute total cost
-    total_cost = 0.0
-    for robot_name, waypoints in robot_poses_dict.items():
-        cost, _ = compute_trajectory_cost(scene.grid, waypoints)
-        total_cost += cost
+            if goal.evaluate(env.state.fluents):
+                break
 
     # Plot
-    plt.figure(figsize=(8, 8))
-    ax = plt.subplot(111)
-    plot_multi_robot_trajectories(ax, scene.grid, robot_poses_dict, scene.scene_graph)
-    plt.title(f"Multi Robot (Known) Trajectory Cost: {total_cost:.1f}\nGoal: {goal}")
+    fig, ax = plt.subplots(figsize=(8, 8))
+    dashboard.plot_trajectories(ax=ax)
+    plt.title(f"Multi Robot (Known) Trajectory\nGoal: {goal}")
 
     figpath = SAVE_DIR / f'test_visualization_known_multi_robot_{SEED}.png'
     figpath.parent.mkdir(parents=True, exist_ok=True)
