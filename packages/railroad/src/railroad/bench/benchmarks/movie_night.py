@@ -162,7 +162,7 @@ def bench_movie_night(case: BenchmarkCase):
     dashboard.print_history()
     html_output = recording_console.export_html(inline_styles=True)
 
-    return {
+    result = {
         "success": goal.evaluate(sim.state.fluents),
         "wall_time": time.perf_counter() - start_time,
         "plan_cost": float(sim.state.time),
@@ -170,6 +170,12 @@ def bench_movie_night(case: BenchmarkCase):
         "actions": actions_taken,
         "log_html": html_output,  # Will be logged as HTML artifact
     }
+
+    plot_image = dashboard.get_plot_image()
+    if plot_image is not None:
+        result["log_plot"] = plot_image
+
+    return result
 
 # Register parameter combinations
 bench_movie_night.add_cases([
