@@ -210,10 +210,13 @@ class _PlottingMixin:
 
         # Dense interpolation for smooth scatter trails
         import numpy as np
-        t_end = self._goal_time or 0.0
-        for _entity, (_wps, traj_times) in trajectories.items():
-            if traj_times:
-                t_end = max(t_end, max(traj_times))
+        if self._goal_time is not None:
+            t_end = self._goal_time
+        else:
+            t_end = 0.0
+            for _entity, (_wps, traj_times) in trajectories.items():
+                if traj_times:
+                    t_end = max(t_end, max(traj_times))
         dense_times = np.linspace(0.0, t_end, 2000) if t_end > 0 else np.array([0.0])
         dense_positions = self.get_entity_positions_at_times(
             dense_times, location_coords=location_coords,
@@ -524,10 +527,13 @@ class _PlottingMixin:
             include_objects=False,
         )
 
-        t_end = self._goal_time or 0.0
-        for _entity, (_wps, traj_times) in trajectories.items():
-            if traj_times:
-                t_end = max(t_end, max(traj_times))
+        if self._goal_time is not None:
+            t_end = self._goal_time
+        else:
+            t_end = 0.0
+            for _entity, (_wps, traj_times) in trajectories.items():
+                if traj_times:
+                    t_end = max(t_end, max(traj_times))
         if t_end <= 0.0:
             return None
 
