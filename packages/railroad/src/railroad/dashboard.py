@@ -432,6 +432,15 @@ class PlannerDashboard:
     falls back to simple text progress updates.
     """
 
+    _COLORMAPS = [
+        "viridis", "plasma", "inferno", "magma", "cividis",
+        "spring", "summer", "autumn", "winter", "cool",
+    ]
+    _MARKER_COLORS = [
+        "tab:red", "tab:blue", "tab:green", "tab:orange",
+        "tab:purple", "tab:cyan", "tab:pink", "tab:olive",
+    ]
+
     def __init__(
         self,
         goal: Union[Goal, Fluent],
@@ -1277,12 +1286,6 @@ class PlannerDashboard:
             except ImportError:
                 pass
 
-        # Colormaps for distinguishing robots
-        colormaps = [
-            "viridis", "plasma", "inferno", "magma", "cividis",
-            "spring", "summer", "autumn", "winter", "cool",
-        ]
-
         # Dense interpolation for smooth scatter trails
         import numpy as np
         t_end = self._goal_time or 0.0
@@ -1301,7 +1304,7 @@ class PlannerDashboard:
             if len(waypoints) < 2:
                 continue
 
-            cmap_name = colormaps[robot_id % len(colormaps)]
+            cmap_name = self._COLORMAPS[robot_id % len(self._COLORMAPS)]
             robot_id += 1
 
             # Get original positions for location markers/labels
@@ -1399,6 +1402,210 @@ class PlannerDashboard:
 
         return result
 
+    def _render_overhead(self, ax: Any) -> bool:
+        """Render ProcTHOR top-down image on the given axes if available.
+
+        Args:
+            ax: Matplotlib axes to draw on.
+
+        Returns:
+            True if an overhead image was rendered, False otherwise.
+        """
+        scene = getattr(self._env, "scene", None)
+        get_top_down = getattr(scene, "get_top_down_image", None)
+        if get_top_down is None:
+            return False
+        top_down_image = get_top_down(orthographic=True)
+        ax.imshow(top_down_image)
+        ax.axis("off")
+        ax.set_title("Top-down View", fontsize=8)
+        return True
+
+    def _render_sidebar(
+        self,
+        sidebar_ax: Any,
+        t_end: float,
+        goal_snapshots_at_end: dict[str, bool],
+        *,
+        show_actions: bool = True,
+    ) -> tuple[list[tuple[Any, str | None]], list[tuple[Any, float]]]:
+        """Render the sidebar content: colorbars, goal status, and action list.
+
+        Shared by show_plots() (static) and save_trajectory_video() (animated).
+
+        Returns:
+            (goal_text_artists, action_texts) where:
+            - goal_text_artists: list of (text_artist, literal_str_or_None)
+            - action_texts: list of (text_artist, start_time)
+        """
+        import numpy as np
+
+        # Derive entity names from tracked robots that have positions
+        entity_names = sorted(self.known_robots & set(self._entity_positions.keys()))
+        colormaps = self._COLORMAPS
+        marker_colors = self._MARKER_COLORS
+        n_entities = len(entity_names)
+        cbar_width = 0.06
+        cbar_gap = 0.03
+        cbar_left = 0.05
+
+        # Goal section: measure how tall it needs to be
+        goal_str = format_goal(self.goal, compact=False)
+        goal_lines = goal_str.split("\n")
+        goal_line_spacing = 0.035
+        goal_section_height = (len(goal_lines) + 1) * goal_line_spacing + 0.04
+        goal_section_bottom = 0.03
+        goal_section_top = goal_section_bottom + goal_section_height
+
+        # Colorbars fill the space above the goal section
+        cbar_bottom = goal_section_top + 0.04
+        cbar_top = 0.88
+        cbar_height = cbar_top - cbar_bottom
+
+        # Total width used by colorbar strips
+        cbar_total_width = n_entities * cbar_width + max(0, n_entities - 1) * cbar_gap
+        actions_left = cbar_left + cbar_total_width + 0.08
+
+        for idx, entity in enumerate(entity_names):
+            cmap_name = colormaps[idx % len(colormaps)]
+            mcolor = marker_colors[idx % len(marker_colors)]
+            x0 = cbar_left + idx * (cbar_width + cbar_gap)
+
+            # Create an inset axes for each colorbar strip
+            cbar_ax = sidebar_ax.inset_axes((x0, cbar_bottom, cbar_width, cbar_height))
+            gradient = np.linspace(0, 1, 256).reshape(-1, 1)
+            cbar_ax.imshow(gradient, aspect="auto", cmap=cmap_name, origin="lower",
+                           extent=(0, 1, 0, t_end))
+            cbar_ax.set_xlim(0, 1)
+            cbar_ax.set_ylim(t_end, 0)
+            cbar_ax.set_xticks([])
+            if idx == 0:
+                cbar_ax.set_ylabel("time", fontsize=6)
+                cbar_ax.tick_params(axis="y", labelsize=5)
+            else:
+                cbar_ax.set_yticks([])
+
+            # Robot marker at top of the strip
+            sidebar_ax.plot(
+                x0 + cbar_width / 2, cbar_top + 0.04, "o",
+                color=mcolor, markeredgecolor="black", markeredgewidth=0.8,
+                markersize=8, transform=sidebar_ax.transAxes, clip_on=False,
+            )
+            sidebar_ax.text(
+                x0 + cbar_width / 2, cbar_top + 0.08, entity,
+                fontsize=5, fontfamily="monospace", fontweight="bold",
+                ha="center", va="bottom",
+                transform=sidebar_ax.transAxes,
+            )
+
+        # --- Goal progress section ---
+        sidebar_ax.text(
+            cbar_left, goal_section_top - 0.01, "Goal:",
+            fontsize=7, fontfamily="monospace", fontweight="bold",
+            ha="left", va="top", transform=sidebar_ax.transAxes,
+        )
+        goal_text_artists: list[tuple[Any, str | None]] = []
+        for i, line in enumerate(goal_lines):
+            y_pos = goal_section_top - 0.01 - (i + 1) * goal_line_spacing
+            stripped = line.strip()
+            literal_str: str | None = None
+            if stripped.startswith("(") and stripped.endswith(")") and "(" not in stripped[1:]:
+                literal_str = stripped
+            # For static plots, show the final state colors directly
+            if show_actions and literal_str is not None:
+                color = "green" if goal_snapshots_at_end.get(literal_str, False) else "red"
+            else:
+                color = "red" if literal_str else "gray"
+            txt = sidebar_ax.text(
+                cbar_left, y_pos, line,
+                fontsize=6, fontfamily="monospace",
+                color=color,
+                ha="left", va="top", transform=sidebar_ax.transAxes,
+            )
+            goal_text_artists.append((txt, literal_str))
+
+        # --- Action list ---
+        actions = self.actions_taken
+        n_actions = len(actions)
+        action_y_top = cbar_top
+        action_y_bottom = cbar_bottom
+        min_gap = 0.025
+
+        action_y_positions: list[float] = []
+        if n_actions > 0:
+            y_range_avail = action_y_top - action_y_bottom
+            for _act_name, act_time in actions:
+                frac = act_time / t_end if t_end > 0 else 0.0
+                action_y_positions.append(action_y_top - frac * y_range_avail)
+            for i in range(1, n_actions):
+                if action_y_positions[i] > action_y_positions[i - 1] - min_gap:
+                    action_y_positions[i] = action_y_positions[i - 1] - min_gap
+
+        action_texts: list[tuple[Any, float]] = []
+        for i, (act_name, act_time) in enumerate(actions):
+            y_pos = action_y_positions[i]
+            txt = sidebar_ax.text(
+                actions_left, y_pos, f"{i+1}. {act_name}",
+                fontsize=5, fontfamily="monospace",
+                ha="left", va="top",
+                transform=sidebar_ax.transAxes,
+                alpha=1.0 if show_actions else 0.0,
+            )
+            action_texts.append((txt, act_time))
+
+        return goal_text_artists, action_texts
+
+    def _create_trajectory_figure(
+        self,
+        figsize: tuple[float, float],
+        *,
+        location_coords: dict[str, tuple[float, float]] | None = None,
+    ) -> tuple[Any, Any, Any, Any, Any, Any, float] | None:
+        """Create a GridSpec figure with main + sidebar + optional overhead axes.
+
+        Returns (fig, main_ax, sidebar_ax, trajectories, env_coords, grid, t_end),
+        or None if there are no trajectories to display.
+        """
+        import matplotlib.pyplot as plt
+        from matplotlib.gridspec import GridSpec
+
+        trajectories, env_coords, grid = self._build_entity_trajectories(
+            location_coords=location_coords,
+            include_objects=False,
+        )
+
+        t_end = self._goal_time or 0.0
+        for _entity, (_wps, traj_times) in trajectories.items():
+            if traj_times:
+                t_end = max(t_end, max(traj_times))
+        if t_end <= 0.0:
+            return None
+
+        has_overhead = getattr(getattr(self._env, "scene", None), "get_top_down_image", None) is not None
+
+        fig = plt.figure(figsize=figsize)
+        if has_overhead:
+            gs = GridSpec(1, 3, width_ratios=[1, 2, 1], figure=fig)
+            overhead_ax = fig.add_subplot(gs[0, 0])
+            main_ax = fig.add_subplot(gs[0, 1])
+            sidebar_ax = fig.add_subplot(gs[0, 2])
+            self._render_overhead(overhead_ax)
+        else:
+            gs = GridSpec(1, 2, width_ratios=[3, 1], figure=fig)
+            main_ax = fig.add_subplot(gs[0, 0])
+            sidebar_ax = fig.add_subplot(gs[0, 1])
+        sidebar_ax.set_axis_off()
+
+        # Plot grid background if available
+        if grid is not None:
+            try:
+                from railroad.environment.procthor.plotting import plot_grid
+                plot_grid(main_ax, grid)
+            except ImportError:
+                pass
+
+        return fig, main_ax, sidebar_ax, trajectories, env_coords, grid, t_end
+
     def save_trajectory_video(
         self,
         path: str,
@@ -1422,18 +1629,10 @@ class PlannerDashboard:
         import matplotlib.pyplot as plt
         from matplotlib.animation import FuncAnimation
 
-        trajectories, env_coords, grid = self._build_entity_trajectories(
-            location_coords=location_coords,
-            include_objects=False,
-        )
-
-        # Determine time range
-        t_end = self._goal_time or 0.0
-        for _entity, (_wps, traj_times) in trajectories.items():
-            if traj_times:
-                t_end = max(t_end, max(traj_times))
-        if t_end <= 0.0:
+        result = self._create_trajectory_figure(figsize, location_coords=location_coords)
+        if result is None:
             return
+        fig, ax, sidebar_ax, trajectories, env_coords, grid, t_end = result
 
         n_frames = int(fps * duration)
         frame_times = np.linspace(0.0, t_end, n_frames)
@@ -1444,6 +1643,7 @@ class PlannerDashboard:
             dense_trail_times, location_coords=location_coords,
         )
         if not dense_positions:
+            plt.close(fig)
             return
 
         # Pre-compute low-res positions for the moving marker
@@ -1451,40 +1651,6 @@ class PlannerDashboard:
             frame_times, location_coords=location_coords,
         )
         entity_names = sorted(dense_positions.keys())
-
-        from matplotlib.gridspec import GridSpec
-        from matplotlib.colors import Normalize
-
-        # Check if ProcTHOR scene provides a top-down image
-        scene = getattr(self._env, "scene", None)
-        get_top_down = getattr(scene, "get_top_down_image", None)
-        has_overhead = get_top_down is not None
-
-        fig = plt.figure(figsize=figsize)
-        if has_overhead:
-            gs = GridSpec(1, 3, width_ratios=[1, 2, 1], figure=fig)
-            overhead_ax = fig.add_subplot(gs[0, 0])
-            ax = fig.add_subplot(gs[0, 1])
-            sidebar_ax = fig.add_subplot(gs[0, 2])
-            # Render the overhead map
-            assert get_top_down is not None
-            top_down_image = get_top_down(orthographic=True)
-            overhead_ax.imshow(top_down_image)
-            overhead_ax.axis("off")
-            overhead_ax.set_title("Top-down View", fontsize=8)
-        else:
-            gs = GridSpec(1, 2, width_ratios=[3, 1], figure=fig)
-            ax = fig.add_subplot(gs[0, 0])
-            sidebar_ax = fig.add_subplot(gs[0, 1])
-        sidebar_ax.set_axis_off()
-
-        # Static background: grid
-        if grid is not None:
-            try:
-                from railroad.environment.procthor.plotting import plot_grid
-                plot_grid(ax, grid)
-            except ImportError:
-                pass
 
         # Static background: location markers + labels
         plotted_locs: set[str] = set()
@@ -1502,130 +1668,17 @@ class PlannerDashboard:
                         xytext=(3, 3), textcoords="offset points",
                     )
 
-        colormaps = [
-            "viridis", "plasma", "inferno", "magma", "cividis",
-            "spring", "summer", "autumn", "winter", "cool",
-        ]
+        # Render sidebar (colorbars, goals, actions hidden initially)
+        goal_text_artists, action_texts = self._render_sidebar(
+            sidebar_ax, t_end,
+            goal_snapshots_at_end={},  # video animates from empty
+            show_actions=False,
+        )
 
-        # Distinct marker colors per entity
-        marker_colors = ["tab:red", "tab:blue", "tab:green", "tab:orange",
-                         "tab:purple", "tab:cyan", "tab:pink", "tab:olive"]
-
-        # --- Sidebar layout: compute goal section height first, then colorbars fill above ---
-        n_entities = len(entity_names)
-        cbar_width = 0.06  # width of each colorbar strip in axes fraction
-        cbar_gap = 0.03    # gap between strips
-        cbar_left = 0.05   # left margin
-
-        # Goal section: measure how tall it needs to be
-        goal_str = format_goal(self.goal, compact=False)
-        goal_lines = goal_str.split("\n")
-        goal_line_spacing = 0.035
-        goal_section_height = (len(goal_lines) + 1) * goal_line_spacing + 0.04  # +1 for header
-        goal_section_bottom = 0.03
-        goal_section_top = goal_section_bottom + goal_section_height
-
-        # Colorbars fill the space above the goal section
-        cbar_bottom = goal_section_top + 0.04
-        cbar_top = 0.88  # leave room for marker + label at top
-        cbar_height = cbar_top - cbar_bottom
-
-        # Total width used by colorbar strips
-        cbar_total_width = n_entities * cbar_width + (n_entities - 1) * cbar_gap
-        actions_left = cbar_left + cbar_total_width + 0.08  # action list starts here
-
-        for idx, entity in enumerate(entity_names):
-            cmap_name = colormaps[idx % len(colormaps)]
-            mcolor = marker_colors[idx % len(marker_colors)]
-            x0 = cbar_left + idx * (cbar_width + cbar_gap)
-
-            # Create an inset axes for each colorbar strip
-            cbar_ax = sidebar_ax.inset_axes((x0, cbar_bottom, cbar_width, cbar_height))
-            gradient = np.linspace(0, 1, 256).reshape(-1, 1)
-            cbar_ax.imshow(gradient, aspect="auto", cmap=cmap_name, origin="lower",
-                           extent=(0, 1, 0, t_end))
-            cbar_ax.set_xlim(0, 1)
-            cbar_ax.set_ylim(t_end, 0)  # invert: t=0 at top, t_end at bottom
-            cbar_ax.set_xticks([])
-            if idx == 0:
-                cbar_ax.set_ylabel("time", fontsize=6)
-                cbar_ax.tick_params(axis="y", labelsize=5)
-            else:
-                cbar_ax.set_yticks([])
-
-            # Robot marker at top of the strip
-            sidebar_ax.plot(
-                x0 + cbar_width / 2, cbar_top + 0.04, "o",
-                color=mcolor, markeredgecolor="black", markeredgewidth=0.8,
-                markersize=8, transform=sidebar_ax.transAxes, clip_on=False,
-            )
-            sidebar_ax.text(
-                x0 + cbar_width / 2, cbar_top + 0.08, entity,
-                fontsize=5, fontfamily="monospace", fontweight="bold",
-                ha="center", va="bottom",
-                transform=sidebar_ax.transAxes,
-            )
-
-        # --- Sidebar: goal progress section ---
-        # Pre-compute goal snapshots: sorted list of (time, {literal_str: bool})
+        # Pre-compute goal snapshots for animation
         goal_snapshots: list[tuple[float, dict[str, bool]]] = []
         for entry in self.history:
             goal_snapshots.append((entry["time"], entry["goals"]))
-
-        # Render goal lines as text artists
-        sidebar_ax.text(
-            cbar_left, goal_section_top - 0.01, "Goal:",
-            fontsize=7, fontfamily="monospace", fontweight="bold",
-            ha="left", va="top", transform=sidebar_ax.transAxes,
-        )
-        goal_text_artists: list[tuple[Any, str | None]] = []
-        for i, line in enumerate(goal_lines):
-            y_pos = goal_section_top - 0.01 - (i + 1) * goal_line_spacing
-            # Detect if this line contains a literal: matches (name args...)
-            stripped = line.strip()
-            literal_str: str | None = None
-            if stripped.startswith("(") and stripped.endswith(")") and "(" not in stripped[1:]:
-                literal_str = stripped
-            txt = sidebar_ax.text(
-                cbar_left, y_pos, line,
-                fontsize=6, fontfamily="monospace",
-                color="red" if literal_str else "gray",
-                ha="left", va="top", transform=sidebar_ax.transAxes,
-            )
-            goal_text_artists.append((txt, literal_str))
-
-        # --- Sidebar: action list (text artists, initially hidden) ---
-        # Position actions proportionally by start time, with a minimum
-        # gap so labels don't overlap.
-        actions = self.actions_taken  # List[(action_name, start_time)]
-        n_actions = len(actions)
-        action_y_top = cbar_top
-        action_y_bottom = cbar_bottom
-        min_gap = 0.025  # minimum vertical spacing in axes fraction
-
-        # Compute ideal y positions proportional to time (top = t=0)
-        action_y_positions: list[float] = []
-        if n_actions > 0:
-            y_range_avail = action_y_top - action_y_bottom
-            for _act_name, act_time in actions:
-                frac = act_time / t_end if t_end > 0 else 0.0
-                action_y_positions.append(action_y_top - frac * y_range_avail)
-            # Enforce minimum gap: walk top-to-bottom pushing overlaps down
-            for i in range(1, n_actions):
-                if action_y_positions[i] > action_y_positions[i - 1] - min_gap:
-                    action_y_positions[i] = action_y_positions[i - 1] - min_gap
-
-        action_texts = []
-        for i, (act_name, act_time) in enumerate(actions):
-            y_pos = action_y_positions[i]
-            txt = sidebar_ax.text(
-                actions_left, y_pos, f"{i+1}. {act_name}",
-                fontsize=5, fontfamily="monospace",
-                ha="left", va="top",
-                transform=sidebar_ax.transAxes,
-                alpha=0.0,  # hidden initially
-            )
-            action_texts.append((txt, act_time))
 
         # --- Main plot: entity artists ---
         markers = []
@@ -1635,7 +1688,7 @@ class PlannerDashboard:
             pos0 = marker_positions[entity][0]
             (marker,) = ax.plot(
                 [pos0[0]], [pos0[1]], "o",
-                color=marker_colors[idx % len(marker_colors)],
+                color=self._MARKER_COLORS[idx % len(self._MARKER_COLORS)],
                 markeredgecolor="black", markeredgewidth=1.0,
                 markersize=11, zorder=10, label=entity,
             )
@@ -1646,7 +1699,7 @@ class PlannerDashboard:
                 zorder=11,
             )
             trail = ax.scatter([], [], s=4, zorder=5, alpha=0.7)
-            trail.set_cmap(colormaps[idx % len(colormaps)])
+            trail.set_cmap(self._COLORMAPS[idx % len(self._COLORMAPS)])
             trail.set_clim(0.0, t_end)
             markers.append(marker)
             labels.append(label)
@@ -1731,15 +1784,34 @@ class PlannerDashboard:
 
         if save_plot or show_plot:
             import matplotlib.pyplot as plt
-            fig, ax = plt.subplots(1, 1, figsize=(10, 8))
-            self.plot_trajectories(ax=ax, location_coords=location_coords)
-            if save_plot:
-                fig.savefig(save_plot, dpi=300)
-                self.console.print(f"Saved plot to [yellow]{save_plot}[/yellow]")
-            if show_plot:
-                plt.show()
-            else:
-                plt.close(fig)
+
+            result = self._create_trajectory_figure(
+                (12.8, 7.2), location_coords=location_coords,
+            )
+            if result is not None:
+                fig, main_ax, sidebar_ax, _trajs, _env_coords, _grid, t_end = result
+
+                # Draw trajectories on the main axes
+                self.plot_trajectories(ax=main_ax, location_coords=location_coords)
+
+                # Get final goal snapshot from history
+                goal_snapshots_at_end: dict[str, bool] = {}
+                if self.history:
+                    goal_snapshots_at_end = self.history[-1].get("goals", {})
+
+                self._render_sidebar(
+                    sidebar_ax, t_end,
+                    goal_snapshots_at_end=goal_snapshots_at_end,
+                    show_actions=True,
+                )
+
+                if save_plot:
+                    fig.savefig(save_plot, dpi=300)
+                    self.console.print(f"Saved plot to [yellow]{save_plot}[/yellow]")
+                if show_plot:
+                    plt.show()
+                else:
+                    plt.close(fig)
 
         if save_video:
             self.save_trajectory_video(save_video, location_coords=location_coords)
