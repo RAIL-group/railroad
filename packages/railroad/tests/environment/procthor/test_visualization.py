@@ -1,7 +1,7 @@
 """Integration tests for ProcTHOR visualization with multi-robot planning.
 
 These tests verify end-to-end planning with MCTS and trajectory visualization
-using PlannerDashboard.plot_trajectories().
+using PlannerDashboard.show_plots().
 """
 
 import random
@@ -9,7 +9,6 @@ from pathlib import Path
 
 import matplotlib
 matplotlib.use('Agg')  # Headless backend for tests
-import matplotlib.pyplot as plt
 import pytest
 
 from railroad import operators
@@ -147,16 +146,10 @@ def test_single_robot_plotting(scene, target_objects, target_locations):
             if goal.evaluate(env.state.fluents):
                 break
 
-    # Plot
-    fig, ax = plt.subplots(figsize=(8, 8))
-    dashboard.plot_trajectories(ax=ax)
-    plt.title(f"Single Robot Trajectory\nGoal: {goal}")
-
-    # Save
+    # Plot using full layout (trajectory + sidebar + overhead)
     figpath = SAVE_DIR / f'test_visualization_single_robot_{SEED}.png'
     figpath.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(figpath, dpi=300)
-    plt.close()
+    dashboard.show_plots(save_plot=str(figpath))
 
     # Verify goal reached
     assert goal.evaluate(env.state.fluents), f"Goal not reached. Final fluents: {env.state.fluents}"
@@ -247,15 +240,10 @@ def test_multi_robot_unknown_plotting(scene, target_objects, target_locations):
             if goal.evaluate(env.state.fluents):
                 break
 
-    # Plot
-    fig, ax = plt.subplots(figsize=(8, 8))
-    dashboard.plot_trajectories(ax=ax)
-    plt.title(f"Multi Robot (Unknown) Trajectory\nGoal: {goal}")
-
+    # Plot using full layout (trajectory + sidebar + overhead)
     figpath = SAVE_DIR / f'test_visualization_unknown_multi_robot_{SEED}.png'
     figpath.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(figpath, dpi=300)
-    plt.close()
+    dashboard.show_plots(save_plot=str(figpath))
 
     assert goal.evaluate(env.state.fluents), f"Goal not reached. Final fluents: {env.state.fluents}"
 
@@ -340,14 +328,9 @@ def test_multi_robot_known_plotting(scene, target_objects, target_locations):
             if goal.evaluate(env.state.fluents):
                 break
 
-    # Plot
-    fig, ax = plt.subplots(figsize=(8, 8))
-    dashboard.plot_trajectories(ax=ax)
-    plt.title(f"Multi Robot (Known) Trajectory\nGoal: {goal}")
-
+    # Plot using full layout (trajectory + sidebar + overhead)
     figpath = SAVE_DIR / f'test_visualization_known_multi_robot_{SEED}.png'
     figpath.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(figpath, dpi=300)
-    plt.close()
+    dashboard.show_plots(save_plot=str(figpath))
 
     assert goal.evaluate(env.state.fluents), f"Goal not reached. Final fluents: {env.state.fluents}"
