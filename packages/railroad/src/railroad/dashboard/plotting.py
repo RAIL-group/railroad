@@ -14,13 +14,25 @@ class _PlottingMixin:
     """Mixin containing all matplotlib plotting methods for PlannerDashboard."""
 
     _COLORMAPS = [
-        "viridis", "plasma", "inferno", "magma", "cividis",
-        "spring", "summer", "autumn", "winter", "cool",
+        "Reds", "Blues", "Greens", "Oranges", "Purples",
+        "YlOrBr", "BuGn", "RdPu", "GnBu", "OrRd",
     ]
-    _MARKER_COLORS = [
-        "tab:red", "tab:blue", "tab:green", "tab:orange",
-        "tab:purple", "tab:cyan", "tab:pink", "tab:olive",
-    ]
+
+    @staticmethod
+    def _get_cmap(idx: int):
+        """Return a truncated colormap starting at 0.25 for the idx-th entry."""
+        import numpy as np
+        import matplotlib.pyplot as plt
+        from matplotlib.colors import LinearSegmentedColormap
+        cmap_name = _PlottingMixin._COLORMAPS[idx % len(_PlottingMixin._COLORMAPS)]
+        base = plt.get_cmap(cmap_name)
+        colors = base(np.linspace(0.25, 1.0, 256))
+        return LinearSegmentedColormap.from_list(f"{cmap_name}_t", colors)
+
+    @staticmethod
+    def _marker_color(idx: int) -> tuple[float, float, float, float]:
+        """Return a marker color by sampling the end of the idx-th colormap."""
+        return _PlottingMixin._get_cmap(idx)(0.85)
 
     def _build_entity_trajectories(
         self: PlannerDashboard,
@@ -211,7 +223,7 @@ class _PlottingMixin:
             if len(waypoints) < 2:
                 continue
 
-            cmap_name = self._COLORMAPS[robot_id % len(self._COLORMAPS)]
+            cmap = self._get_cmap(robot_id)
             robot_id += 1
 
             # Get original positions for location markers/labels
@@ -225,7 +237,7 @@ class _PlottingMixin:
 
             if entity in dense_positions:
                 pts = dense_positions[entity]
-                ax.scatter(pts[:, 0], pts[:, 1], c=dense_times, cmap=cmap_name, s=4, zorder=5, alpha=0.7)
+                ax.scatter(pts[:, 0], pts[:, 1], c=dense_times, cmap=cmap, s=4, zorder=5, alpha=0.7)
 
             # Plot location markers and labels
             wx = [p[0] for p in location_waypoints]
@@ -349,8 +361,6 @@ class _PlottingMixin:
 
         # Derive entity names from tracked robots that have positions
         entity_names = sorted(self.known_robots & set(self._entity_positions.keys()))
-        colormaps = self._COLORMAPS
-        marker_colors = self._MARKER_COLORS
         n_entities = len(entity_names)
         cbar_width = 0.06
         cbar_gap = 0.03
@@ -374,14 +384,14 @@ class _PlottingMixin:
         actions_left = cbar_left + cbar_total_width + 0.08
 
         for idx, entity in enumerate(entity_names):
-            cmap_name = colormaps[idx % len(colormaps)]
-            mcolor = marker_colors[idx % len(marker_colors)]
+            cmap = self._get_cmap(idx)
+            mcolor = self._marker_color(idx)
             x0 = cbar_left + idx * (cbar_width + cbar_gap)
 
             # Create an inset axes for each colorbar strip
             cbar_ax = sidebar_ax.inset_axes((x0, cbar_bottom, cbar_width, cbar_height))
             gradient = np.linspace(0, 1, 256).reshape(-1, 1)
-            cbar_ax.imshow(gradient, aspect="auto", cmap=cmap_name, origin="lower",
+            cbar_ax.imshow(gradient, aspect="auto", cmap=cmap, origin="lower",
                            extent=(0, 1, 0, t_end))
             cbar_ax.set_xlim(0, 1)
             cbar_ax.set_ylim(t_end, 0)
@@ -492,13 +502,15 @@ class _PlottingMixin:
 
         fig = plt.figure(figsize=figsize)
         if has_overhead:
-            gs = GridSpec(1, 3, width_ratios=[1, 2, 1], figure=fig)
+            gs = GridSpec(1, 3, width_ratios=[1, 2, 1], figure=fig,
+                         wspace=0.1, left=0.03, right=0.97, top=0.95, bottom=0.05)
             overhead_ax = fig.add_subplot(gs[0, 0])
             main_ax = fig.add_subplot(gs[0, 1])
             sidebar_ax = fig.add_subplot(gs[0, 2])
             self._render_overhead(overhead_ax)
         else:
-            gs = GridSpec(1, 2, width_ratios=[3, 1], figure=fig)
+            gs = GridSpec(1, 2, width_ratios=[3, 1], figure=fig,
+                         wspace=0.1, left=0.05, right=0.97, top=0.95, bottom=0.05)
             main_ax = fig.add_subplot(gs[0, 0])
             sidebar_ax = fig.add_subplot(gs[0, 1])
         sidebar_ax.set_axis_off()
@@ -595,7 +607,7 @@ class _PlottingMixin:
             pos0 = marker_positions[entity][0]
             (marker,) = ax.plot(
                 [pos0[0]], [pos0[1]], "o",
-                color=self._MARKER_COLORS[idx % len(self._MARKER_COLORS)],
+                color=self._marker_color(idx),
                 markeredgecolor="black", markeredgewidth=1.0,
                 markersize=11, zorder=10, label=entity,
             )
@@ -606,7 +618,7 @@ class _PlottingMixin:
                 zorder=11,
             )
             trail = ax.scatter([], [], s=4, zorder=5, alpha=0.7)
-            trail.set_cmap(self._COLORMAPS[idx % len(self._COLORMAPS)])
+            trail.set_cmap(self._get_cmap(idx))
             trail.set_clim(0.0, t_end)
             markers.append(marker)
             labels.append(label)
@@ -667,7 +679,7 @@ class _PlottingMixin:
             from matplotlib.animation import FFMpegWriter
             writer = FFMpegWriter(fps=fps)
 
-        anim.save(path, writer=writer, dpi=150)
+        anim.save(path, writer=writer, dpi=150, savefig_kwargs={"bbox_inches": "tight"})
         plt.close(fig)
 
     def show_plots(
@@ -713,7 +725,7 @@ class _PlottingMixin:
                 )
 
                 if save_plot:
-                    fig.savefig(save_plot, dpi=300)
+                    fig.savefig(save_plot, dpi=300, bbox_inches='tight')
                     self.console.print(f"Saved plot to [yellow]{save_plot}[/yellow]")
                 if show_plot:
                     plt.show()
