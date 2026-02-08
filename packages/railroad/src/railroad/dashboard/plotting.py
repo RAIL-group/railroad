@@ -17,6 +17,8 @@ class _PlottingMixin:
         "Reds", "Blues", "Greens", "Oranges", "Purples",
         "YlOrBr", "BuGn", "RdPu", "GnBu", "OrRd",
     ]
+    _TRAIL_SIZE_START = 25.0
+    _TRAIL_SIZE_END = 2.0
 
     @staticmethod
     def _get_cmap(idx: int):
@@ -216,7 +218,14 @@ class _PlottingMixin:
             dense_times, location_coords=location_coords,
         )
 
-        # Plot robot trajectories as interpolated scatter colored by time
+        # Plot robot trajectories as a single combined scatter sorted by time.
+        # Earlier points are drawn first (lowest array index) and are larger,
+        # so later (smaller) points overlay them — making double-back paths visible.
+        all_xy: list[Any] = []
+        all_sizes: list[Any] = []
+        all_colors: list[Any] = []
+        all_times: list[Any] = []
+
         robot_id = 0
         for entity in sorted(self.known_robots & set(trajectories.keys())):
             waypoints, times = trajectories[entity]
@@ -237,7 +246,16 @@ class _PlottingMixin:
 
             if entity in dense_positions:
                 pts = dense_positions[entity]
-                ax.scatter(pts[:, 0], pts[:, 1], c=dense_times, cmap=cmap, s=4, zorder=5, alpha=0.7)
+                n_pts = len(dense_times)
+                # Per-point sizes: linearly decay from large (early) to small (late)
+                sizes = np.linspace(self._TRAIL_SIZE_START, self._TRAIL_SIZE_END, n_pts)
+                # Per-point RGBA colors from this robot's colormap
+                norm_t = dense_times / t_end if t_end > 0 else np.zeros_like(dense_times)
+                rgba = cmap(norm_t)
+                all_xy.append(pts)
+                all_sizes.append(sizes)
+                all_colors.append(rgba)
+                all_times.append(dense_times)
 
             # Plot location markers and labels
             wx = [p[0] for p in location_waypoints]
@@ -256,6 +274,19 @@ class _PlottingMixin:
                         fontsize=5, color="brown",
                         xytext=(3, 3), textcoords="offset points",
                     )
+
+        # Draw one combined scatter for all robot trails, sorted by time
+        if all_xy:
+            combined_xy = np.concatenate(all_xy)
+            combined_sizes = np.concatenate(all_sizes)
+            combined_colors = np.concatenate(all_colors)
+            combined_times = np.concatenate(all_times)
+            order = np.argsort(combined_times)
+            ax.scatter(
+                combined_xy[order, 0], combined_xy[order, 1],
+                s=combined_sizes[order], c=combined_colors[order],
+                zorder=5, alpha=0.7,
+            )
 
         # Optionally plot object trajectories
         if show_objects:
@@ -599,10 +630,20 @@ class _PlottingMixin:
         for entry in self.history:
             goal_snapshots.append((entry["time"], entry["goals"]))
 
-        # --- Main plot: entity artists ---
+        # --- Pre-compute per-point sizes and RGBA colors for all robots ---
+        n_dense = len(dense_trail_times)
+        per_point_sizes = np.linspace(self._TRAIL_SIZE_START, self._TRAIL_SIZE_END, n_dense)
+        norm_t = dense_trail_times / t_end if t_end > 0 else np.zeros(n_dense)
+
+        # Build combined arrays for all robots
+        all_dense_xy: list[Any] = []
+        all_dense_sizes: list[Any] = []
+        all_dense_colors: list[Any] = []
+        all_dense_times: list[Any] = []
+
+        # --- Main plot: entity artists (markers + labels only) ---
         markers = []
         labels = []
-        trails = []
         for idx, entity in enumerate(entity_names):
             pos0 = marker_positions[entity][0]
             (marker,) = ax.plot(
@@ -617,12 +658,36 @@ class _PlottingMixin:
                 ha="center", va="bottom",
                 zorder=11,
             )
-            trail = ax.scatter([], [], s=4, zorder=5, alpha=0.7)
-            trail.set_cmap(self._get_cmap(idx))
-            trail.set_clim(0.0, t_end)
             markers.append(marker)
             labels.append(label)
-            trails.append(trail)
+
+            if entity in dense_positions:
+                cmap = self._get_cmap(idx)
+                rgba = cmap(norm_t)
+                all_dense_xy.append(dense_positions[entity])
+                all_dense_sizes.append(per_point_sizes)
+                all_dense_colors.append(rgba)
+                all_dense_times.append(dense_trail_times)
+
+        # Concatenate and sort by time for correct draw order
+        if all_dense_xy:
+            combined_xy = np.concatenate(all_dense_xy)
+            combined_sizes = np.concatenate(all_dense_sizes)
+            combined_colors = np.concatenate(all_dense_colors)
+            combined_times = np.concatenate(all_dense_times)
+            sort_order = np.argsort(combined_times)
+            combined_xy = combined_xy[sort_order]
+            combined_sizes = combined_sizes[sort_order]
+            combined_colors = combined_colors[sort_order]
+            combined_times = combined_times[sort_order]
+        else:
+            combined_xy = np.empty((0, 2))
+            combined_sizes = np.empty(0)
+            combined_colors = np.empty((0, 4))
+            combined_times = np.empty(0)
+
+        # Single shared trail scatter artist
+        trail_scatter = ax.scatter([], [], s=[], zorder=-1, alpha=1.0)
 
         ax.legend(fontsize=7, loc="upper right")
         ax.set_title("Entity Trajectories")
@@ -643,12 +708,11 @@ class _PlottingMixin:
                 markers[idx].set_data([pos[frame, 0]], [pos[frame, 1]])
                 # Update label position (just above the marker)
                 labels[idx].set_position((pos[frame, 0], pos[frame, 1] + label_offset))
-                # Update trail from the dense pre-computed data,
-                # sliced up to the current frame time
-                if entity in dense_positions:
-                    mask = dense_trail_times <= current_time
-                    trails[idx].set_offsets(dense_positions[entity][mask])
-                    trails[idx].set_array(dense_trail_times[mask])
+            # Update combined trail: mask points up to current time
+            mask = combined_times <= current_time
+            trail_scatter.set_offsets(combined_xy[mask])
+            trail_scatter.set_sizes(combined_sizes[mask])
+            trail_scatter.set_facecolors(combined_colors[mask])
             # Reveal actions whose start time has passed
             for txt, act_time in action_texts:
                 if current_time >= act_time:
@@ -664,7 +728,7 @@ class _PlottingMixin:
                 if literal_str is not None:
                     satisfied = current_goals.get(literal_str, False)
                     txt.set_color("green" if satisfied else "red")
-            return (markers + labels + trails
+            return (markers + labels + [trail_scatter]
                     + [txt for txt, _ in action_texts]
                     + [txt for txt, _ in goal_text_artists])
 
@@ -679,7 +743,8 @@ class _PlottingMixin:
             from matplotlib.animation import FFMpegWriter
             writer = FFMpegWriter(fps=fps)
 
-        anim.save(path, writer=writer, dpi=150, savefig_kwargs={"bbox_inches": "tight"})
+        anim.save(path, writer=writer, dpi=150)
+        # anim.save(path, writer=writer, dpi=150, savefig_kwargs={"bbox_inches": "tight"})
         plt.close(fig)
 
     def show_plots(
