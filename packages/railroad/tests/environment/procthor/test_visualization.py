@@ -72,6 +72,7 @@ def target_locations(scene, target_objects):
     return targets[:2] if len(targets) >= 2 else [targets[0], targets[0]]
 
 
+@pytest.mark.slow
 @pytest.mark.timeout(120)
 def test_single_robot_plotting(scene, target_objects, target_locations):
     """Test visualization for single robot pick-and-place scenario.
@@ -155,6 +156,7 @@ def test_single_robot_plotting(scene, target_objects, target_locations):
     assert goal.evaluate(env.state.fluents), f"Goal not reached. Final fluents: {env.state.fluents}"
 
 
+@pytest.mark.slow
 @pytest.mark.timeout(180)
 def test_multi_robot_unknown_plotting(scene, target_objects, target_locations):
     """Test multi-robot planning with unknown object locations.
@@ -248,6 +250,7 @@ def test_multi_robot_unknown_plotting(scene, target_objects, target_locations):
     assert goal.evaluate(env.state.fluents), f"Goal not reached. Final fluents: {env.state.fluents}"
 
 
+@pytest.mark.slow
 @pytest.mark.timeout(120)
 def test_multi_robot_known_plotting(scene, target_objects, target_locations):
     """Test multi-robot planning with known object locations.
