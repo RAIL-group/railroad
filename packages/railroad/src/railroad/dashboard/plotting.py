@@ -780,6 +780,57 @@ class _PlottingMixin:
         if interrupted:
             self.console.print("[yellow]Video generation interrupted — saved partial video.[/yellow]")
 
+    def get_plot_image(
+        self: PlannerDashboard,
+        *,
+        location_coords: dict[str, tuple[float, float]] | None = None,
+        figsize: tuple[float, float] = (12.8, 7.2),
+        dpi: int = 150,
+        quality: int = 85,
+    ) -> bytes | None:
+        """Render the trajectory plot to JPEG bytes in memory.
+
+        Uses the Agg backend for headless rendering (safe in subprocess workers).
+
+        Args:
+            location_coords: Optional explicit location->(x,y) mapping.
+            figsize: Figure size in inches.
+            dpi: Resolution in dots per inch.
+            quality: JPEG quality (1-95).
+
+        Returns:
+            JPEG image bytes, or None if there are no trajectories to display.
+        """
+        import io
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        result = self._create_trajectory_figure(figsize, location_coords=location_coords)
+        if result is None:
+            return None
+        fig, main_ax, sidebar_ax, _trajs, _env_coords, _grid, t_end = result
+
+        self.plot_trajectories(ax=main_ax, location_coords=location_coords)
+
+        goal_snapshots_at_end: dict[str, bool] = {}
+        if self.history:
+            goal_snapshots_at_end = self.history[-1].get("goals", {})
+
+        self._render_sidebar(
+            sidebar_ax, t_end,
+            goal_snapshots_at_end=goal_snapshots_at_end,
+            show_actions=True,
+        )
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="jpeg", dpi=dpi,
+                    bbox_inches="tight",
+                    pil_kwargs={"quality": quality})
+        plt.close(fig)
+        buf.seek(0)
+        return buf.read()
+
     def show_plots(
         self: PlannerDashboard,
         *,

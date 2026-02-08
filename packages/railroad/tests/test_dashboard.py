@@ -332,3 +332,70 @@ class TestGetEntityPositionsAtTimes:
         )
         assert "r1" in result
         np.testing.assert_allclose(result["r1"][0], [10.0, 0.0], atol=1e-6)
+
+
+# ------------------------------------------------------------------ #
+# get_plot_image
+# ------------------------------------------------------------------ #
+
+class TestGetPlotImage:
+    """Test the get_plot_image() method for JPEG rendering."""
+
+    def test_returns_jpeg_bytes(self):
+        """Dashboard with entity positions produces valid JPEG bytes."""
+        move_op = operators.construct_move_operator_blocking(lambda r, a, b: 10.0)
+        no_op = operators.construct_no_op_operator(no_op_time=1.0, extra_cost=10.0)
+        initial_state = State(0.0, {F("at r1 A"), F("free r1")}, [])
+        env = SymbolicEnvironment(
+            state=initial_state,
+            objects_by_type={
+                "robot": {"r1"},
+                "location": {"A", "B"},
+            },
+            operators=[move_op, no_op],
+        )
+        goal = F("at r1 B")
+        db = PlannerDashboard(
+            goal, env,
+            force_interactive=False,
+            print_on_exit=False,
+        )
+        db.known_robots = {"r1"}
+        db._entity_positions = {
+            "r1": [
+                (0.0, "A", None),
+                (10.0, "B", None),
+            ],
+        }
+        db._goal_time = 10.0
+
+        coords = {"A": (0.0, 0.0), "B": (10.0, 0.0)}
+        image_bytes = db.get_plot_image(location_coords=coords)
+
+        assert image_bytes is not None
+        # JPEG magic bytes
+        assert image_bytes[:3] == b"\xff\xd8\xff"
+        assert len(image_bytes) > 100
+
+    def test_returns_none_when_no_trajectories(self):
+        """Empty dashboard with no entity positions returns None."""
+        move_op = operators.construct_move_operator_blocking(lambda r, a, b: 1.0)
+        no_op = operators.construct_no_op_operator(no_op_time=1.0, extra_cost=10.0)
+        initial_state = State(0.0, {F("at r1 kitchen"), F("free r1")}, [])
+        env = SymbolicEnvironment(
+            state=initial_state,
+            objects_by_type={
+                "robot": {"r1"},
+                "location": {"kitchen"},
+            },
+            operators=[move_op, no_op],
+        )
+        goal = F("at r1 kitchen")
+        db = PlannerDashboard(
+            goal, env,
+            force_interactive=False,
+            print_on_exit=False,
+        )
+
+        image_bytes = db.get_plot_image()
+        assert image_bytes is None

@@ -142,6 +142,11 @@ class MLflowTracker:
                                 with open(artifact_path, 'w') as f:
                                     f.write(str(value))
                                 mlflow.log_artifact(str(artifact_path))  # type: ignore[possibly-missing-attribute]
+                            elif key == 'log_plot':
+                                artifact_path = Path(tmpdir) / "plot.jpg"
+                                with open(artifact_path, 'wb') as f:
+                                    f.write(value)
+                                mlflow.log_artifact(str(artifact_path))  # type: ignore[possibly-missing-attribute]
                             else:
                                 # Regular artifacts as JSON
                                 artifact_path = Path(tmpdir) / f"{key}.json"

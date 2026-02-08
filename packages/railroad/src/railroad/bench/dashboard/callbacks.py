@@ -159,7 +159,21 @@ def register_callbacks(app):
                                 # Add timestamp to force iframe reload
                                 timestamp = int(time.time() * 1000)
                                 artifact_url = f"/artifact/{run_id}/log.html?t={timestamp}"
+                                plot_url = f"/artifact/{run_id}/plot.jpg?t={timestamp}"
                                 title = f"Run: {run_id} | Timestamp: {timestamp}"
+
+                                # Plot image (hidden on error via clientside callback)
+                                plot_img = html.Img(
+                                    id="modal-plot-img",
+                                    src=plot_url,
+                                    style={
+                                        "width": "100%",
+                                        "maxHeight": "50vh",
+                                        "objectFit": "contain",
+                                        "marginBottom": "10px",
+                                    },
+                                    key=f"plot-{run_id}-{timestamp}",
+                                )
 
                                 # Create a new iframe component with unique key to force reload
                                 iframe = html.Iframe(
@@ -173,8 +187,29 @@ def register_callbacks(app):
                                     key=f"iframe-{run_id}-{timestamp}",  # Unique key forces recreation
                                 )
 
-                                return True, iframe, title
+                                return True, html.Div([plot_img, iframe]), title
             except Exception as e:
                 print(f"Error parsing trigger ID: {e}")
 
         return False, None, ""
+
+    # Hide the plot image when it fails to load (run has no plot artifact).
+    # The callback fires whenever modal-plot-img.src changes; it attaches an
+    # onerror handler that sets display='none' on the element.
+    app.clientside_callback(
+        """
+        function(src) {
+            setTimeout(function() {
+                var img = document.getElementById('modal-plot-img');
+                if (img) {
+                    img.style.display = '';
+                    img.onerror = function() { this.style.display = 'none'; };
+                }
+            }, 50);
+            return window.dash_clientside.no_update;
+        }
+        """,
+        Output("modal-plot-img", "className"),
+        Input("modal-plot-img", "src"),
+        prevent_initial_call=True,
+    )
