@@ -394,12 +394,11 @@ class PlannerDashboard(_PlottingMixin):
         """Expose the root layout so it can be passed to Live()."""
         return self.layout
 
-    def _colorize_goal_line(self, line: str, fluents) -> str:
-        """Colorize a goal line based on whether literals are satisfied.
+    def _colorize_goal_line(self, line: str, fluents, *, rich: bool = True) -> str:
+        """Annotate a goal line based on whether literals are satisfied.
 
-        Uses both color AND a checkmark for accessibility:
-        - checkmark (green) for satisfied goals
-        - (red) for unsatisfied goals
+        Inserts checkmarks for satisfied goals. When rich=True, also wraps
+        in Rich color markup (green/red).
         """
         # Build a set of fluent strings for faster lookup
         fluent_strs = {str(f) for f in fluents}
@@ -409,19 +408,17 @@ class PlannerDashboard(_PlottingMixin):
 
             # Check if this is a negated fluent like "(not at Book table)"
             if fluent_str.startswith("(not "):
-                # Extract the positive fluent: "(not at Book table)" -> "(at Book table)"
                 positive_fluent_str = "(" + fluent_str[5:]
-                # Negative goal is satisfied if the positive fluent is NOT in the state
-                if positive_fluent_str not in fluent_strs:
-                    return f"[green]\u2713{fluent_str}[/green]"
-                else:
-                    return f"[red] {fluent_str}[/red]"
+                satisfied = positive_fluent_str not in fluent_strs
             else:
-                # Positive fluent: satisfied if it IS in the state
-                if fluent_str in fluent_strs:
-                    return f"[green]\u2713{fluent_str}[/green]"
-                else:
-                    return f"[red] {fluent_str}[/red]"
+                satisfied = fluent_str in fluent_strs
+
+            mark = "\u2713" if satisfied else " "
+            text = f"{mark}{fluent_str}"
+            if rich:
+                color = "green" if satisfied else "red"
+                return f"[{color}]{text}[/{color}]"
+            return text
 
         # Pattern to match fluents: (name args...) or (not name args...)
         pattern = r'\([^()]+\)'
@@ -543,15 +540,15 @@ class PlannerDashboard(_PlottingMixin):
         last_action_name: str | None,
         heuristic_value: float | None,
     ):
-        # Store a lightweight, serializable snapshot
         entry = {
             "step": step_index,
             "time": float(state.time),
             "last_action": last_action_name,
             "heuristic": float(heuristic_value) if heuristic_value is not None else None,
             "relevant_fluents": [str(f) for f in sorted(relevant_fluents, key=lambda x: x.name)],
+            "fluents": set(state.fluents),
             "goals": {
-                str(g): bool(g in state.fluents) for g in self.goal_fluents
+                str(g): LiteralGoal(g).evaluate(state.fluents) for g in self.goal_fluents
             },
             "goal_satisfied": self._is_goal_satisfied(state),
             "tree_trace": tree_trace,
@@ -575,18 +572,10 @@ class PlannerDashboard(_PlottingMixin):
         lines.append("\n## Selected Active Fluents:")
         for f in entry["relevant_fluents"]:
             lines.append(f"    {f}")
-        lines.append("## Goal Fluents:")
-        for g, ok in entry["goals"].items():
-            mark = "\u2713" if ok else "\u2717"
-            lines.append(f"   {mark} {g}")
-        # Show overall goal satisfaction
-        goal_status = entry.get("goal_satisfied", False)
-        status_mark = "\u2713 SATISFIED" if goal_status else "\u2717 NOT SATISFIED"
-        lines.append(f"## Overall Goal: {status_mark}")
 
         return "\n".join(lines)
 
-    def _print_entry(self, entry: dict):
+    def _print_entry(self, entry: dict) -> None:
         """Pretty-print a single history entry using Rich."""
         text = self._format_single_entry(entry)
         split_text = split_markdown_flat(text)
@@ -601,11 +590,28 @@ class PlannerDashboard(_PlottingMixin):
             elif text_type == 'h2':
                 self.console.print(f"[bold red]{content}[/]")
 
+        # Goal with colorized satisfaction status
+        self.console.print(f"[bold red]Goal:[/]")
+        fluents = entry["fluents"]
+        for line in format_goal(self.goal, compact=True).split('\n'):
+            self.console.print(f"  {self._colorize_goal_line(line, fluents)}")
+
+        goal_satisfied = entry.get("goal_satisfied", False)
+        status = "[green]\u2713 SATISFIED[/]" if goal_satisfied else "[red]\u2717 NOT SATISFIED[/]"
+        self.console.print(f"[bold red]Overall Goal:[/] {status}")
+
     def format_history_as_text(self) -> str:
         """Return the full dashboard history as a multi-line string."""
         lines: list[str] = []
         for entry in self.history:
             lines.append(self._format_single_entry(entry))
+            fluents = entry["fluents"]
+            lines.append("Goal:")
+            for goal_line in format_goal(self.goal, compact=True).split('\n'):
+                lines.append(f"    {self._colorize_goal_line(goal_line, fluents, rich=False)}")
+            goal_status = entry.get("goal_satisfied", False)
+            status_mark = "\u2713 SATISFIED" if goal_status else "\u2717 NOT SATISFIED"
+            lines.append(f"Overall Goal: {status_mark}")
             lines.append("\n")  # blank line between steps
 
         return "\n".join(lines)
