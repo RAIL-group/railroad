@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import math
+import subprocess
 from typing import Any, TYPE_CHECKING
 
 from ._goals import format_goal
-from ._tui import _generate_coordinates
+from ._tui import _generate_coordinates, _is_headless_environment
 
 if TYPE_CHECKING:
     from .dashboard import PlannerDashboard
@@ -309,7 +310,8 @@ class _PlottingMixin:
             ax.autoscale()
             ax.set_aspect("equal", adjustable="datalim")
 
-        ax.set_title("Entity Trajectories")
+        ax.set_title(f"Entity Trajectories  (cost = {t_end:.1f})",
+                     fontfamily="monospace", fontsize=10)
         return ax
 
     def get_entity_positions_at_times(
@@ -687,10 +689,15 @@ class _PlottingMixin:
             combined_times = np.empty(0)
 
         # Single shared trail scatter artist
-        trail_scatter = ax.scatter([], [], s=[], zorder=-1, alpha=1.0)
+        trail_scatter = ax.scatter([], [], s=[], zorder=5, alpha=1.0)
 
         ax.legend(fontsize=7, loc="upper right")
-        ax.set_title("Entity Trajectories")
+        # Fixed-width title so it doesn't jump during animation
+        t_width = len(f"{t_end:.1f}")
+        title_artist = ax.set_title(
+            f"Entity Trajectories  (cost = {'0.0':>{t_width}} / {t_end:.1f})",
+            fontfamily="monospace", fontsize=10,
+        )
 
         if grid is None:
             ax.autoscale()
@@ -702,6 +709,9 @@ class _PlottingMixin:
 
         def _update(frame: int):
             current_time = frame_times[frame]
+            title_artist.set_text(
+                f"Entity Trajectories  (cost = {current_time:>{t_width}.1f} / {t_end:.1f})"
+            )
             for idx, entity in enumerate(entity_names):
                 # Update current position marker
                 pos = marker_positions[entity]
@@ -728,7 +738,7 @@ class _PlottingMixin:
                 if literal_str is not None:
                     satisfied = current_goals.get(literal_str, False)
                     txt.set_color("green" if satisfied else "red")
-            return (markers + labels + [trail_scatter]
+            return (markers + labels + [trail_scatter, title_artist]
                     + [txt for txt, _ in action_texts]
                     + [txt for txt, _ in goal_text_artists])
 
@@ -743,9 +753,32 @@ class _PlottingMixin:
             from matplotlib.animation import FFMpegWriter
             writer = FFMpegWriter(fps=fps)
 
-        anim.save(path, writer=writer, dpi=150)
-        # anim.save(path, writer=writer, dpi=150, savefig_kwargs={"bbox_inches": "tight"})
+        interrupted = False
+        try:
+            if not _is_headless_environment():
+                from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
+                with Progress(
+                    TextColumn("[bold blue]Saving video"),
+                    BarColumn(),
+                    TextColumn("{task.percentage:>3.0f}%"),
+                    TimeRemainingColumn(),
+                ) as progress:
+                    task = progress.add_task("frames", total=n_frames)
+                    def _progress_cb(current_frame: int, total_frames: int) -> None:
+                        progress.update(task, completed=current_frame)
+                    anim.save(path, writer=writer, dpi=150, progress_callback=_progress_cb)
+            else:
+                anim.save(path, writer=writer, dpi=150)
+        except KeyboardInterrupt:
+            interrupted = True
+        except subprocess.CalledProcessError as exc:
+            if isinstance(exc.__context__, KeyboardInterrupt):
+                interrupted = True
+            else:
+                raise
         plt.close(fig)
+        if interrupted:
+            self.console.print("[yellow]Video generation interrupted — saved partial video.[/yellow]")
 
     def show_plots(
         self: PlannerDashboard,
