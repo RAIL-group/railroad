@@ -571,6 +571,7 @@ class _PlottingMixin:
         fps: int = 60,
         duration: float = 10.0,
         figsize: tuple[float, float] = (12.8, 7.2),
+        dpi: int = 150,
     ) -> None:
         """Save an animated trajectory video/GIF.
 
@@ -581,6 +582,7 @@ class _PlottingMixin:
             fps: Frames per second.
             duration: Total animation duration in seconds.
             figsize: Figure size in inches.
+            dpi: Resolution in dots per inch.
         """
         import numpy as np
         import matplotlib.pyplot as plt
@@ -765,9 +767,9 @@ class _PlottingMixin:
                     task = progress.add_task("frames", total=n_frames)
                     def _progress_cb(current_frame: int, total_frames: int) -> None:
                         progress.update(task, completed=current_frame)
-                    anim.save(path, writer=writer, dpi=150, progress_callback=_progress_cb)
+                    anim.save(path, writer=writer, dpi=dpi, progress_callback=_progress_cb)
             else:
-                anim.save(path, writer=writer, dpi=150)
+                anim.save(path, writer=writer, dpi=dpi)
         except KeyboardInterrupt:
             interrupted = True
         except subprocess.CalledProcessError as exc:
