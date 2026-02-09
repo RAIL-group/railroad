@@ -50,8 +50,8 @@ GLOBAL_EXAMPLE_OPTIONS: List[OptionInfo] = [
     {"name": "--save-plot", "default": None, "help": "Save trajectory plot to file (e.g. out.png)", "param_name": "save_plot"},
     {"name": "--show-plot", "is_flag": True, "default": False, "help": "Show trajectory plot interactively", "param_name": "show_plot"},
     {"name": "--save-video", "default": None, "help": "Save trajectory animation to file (e.g. out.mp4)", "param_name": "save_video"},
-    {"name": "--video-fps", "type": int, "default": None, "help": "Video frames per second", "param_name": "video_fps"},
-    {"name": "--video-dpi", "type": int, "default": None, "help": "Video resolution in dots per inch", "param_name": "video_dpi"},
+    {"name": "--video-fps", "type": int, "default": 60, "help": "Video frames per second", "param_name": "video_fps"},
+    {"name": "--video-dpi", "type": int, "default": 150, "help": "Video resolution in dots per inch", "param_name": "video_dpi"},
 ]
 
 EXAMPLES: Dict[str, ExampleInfo] = {
