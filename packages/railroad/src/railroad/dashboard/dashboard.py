@@ -591,7 +591,7 @@ class PlannerDashboard(_PlottingMixin):
                 self.console.print(f"[bold red]{content}[/]")
 
         # Goal with colorized satisfaction status
-        self.console.print(f"[bold red]Goal:[/]")
+        self.console.print("[bold red]Goal:[/]")
         fluents = entry["fluents"]
         for line in format_goal(self.goal, compact=True).split('\n'):
             self.console.print(f"  {self._colorize_goal_line(line, fluents)}")
