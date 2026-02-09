@@ -30,8 +30,8 @@ def main(
     save_plot: str | None = None,
     show_plot: bool = False,
     save_video: str | None = None,
-    video_fps: int | None = None,
-    video_dpi: int | None = None,
+    video_fps: int = 60,
+    video_dpi: int = 150,
 ) -> None:
     """Run ProcTHOR multi-robot search example."""
     # Lazy import to avoid loading heavy dependencies at startup
