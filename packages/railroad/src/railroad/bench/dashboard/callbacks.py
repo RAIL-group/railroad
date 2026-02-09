@@ -34,17 +34,41 @@ def register_callbacks(app):
         cache_key = f"{run_id}/{filename}"
 
         if cache_key not in _artifact_cache:
-            try:
-                local_path = mlflow.artifacts.download_artifacts(  # type: ignore[possibly-missing-attribute]
-                    run_id=run_id,
-                    artifact_path=filename,
-                )
-                _artifact_cache[cache_key] = local_path
-            except Exception as e:
-                print(f"Could not download artifact {filename} for {run_id}: {e}")
-                return f"Artifact not found: {e}", 404
+            downloaded = False
 
-        return send_file(_artifact_cache[cache_key])
+            # Try gzipped version first for HTML files
+            if filename.endswith('.html'):
+                try:
+                    local_path = mlflow.artifacts.download_artifacts(  # type: ignore[possibly-missing-attribute]
+                        run_id=run_id,
+                        artifact_path=filename + '.gz',
+                    )
+                    _artifact_cache[cache_key] = local_path
+                    downloaded = True
+                except Exception:
+                    pass
+
+            if not downloaded:
+                try:
+                    local_path = mlflow.artifacts.download_artifacts(  # type: ignore[possibly-missing-attribute]
+                        run_id=run_id,
+                        artifact_path=filename,
+                    )
+                    _artifact_cache[cache_key] = local_path
+                except Exception as e:
+                    print(f"Could not download artifact {filename} for {run_id}: {e}")
+                    return f"Artifact not found: {e}", 404
+
+        local_path = _artifact_cache[cache_key]
+
+        # Serve gzipped files with proper headers for transparent decompression
+        if local_path.endswith('.gz'):
+            response = send_file(local_path)
+            response.headers['Content-Encoding'] = 'gzip'
+            response.headers['Content-Type'] = 'text/html'
+            return response
+
+        return send_file(local_path)
 
     @app.callback(
         [Output("main-content", "children"), Output("data-store", "data")],

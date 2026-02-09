@@ -8,6 +8,7 @@ import sys
 from io import StringIO
 from typing import Dict, Any, Optional
 from pathlib import Path
+import gzip
 import json
 import tempfile
 
@@ -136,10 +137,10 @@ class MLflowTracker:
                 if artifacts:
                     with tempfile.TemporaryDirectory() as tmpdir:
                         for key, value in artifacts.items():
-                            # Special handling for HTML artifacts
+                            # Special handling for HTML artifacts (gzipped to save space)
                             if key == 'log_html':
-                                artifact_path = Path(tmpdir) / "log.html"
-                                with open(artifact_path, 'w') as f:
+                                artifact_path = Path(tmpdir) / "log.html.gz"
+                                with gzip.open(artifact_path, 'wt', compresslevel=6) as f:
                                     f.write(str(value))
                                 mlflow.log_artifact(str(artifact_path))  # type: ignore[possibly-missing-attribute]
                             elif key == 'log_plot':
