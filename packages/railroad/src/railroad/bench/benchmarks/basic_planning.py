@@ -7,8 +7,10 @@ Demonstrates benchmark registration and parametrization.
 from railroad.bench import benchmark, BenchmarkCase
 from railroad.core import Fluent as F, State, get_action_by_name
 from railroad.planner import MCTSPlanner
+from railroad.dashboard import PlannerDashboard
 from railroad.experimental.environment import EnvironmentInterface, SimpleEnvironment
 from railroad import operators
+from rich.console import Console
 import time
 
 
@@ -69,7 +71,9 @@ def bench_single_robot_nav(case: BenchmarkCase):
     # Run planning loop with timing
     start_time = time.perf_counter()
 
-    actions_taken = []
+    recording_console = Console(record=True, force_terminal=True, width=120)
+    dashboard = PlannerDashboard(goal, sim, print_on_exit=False, console=recording_console)
+
     planner = MCTSPlanner(sim.get_actions())
 
     max_steps = 100
@@ -89,9 +93,13 @@ def bench_single_robot_nav(case: BenchmarkCase):
 
         action = get_action_by_name(sim.get_actions(), action_name)
         sim.advance(action)
-        actions_taken.append(action_name)
+        dashboard.update(planner, action_name)
 
     wall_time = time.perf_counter() - start_time
+
+    actions_taken = [name for name, _ in dashboard.actions_taken]
+    dashboard.print_history()
+    html_output = recording_console.export_html(inline_styles=True)
 
     # Return metrics
     return {
@@ -99,7 +107,8 @@ def bench_single_robot_nav(case: BenchmarkCase):
         "wall_time": wall_time,
         "plan_cost": float(sim.state.time),
         "actions_count": len(actions_taken),
-        "actions": actions_taken,  # Will be logged as artifact
+        "actions": actions_taken,
+        "log_html": html_output,
     }
 
 
