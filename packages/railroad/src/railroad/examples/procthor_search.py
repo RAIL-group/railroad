@@ -4,7 +4,29 @@ Demonstrates using ProcTHOR environment with MCTS planning
 for multi-robot object search and retrieval.
 """
 
+
+def sample_objects_and_location(scene, num_objects: int, seed: int | None = None):
+    import random
+
+    if seed:
+        random.seed(seed)
+    all_objects = sorted({
+        obj
+        for objs in scene.object_locations.values()
+        for obj in objs
+    })
+
+    all_locations = sorted(scene.object_locations.keys())
+
+    return (
+        random.sample(list(all_objects), k=min(num_objects, len(all_objects))),
+        random.choice(all_locations),
+    )
+
 def main(
+    seed: int | None = None,
+    num_objects: int = 2,
+    num_robots: int = 2,
     save_plot: str | None = None,
     show_plot: bool = False,
     save_video: str | None = None,
@@ -23,14 +45,22 @@ def main(
     from railroad.dashboard import PlannerDashboard
     from railroad.planner import MCTSPlanner
     from railroad._bindings import State
-    # Configuration
-    seed = 4001
-    robot_names = ["robot1", "robot2"]
-    target_objects = ["teddybear_6", "pencil_17"]
-    target_location = "garbagecan_5"
 
-    print(f"Loading ProcTHOR scene (seed={seed})...")
-    scene = ProcTHORScene(seed=seed)
+    # Configuration
+    robot_names = [f"robot{i + 1}" for i in range(num_robots)]
+
+    if seed is None:
+        # Use hardcoded defaults
+        scene_seed = 4001
+        print(f"Loading ProcTHOR scene (seed={scene_seed})...")
+        scene = ProcTHORScene(seed=scene_seed)
+        target_objects = ["teddybear_6", "pencil_17"]
+        target_location = "garbagecan_5"
+    else:
+        scene_seed = seed
+        print(f"Loading ProcTHOR scene (seed={scene_seed})...")
+        scene = ProcTHORScene(seed=scene_seed)
+        target_objects, target_location = sample_objects_and_location(scene, num_objects=num_objects, seed=seed)
 
     # Build operators
     move_cost_fn = scene.get_move_cost_fn()
@@ -58,19 +88,20 @@ def main(
     no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
 
     # Initial state
-    initial_fluents = {
-        F("revealed start_loc"),
-        F("at robot1 start_loc"),
-        F("free robot1"),
-        F("at robot2 start_loc"),
-        F("free robot2"),
-    }
+    initial_fluents = {F("revealed start_loc")}
+    for robot in robot_names:
+        initial_fluents.add(F(f"at {robot} start_loc"))
+        initial_fluents.add(F(f"free {robot}"))
     initial_state = State(0.0, initial_fluents, [])
 
     # Goal: place both objects at target location
-    goal = F(f"at {target_objects[0]} {target_location}") & F(
-        f"at {target_objects[1]} {target_location}"
-    )
+    from functools import reduce
+    from operator import and_
+    goal = reduce(and_, [F(f"at {obj} {target_location}") & F(f"found {obj}")
+                         for obj in target_objects])
+    # goal = F(f"at {target_objects[0]} {target_location}") & F(
+    #     f"at {target_objects[1]} {target_location}"
+    # )
 
     # Create environment
     env = ProcTHOREnvironment(
@@ -81,6 +112,7 @@ def main(
             "location": set(scene.locations.keys()),
             "object": set(target_objects),
         },
+
         operators=[no_op, pick_op, place_op, move_op, search_op],
     )
 
@@ -120,4 +152,21 @@ def main(
 
 
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description="ProcTHOR multi-robot search example")
+    parser.add_argument("--seed", type=int, default=None, help="Scene seed (default: use hardcoded scene/objects)")
+    parser.add_argument("--num-objects", type=int, default=2, help="Number of objects to search for (default: 2)")
+    parser.add_argument("--num-robots", type=int, default=2, help="Number of robots (default: 2)")
+    parser.add_argument("--save-plot", default=None, help="Save trajectory plot to file")
+    parser.add_argument("--show-plot", action="store_true", help="Show trajectory plot")
+    parser.add_argument("--save-video", default=None, help="Save trajectory animation to file")
+    args = parser.parse_args()
+    main(
+        seed=args.seed,
+        num_objects=args.num_objects,
+        num_robots=args.num_robots,
+        save_plot=args.save_plot,
+        show_plot=args.show_plot,
+        save_video=args.save_video,
+    )

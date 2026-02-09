@@ -577,7 +577,7 @@ class _PlottingMixin:
 
         Args:
             path: Output file path. Extension determines writer:
-                ``.gif`` uses PillowWriter, ``.mp4``/``.avi`` uses FFMpegWriter.
+                ``.mp4``/``.avi`` uses FFMpegWriter.
             location_coords: Optional explicit location->(x,y) mapping.
             fps: Frames per second.
             duration: Total animation duration in seconds.
@@ -750,14 +750,8 @@ class _PlottingMixin:
 
         anim = FuncAnimation(fig, _update, frames=n_frames, blit=False, interval=1000 / fps)
 
-        # Select writer by extension
-        ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
-        if ext == "gif":
-            from matplotlib.animation import PillowWriter
-            writer = PillowWriter(fps=fps)
-        else:
-            from matplotlib.animation import FFMpegWriter
-            writer = FFMpegWriter(fps=fps)
+        from matplotlib.animation import FFMpegWriter
+        writer = FFMpegWriter(fps=fps)
 
         interrupted = False
         try:
