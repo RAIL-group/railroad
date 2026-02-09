@@ -171,10 +171,6 @@ def bench_movie_night(case: BenchmarkCase):
         "log_html": html_output,  # Will be logged as HTML artifact
     }
 
-    plot_image = dashboard.get_plot_image()
-    if plot_image is not None:
-        result["log_plot"] = plot_image
-
     return result
 
 # Register parameter combinations

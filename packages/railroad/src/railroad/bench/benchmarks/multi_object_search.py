@@ -26,7 +26,7 @@ from rich.console import Console
 from railroad.bench import benchmark, BenchmarkCase
 
 
-def bench_multi_object_search_base(case: BenchmarkCase):
+def bench_multi_object_search_base(case: BenchmarkCase, do_plot=False):
     # Define locations with coordinates (for move cost calculation)
     locations = {
         "start_loc": np.array([-5, -5]),
@@ -157,9 +157,10 @@ def bench_multi_object_search_base(case: BenchmarkCase):
         "log_html": html_output,  # Will be logged as HTML artifact
     }
 
-    plot_image = dashboard.get_plot_image()
-    if plot_image is not None:
-        result["log_plot"] = plot_image
+    if do_plot:
+        plot_image = dashboard.get_plot_image()
+        if plot_image is not None:
+            result["log_plot"] = plot_image
 
     return result
 
@@ -207,7 +208,7 @@ def bench_multi_object_search_varied_goals(case: BenchmarkCase):
     case.params["mcts.iterations"] = 1000
     case.params["mcts.h_mult"] = 2
     case.params["num_robots"] = 2
-    return bench_multi_object_search_base(case)
+    return bench_multi_object_search_base(case, do_plot=True)
 
 bench_multi_object_search_varied_goals.add_cases([
     { "goal": goal}
