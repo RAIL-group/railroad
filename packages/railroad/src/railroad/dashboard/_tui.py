@@ -4,21 +4,27 @@ import re
 from typing import Collection, List, Dict, Set, Tuple, Optional
 
 
-def _is_headless_environment() -> bool:
-    """Detect if running in a headless environment where live dashboards don't work well.
+def _is_ci_environment() -> bool:
+    """Detect CI or non-interactive shells where Rich output is not supported.
 
     Checks for:
     - CI environments (GitHub Actions, GitLab CI, etc.) via CI env var
     - Claude Code via CLAUDECODE env var
-    - Google Colab via COLAB_RELEASE_TAG env var
-    - Jupyter notebooks via JPY_PARENT_PID env vars
     """
-    # CI environments (GitHub Actions, GitLab, Jenkins, etc.)
     if os.environ.get("CI"):
         return True
-
-    # Claude Code
     if os.environ.get("CLAUDECODE"):
+        return True
+    return False
+
+
+def _is_headless_environment() -> bool:
+    """Detect if running in a headless environment where live dashboards don't work well.
+
+    Superset of :func:`_is_ci_environment` — also includes notebook/Colab
+    environments that can render Rich output but not full TUI dashboards.
+    """
+    if _is_ci_environment():
         return True
 
     # Google Colab

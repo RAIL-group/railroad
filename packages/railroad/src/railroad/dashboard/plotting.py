@@ -4,7 +4,7 @@ import subprocess
 from typing import Any, TYPE_CHECKING
 
 from ._goals import format_goal
-from ._tui import _generate_coordinates, _is_headless_environment
+from ._tui import _generate_coordinates, _is_ci_environment
 
 if TYPE_CHECKING:
     from .dashboard import PlannerDashboard
@@ -385,7 +385,7 @@ class _PlottingMixin:
     ) -> tuple[list[tuple[Any, str | None]], list[tuple[Any, float]]]:
         """Render the sidebar content: colorbars, goal status, and action list.
 
-        Shared by show_plots() (static) and save_trajectory_video() (animated).
+        Shared by show_plots() (static) and save_video() (animated).
 
         Returns:
             (goal_text_artists, action_texts) where:
@@ -563,7 +563,7 @@ class _PlottingMixin:
 
         return fig, main_ax, sidebar_ax, trajectories, env_coords, grid, t_end
 
-    def save_trajectory_video(
+    def save_video(
         self: PlannerDashboard,
         path: str,
         *,
@@ -756,7 +756,7 @@ class _PlottingMixin:
 
         interrupted = False
         try:
-            if not _is_headless_environment():
+            if not _is_ci_environment():
                 from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
                 with Progress(
                     TextColumn("[bold blue]Saving video"),
@@ -883,5 +883,5 @@ class _PlottingMixin:
                     plt.close(fig)
 
         if save_video:
-            self.save_trajectory_video(save_video, location_coords=location_coords)
+            self.save_video(save_video, location_coords=location_coords)
             self.console.print(f"Saved video to [yellow]{save_video}[/yellow]")
