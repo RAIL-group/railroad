@@ -48,6 +48,8 @@ def main(
     save_plot: str | None = None,
     show_plot: bool = False,
     save_video: str | None = None,
+    video_fps: int | None = None,
+    video_dpi: int | None = None,
 ) -> None:
     """Run the clear-the-table example."""
     # Objects that need to be cleared from the table
@@ -126,6 +128,7 @@ def main(
     location_coords = {name: (float(c[0]), float(c[1])) for name, c in LOCATIONS.items()}
     dashboard.show_plots(
         save_plot=save_plot, show_plot=show_plot, save_video=save_video,
+        video_fps=video_fps, video_dpi=video_dpi,
         location_coords=location_coords,
     )
 

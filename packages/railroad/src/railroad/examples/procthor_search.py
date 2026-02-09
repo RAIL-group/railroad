@@ -30,6 +30,8 @@ def main(
     save_plot: str | None = None,
     show_plot: bool = False,
     save_video: str | None = None,
+    video_fps: int | None = None,
+    video_dpi: int | None = None,
 ) -> None:
     """Run ProcTHOR multi-robot search example."""
     # Lazy import to avoid loading heavy dependencies at startup
@@ -136,25 +138,9 @@ def main(
 
     dashboard.show_plots(
         save_plot=save_plot, show_plot=show_plot, save_video=save_video,
+        video_fps=video_fps, video_dpi=video_dpi,
     )
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="ProcTHOR multi-robot search example")
-    parser.add_argument("--seed", type=int, default=None, help="Scene seed (default: use hardcoded scene/objects)")
-    parser.add_argument("--num-objects", type=int, default=2, help="Number of objects to search for (default: 2)")
-    parser.add_argument("--num-robots", type=int, default=2, help="Number of robots (default: 2)")
-    parser.add_argument("--save-plot", default=None, help="Save trajectory plot to file")
-    parser.add_argument("--show-plot", action="store_true", help="Show trajectory plot")
-    parser.add_argument("--save-video", default=None, help="Save trajectory animation to file")
-    args = parser.parse_args()
-    main(
-        seed=args.seed,
-        num_objects=args.num_objects,
-        num_robots=args.num_robots,
-        save_plot=args.save_plot,
-        show_plot=args.show_plot,
-        save_video=args.save_video,
-    )
+    main()

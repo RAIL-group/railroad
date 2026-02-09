@@ -838,6 +838,8 @@ class _PlottingMixin:
         save_plot: str | None = None,
         show_plot: bool = False,
         save_video: str | None = None,
+        video_fps: int | None = None,
+        video_dpi: int | None = None,
         location_coords: dict[str, tuple[float, float]] | None = None,
     ) -> None:
         """Convenience method that handles plot/video output based on CLI flags.
@@ -846,6 +848,8 @@ class _PlottingMixin:
             save_plot: If set, save the trajectory plot to this file path.
             show_plot: If True, display the trajectory plot interactively.
             save_video: If set, save a trajectory animation to this file path.
+            video_fps: Frames per second for video (default: 60).
+            video_dpi: Resolution in dots per inch for video (default: 150).
             location_coords: Optional explicit location->(x,y) mapping.
         """
         if not save_plot and not show_plot and not save_video:
@@ -883,5 +887,10 @@ class _PlottingMixin:
                     plt.close(fig)
 
         if save_video:
-            self.save_video(save_video, location_coords=location_coords)
+            video_kwargs: dict[str, Any] = {}
+            if video_fps is not None:
+                video_kwargs["fps"] = video_fps
+            if video_dpi is not None:
+                video_kwargs["dpi"] = video_dpi
+            self.save_video(save_video, location_coords=location_coords, **video_kwargs)
             self.console.print(f"Saved video to [yellow]{save_video}[/yellow]")
