@@ -11,6 +11,8 @@ dependencies = [
     "numpy",
     "rich-click>=1.8.0",
     "rich",
+    "matplotlib",
+    "pyqt5",
 ]
 
 [project.optional-dependencies]
@@ -32,7 +34,6 @@ procthor = [
     "shapely",
     "networkx",
     "scikit-image",
-    "matplotlib",
     "shapely>=2.1.2",
 ]
 all = [
