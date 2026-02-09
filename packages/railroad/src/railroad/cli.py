@@ -144,6 +144,9 @@ def _make_example_command(name: str, info: ExampleInfo) -> None:
     _run = click.option("--save-video", "save_video", default=None, help="Save trajectory animation to file (e.g. out.mp4)")(_run)
     _run = click.option("--show-plot", "show_plot", is_flag=True, default=False, help="Show trajectory plot interactively")(_run)
     _run = click.option("--save-plot", "save_plot", default=None, help="Save trajectory plot to file (e.g. out.png)")(_run)
+    # Option group panels (last applied = displayed first)
+    _run = click.option_panel("Options", options=[opt["name"] for opt in options] + ["--help"])(_run)
+    _run = click.option_panel("Plot/video options", options=["--save-plot", "--show-plot", "--save-video", "--video-fps", "--video-dpi"])(_run)
 
 
 # Register each example as a direct subcommand
