@@ -2,7 +2,7 @@
 
 from typing import Any
 
-import click
+import rich_click as click
 
 from railroad.examples import ExampleInfo
 
