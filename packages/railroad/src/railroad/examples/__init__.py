@@ -13,6 +13,7 @@ class OptionInfo(TypedDict, total=False):
     name: str  # e.g., "--interruptible-moves"
     is_flag: bool  # True for boolean flags
     default: Any  # Default value
+    type: Any  # Click type (e.g., int, str). Inferred from default if not set.
     help: str  # Help text
     param_name: str  # Python parameter name (e.g., "use_interruptible_moves")
 
@@ -78,4 +79,25 @@ if _procthor_available():
     EXAMPLES["procthor-search"] = {
         "main": _lazy_import("procthor_search"),
         "description": "Multi-robot search in ProcTHOR 3D environment",
+        "options": [
+            {
+                "name": "--seed",
+                "type": int,
+                "default": None,
+                "help": "Scene seed (default: use hardcoded scene/objects)",
+                "param_name": "seed",
+            },
+            {
+                "name": "--num-objects",
+                "default": 2,
+                "help": "Number of objects to search for",
+                "param_name": "num_objects",
+            },
+            {
+                "name": "--num-robots",
+                "default": 2,
+                "help": "Number of robots",
+                "param_name": "num_robots",
+            },
+        ],
     }

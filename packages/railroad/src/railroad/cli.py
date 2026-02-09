@@ -1,5 +1,7 @@
 """Railroad command-line interface."""
 
+from typing import Any
+
 import click
 
 from railroad.examples import ExampleInfo
@@ -132,10 +134,13 @@ def _make_example_command(name: str, info: ExampleInfo) -> None:
         if opt.get("is_flag", False):
             _run = click.option(option_name, param_name, is_flag=True, default=opt.get("default", False), help=opt.get("help", ""))(_run)
         else:
-            _run = click.option(option_name, param_name, default=opt.get("default"), help=opt.get("help", ""))(_run)
+            extra_kwargs: dict[str, Any] = {}
+            if "type" in opt:
+                extra_kwargs["type"] = opt["type"]
+            _run = click.option(option_name, param_name, default=opt.get("default"), show_default=True, help=opt.get("help", ""), **extra_kwargs)(_run)
 
     # Add global plot/video options to every example command
-    _run = click.option("--save-video", "save_video", default=None, help="Save trajectory animation to file (e.g. out.gif, out.mp4)")(_run)
+    _run = click.option("--save-video", "save_video", default=None, help="Save trajectory animation to file (e.g. out.mp4)")(_run)
     _run = click.option("--show-plot", "show_plot", is_flag=True, default=False, help="Show trajectory plot interactively")(_run)
     _run = click.option("--save-plot", "save_plot", default=None, help="Save trajectory plot to file (e.g. out.png)")(_run)
 
