@@ -94,6 +94,8 @@ def main(
     save_plot: str | None = None,
     show_plot: bool = False,
     save_video: str | None = None,
+    video_fps: int | None = None,
+    video_dpi: int | None = None,
 ) -> None:
     """Run the heterogeneous robots example.
 
@@ -188,26 +190,10 @@ def main(
     location_coords = {name: (float(c[0]), float(c[1])) for name, c in LOCATIONS.items()}
     dashboard.show_plots(
         save_plot=save_plot, show_plot=show_plot, save_video=save_video,
+        video_fps=video_fps, video_dpi=video_dpi,
         location_coords=location_coords,
     )
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Heterogeneous robots example")
-    parser.add_argument(
-        "--interruptible-moves",
-        action="store_true",
-        help="Enable interruptible move actions",
-    )
-    parser.add_argument("--save-plot", default=None, help="Save trajectory plot to file")
-    parser.add_argument("--show-plot", action="store_true", help="Show trajectory plot")
-    parser.add_argument("--save-video", default=None, help="Save trajectory animation to file")
-    args = parser.parse_args()
-    main(
-        use_interruptible_moves=args.interruptible_moves,
-        save_plot=args.save_plot,
-        show_plot=args.show_plot,
-        save_video=args.save_video,
-    )
+    main()
