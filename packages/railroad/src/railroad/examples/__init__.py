@@ -46,14 +46,6 @@ def _procthor_available() -> bool:
     return is_available()
 
 
-GLOBAL_EXAMPLE_OPTIONS: List[OptionInfo] = [
-    {"name": "--save-plot", "default": None, "help": "Save trajectory plot to file (e.g. out.png)", "param_name": "save_plot"},
-    {"name": "--show-plot", "is_flag": True, "default": False, "help": "Show trajectory plot interactively", "param_name": "show_plot"},
-    {"name": "--save-video", "default": None, "help": "Save trajectory animation to file (e.g. out.mp4)", "param_name": "save_video"},
-    {"name": "--video-fps", "type": int, "default": 60, "help": "Video frames per second", "param_name": "video_fps"},
-    {"name": "--video-dpi", "type": int, "default": 150, "help": "Video resolution in dots per inch", "param_name": "video_dpi"},
-]
-
 EXAMPLES: Dict[str, ExampleInfo] = {
     "clear-table": {
         "main": _lazy_import("clear_the_table"),
@@ -109,30 +101,5 @@ if _procthor_available():
             },
         ],
     }
-
-
-def _apply_options(cmd: Any, options: List["OptionInfo"]) -> Any:
-    """Apply a list of OptionInfo entries as click options to a command."""
-    import rich_click as click
-
-    for opt in reversed(options):
-        option_name = opt["name"]
-        param_name = opt.get("param_name", option_name.lstrip("-").replace("-", "_"))
-        if opt.get("is_flag", False):
-            cmd = click.option(
-                option_name, param_name,
-                is_flag=True, default=opt.get("default", False),
-                help=opt.get("help", ""),
-            )(cmd)
-        else:
-            extra_kwargs: Dict[str, Any] = {}
-            if "type" in opt:
-                extra_kwargs["type"] = opt["type"]
-            cmd = click.option(
-                option_name, param_name,
-                default=opt.get("default"), show_default=True,
-                help=opt.get("help", ""), **extra_kwargs,
-            )(cmd)
-    return cmd
 
 

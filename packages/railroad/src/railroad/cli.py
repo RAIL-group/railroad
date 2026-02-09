@@ -4,7 +4,7 @@ from typing import Any
 
 import rich_click as click
 
-from railroad.examples import ExampleInfo, GLOBAL_EXAMPLE_OPTIONS, _apply_options
+from railroad.examples import ExampleInfo
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -126,7 +126,24 @@ def _make_example_command(name: str, info: ExampleInfo) -> None:
         example_fn = example_info["main"]
         example_fn(**kwargs)
 
-    _apply_options(_run, list(options) + GLOBAL_EXAMPLE_OPTIONS)
+    # Add example-specific options dynamically
+    for opt in reversed(options):
+        option_name = opt["name"]
+        param_name = opt.get("param_name", option_name.lstrip("-").replace("-", "_"))
+        if opt.get("is_flag", False):
+            _run = click.option(option_name, param_name, is_flag=True, default=opt.get("default", False), help=opt.get("help", ""))(_run)
+        else:
+            extra_kwargs: dict[str, Any] = {}
+            if "type" in opt:
+                extra_kwargs["type"] = opt["type"]
+            _run = click.option(option_name, param_name, default=opt.get("default"), show_default=True, help=opt.get("help", ""), **extra_kwargs)(_run)
+
+    # Global plot/video options for every example command
+    _run = click.option("--video-dpi", "video_dpi", type=int, default=150, show_default=True, help="Video resolution in dots per inch")(_run)
+    _run = click.option("--video-fps", "video_fps", type=int, default=60, show_default=True, help="Video frames per second")(_run)
+    _run = click.option("--save-video", "save_video", default=None, help="Save trajectory animation to file (e.g. out.mp4)")(_run)
+    _run = click.option("--show-plot", "show_plot", is_flag=True, default=False, help="Show trajectory plot interactively")(_run)
+    _run = click.option("--save-plot", "save_plot", default=None, help="Save trajectory plot to file (e.g. out.png)")(_run)
 
 
 # Register each example as a direct subcommand
