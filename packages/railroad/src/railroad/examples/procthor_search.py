@@ -62,17 +62,8 @@ def main(
         scene = ProcTHORScene(seed=scene_seed)
         target_objects, target_location = sample_objects_and_location(scene, num_objects=num_objects, seed=seed)
 
-    # Build operators
+    ## Build operators
     move_cost_fn = scene.get_move_cost_fn()
-    # All skill time functions take (robot, location, object) -> float
-    def search_time_fn(r, loc, o):
-        return 15.0 if r == "robot1" else 10.0
-
-    def pick_time_fn(r, loc, o):
-        return 15.0 if r == "robot1" else 10.0
-
-    def place_time_fn(r, loc, o):
-        return 15.0 if r == "robot1" else 10.0
 
     # Create probability function based on ground truth
     def object_find_prob(robot: str, location: str, obj: str) -> float:
@@ -82,9 +73,9 @@ def main(
         return 0.1
 
     move_op = operators.construct_move_operator_blocking(move_cost_fn)
-    search_op = operators.construct_search_operator(object_find_prob, search_time_fn)
-    pick_op = operators.construct_pick_operator_blocking(pick_time_fn)
-    place_op = operators.construct_place_operator_blocking(place_time_fn)
+    search_op = operators.construct_search_operator(object_find_prob, 10.0)
+    pick_op = operators.construct_pick_operator_blocking(10.0)
+    place_op = operators.construct_place_operator_blocking(10.0)
     no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
 
     # Initial state
@@ -99,9 +90,6 @@ def main(
     from operator import and_
     goal = reduce(and_, [F(f"at {obj} {target_location}") & F(f"found {obj}")
                          for obj in target_objects])
-    # goal = F(f"at {target_objects[0]} {target_location}") & F(
-    #     f"at {target_objects[1]} {target_location}"
-    # )
 
     # Create environment
     env = ProcTHOREnvironment(

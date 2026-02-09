@@ -69,7 +69,7 @@ class TestFormatGoal:
         assert "OR(" in result
         # Check indentation depth
         lines = result.split("\n")
-        or_line = [l for l in lines if "OR(" in l][0]
+        or_line = [line for line in lines if "OR(" in line][0]
         assert or_line.startswith("  ")  # indented one level
 
 
