@@ -4,6 +4,13 @@ import numpy as np
 from ..resources import DEFAULT_RESOURCES_BASE, DEFAULT_SBERT_SUBDIR
 from ..scenegraph import SceneGraph
 
+_SENTENCE_MODEL = None
+
+
+def get_default_fcnn_model_path() -> Path:
+    """Get the packaged default FCNN model path."""
+    return Path(__file__).resolve().parents[1] / "resources" / "models" / "procthor_obj_prob_net.pt"
+
 
 def prepare_fcnn_input(
     graph: "SceneGraph",
@@ -62,10 +69,13 @@ def get_sentence_embedding(sentence: str) -> np.ndarray:
     loaded_embedding = load_sentence_embedding(f"{sentence}.npy")
     if loaded_embedding is not None:
         return loaded_embedding
+
     from sentence_transformers import SentenceTransformer
     model_dir = Path(DEFAULT_RESOURCES_BASE) / DEFAULT_SBERT_SUBDIR
-    model = SentenceTransformer(model_dir.as_posix())
-    sentence_embedding = model.encode([sentence])[0]
+    global _SENTENCE_MODEL
+    if _SENTENCE_MODEL is None:
+        _SENTENCE_MODEL = SentenceTransformer(model_dir.as_posix())
+    sentence_embedding = _SENTENCE_MODEL.encode([sentence])[0]
     file_path = model_dir / "cache" / f"{sentence}.npy"
     np.save(file_path, sentence_embedding)
     return sentence_embedding

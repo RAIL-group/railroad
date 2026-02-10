@@ -29,6 +29,7 @@ bench = [
 ]
 procthor = [
     "ai2thor>=5.0.0",
+    "torch",
     "sentence-transformers>=5.1.2",
     "prior>=1.0.3",
     "shapely",
@@ -55,7 +56,10 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-railroad = ["*.pyi"]
+railroad = [
+    "*.pyi",
+    "environment/procthor/resources/models/*.pt",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

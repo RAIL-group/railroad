@@ -32,8 +32,7 @@ def main(
     show_plot: bool = False,
     save_video: str | None = None,
     estimate_object_find_prob: bool = False,
-    nn_model_path: str = ("./packages/railroad/src/railroad/environment/procthor/resources/models/"
-                          "procthor_obj_prob_net.pt"),
+    nn_model_path: str | None = None,
     video_fps: int = 60,
     video_dpi: int = 150,
 ) -> None:
@@ -41,6 +40,7 @@ def main(
     # Lazy import to avoid loading heavy dependencies at startup
     try:
         from railroad.environment.procthor import ProcTHORScene, ProcTHOREnvironment
+        from railroad.environment.procthor.learning.utils import get_default_fcnn_model_path
     except ImportError as e:
         print(f"Error: {e}")
         print("\nInstall ProcTHOR dependencies with: pip install railroad[procthor]")
@@ -73,13 +73,15 @@ def main(
     move_cost_fn = scene.get_move_cost_fn()
 
     # If estimate_object_find_prob is True, use learned model to get object find probabilities
+
     if estimate_object_find_prob:
-        if not Path(nn_model_path).exists():
+        model_path = Path(nn_model_path) if nn_model_path is not None else get_default_fcnn_model_path()
+        if not model_path.exists():
             raise FileNotFoundError(
-                f"Trained neural network model not found at {nn_model_path} to estimate object find probabilities. "
+                f"Trained neural network model not found at {model_path} to estimate object find probabilities. "
                 "Please provide a valid path or omit the --estimate-object-find-prob flag."
             )
-        object_find_prob_fn = scene.get_object_find_prob_fn(nn_model_path=nn_model_path,
+        object_find_prob_fn = scene.get_object_find_prob_fn(nn_model_path=str(model_path),
                                                             objects_to_find=target_objects)
     else:
         # Otherwise, create probability function based on ground truth
