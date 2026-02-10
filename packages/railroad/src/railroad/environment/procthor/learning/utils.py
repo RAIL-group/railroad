@@ -12,6 +12,13 @@ def get_default_fcnn_model_path() -> Path:
     return Path(__file__).resolve().parents[1] / "resources" / "models" / "procthor_obj_prob_net.pt"
 
 
+def _get_embedding_cache_dir() -> Path:
+    """Return embedding cache directory, creating it if needed."""
+    cache_dir = Path(DEFAULT_RESOURCES_BASE) / DEFAULT_SBERT_SUBDIR / "cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+
 def prepare_fcnn_input(
     graph: "SceneGraph",
     containers: List[int],
@@ -58,8 +65,7 @@ def compute_node_features(nodes: Dict[int, Dict[str, str]]) -> np.ndarray:
 
 
 def load_sentence_embedding(target_file_name: str) -> Optional[np.ndarray]:
-    target_dir = Path(DEFAULT_RESOURCES_BASE) / DEFAULT_SBERT_SUBDIR / "cache"
-    file_path = target_dir / target_file_name
+    file_path = _get_embedding_cache_dir() / target_file_name
     if file_path.exists():
         return np.load(file_path)
     return None
@@ -76,6 +82,6 @@ def get_sentence_embedding(sentence: str) -> np.ndarray:
     if _SENTENCE_MODEL is None:
         _SENTENCE_MODEL = SentenceTransformer(model_dir.as_posix())
     sentence_embedding = _SENTENCE_MODEL.encode([sentence])[0]
-    file_path = model_dir / "cache" / f"{sentence}.npy"
+    file_path = _get_embedding_cache_dir() / f"{sentence}.npy"
     np.save(file_path, sentence_embedding)
     return sentence_embedding
