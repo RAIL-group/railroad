@@ -16,7 +16,7 @@ The `railroad` planning framework is meant to support **concurrent multi-robot t
 
 In this [ProcTHOR](https://procthor.allenai.org/)-generated household environment, the team is told to search for two objects, with proabilities correlated with their underlying locations, and deliver them at a destionation. The planner coordinates them to search effectively and split up, pirotizing search of the locations where the objects are likely to be.
 
-![Two-robots quickly searching for and delivering two objects in a ProcTHOR-generated home.](assets/procthor-search-8616.jpeg)
+<img src="assets/procthor-search-8616.jpeg" width="720" alt="Two-robots quickly searching for and delivering two objects in a ProcTHOR-generated home.">
 
 #### Quickstart via the [`uv`](https://docs.astral.sh/uv/) package manager
 ```bash
