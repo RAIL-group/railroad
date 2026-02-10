@@ -1,9 +1,16 @@
+
+from typing import Optional, Dict, List
 import os
 import numpy as np
 from ..resources import DEFAULT_RESOURCES_BASE, DEFAULT_SBERT_SUBDIR
+from ..scenegraph import SceneGraph
 
 
-def prepare_fcnn_input(graph, containers, objects_to_find):
+def prepare_fcnn_input(
+    graph: SceneGraph,
+    containers: List[int],
+    objects_to_find: List[str]
+) -> Dict[str, np.ndarray]:
     graph = graph.copy()
 
     objs_idx = []
@@ -22,16 +29,18 @@ def prepare_fcnn_input(graph, containers, objects_to_find):
         for container in containers:
             feats = []
             room_idx = graph.get_parent_node_idx(container)
+            if room_idx is None:
+                raise ValueError(f"Container {container} does not have a parent room in the scene graph.")
             feats.extend(node_features[room_idx])
             feats.extend(node_features[container])
             feats.extend(node_features[idx])
             node_feats_input.append(feats)
-        node_features_dict[obj] = node_feats_input
+        node_features_dict[obj] = np.array(node_feats_input)
 
     return node_features_dict
 
 
-def compute_node_features(nodes):
+def compute_node_features(nodes: Dict[int, Dict[str, str]]) -> np.ndarray:
     """Get node features for all nodes."""
     features = []
     for node in nodes.values():
@@ -39,10 +48,10 @@ def compute_node_features(nodes):
             get_sentence_embedding(node['name']), node['type']
         ))
         features.append(node_feature)
-    return features
+    return np.array(features)
 
 
-def load_sentence_embedding(target_file_name):
+def load_sentence_embedding(target_file_name: str) -> Optional[np.ndarray]:
     target_dir = os.path.join(DEFAULT_RESOURCES_BASE, DEFAULT_SBERT_SUBDIR, 'cache')
     if not os.path.exists(target_dir):
         os.makedirs(target_dir)
@@ -55,7 +64,7 @@ def load_sentence_embedding(target_file_name):
     return None
 
 
-def get_sentence_embedding(sentence):
+def get_sentence_embedding(sentence: str) -> np.ndarray:
     loaded_embedding = load_sentence_embedding(sentence + '.npy')
     if loaded_embedding is None:
         from sentence_transformers import SentenceTransformer

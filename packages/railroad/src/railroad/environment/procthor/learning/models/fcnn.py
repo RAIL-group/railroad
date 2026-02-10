@@ -1,3 +1,4 @@
+from typing import List, Callable, Dict, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,7 +8,7 @@ import numpy as np
 class FCNN(nn.Module):
     name = 'FCNNforObjectSearch'
 
-    def __init__(self):
+    def __init__(self) -> None:
         super(FCNN, self).__init__()
         torch.manual_seed(8616)
 
@@ -40,7 +41,7 @@ class FCNN(nn.Module):
         self.pos = 1  # 9.74
         self.neg = 1  # 0.53
 
-    def forward(self, data, device):
+    def forward(self, data: Dict[str, torch.Tensor], device: str) -> torch.Tensor:
         h = data['node_feats'].type(torch.float).to(device)
         h = F.leaky_relu(self.fc1bn(self.fc1(h)), 0.1)
         h = F.leaky_relu(self.fc2bn(self.fc2(h)), 0.1)
@@ -55,42 +56,19 @@ class FCNN(nn.Module):
         props = self.classifier(h)
         return props
 
-    def loss(self, nn_out, data, device='cpu', writer=None, index=None):
-        # Separate outputs.
-        is_feasible_logits = nn_out[:, 0]
-        # Extract & load the data to device
-        is_feasible_label = data['labels'].to(device)
-
-        # Compute the contribution from the is_feasible_label
-        is_feasible_xentropy = self.pos * \
-            is_feasible_label * -F.logsigmoid(is_feasible_logits) + \
-            self.neg * (1 - is_feasible_label) * -F.logsigmoid(-is_feasible_logits)
-        is_feasible_xentropy = torch.mean(is_feasible_xentropy) + 1e-10
-
-        # Sum the contributions
-        loss = is_feasible_xentropy
-
-        # Logging
-        if writer is not None:
-            writer.add_scalar("Loss/is_feasible_xentropy",
-                              is_feasible_xentropy.item(),
-                              index)
-            writer.add_scalar("Loss/total_loss",
-                              loss.item(),
-                              index)
-
-        return loss
-
     @classmethod
-    def preprocess_fcnn_data(_, datum):
+    def preprocess_fcnn_data(_, datum: Dict[str, np.ndarray | torch.Tensor]) -> Dict[str, np.ndarray | torch.Tensor]:
         data = datum.copy()
         data['node_feats'] = torch.tensor(np.array(
             data['node_feats']), dtype=torch.float)
         return data
 
-
     @classmethod
-    def get_net_eval_fn(_, network_file, device=None):
+    def get_net_eval_fn(
+        _,
+        network_file: str,
+        device: Optional[str] = None
+    ) -> Callable[[Dict[str, np.ndarray | torch.Tensor], List[int]], Dict[int, float]]:
         if device is None:
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -100,11 +78,12 @@ class FCNN(nn.Module):
         model.eval()
         model.to(device)
 
-        def frontier_net(datum, subgoals):
-            datum = FCNN.preprocess_fcnn_data(datum)
+        def frontier_net(datum: Dict[str, np.ndarray | torch.Tensor],
+                         subgoals: List[int]) -> Dict[int, float]:
+            datum_ = FCNN.preprocess_fcnn_data(datum)
             prob_feasible_dict = {}
             for idx, subgoal in enumerate(subgoals):
-                sub_data = {'node_feats': datum['node_feats'][idx].unsqueeze(0)}
+                sub_data = {'node_feats': datum_['node_feats'][idx].unsqueeze(0)}
                 with torch.no_grad():
                     out = model.forward(sub_data, device)
                     out[:, 0] = torch.sigmoid(out[:, 0])
