@@ -1,7 +1,7 @@
 [project]
 name = "railroad-monorepo"
-version = "0.1.0"
-description = "Add your description here"
+version = "0.2.0"
+description = "Planning suite from the RAIL Group @ GMU supporting multi-agent concurrent planning under uncertainty, among other capabilities."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
