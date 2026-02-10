@@ -43,6 +43,7 @@ uv pip install 'git+https://github.com/RAIL-group/railroad.git@main#subdirectory
 uv run railroad example procthor-search --seed 8616 --save-video ./procthor-search-8616.mp4 --save-plot ./procthor-search-8616.jpg
 ```
 
+`railroad` is is heavily type-hinted, and so can be used with a standard type checker, e.g., via `uv run ty check`.
 
 ## Quick Example: Two-Robot Object Search
 
