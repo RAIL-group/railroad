@@ -12,10 +12,16 @@ The `railroad` planning framework is meant to support **concurrent multi-robot t
 - **Probabilistic state transitions**: effects can be probabilistic
 - **Planning via MCTS**: planning via Monte Carlo Tree Search over joint action spaces
 
+#### Multi-Robot Object Search Example
+
+In this [ProcTHOR](https://procthor.allenai.org/)-generated household environment, the team is told to search for two objects, with proabilities correlated with their underlying locations, and deliver them at a destionation. The planner coordinates them to search effectively and split up, pirotizing search of the locations where the objects are likely to be.
+
+![Two-robots quickly searching for and delivering two objects in a ProcTHOR-generated home.](assets/procthor-search-8616.jpeg)
+
 #### Quickstart via the [`uv`](https://docs.astral.sh/uv/) package manager
 ```bash
 mkdir railroad-env && cd railroad-env && uv venv
-uv pip install 'git+https://github.com/RAIL-group/railroad.git@gjstein/code-cleanup#subdirectory=packages/railroad'
+uv pip install 'git+https://github.com/RAIL-group/railroad.git@main#subdirectory=packages/railroad'
 uv run railroad example multi-object-search
 ```
 
