@@ -25,6 +25,25 @@ uv pip install 'git+https://github.com/RAIL-group/railroad.git@main#subdirectory
 uv run railroad example multi-object-search
 ```
 
+Use the optional benchmark suite
+```bash
+# Install with railroad[bench]
+uv pip install 'git+https://github.com/RAIL-group/railroad.git@main#subdirectory=packages/railroad[bench]'
+uv run railroad benchmarks run --dry-run  # Inspect what will run
+uv run railroad benchmarks run  # Runs all
+uv run railroad benchmarks run <filter>  # Runs all with <filter> string
+
+# Run the interactive web dashboard (after starting/running benchmarks)
+uv run railroad benchmarks dashboard
+```
+
+ProcTHOR is an optional install via `railroad[procthor]`. To run the example from above and generate a video:
+```bash
+uv pip install 'git+https://github.com/RAIL-group/railroad.git@main#subdirectory=packages/railroad[procthor]'
+uv run railroad example procthor-search --seed 8616 --save-video ./procthor-search-8616.mp4 --save-plot ./procthor-search-8616.jpg
+```
+
+
 ## Quick Example: Two-Robot Object Search
 
 *[Run this example in a Google Colab notebook](https://colab.research.google.com/drive/1jdUtZmKc9OA9LiCSeDdteCqZMGRHik2U?usp=sharing).*
