@@ -1,6 +1,6 @@
-# `railroad` : PDDL-like concurrent multi-agent, probabilistic planning
+# `railroad` : Concurrent multi-agent, probabilistic planning framework
 
-**Multi-Agent Task Planning, supporting concurrency and probabilistic effects.**
+**Multi-Agent Task Planning, supporting concurrency and probabilistic effects. PDDL-inspired operators with a Python API**
 
 The `railroad` planning framework is meant to support **concurrent multi-robot task planning under uncertainty**. Operators are PDDL-like and defined in Python, so that learned estimators can be used to specify timing, probabilities, and costs. Planning is C++-based for efficiency, and use MCTS with an uncertainty-aware h-sum heuristic (_still a work in progress_) as its value function.
 
