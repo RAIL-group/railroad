@@ -594,7 +594,11 @@ class _PlottingMixin:
         fig, ax, sidebar_ax, trajectories, env_coords, grid, t_end = result
 
         n_frames = int(fps * duration)
-        frame_times = np.linspace(0.0, t_end, n_frames)
+        animation_times = np.linspace(0.0, t_end, n_frames)
+        # Prepend the final time as frame 0 so the video thumbnail/poster
+        # shows the completed plan rather than the empty initial state.
+        frame_times = np.concatenate(([t_end], animation_times))
+        n_frames += 1
 
         # Pre-compute dense trail positions (same resolution as static plot)
         dense_trail_times = np.linspace(0.0, t_end, 2000)
@@ -730,10 +734,9 @@ class _PlottingMixin:
             trail_scatter.set_offsets(combined_xy[mask])
             trail_scatter.set_sizes(combined_sizes[mask])
             trail_scatter.set_facecolors(combined_colors[mask])
-            # Reveal actions whose start time has passed
+            # Show/hide actions based on whether their start time has passed
             for txt, act_time in action_texts:
-                if current_time >= act_time:
-                    txt.set_alpha(1.0)
+                txt.set_alpha(1.0 if current_time >= act_time else 0.0)
             # Update goal literal colors based on latest snapshot <= current_time
             current_goals: dict[str, bool] = {}
             for snap_time, snap_goals in goal_snapshots:
