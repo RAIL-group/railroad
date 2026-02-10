@@ -109,8 +109,10 @@ if _procthor_available():
             {
                 "name": "--nn-model-path",
                 "type": str,
-                "default": "./resources/models/procthor_obj_prob_net.pt",
-                "help": "Path to trained neural network model for estimating object find probabilities (used if --estimate-object-find-prob is set)",
+                "default": ("./packages/railroad/src/railroad/environment/procthor/resources/models/"
+                            "procthor_obj_prob_net.pt"),
+                "help": ("Path to trained neural network model for estimating object find probabilities "
+                         "(used if --estimate-object-find-prob is set)"),
                 "param_name": "nn_model_path",
             }
         ],

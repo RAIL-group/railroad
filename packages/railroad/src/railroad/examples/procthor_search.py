@@ -32,7 +32,8 @@ def main(
     show_plot: bool = False,
     save_video: str | None = None,
     estimate_object_find_prob: bool = False,
-    nn_model_path: str = "./resources/models/procthor_obj_prob_net.pt",
+    nn_model_path: str = ("./packages/railroad/src/railroad/environment/procthor/resources/models/"
+                          "procthor_obj_prob_net.pt"),
     video_fps: int = 60,
     video_dpi: int = 150,
 ) -> None:
