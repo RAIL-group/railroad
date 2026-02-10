@@ -36,11 +36,6 @@ class FCNN(nn.Module):
         self.fc9bn = nn.BatchNorm1d(8)
         self.fc10bn = nn.BatchNorm1d(4)
 
-        # Following class weighting factors have
-        # been calculated after observing the data
-        self.pos = 1  # 9.74
-        self.neg = 1  # 0.53
-
     def forward(self, data: Dict[str, torch.Tensor], device: str) -> torch.Tensor:
         h = data['node_feats'].type(torch.float).to(device)
         h = F.leaky_relu(self.fc1bn(self.fc1(h)), 0.1)
