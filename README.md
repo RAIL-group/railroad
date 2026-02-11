@@ -21,14 +21,14 @@ In this [ProcTHOR](https://procthor.allenai.org/)-generated household environmen
 #### Quickstart via the [`uv`](https://docs.astral.sh/uv/) package manager
 ```bash
 mkdir railroad-env && cd railroad-env && uv venv
-uv pip install 'git+https://github.com/RAIL-group/railroad.git@main#subdirectory=packages/railroad'
+uv add "railroad @ git+https://github.com/RAIL-group/railroad.git#subdirectory=packages/railroad"
 uv run railroad example multi-object-search
 ```
 
 Use the optional benchmark suite
 ```bash
 # Install with railroad[bench]
-uv pip install 'git+https://github.com/RAIL-group/railroad.git@main#subdirectory=packages/railroad[bench]'
+uv add "railroad[bench] @ git+https://github.com/RAIL-group/railroad.git#subdirectory=packages/railroad"
 uv run railroad benchmarks run --dry-run  # Inspect what will run
 uv run railroad benchmarks run  # Runs all
 uv run railroad benchmarks run <filter>  # Runs all with <filter> string
@@ -39,7 +39,7 @@ uv run railroad benchmarks dashboard
 
 ProcTHOR is an optional install via `railroad[procthor]`. To run the example from above and generate a video:
 ```bash
-uv pip install 'git+https://github.com/RAIL-group/railroad.git@main#subdirectory=packages/railroad[procthor]'
+uv add "railroad[procthor] @ git+https://github.com/RAIL-group/railroad.git#subdirectory=packages/railroad"
 uv run railroad example procthor-search --seed 8616 --save-video ./procthor-search-8616.mp4 --save-plot ./procthor-search-8616.jpg
 ```
 
