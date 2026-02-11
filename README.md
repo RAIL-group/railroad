@@ -20,7 +20,7 @@ In this [ProcTHOR](https://procthor.allenai.org/)-generated household environmen
 
 #### Quickstart via the [`uv`](https://docs.astral.sh/uv/) package manager
 ```bash
-mkdir railroad-env && cd railroad-env && uv venv
+mkdir railroad-env && cd railroad-env && uv init
 uv add "railroad @ git+https://github.com/RAIL-group/railroad.git#subdirectory=packages/railroad"
 uv run railroad example multi-object-search
 ```
