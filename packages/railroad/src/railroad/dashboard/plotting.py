@@ -36,6 +36,34 @@ class _PlottingMixin:
         """Return a marker color by sampling the end of the idx-th colormap."""
         return _PlottingMixin._get_cmap(idx)(0.85)
 
+    @staticmethod
+    def _try_embed_video_in_notebook(path: str) -> None:
+        """Best-effort inline video display for notebook environments."""
+        try:
+            import importlib
+            ipython_mod = importlib.import_module("IPython")
+            display_mod = importlib.import_module("IPython.display")
+        except Exception:
+            return
+
+        get_ipython = getattr(ipython_mod, "get_ipython", None)
+        if get_ipython is None:
+            return
+
+        shell = get_ipython()
+        if shell is None or getattr(shell, "kernel", None) is None:
+            return
+
+        try:
+            video_cls = getattr(display_mod, "Video", None)
+            display_fn = getattr(display_mod, "display", None)
+            if video_cls is None or display_fn is None:
+                return
+            display_fn(video_cls(path, embed=True))
+        except Exception:
+            # Never fail video save if inline rendering is unavailable.
+            return
+
     def _build_entity_trajectories(
         self: PlannerDashboard,
         *,
@@ -783,6 +811,8 @@ class _PlottingMixin:
         plt.close(fig)
         if interrupted:
             self.console.print("[yellow]Video generation interrupted — saved partial video.[/yellow]")
+        else:
+            self._try_embed_video_in_notebook(path)
 
     def get_plot_image(
         self: PlannerDashboard,
