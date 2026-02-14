@@ -12,6 +12,11 @@ import numpy as np
 from pathlib import Path
 
 
+def get_default_pyrobosim_world_file_path() -> Path:
+    """Get the packaged default world file path."""
+    return Path(__file__).resolve().parent / "resources" / "worlds" / "test_world.yaml"
+
+
 def run_async(func):
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -29,7 +34,7 @@ def run_async(func):
 class PyRoboSimEnv(BaseEnvironment):
     """Environment class that wraps PyRoboSim simulator."""
 
-    def __init__(self, world_file: str, show_plot: bool = True, record_plots: bool = False):
+    def __init__(self, world_file: str | Path, show_plot: bool = True, record_plots: bool = False):
         self.world = WorldYamlLoader().from_file(Path(world_file))
         self.canvas = MatplotlibWorldCanvas(self.world, show_plot, record_plots)
         self.initial_robot_locations = {

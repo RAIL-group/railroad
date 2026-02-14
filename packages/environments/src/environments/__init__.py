@@ -4,9 +4,8 @@ This package provides environment implementations and interfaces for
 robot simulation via `railroad`.
 """
 
-from . import plotting, pyrobosim
+from . import plotting
 
 __all__ = [
     "plotting",
-    "pyrobosim",
 ]

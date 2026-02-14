@@ -1,4 +1,4 @@
-from environments.pyrobosim import PyRoboSimEnv
+from railroad.environment.pyrobosim import PyRoboSimEnv, get_default_pyrobosim_world_file_path
 from railroad import operators
 from railroad.planner import MCTSPlanner
 from railroad.core import Fluent as F, get_action_by_name
@@ -92,7 +92,7 @@ def main(args):
 
 if __name__ == "__main__":
     args = argparse.ArgumentParser()
-    args.add_argument("--world-file", type=str, default='./resources/pyrobosim_worlds/test_world.yaml',
+    args.add_argument("--world-file", type=str, default=str(get_default_pyrobosim_world_file_path()),
                       help="Path to the world YAML file.")
     args.add_argument("--show-plot", action='store_true', help="Whether to show the plot window.")
     args.add_argument("--no-video", action='store_true', help="Whether to disable generating video of the simulation.")

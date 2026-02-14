@@ -1,10 +1,10 @@
-from environments.pyrobosim import PyRoboSimEnv
+from railroad.environment.pyrobosim import PyRoboSimEnv, get_default_pyrobosim_world_file_path
 from railroad.experimental.environment import SkillStatus
 from pathlib import Path
 
 
 def test_pyrobosim_demo():
-    env = PyRoboSimEnv(world_file='./resources/pyrobosim_worlds/test_world.yaml',
+    env = PyRoboSimEnv(world_file=get_default_pyrobosim_world_file_path(),
                        show_plot=False,
                        record_plots=True)
 
