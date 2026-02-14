@@ -143,11 +143,11 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
         )
 
         # Optional: correct observed cells with true-grid values.
-        # Inflate the newly scanned region by 1.7 cells to fill corners
+        # Inflate the newly scanned region to fill diagonal/corner gaps
         # between laser rays, then apply the true grid to the expanded area.
         if self._config.correct_with_known_map:
             scan_mask = was_unobserved & (self._observed_grid != UNOBSERVED_VAL)
-            radius = 1.7
+            radius = max(0.0, float(self._config.scan_inflation_radius))
             kernel_size = int(1 + 2 * np.ceil(radius))
             cind = int(np.ceil(radius))
             y, x = np.ogrid[-cind:kernel_size - cind, -cind:kernel_size - cind]
@@ -317,7 +317,14 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
 
         start = (int(round(float(start_coords[0]))), int(round(float(start_coords[1]))))
         end = (int(round(float(end_coords[0]))), int(round(float(end_coords[1]))))
-        _cost, path = pathing.get_cost_and_path(self._observed_grid, start, end)
+        _cost, path = pathing.get_cost_and_path(
+            self._observed_grid,
+            start,
+            end,
+            use_soft_cost=self._config.trajectory_use_soft_cost,
+            unknown_as_obstacle=True,
+            soft_cost_scale=self._config.trajectory_soft_cost_scale,
+        )
         return path
 
     def _get_cost_grid(self, loc: str) -> tuple[np.ndarray, tuple[int, int]] | None:
@@ -407,6 +414,10 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
 
         parts = action.name.split()
         if parts and parts[0] == "move":
+            if len(parts) > 3 and Fluent("at", parts[1], parts[2]) in self._fluents:
+                path = self.compute_move_path(parts[2], parts[3])
+                if path.size == 0:
+                    return False
             delayed_times = [eff.time for eff in action.effects if eff.time > 1e-9]
             if delayed_times and min(delayed_times) > self._config.max_move_action_time:
                 # Only filter from the robot's currently dispatchable source.

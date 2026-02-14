@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import heapq
 import math
-from typing import Callable, Dict, List, Tuple, Union
+from typing import Callable, Dict, List, Tuple, Union, cast
 
 import numpy as np
 import scipy.ndimage
 import skimage.graph
 
 from .constants import COLLISION_VAL, OBSTACLE_THRESHOLD, UNOBSERVED_VAL
+
+_SOFT_COST_SCALE = 12.0
 
 
 def inflate_grid(
@@ -44,6 +46,7 @@ def build_traversal_costs(
     occupancy_grid: np.ndarray,
     use_soft_cost: bool = True,
     unknown_as_obstacle: bool = True,
+    soft_cost_scale: float = _SOFT_COST_SCALE,
 ) -> np.ndarray:
     """Build per-cell traversal costs from an occupancy grid."""
     costs = np.ones(occupancy_grid.shape)
@@ -52,7 +55,7 @@ def build_traversal_costs(
         g2 = inflate_grid(g1, 1.0)
         g3 = inflate_grid(g2, 1.5)
         soft = 8 * g1 + 5 * g2 + g3
-        costs += soft / 50.0
+        costs += soft / max(1e-6, soft_cost_scale)
     obstacle_mask = occupancy_grid >= OBSTACLE_THRESHOLD
     if unknown_as_obstacle:
         obstacle_mask = np.logical_or(obstacle_mask, occupancy_grid == UNOBSERVED_VAL)
@@ -191,12 +194,14 @@ def get_cost_and_path_theta(
     end: tuple[int, int],
     use_soft_cost: bool = True,
     unknown_as_obstacle: bool = True,
+    soft_cost_scale: float = _SOFT_COST_SCALE,
 ) -> tuple[float, np.ndarray]:
     """Compute cost and path with Theta* on occupancy grid."""
     costs = build_traversal_costs(
         grid,
         use_soft_cost=use_soft_cost,
         unknown_as_obstacle=unknown_as_obstacle,
+        soft_cost_scale=soft_cost_scale,
     )
 
     if 0 <= start[0] < costs.shape[0] and 0 <= start[1] < costs.shape[1]:
@@ -211,15 +216,38 @@ def get_cost_and_path(
     grid: np.ndarray,
     start: tuple[int, int],
     end: tuple[int, int],
+    use_soft_cost: bool = True,
+    unknown_as_obstacle: bool = True,
+    soft_cost_scale: float = _SOFT_COST_SCALE,
 ) -> tuple[float, np.ndarray]:
-    """Compute cost and path between two grid positions."""
-    return get_cost_and_path_theta(
-        grid,
-        start,
-        end,
-        use_soft_cost=True,
-        unknown_as_obstacle=True,
+    """Compute cost and path between two grid positions.
+
+    Uses a Dijkstra/MCP shortest-path query for speed. Theta* remains
+    available via ``get_cost_and_path_theta`` when any-angle routing is
+    explicitly needed.
+    """
+    occ_grid = np.copy(grid)
+    if 0 <= start[0] < occ_grid.shape[0] and 0 <= start[1] < occ_grid.shape[1]:
+        occ_grid[start[0], start[1]] = 0.0
+    if 0 <= end[0] < occ_grid.shape[0] and 0 <= end[1] < occ_grid.shape[1]:
+        occ_grid[end[0], end[1]] = 0.0
+
+    cost_grid, get_path = cast(
+        Tuple[np.ndarray, Callable],
+        compute_cost_grid_from_position(
+            occ_grid,
+            start=[start[0], start[1]],
+            use_soft_cost=use_soft_cost,
+            unknown_as_obstacle=unknown_as_obstacle,
+            soft_cost_scale=soft_cost_scale,
+            ends=[(end[0], end[1])],
+            only_return_cost_grid=False,
+        ),
     )
+    success, path = get_path((end[0], end[1]))
+    if not success:
+        return float("inf"), np.array([[]], dtype=int)
+    return float(cost_grid[end[0], end[1]]), path
 
 
 def path_total_length(path: np.ndarray) -> float:
@@ -285,6 +313,7 @@ def compute_cost_grid_from_position(
     use_soft_cost: bool = False,
     obstacle_cost: float = -1,
     unknown_as_obstacle: bool = True,
+    soft_cost_scale: float = _SOFT_COST_SCALE,
     ends: Union[List[Tuple[int, int]], None] = None,
     only_return_cost_grid: bool = False,
 ) -> Union[np.ndarray, Tuple[np.ndarray, Callable]]:
@@ -314,7 +343,7 @@ def compute_cost_grid_from_position(
         starts = [start]
 
     if use_soft_cost:
-        scale_factor = 50
+        scale_factor = max(1e-6, soft_cost_scale)
         input_cost_grid = np.ones(occupancy_grid.shape) * scale_factor
         g1 = inflate_grid(occupancy_grid, 1.5)
         g2 = inflate_grid(g1, 1.0)

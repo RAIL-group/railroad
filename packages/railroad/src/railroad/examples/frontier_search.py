@@ -1,6 +1,6 @@
 """Frontier-based exploration and object search example.
 
-Demonstrates end-to-end planning: a single robot explores unknown space by
+Demonstrates end-to-end planning: one or more robots explore unknown space by
 moving to frontiers, discovers hidden container sites as map cells are
 revealed, and searches those sites for target objects using the MCTS planner.
 
@@ -10,6 +10,7 @@ Two modes:
 
 Usage:
     uv run railroad example frontier-search
+    uv run railroad example frontier-search --num-robots 2
     uv run railroad example frontier-search --procthor --seed 4001
 """
 
@@ -25,6 +26,7 @@ def main(
     procthor: bool = False,
     seed: int | None = None,
     num_objects: int = 2,
+    num_robots: int = 1,
     save_plot: str | None = None,
     show_plot: bool = False,
     save_video: str | None = None,
@@ -54,19 +56,22 @@ def main(
     # Setup: grid, hidden sites, target objects
     # ------------------------------------------------------------------
 
+    if num_robots < 1:
+        raise ValueError("num_robots must be >= 1")
+
     if procthor:
-        true_grid, hidden_sites, true_object_locations, start_coords, target_objects = (
-            _setup_procthor(seed=seed, num_objects=num_objects)
+        true_grid, hidden_sites, true_object_locations, start_coords_list, target_objects = (
+            _setup_procthor(seed=seed, num_objects=num_objects, num_robots=num_robots)
         )
     else:
-        true_grid, hidden_sites, true_object_locations, start_coords, target_objects = (
-            _setup_synthetic()
+        true_grid, hidden_sites, true_object_locations, start_coords_list, target_objects = (
+            _setup_synthetic(num_robots=num_robots)
         )
 
     print(f"Grid: {true_grid.shape[0]}x{true_grid.shape[1]}")
     print(f"Hidden sites: {list(hidden_sites.keys())}")
     print(f"Target objects: {target_objects}")
-    print(f"Start: {start_coords}")
+    print(f"Starts: {start_coords_list}")
 
     # ------------------------------------------------------------------
     # Operators
@@ -115,34 +120,47 @@ def main(
         sensor_fov_rad=2 * np.pi,
         sensor_num_rays=181,
         max_move_action_time=10_000.0,
-        interrupt_min_new_cells=100000,   # effectively disable interrupt
+        interrupt_min_new_cells=10,
         interrupt_min_dt=100000.0,
     )
 
-    start_loc = np.array(start_coords, dtype=float)
+    robots = [f"robot{i + 1}" for i in range(num_robots)]
+    start_names = ["start" if i == 0 else f"start{i + 1}" for i in range(num_robots)]
+
     location_registry = LocationRegistry(
-        {"start": start_loc}
+        {
+            start_name: np.array(start_coords_list[i], dtype=float)
+            for i, start_name in enumerate(start_names)
+        }
         | {k: np.array(v, dtype=float) for k, v in hidden_sites.items()}
     )
 
-    fluents: set = {
-        F("at robot1 start"),
-        F("free robot1"),
-        F("revealed start"),
-    }
+    fluents: set = set()
+    robot_initial_poses: dict[str, Pose] = {}
+    for i, robot in enumerate(robots):
+        start_name = start_names[i]
+        start_coords = start_coords_list[i]
+        fluents |= {
+            F(f"at {robot} {start_name}"),
+            F(f"free {robot}"),
+            F(f"revealed {start_name}"),
+        }
+        robot_initial_poses[robot] = Pose(
+            float(start_coords[0]), float(start_coords[1]), 0.0
+        )
 
     env = UnknownSpaceEnvironment(
         state=State(0.0, fluents, []),
         objects_by_type={
-            "robot": {"robot1"},
-            "location": {"start"} | set(hidden_sites.keys()),
+            "robot": set(robots),
+            "location": set(start_names) | set(hidden_sites.keys()),
             "container": set(hidden_sites.keys()),
             "frontier": set(),
             "object": set(target_objects),
         },
         operators=operators,
         true_grid=true_grid,
-        robot_initial_poses={"robot1": Pose(float(start_coords[0]), float(start_coords[1]), 0.0)},
+        robot_initial_poses=robot_initial_poses,
         location_registry=location_registry,
         hidden_sites=hidden_sites,
         true_object_locations=true_object_locations,
@@ -180,6 +198,7 @@ def main(
                 max_iterations=4000,
                 c=300,
                 max_depth=20,
+                heuristic_multiplier=2,
             )
 
             if action_name == "NONE":
@@ -204,11 +223,11 @@ def main(
 # ======================================================================
 
 
-def _setup_synthetic() -> tuple[
+def _setup_synthetic(num_robots: int = 1) -> tuple[
     "np.ndarray",
     dict[str, tuple[int, int]],
     dict[str, set[str]],
-    tuple[int, int],
+    list[tuple[int, int]],
     list[str],
 ]:
     """Build a synthetic corridor grid with hidden container sites."""
@@ -261,18 +280,20 @@ def _setup_synthetic() -> tuple[
     }
 
     target_objects = ["Mug", "Knife"]
-    start_coords = (mid, mid)
+    start_coords = [(mid, mid)] * num_robots
 
     return grid, hidden_sites, true_object_locations, start_coords, target_objects
 
 
 def _setup_procthor(
-    seed: int | None = None, num_objects: int = 2
+    seed: int | None = None,
+    num_objects: int = 2,
+    num_robots: int = 1,
 ) -> tuple[
     "np.ndarray",
     dict[str, tuple[int, int]],
     dict[str, set[str]],
-    tuple[int, int],
+    list[tuple[int, int]],
     list[str],
 ]:
     """Load a ProcTHOR scene and extract grid, sites, and objects."""
@@ -308,15 +329,21 @@ def _setup_procthor(
         random.seed(seed)
     target_objects = random.sample(all_objects, k=min(num_objects, len(all_objects)))
 
-    # Start position
+    # Shared start position for all robots
     start_loc = scene.locations.get("start_loc")
     if start_loc is not None:
-        start_coords = (int(start_loc[0]), int(start_loc[1]))
+        shared_start = (int(start_loc[0]), int(start_loc[1]))
     else:
         # Fallback to grid center
-        start_coords = (true_grid.shape[0] // 2, true_grid.shape[1] // 2)
+        shared_start = (true_grid.shape[0] // 2, true_grid.shape[1] // 2)
 
-    return true_grid, hidden_sites, true_object_locations, start_coords, target_objects
+    return (
+        true_grid,
+        hidden_sites,
+        true_object_locations,
+        [shared_start] * num_robots,
+        target_objects,
+    )
 
 
 if __name__ == "__main__":
