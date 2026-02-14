@@ -191,12 +191,29 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
         # Update objects_by_type
         self._objects_by_type["frontier"] = set(frontier_ids)
 
-        # Collect current robot transient locations
+        # Stabilize robot locations: if a robot is at a stale frontier that
+        # no longer exists, remap it to a stable {robot}_loc at its current pose.
+        stable_locs = self._base_locations | frontier_ids
         robot_locs = set()
         for rob in self._objects_by_type.get("robot", set()):
-            rloc = f"{rob}_loc"
-            if Fluent("at", rob, rloc) in self._fluents:
-                robot_locs.add(rloc)
+            for fluent in list(self._fluents):
+                if (fluent.name == "at" and not fluent.negated
+                        and len(fluent.args) >= 2 and fluent.args[0] == rob):
+                    loc = fluent.args[1]
+                    if loc not in stable_locs:
+                        # Robot is at a stale location — remap to {robot}_loc
+                        new_loc = f"{rob}_loc"
+                        pose = self._robot_poses.get(rob)
+                        if pose is not None and self._location_registry is not None:
+                            self._location_registry.register(
+                                new_loc, np.array([pose.x, pose.y])
+                            )
+                        self._fluents.discard(fluent)
+                        self._fluents.add(Fluent("at", rob, new_loc))
+                        robot_locs.add(new_loc)
+                    else:
+                        robot_locs.add(loc)
+                    break
 
         self._objects_by_type["location"] = (
             self._base_locations | frontier_ids | robot_locs
