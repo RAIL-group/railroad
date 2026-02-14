@@ -44,9 +44,9 @@ def main(
     from railroad.environment.symbolic import LocationRegistry
     from railroad.operators import (
         construct_move_navigable_operator,
+        construct_no_op_operator,
         construct_observe_site_operator,
         construct_search_at_site_operator,
-        construct_wait_operator,
     )
     from railroad.planner import MCTSPlanner
 
@@ -90,7 +90,7 @@ def main(
         construct_move_navigable_operator(move_time_fn),
         construct_observe_site_operator(observe_success_prob=0.8, observe_time=1.0, container_type="container"),
         construct_search_at_site_operator(object_find_prob_fn, search_time=2.0, container_type="container"),
-        construct_wait_operator(),
+        construct_no_op_operator(no_op_time=5.0, extra_cost=100.0),
     ]
 
     # ------------------------------------------------------------------
@@ -140,7 +140,7 @@ def main(
     goal = reduce(and_, [F(f"found {obj}") for obj in target_objects])
 
     def fluent_filter(f):  # noqa: ANN001
-        return any(kw in f.name for kw in ["at", "found", "searched", "navigable", "candidate"])
+        return any(kw in f.name for kw in ["at", "found", "searched", "navigable"])
 
     max_iterations = 80
 
@@ -173,13 +173,13 @@ def main(
             env.act(action, loop_callback_fn=act_callback)
             dashboard.update(mcts, action_name)
 
-        dashboard.show_plots(
-            save_plot=save_plot,
-            show_plot=show_plot,
-            save_video=save_video,
-            video_fps=video_fps,
-            video_dpi=video_dpi,
-        )
+    dashboard.show_plots(
+        save_plot=save_plot,
+        show_plot=show_plot,
+        save_video=save_video,
+        video_fps=video_fps,
+        video_dpi=video_dpi,
+    )
 
 
 # ======================================================================
