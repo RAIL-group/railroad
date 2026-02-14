@@ -56,11 +56,14 @@ class NavigationConfig:
     sensor_num_rays: int = 181
     sensor_dt: float = 0.08
     speed_cells_per_sec: float = 2.0
+    trajectory_use_soft_cost: bool = True
+    trajectory_soft_cost_scale: float = 6.0
     occupied_prob: float = 0.9
     unoccupied_prob: float = 0.1
     connect_neighbor_distance: int = 2
     interrupt_min_new_cells: int = 20
     interrupt_min_dt: float = 1.0
     max_move_action_time: float = float("inf")
+    scan_inflation_radius: float = 2.5
     correct_with_known_map: bool = True
     record_frames: bool = True

@@ -14,6 +14,7 @@ COLLISION_VAL = 1
 FREE_VAL = 0
 OBSTACLE_THRESHOLD = 0.5 * (FREE_VAL + COLLISION_VAL)
 THETA_STAR_HEURISTIC_WEIGHT = 1.5
+SOFT_COST_SCALE = 12.0
 
 
 def get_nearest_free_point(
@@ -115,7 +116,7 @@ def build_traversal_costs(
         g2 = inflate_grid(g1, 1.0)
         g3 = inflate_grid(g2, 1.5)
         soft = 8 * g1 + 5 * g2 + g3
-        costs += soft / 50.0
+        costs += soft / SOFT_COST_SCALE
     costs[occupancy_grid >= OBSTACLE_THRESHOLD] = np.inf
     return costs
 
@@ -360,7 +361,7 @@ def get_cost_and_path(
 ) -> Tuple[float, np.ndarray]:
     """Compute path cost and path between two grid positions.
 
-    Uses Theta* any-angle planning for smoother trajectories.
+    Uses Dijkstra/MCP shortest-path planning for speed.
 
     Args:
         grid: Occupancy grid
@@ -370,7 +371,25 @@ def get_cost_and_path(
     Returns:
         Tuple of (cost, path) where path is 2xN array
     """
-    return get_cost_and_path_theta(grid, start, end, use_soft_cost=True)
+    occ_grid = np.copy(grid)
+    occ_grid[int(start[0])][int(start[1])] = 0
+    occ_grid[end[0], end[1]] = 0
+
+    cost_grid, get_path = cast(
+        Tuple[np.ndarray, Callable],
+        compute_cost_grid_from_position(
+            occ_grid,
+            start=[start[0], start[1]],
+            use_soft_cost=True,
+            only_return_cost_grid=False,
+        ),
+    )
+
+    success, path = get_path((end[0], end[1]))
+    if not success:
+        return float("inf"), np.array([[]], dtype=int)
+
+    return float(cost_grid[end[0], end[1]]), path
 
 
 def get_coordinates_at_time(path: np.ndarray, time: float) -> np.ndarray:

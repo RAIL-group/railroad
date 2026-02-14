@@ -203,7 +203,7 @@ class NavigationMoveSkill:
 
         # Clear claim on old target if it was set
         claim_fluent = Fluent("claimed", old_target)
-        env.fluents.discard(claim_fluent)  # type: ignore[union-attr]
+        env.fluents.discard(claim_fluent)
 
         # Clear remaining effects
         self._upcoming_effects = []

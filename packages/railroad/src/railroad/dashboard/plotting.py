@@ -25,6 +25,31 @@ def _nav_grid_to_rgb(grid):
     return rgb
 
 
+def _nav_observed_overlay_rgba(observed_grid):
+    """Convert observed navigation grid to RGBA with transparent unknown cells."""
+    import numpy as np
+
+    g = observed_grid.T
+    rgba = np.zeros((*g.shape, 4))
+    rgba[(g >= 0.0) & (g < 0.5), :3] = [0.96, 0.94, 0.88]  # free
+    rgba[g >= 0.5, :3] = [0.40, 0.18, 0.14]  # occupied
+    rgba[g != -1.0, 3] = 0.96
+    rgba[g == -1.0, 3] = 0.0
+    return rgba
+
+
+def _render_navigation_background(ax, observed_grid, true_grid=None):
+    """Render navigation map with optional faded full-map underlay."""
+    import numpy as np
+
+    has_unknown = bool(np.any(observed_grid == -1.0))
+    if true_grid is not None and has_unknown:
+        ax.imshow(_nav_grid_to_rgb(true_grid), origin="upper", zorder=0, alpha=0.18)
+        ax.imshow(_nav_observed_overlay_rgba(observed_grid), origin="upper", zorder=1)
+    else:
+        ax.imshow(_nav_grid_to_rgb(observed_grid), origin="upper", zorder=0)
+
+
 class _PlottingMixin:
     """Mixin containing all matplotlib plotting methods for PlannerDashboard."""
 
@@ -267,7 +292,11 @@ class _PlottingMixin:
             except ImportError:
                 pass
         elif hasattr(self._env, 'observed_grid'):
-            ax.imshow(_nav_grid_to_rgb(self._env.observed_grid), origin='upper')
+            _render_navigation_background(
+                ax,
+                self._env.observed_grid,
+                getattr(self._env, "true_grid", None),
+            )
 
         # Dense interpolation for smooth scatter trails
         import numpy as np
@@ -656,15 +685,44 @@ class _PlottingMixin:
         fig, ax, sidebar_ax, trajectories, env_coords, grid, t_end = result
 
         # Animated navigation grid background
+        nav_true_artist = None
         nav_grid_artist = None
         nav_grid_frames: list[tuple[float, Any]] = []
-        if grid is None and self._nav_grid_snapshots:
-            nav_grid_frames = [
-                (t, _nav_grid_to_rgb(g)) for t, g in self._nav_grid_snapshots
-            ]
-            nav_grid_artist = ax.imshow(
-                nav_grid_frames[0][1], origin='upper', zorder=0,
-            )
+        if grid is None and hasattr(self._env, "observed_grid"):
+            observed_grid = self._env.observed_grid
+            true_grid = getattr(self._env, "true_grid", None)
+            has_unknown = bool(np.any(observed_grid == -1.0))
+            if true_grid is not None and has_unknown:
+                nav_true_artist = ax.imshow(
+                    _nav_grid_to_rgb(true_grid), origin="upper", zorder=0, alpha=0.18,
+                )
+
+            if self._nav_grid_snapshots:
+                if nav_true_artist is not None:
+                    nav_grid_frames = [
+                        (t, _nav_observed_overlay_rgba(g))
+                        for t, g in self._nav_grid_snapshots
+                    ]
+                else:
+                    nav_grid_frames = [
+                        (t, _nav_grid_to_rgb(g)) for t, g in self._nav_grid_snapshots
+                    ]
+                nav_grid_artist = ax.imshow(
+                    nav_grid_frames[0][1],
+                    origin="upper",
+                    zorder=1 if nav_true_artist is not None else 0,
+                )
+            else:
+                initial = (
+                    _nav_observed_overlay_rgba(observed_grid)
+                    if nav_true_artist is not None
+                    else _nav_grid_to_rgb(observed_grid)
+                )
+                nav_grid_artist = ax.imshow(
+                    initial,
+                    origin="upper",
+                    zorder=1 if nav_true_artist is not None else 0,
+                )
 
         n_frames = int(fps * duration)
         animation_times = np.linspace(0.0, t_end, n_frames)
@@ -831,6 +889,8 @@ class _PlottingMixin:
                     satisfied = current_goals.get(literal_str, False)
                     txt.set_color("green" if satisfied else "red")
             artists = markers + labels + [trail_scatter, title_artist]
+            if nav_true_artist is not None:
+                artists.append(nav_true_artist)
             if nav_grid_artist is not None:
                 artists.append(nav_grid_artist)
             artists += [txt for txt, _ in action_texts]

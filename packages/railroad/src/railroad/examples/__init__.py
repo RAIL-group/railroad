@@ -96,6 +96,12 @@ EXAMPLES: Dict[str, ExampleInfo] = {
                 "help": "Number of objects to search for",
                 "param_name": "num_objects",
             },
+            {
+                "name": "--num-robots",
+                "default": 1,
+                "help": "Number of robots",
+                "param_name": "num_robots",
+            },
         ],
     },
 }
