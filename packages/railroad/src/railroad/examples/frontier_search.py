@@ -120,8 +120,8 @@ def main(
         sensor_fov_rad=2 * np.pi,
         sensor_num_rays=181,
         max_move_action_time=10_000.0,
-        interrupt_min_new_cells=10,
-        interrupt_min_dt=100000.0,
+        interrupt_min_new_cells=30,
+        interrupt_min_dt=30.0,
     )
 
     robots = [f"robot{i + 1}" for i in range(num_robots)]
