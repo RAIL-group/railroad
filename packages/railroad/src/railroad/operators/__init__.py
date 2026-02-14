@@ -38,6 +38,10 @@ from .core import (
     # Wait operators
     construct_wait_operator,
     construct_no_op_operator,
+    # Navigation operators
+    construct_move_navigable_operator,
+    construct_observe_site_operator,
+    construct_search_at_site_operator,
 )
 
 from ._utils import (
@@ -66,6 +70,10 @@ __all__ = [
     # Wait operators
     "construct_wait_operator",
     "construct_no_op_operator",
+    # Navigation operators
+    "construct_move_navigable_operator",
+    "construct_observe_site_operator",
+    "construct_search_at_site_operator",
     # Utilities
     "Numeric",
     "numeric",

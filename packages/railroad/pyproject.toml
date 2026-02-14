@@ -37,8 +37,14 @@ procthor = [
     "scikit-image",
     "shapely>=2.1.2",
 ]
+navigation = [
+    "scipy>=1.11.0",
+    "scikit-image>=0.21.0",
+    "imageio>=2.31.0",
+    "imageio-ffmpeg>=0.4.9",
+]
 all = [
-    "railroad[test,bench,procthor]",
+    "railroad[test,bench,procthor,navigation]",
 ]
 
 [project.scripts]
