@@ -462,3 +462,158 @@ def construct_no_op_operator(no_op_time: OptNumeric, extra_cost: float = 0.0) ->
         ],
         extra_cost=extra_cost,
     )
+
+
+# =============================================================================
+# Navigation Operators (frontier/hidden-site domain)
+# =============================================================================
+
+
+def construct_move_navigable_operator(move_time: OptNumeric) -> Operator:
+    """Construct a move operator requiring (navigable ?to) with claim locking.
+
+    Suitable for unknown-space navigation where only dynamically discovered
+    locations (frontiers, unlocked hidden sites) are valid move targets.
+
+    Args:
+        move_time: Time or function to compute movement duration.
+            Function signature: (robot, from_location, to_location) -> float
+
+    Returns:
+        Operator for moving to a navigable target.
+    """
+    move_time_fn = _to_numeric(move_time)
+    return Operator(
+        name="move",
+        parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[
+            F("at ?r ?from"),
+            F("free ?r"),
+            F("navigable ?to"),
+            ~F("claimed ?to"),
+        ],
+        effects=[
+            Effect(
+                time=0,
+                resulting_fluents={F("not free ?r"), F("not at ?r ?from"), F("claimed ?to")},
+            ),
+            Effect(
+                time=(move_time_fn, ["?r", "?from", "?to"]),
+                resulting_fluents={F("free ?r"), F("at ?r ?to"), F("not claimed ?to")},
+            ),
+        ],
+    )
+
+
+def construct_observe_site_operator(
+    observe_success_prob: OptNumeric,
+    observe_time: OptNumeric,
+) -> Operator:
+    """Construct an operator to observe a hidden site from a frontier.
+
+    The robot must be at a frontier and the target site must be a candidate
+    that has not yet been unlocked. On success, the site becomes navigable.
+
+    Args:
+        observe_success_prob: Probability or function for observing the site.
+            Function signature: (robot, frontier, site) -> float
+        observe_time: Time or function for observation duration.
+            Function signature: (robot, frontier, site) -> float
+
+    Returns:
+        Operator for observing a hidden site.
+    """
+    prob_fn = _to_numeric(observe_success_prob)
+    time_fn = _to_numeric(observe_time)
+    return Operator(
+        name="observe-site",
+        parameters=[
+            ("?r", "robot"),
+            ("?frontier", "frontier"),
+            ("?site", "location"),
+        ],
+        preconditions=[
+            F("at ?r ?frontier"),
+            F("free ?r"),
+            F("candidate-site ?site"),
+            ~F("navigable ?site"),
+            ~F("looked-for-site ?frontier ?site"),
+        ],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free ?r")}),
+            Effect(
+                time=(time_fn, ["?r", "?frontier", "?site"]),
+                resulting_fluents={
+                    F("free ?r"),
+                    F("looked-for-site ?frontier ?site"),
+                },
+                prob_effects=[
+                    (
+                        (prob_fn, ["?r", "?frontier", "?site"]),
+                        [Effect(time=0, resulting_fluents={F("navigable ?site")})],
+                    ),
+                    (
+                        (1 - prob_fn, ["?r", "?frontier", "?site"]),
+                        [],
+                    ),
+                ],
+            ),
+        ],
+    )
+
+
+def construct_search_at_site_operator(
+    object_find_prob: OptNumeric,
+    search_time: OptNumeric,
+) -> Operator:
+    """Construct a search operator for hidden candidate sites.
+
+    Like the standard search operator but requires ``(candidate-site ?loc)``
+    as an additional precondition, restricting search to known hidden-object
+    candidate locations.
+
+    Args:
+        object_find_prob: Probability or function for finding the object.
+            Function signature: (robot, location, object) -> float
+        search_time: Time or function for search duration.
+            Function signature: (robot, location, object) -> float
+
+    Returns:
+        Operator for searching a candidate site.
+    """
+    prob_fn = _to_numeric(object_find_prob)
+    time_fn = _to_numeric(search_time)
+    return Operator(
+        name="search",
+        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
+        preconditions=[
+            F("at ?r ?loc"),
+            F("free ?r"),
+            F("candidate-site ?loc"),
+            ~F("revealed ?loc"),
+            ~F("searched ?loc ?obj"),
+            ~F("found ?obj"),
+            ~F("lock-search ?loc"),
+        ],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free ?r"), F("lock-search ?loc")}),
+            Effect(
+                time=(time_fn, ["?r", "?loc", "?obj"]),
+                resulting_fluents={
+                    F("free ?r"),
+                    F("searched ?loc ?obj"),
+                    F("not lock-search ?loc"),
+                },
+                prob_effects=[
+                    (
+                        (prob_fn, ["?r", "?loc", "?obj"]),
+                        [Effect(time=0, resulting_fluents={F("found ?obj"), F("at ?obj ?loc")})],
+                    ),
+                    (
+                        (1 - prob_fn, ["?r", "?loc", "?obj"]),
+                        [],
+                    ),
+                ],
+            ),
+        ],
+    )
