@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Dict, List, Set, Tuple
 
 import numpy as np
+import scipy.ndimage
 
 from railroad._bindings import Action, Fluent, GroundedEffect, State
 from railroad.core import Operator
@@ -131,6 +132,7 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
             pose,
         )
 
+        was_unobserved = self._observed_grid == UNOBSERVED_VAL
         self._observed_grid, newly_observed = mapping.insert_scan(
             occupancy_grid=self._observed_grid,
             laser_scanner_directions=self._laser_directions,
@@ -142,8 +144,24 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
             unoccupied_prob=self._config.unoccupied_prob,
         )
 
-        # Optional: correct observed cells with true-grid values
+        # Optional: correct observed cells with true-grid values.
+        # Inflate the newly scanned region by 1.7 cells to fill corners
+        # between laser rays, then apply the true grid to the expanded area.
         if self._config.correct_with_known_map:
+            scan_mask = was_unobserved & (self._observed_grid != UNOBSERVED_VAL)
+            radius = 1.7
+            kernel_size = int(1 + 2 * np.ceil(radius))
+            cind = int(np.ceil(radius))
+            y, x = np.ogrid[-cind:kernel_size - cind, -cind:kernel_size - cind]
+            kernel = (y * y + x * x <= radius * radius).astype(float)
+            inflated_scan = scipy.ndimage.convolve(
+                scan_mask.astype(float), kernel, mode="constant", cval=0,
+            ) >= 1.0
+            # Fill expanded cells that are still unobserved with true values
+            fill_mask = inflated_scan & (self._observed_grid == UNOBSERVED_VAL)
+            self._observed_grid[fill_mask] = self._true_grid[fill_mask]
+            newly_observed += int(np.count_nonzero(fill_mask))
+            # Correct all observed cells with true values
             observed_mask = self._observed_grid != UNOBSERVED_VAL
             self._observed_grid[observed_mask] = self._true_grid[observed_mask]
 
