@@ -17,7 +17,6 @@ from railroad.operators import (
     construct_move_navigable_operator,
     construct_observe_site_operator,
     construct_search_at_site_operator,
-    construct_wait_operator,
 )
 
 F = Fluent
@@ -137,7 +136,6 @@ def _make_environment(
         construct_move_navigable_operator(move_time_fn),
         construct_observe_site_operator(0.8, 1.0, container_type="container"),
         construct_search_at_site_operator(0.9, 2.0, container_type="container"),
-        construct_wait_operator(),
     ]
 
     return UnknownSpaceEnvironment(

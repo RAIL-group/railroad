@@ -79,6 +79,13 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
         self.sync_dynamic_navigable_targets()
 
     @property
+    def state(self) -> State:
+        """Assemble state, filtering just-moved fluents for real execution."""
+        s = super().state
+        filtered = {f for f in s.fluents if f.name != "just-moved"}
+        return State(s.time, filtered, list(s.upcoming_effects))
+
+    @property
     def config(self) -> NavigationConfig:
         return self._config
 
