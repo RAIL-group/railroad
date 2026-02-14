@@ -491,7 +491,6 @@ def construct_move_navigable_operator(move_time: OptNumeric) -> Operator:
             F("free ?r"),
             F("navigable ?to"),
             ~F("claimed ?to"),
-            ~F("just-moved ?r"),
         ],
         effects=[
             Effect(
@@ -500,11 +499,7 @@ def construct_move_navigable_operator(move_time: OptNumeric) -> Operator:
             ),
             Effect(
                 time=(move_time_fn, ["?r", "?from", "?to"]),
-                resulting_fluents={F("free ?r"), F("at ?r ?to"), F("not claimed ?to"), F("just-moved ?r")},
-            ),
-            Effect(
-                time=(move_time_fn + 0.1, ["?r", "?from", "?to"]),
-                resulting_fluents={~F("just-moved ?r")},
+                resulting_fluents={F("free ?r"), F("at ?r ?to"), F("not claimed ?to")},
             ),
         ],
     )

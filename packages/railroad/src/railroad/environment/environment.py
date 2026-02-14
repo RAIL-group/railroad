@@ -143,15 +143,26 @@ class Environment(ABC):
 
     def _is_valid_action(self, action: Action) -> bool:
         """Filter actions with infinite effects or invalid destinations."""
-        if any(math.isinf(eff.time) for eff in action.effects):
+        if any(math.isinf(eff.time) or math.isnan(eff.time) for eff in action.effects):
             return False
+
         parts = action.name.split()
-        if parts[0] == "move" and len(parts) > 3 and "_loc" in parts[3]:
+        if not parts:
             return False
-        if parts[0] == "place" and len(parts) > 2 and "_loc" in parts[2]:
+
+        if parts[0] == "move":
+            if len(parts) > 3 and parts[2] == parts[3]:
+                return False
+            if action.effects and all(eff.time <= 1e-9 for eff in action.effects):
+                return False
+            if len(parts) > 3 and parts[3].endswith("_loc"):
+                return False
+
+        if parts[0] == "place" and len(parts) > 2 and parts[2].endswith("_loc"):
             return False
-        if parts[0] == "search" and len(parts) > 2 and "_loc" in parts[2]:
+        if parts[0] == "search" and len(parts) > 2 and parts[2].endswith("_loc"):
             return False
+
         return True
 
     def is_goal_reached(self, goal_fluents: Collection[Fluent]) -> bool:
