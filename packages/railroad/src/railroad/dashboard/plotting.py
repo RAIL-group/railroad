@@ -10,6 +10,21 @@ if TYPE_CHECKING:
     from .dashboard import PlannerDashboard
 
 
+def _nav_grid_to_rgb(grid):
+    """Convert a navigation occupancy grid to an RGB image array.
+
+    Transposes the grid (rows -> x-axis) to match ProcTHOR's plot_grid convention.
+    """
+    import numpy as np
+
+    g = grid.T
+    rgb = np.zeros((*g.shape, 3))
+    rgb[g == -1.0] = [0.18, 0.22, 0.30]  # unobserved
+    rgb[(g >= 0.0) & (g < 0.5)] = [0.96, 0.94, 0.88]  # free
+    rgb[g >= 0.5] = [0.40, 0.18, 0.14]  # occupied
+    return rgb
+
+
 class _PlottingMixin:
     """Mixin containing all matplotlib plotting methods for PlannerDashboard."""
 
@@ -133,8 +148,25 @@ class _PlottingMixin:
 
         # Build robot trajectories (with scene expansion)
         for entity, positions in sorted(robot_entities.items()):
-            waypoints: list[tuple[float, float]] = []
-            times: list[float] = []
+            # Prefer continuous navigation positions (already obstacle-respecting)
+            nav_pos = self._nav_continuous_positions.get(entity)
+            if nav_pos:
+                waypoints = [(x, y) for _, x, y in nav_pos]
+                times = [t for t, _, _ in nav_pos]
+                # Append any finalized positions after the last continuous sample
+                # (handles upcoming-effect extrapolation at goal time)
+                last_t = times[-1] if times else -1.0
+                for t, loc_name, stored_coords in positions:
+                    if t > last_t:
+                        coord = stored_coords if stored_coords is not None else env_coords.get(loc_name)
+                        if coord is not None:
+                            waypoints.append(coord)
+                            times.append(t)
+                trajectories[entity] = (waypoints, times)
+                continue
+
+            waypoints = []
+            times = []
             for t, loc_name, stored_coords in positions:
                 if stored_coords is not None:
                     waypoints.append(stored_coords)
@@ -234,6 +266,8 @@ class _PlottingMixin:
                 plot_grid(ax, grid)
             except ImportError:
                 pass
+        elif hasattr(self._env, 'observed_grid'):
+            ax.imshow(_nav_grid_to_rgb(self._env.observed_grid), origin='upper')
 
         # Dense interpolation for smooth scatter trails
         import numpy as np
@@ -336,7 +370,7 @@ class _PlottingMixin:
                 ax.legend(fontsize=6)
 
         # Auto-scale for non-grid plots
-        if grid is None:
+        if grid is None and not hasattr(self._env, 'observed_grid'):
             ax.autoscale()
             ax.set_aspect("equal", adjustable="datalim")
 
@@ -621,6 +655,17 @@ class _PlottingMixin:
             return
         fig, ax, sidebar_ax, trajectories, env_coords, grid, t_end = result
 
+        # Animated navigation grid background
+        nav_grid_artist = None
+        nav_grid_frames: list[tuple[float, Any]] = []
+        if grid is None and self._nav_grid_snapshots:
+            nav_grid_frames = [
+                (t, _nav_grid_to_rgb(g)) for t, g in self._nav_grid_snapshots
+            ]
+            nav_grid_artist = ax.imshow(
+                nav_grid_frames[0][1], origin='upper', zorder=0,
+            )
+
         n_frames = int(fps * duration)
         animation_times = np.linspace(0.0, t_end, n_frames)
         # Prepend the final time as frame 0 so the video thumbnail/poster
@@ -738,7 +783,7 @@ class _PlottingMixin:
             fontfamily="monospace", fontsize=10,
         )
 
-        if grid is None:
+        if grid is None and nav_grid_artist is None:
             ax.autoscale()
             ax.set_aspect("equal", adjustable="datalim")
 
@@ -751,6 +796,15 @@ class _PlottingMixin:
             title_artist.set_text(
                 f"Entity Trajectories  (cost = {current_time:>{t_width}.1f} / {t_end:.1f})"
             )
+            # Update animated navigation grid
+            if nav_grid_artist is not None and nav_grid_frames:
+                latest_rgb = nav_grid_frames[0][1]
+                for snap_time, rgb in nav_grid_frames:
+                    if snap_time <= current_time:
+                        latest_rgb = rgb
+                    else:
+                        break
+                nav_grid_artist.set_data(latest_rgb)
             for idx, entity in enumerate(entity_names):
                 # Update current position marker
                 pos = marker_positions[entity]
@@ -776,9 +830,12 @@ class _PlottingMixin:
                 if literal_str is not None:
                     satisfied = current_goals.get(literal_str, False)
                     txt.set_color("green" if satisfied else "red")
-            return (markers + labels + [trail_scatter, title_artist]
-                    + [txt for txt, _ in action_texts]
-                    + [txt for txt, _ in goal_text_artists])
+            artists = markers + labels + [trail_scatter, title_artist]
+            if nav_grid_artist is not None:
+                artists.append(nav_grid_artist)
+            artists += [txt for txt, _ in action_texts]
+            artists += [txt for txt, _ in goal_text_artists]
+            return artists
 
         anim = FuncAnimation(fig, _update, frames=n_frames, blit=False, interval=1000 / fps)
 

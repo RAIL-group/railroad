@@ -48,6 +48,8 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
         self._hidden_sites: Dict[str, Tuple[int, int]] = dict(hidden_sites or {})
         self._frontiers: Dict[str, Frontier] = {}
         self._frames: list[np.ndarray] = []
+        self._grid_generation: int = 0  # bumped when observed_grid changes
+        self._cost_grid_cache: Dict[str, Tuple[int, np.ndarray]] = {}  # robot -> (gen, cost_grid)
 
         # Interrupt tracking
         self._interrupt_requested = False
@@ -139,6 +141,8 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
             self._observed_grid[observed_mask] = self._true_grid[observed_mask]
 
         self._new_cells_since_interrupt += newly_observed
+        if newly_observed > 0:
+            self._grid_generation += 1
 
         # Check interrupt thresholds
         if (
@@ -296,13 +300,46 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
             return np.array([[start[0], end[0]], [start[1], end[1]]])
         return path
 
+    def _get_cost_grid(self, loc: str) -> np.ndarray | None:
+        """Return a cached Dijkstra cost grid from *loc*, recomputing if stale."""
+        registry = self._location_registry
+        if registry is None:
+            return None
+        coords = registry.get(loc)
+        if coords is None:
+            return None
+
+        cached = self._cost_grid_cache.get(loc)
+        if cached is not None and cached[0] == self._grid_generation:
+            return cached[1]
+
+        start = (int(round(float(coords[0]))), int(round(float(coords[1]))))
+        cost_grid: np.ndarray = pathing.compute_cost_grid_from_position(  # type: ignore[assignment]
+            self._observed_grid, start=[start[0], start[1]], only_return_cost_grid=True,
+        )
+        self._cost_grid_cache[loc] = (self._grid_generation, cost_grid)
+        return cost_grid
+
     def estimate_move_time(self, robot: str, loc_from: str, loc_to: str) -> float:
-        """Estimate move duration based on observed-grid path length."""
-        path = self.compute_move_path(loc_from, loc_to)
-        length = pathing.path_total_length(path)
-        if length <= 0:
+        """Estimate move duration via cached Dijkstra cost grid lookup."""
+        registry = self._location_registry
+        if registry is None:
             return 0.01
-        return length / self._config.speed_cells_per_sec
+        end_coords = registry.get(loc_to)
+        if end_coords is None:
+            return 0.01
+
+        cost_grid = self._get_cost_grid(loc_from)
+        if cost_grid is None:
+            return 0.01
+
+        r, c = int(round(float(end_coords[0]))), int(round(float(end_coords[1])))
+        r = max(0, min(r, cost_grid.shape[0] - 1))
+        c = max(0, min(c, cost_grid.shape[1] - 1))
+        cost = float(cost_grid[r, c])
+        if np.isinf(cost) or cost <= 0:
+            return 0.01
+        return cost / self._config.speed_cells_per_sec
 
     def is_cell_observed(self, row: int, col: int) -> bool:
         """Check whether a grid cell has been observed."""

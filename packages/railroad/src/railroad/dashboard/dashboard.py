@@ -117,6 +117,8 @@ class PlannerDashboard(_PlottingMixin):
         # Trajectory tracking: entity_name -> [(time, location_name, (x,y) or None), ...]
         self._entity_positions: dict[str, list[tuple[float, str, tuple[float, float] | None]]] = {}
         self._goal_time: float | None = None
+        self._nav_grid_snapshots: list[tuple[float, Any]] = []
+        self._nav_continuous_positions: dict[str, list[tuple[float, float, float]]] = {}
 
         # Root layout
         self.layout = self._make_layout()
@@ -771,6 +773,41 @@ class PlannerDashboard(_PlottingMixin):
                 if not positions or positions[-1][1] != location_name or positions[-1][0] != state.time:
                     positions.append((state.time, location_name, coords))
 
+    def make_act_callback(self) -> Callable[[], None]:
+        """Create a callback for ``env.act()`` that captures intermediate state.
+
+        For navigation environments, this records robot poses (for smooth,
+        obstacle-respecting trajectories) and observed-grid snapshots (for
+        animated grid evolution in videos) at every act-loop time step.
+
+        Returns a reusable callback — create it once and pass it to every
+        ``env.act(action, loop_callback_fn=callback)`` call.
+        """
+        last_snapshot_time: list[float] = [float('-inf')]
+        min_snapshot_interval = 0.5  # seconds of sim-time between grid copies
+
+        def _callback() -> None:
+            env = self._env
+            t = env.time  # type: ignore[union-attr]
+
+            # Capture robot poses (cheap — just a few tuples per call)
+            robot_poses = getattr(env, 'robot_poses', None)
+            if robot_poses is not None:
+                for robot, pose in robot_poses.items():
+                    if robot not in self._nav_continuous_positions:
+                        self._nav_continuous_positions[robot] = []
+                    self._nav_continuous_positions[robot].append(
+                        (t, pose.x, pose.y)
+                    )
+
+            # Capture grid snapshot (throttled to limit memory)
+            observed_grid = getattr(env, 'observed_grid', None)
+            if observed_grid is not None and (t - last_snapshot_time[0]) >= min_snapshot_interval:
+                self._nav_grid_snapshots.append((t, observed_grid.copy()))
+                last_snapshot_time[0] = t
+
+        return _callback
+
     def _do_update(
         self,
         state: State,
@@ -789,6 +826,22 @@ class PlannerDashboard(_PlottingMixin):
                 self.known_robots.add(robot_name)
 
         self._record_entity_positions(state)
+
+        # Capture navigation state (robot poses + grid) for plotting.
+        # The act callback captures intermediate states; this captures
+        # the initial state (from __enter__) and post-action states.
+        robot_poses = getattr(self._env, 'robot_poses', None)
+        if robot_poses is not None:
+            for robot, pose in robot_poses.items():
+                if robot not in self._nav_continuous_positions:
+                    self._nav_continuous_positions[robot] = []
+                self._nav_continuous_positions[robot].append(
+                    (state.time, pose.x, pose.y)
+                )
+
+        observed_grid = getattr(self._env, 'observed_grid', None)
+        if observed_grid is not None:
+            self._nav_grid_snapshots.append((state.time, observed_grid.copy()))
 
         # Use best branch progress for OR goals
         achieved, total, label = self._get_best_branch_progress(state)

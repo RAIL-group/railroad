@@ -88,8 +88,8 @@ def main(
 
     operators = [
         construct_move_navigable_operator(move_time_fn),
-        construct_observe_site_operator(observe_success_prob=0.8, observe_time=1.0),
-        construct_search_at_site_operator(object_find_prob_fn, search_time=2.0),
+        construct_observe_site_operator(observe_success_prob=0.8, observe_time=1.0, container_type="container"),
+        construct_search_at_site_operator(object_find_prob_fn, search_time=2.0, container_type="container"),
         construct_wait_operator(),
     ]
 
@@ -98,8 +98,6 @@ def main(
     # ------------------------------------------------------------------
 
     config = NavigationConfig(
-        sensor_range=12.0,
-        sensor_num_rays=181,
         interrupt_min_new_cells=100000,   # effectively disable interrupt
         interrupt_min_dt=100000.0,
     )
@@ -114,13 +112,14 @@ def main(
         F("at robot1 start"),
         F("free robot1"),
         F("revealed start"),
-    } | {F(f"candidate-site {s}") for s in hidden_sites}
+    }
 
     env = UnknownSpaceEnvironment(
         state=State(0.0, fluents, []),
         objects_by_type={
             "robot": {"robot1"},
             "location": {"start"} | set(hidden_sites.keys()),
+            "container": set(hidden_sites.keys()),
             "frontier": set(),
             "object": set(target_objects),
         },
@@ -146,6 +145,7 @@ def main(
     max_iterations = 80
 
     with PlannerDashboard(goal, env, fluent_filter=fluent_filter) as dashboard:
+        act_callback = dashboard.make_act_callback()
         for iteration in range(max_iterations):
             if goal.evaluate(env.state.fluents):
                 dashboard.console.print("[green]All objects found![/green]")
@@ -170,7 +170,7 @@ def main(
                 break
 
             action = get_action_by_name(actions, action_name)
-            env.act(action)
+            env.act(action, loop_callback_fn=act_callback)
             dashboard.update(mcts, action_name)
 
         dashboard.show_plots(
