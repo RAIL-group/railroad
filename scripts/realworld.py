@@ -14,6 +14,7 @@ from railroad.core import Fluent as F, State, get_action_by_name
 from railroad.planner import MCTSPlanner
 from railroad.experimental.environment import BaseEnvironment, SkillStatus, EnvironmentInterface as PlanningLoop
 from railroad.operators import construct_move_visited_operator
+import argparse
 
 STATUS_MAP = {'moving': SkillStatus.RUNNING, 'reached': SkillStatus.DONE, 'stopped': SkillStatus.IDLE}
 
@@ -52,7 +53,7 @@ class RealEnvironment(BaseEnvironment):
         return SkillStatus.DONE
 
     def get_move_cost_fn(self):
-        locations = set(self.locations) - {'r1_loc', 'r2_loc'}
+        locations = set(self.locations) - {'v4w1_loc', 'v4w2_loc'}
         location_distances = {}
         for loc1, loc2 in itertools.combinations(locations, 2):
             distance = self._get_distance(loc1, loc2)
@@ -66,9 +67,11 @@ class RealEnvironment(BaseEnvironment):
         return get_move_time
 
     def _get_distance(self, location1, location2):
-        if location1 == 'r1_loc':
+        if location2 == 'v4w1_loc' or location2 == 'v4w2_loc':
             location1, location2 = location2, location1
-        request = roslibpy.ServiceRequest({'to_name': location1, 'from_name': location2})
+        if location1.endswith('_loc') and location2.endswith('_loc'):
+            return float('inf')
+        request = roslibpy.ServiceRequest({'to_name': location2, 'from_name': location1})
         result = self._get_distance_service.call(request)
         if result['ok']:
             return result['distance']
@@ -101,25 +104,38 @@ class RealEnvironment(BaseEnvironment):
 
 
 if __name__ == '__main__':
-    # host = 'localhost'
-    host = '192.168.1.71'
-    client = roslibpy.Ros(host=host, port=9090)
+    parser = argparse.ArgumentParser(description='Real-world robot planning demonstration.')
+    parser.add_argument('--host', type=str, default='0.0.0.0', help='ROS bridge host')
+    parser.add_argument('--port', type=int, default=9090, help='ROS bridge port')
+    args = parser.parse_args()
+
+    print(f"Connecting to ROS bridge at {args.host}:{args.port}...")
+    client = roslibpy.Ros(host=args.host, port=args.port)
     client.run()
     env = RealEnvironment(client)
     print("Locations in environment:", env.locations)
-    robot_locations = {"r1": "r1_loc", "r2": "r2_loc"}
+    # test move cost fn:
+    robot_locations = {"v4w1": "v4w1_loc", "v4w2": "v4w2_loc"}
+    move_cost_fn = env.get_move_cost_fn()
+    for loc1, loc2 in itertools.combinations(env.locations, 2):
+        print(f"Distance from {loc1} to {loc2}: {move_cost_fn('v4w1', loc1, loc2)}")
+    for robot_name, r_loc in robot_locations.items():
+        for loc in env.locations:
+            if loc != r_loc:
+                print(f"Computing distance from {r_loc} to {loc}...")
+                print(f"Distance from {r_loc} to {loc}: {move_cost_fn(robot_name, r_loc, loc)}")
+
     objects_by_type = {
         "robot": robot_locations.keys(),
-        # "robot": {"r1"},
         "location": env.locations,
     }
     initial_state = State(
         time=0.0,
         fluents={
-            F("at", "r1", "r1_loc"), F('visited', 'r1_loc'),
-            F("at", "r2", "r2_loc"), F('visited', 'r2_loc'),
-            F("free", "r1"),
-            F("free", "r2"),
+            F("at", "v4w1", "v4w1_loc"), F('visited', 'v4w1_loc'),
+            F("at", "v4w2", "v4w2_loc"), F('visited', 'v4w2_loc'),
+            F("free", "v4w1"),
+            F("free", "v4w2"),
         },
     )
 
@@ -128,9 +144,11 @@ if __name__ == '__main__':
     # Goal: Visit all target locations
     # Using Goal API: reduce(and_, [...]) creates an AndGoal
     # goal = reduce(and_, [F("visited t1"), F("visited t2"), F("visited t3")])
-    goal = reduce(and_, (F("visited", loc) for loc in env.locations if loc not in {"r1_loc", "r2_loc"}))
+    goal = reduce(and_, (F("visited", loc) for loc in env.locations if loc not in {"v4w1_loc", "v4w2_loc"}))
     print(f"Goal: {goal}")
+
     actions_taken = []
+    input("Press Enter to start planning...")
     for _ in range(10):
         if goal.evaluate(planning_loop.state.fluents):
             print("Goal reached!")
@@ -138,11 +156,11 @@ if __name__ == '__main__':
 
         all_actions = planning_loop.get_actions()
         mcts = MCTSPlanner(all_actions)
-        action_name = mcts(planning_loop.state, goal, max_iterations=20000, c=10)
+        action_name = mcts(planning_loop.state, goal, max_iterations=30000, c=100)
         if action_name != 'NONE':
             action = get_action_by_name(all_actions, action_name)
             print(action_name)
-            planning_loop.advance(action)
+            planning_loop.advance(action, do_interrupt=False)
             print(planning_loop.state.fluents)
             actions_taken.append(action_name)
         else:
