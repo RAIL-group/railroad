@@ -322,72 +322,8 @@ def get_cost_and_path_theta(
     return _theta_star(trav_costs, start, end, heuristic_grid=heuristic_grid)
 
 
-def compute_cost_grid_from_position(
-    occupancy_grid: np.ndarray,
-    start: Union[List[float], np.ndarray],
-    use_soft_cost: bool = False,
-    obstacle_cost: float = -1,
-    ends: Union[List[Tuple[int, int]], None] = None,
-    only_return_cost_grid: bool = False,
-) -> Union[np.ndarray, Tuple[np.ndarray, Callable]]:
-    """Get the cost grid and planning function for a grid/start position.
-
-    Uses Dijkstra's algorithm via skimage.graph.MCP_Geometric.
-
-    Args:
-        occupancy_grid: Input grid over which cost is computed
-        start: Location of the start position for cost computation
-        use_soft_cost: Whether to use soft inflation costs
-        obstacle_cost: Cost assigned to obstacles
-        ends: Optional list of end positions
-        only_return_cost_grid: If True, only return the cost grid
-
-    Returns:
-        If only_return_cost_grid is True:
-            cost_grid: The cost of traveling from start to other positions
-        Otherwise:
-            Tuple of (cost_grid, get_path function)
-    """
-    start_arr = np.array(start)
-    if len(start_arr.shape) > 1:
-        starts = start_arr.T
-    else:
-        starts = [start]
-
-    if use_soft_cost:
-        scale_factor = 50
-        input_cost_grid = np.ones(occupancy_grid.shape) * scale_factor
-        g1 = inflate_grid(occupancy_grid, 1.5)
-        g2 = inflate_grid(g1, 1.0)
-        g3 = inflate_grid(g2, 1.5)
-        soft_cost_grid = 8 * g1 + 5 * g2 + g3
-        input_cost_grid += soft_cost_grid
-    else:
-        scale_factor = 1
-        input_cost_grid = np.ones(occupancy_grid.shape)
-
-    input_cost_grid[occupancy_grid >= OBSTACLE_THRESHOLD] = obstacle_cost
-
-    mcp = skimage.graph.MCP_Geometric(input_cost_grid)
-    if ends is None:
-        cost_grid = mcp.find_costs(starts=starts)[0] / (1.0 * scale_factor)
-    else:
-        cost_grid = mcp.find_costs(starts=starts, ends=ends)[0] / (1.0 * scale_factor)
-
-    if only_return_cost_grid:
-        return cost_grid
-
-    def get_path(target: Tuple[int, int]) -> Tuple[bool, np.ndarray]:
-        try:
-            path_list = mcp.traceback(target)
-        except ValueError:
-            return False, np.array([[]])
-        path = np.zeros((2, len(path_list)))
-        for ii in range(len(path_list)):
-            path[:, ii] = path_list[ii]
-        return True, path.astype(int)
-
-    return cost_grid, get_path
+# Re-export from canonical location for backward compatibility.
+from railroad.environment.navigation.pathing import compute_cost_grid_from_position as compute_cost_grid_from_position  # noqa: F401
 
 
 def get_cost(grid: np.ndarray, robot_pose: Tuple[int, int], end: Tuple[int, int]) -> float:

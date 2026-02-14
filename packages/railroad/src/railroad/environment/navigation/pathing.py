@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import heapq
 import math
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Tuple, Union
 
 import numpy as np
 import scipy.ndimage
+import skimage.graph
 
 from .constants import COLLISION_VAL, OBSTACLE_THRESHOLD, UNOBSERVED_VAL
 
@@ -276,3 +277,71 @@ def get_trajectory(
         for j in range(start_idx, path.shape[1]):
             trajectory.append((float(path[0, j]), float(path[1, j])))
     return trajectory
+
+
+def compute_cost_grid_from_position(
+    occupancy_grid: np.ndarray,
+    start: Union[List[float], np.ndarray],
+    use_soft_cost: bool = False,
+    obstacle_cost: float = -1,
+    ends: Union[List[Tuple[int, int]], None] = None,
+    only_return_cost_grid: bool = False,
+) -> Union[np.ndarray, Tuple[np.ndarray, Callable]]:
+    """Compute a cost grid (distances from *start* to every cell) via Dijkstra.
+
+    Uses ``skimage.graph.MCP_Geometric`` for efficient single-source
+    shortest-path computation over the occupancy grid.
+
+    Args:
+        occupancy_grid: Input grid over which cost is computed.
+        start: Source position ``(row, col)`` or array of positions.
+        use_soft_cost: Whether to use soft inflation costs.
+        obstacle_cost: Cost assigned to obstacles (use -1 for impassable).
+        ends: Optional list of end positions for early termination.
+        only_return_cost_grid: If True, only return the cost grid.
+
+    Returns:
+        If *only_return_cost_grid* is True, the cost grid (ndarray).
+        Otherwise ``(cost_grid, get_path)`` where *get_path(target)*
+        returns ``(success, 2xN_path)``.
+    """
+    start_arr = np.array(start)
+    if len(start_arr.shape) > 1:
+        starts = start_arr.T
+    else:
+        starts = [start]
+
+    if use_soft_cost:
+        scale_factor = 50
+        input_cost_grid = np.ones(occupancy_grid.shape) * scale_factor
+        g1 = inflate_grid(occupancy_grid, 1.5)
+        g2 = inflate_grid(g1, 1.0)
+        g3 = inflate_grid(g2, 1.5)
+        soft_cost_grid = 8 * g1 + 5 * g2 + g3
+        input_cost_grid += soft_cost_grid
+    else:
+        scale_factor = 1
+        input_cost_grid = np.ones(occupancy_grid.shape)
+
+    input_cost_grid[occupancy_grid >= OBSTACLE_THRESHOLD] = obstacle_cost
+
+    mcp = skimage.graph.MCP_Geometric(input_cost_grid)
+    if ends is None:
+        cost_grid = mcp.find_costs(starts=starts)[0] / (1.0 * scale_factor)
+    else:
+        cost_grid = mcp.find_costs(starts=starts, ends=ends)[0] / (1.0 * scale_factor)
+
+    if only_return_cost_grid:
+        return cost_grid
+
+    def get_path(target: Tuple[int, int]) -> Tuple[bool, np.ndarray]:
+        try:
+            path_list = mcp.traceback(target)
+        except ValueError:
+            return False, np.array([[]])
+        path = np.zeros((2, len(path_list)))
+        for ii in range(len(path_list)):
+            path[:, ii] = path_list[ii]
+        return True, path.astype(int)
+
+    return cost_grid, get_path

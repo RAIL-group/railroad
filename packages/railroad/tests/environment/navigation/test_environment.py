@@ -102,6 +102,7 @@ def _make_environment(
         "robot": robots,
         "location": {"start"} | ({"start2"} if two_robots else set())
                     | set(hidden_sites.keys()),
+        "container": set(hidden_sites.keys()),
         "frontier": set(),
         "object": {"Mug", "Knife"},
     }
@@ -117,9 +118,6 @@ def _make_environment(
         F("at robot1 start"),
         F("free robot1"),
         F("revealed start"),
-        F("candidate-site stash_east"),
-        F("candidate-site stash_north"),
-        F("candidate-site stash_west"),
     }
     if two_robots:
         fluents |= {
@@ -137,8 +135,8 @@ def _make_environment(
 
     operators = [
         construct_move_navigable_operator(move_time_fn),
-        construct_observe_site_operator(0.8, 1.0),
-        construct_search_at_site_operator(0.9, 2.0),
+        construct_observe_site_operator(0.8, 1.0, container_type="container"),
+        construct_search_at_site_operator(0.9, 2.0, container_type="container"),
         construct_wait_operator(),
     ]
 
