@@ -230,6 +230,125 @@ def test_move_completes_with_high_thresholds():
 
 
 # ---------------------------------------------------------------------------
+# Regression: Unreachable moves must be filtered (no obstacle-crossing fallback)
+# ---------------------------------------------------------------------------
+
+
+def test_unreachable_move_is_filtered_out():
+    """Moves to unreachable destinations should not be instantiated."""
+    # Two disconnected free regions separated by walls.
+    true_grid = COLLISION_VAL * np.ones((14, 14))
+    true_grid[1:13, 1:5] = FREE_VAL
+    true_grid[1:13, 9:13] = FREE_VAL
+
+    location_registry = LocationRegistry(
+        {
+            "start": np.array([6, 2], dtype=float),
+            "goal": np.array([6, 10], dtype=float),
+        }
+    )
+
+    env_ref: list[UnknownSpaceEnvironment | None] = [None]
+
+    def move_time_fn(robot: str, loc_from: str, loc_to: str) -> float:
+        assert env_ref[0] is not None
+        return env_ref[0].estimate_move_time(robot, loc_from, loc_to)
+
+    operators = [construct_move_navigable_operator(move_time_fn)]
+
+    env = UnknownSpaceEnvironment(
+        state=State(0.0, {F("at robot1 start"), F("free robot1"), F("navigable goal")}, []),
+        objects_by_type={
+            "robot": {"robot1"},
+            "location": {"start", "goal"},
+            "frontier": set(),
+            "object": set(),
+        },
+        operators=operators,
+        true_grid=true_grid,
+        robot_initial_poses={"robot1": Pose(6.0, 2.0, 0.0)},
+        location_registry=location_registry,
+        hidden_sites={},
+        config=NavigationConfig(
+            sensor_range=2.0,
+            correct_with_known_map=False,
+            interrupt_min_new_cells=100000,
+            interrupt_min_dt=100000.0,
+        ),
+    )
+    env_ref[0] = env
+
+    # Keep the target navigable for this targeted move-validity test.
+    env.fluents.add(F("navigable goal"))
+
+    actions = env.get_actions()
+    move_names = {a.name for a in actions}
+    assert "move robot1 start goal" not in move_names
+
+
+# ---------------------------------------------------------------------------
+# Regression: move-time cache must respect location coordinate updates
+# ---------------------------------------------------------------------------
+
+
+def test_move_time_cache_updates_when_location_moves():
+    """Updating location coordinates should invalidate cached move-time grid."""
+    true_grid = FREE_VAL * np.ones((24, 24))
+    true_grid[0, :] = COLLISION_VAL
+    true_grid[-1, :] = COLLISION_VAL
+    true_grid[:, 0] = COLLISION_VAL
+    true_grid[:, -1] = COLLISION_VAL
+
+    location_registry = LocationRegistry(
+        {
+            "robot1_loc": np.array([2, 2], dtype=float),
+            "goal": np.array([20, 20], dtype=float),
+        }
+    )
+
+    env_ref: list[UnknownSpaceEnvironment | None] = [None]
+
+    def move_time_fn(robot: str, loc_from: str, loc_to: str) -> float:
+        assert env_ref[0] is not None
+        return env_ref[0].estimate_move_time(robot, loc_from, loc_to)
+
+    env = UnknownSpaceEnvironment(
+        state=State(
+            0.0,
+            {F("at robot1 robot1_loc"), F("free robot1"), F("navigable goal")},
+            [],
+        ),
+        objects_by_type={
+            "robot": {"robot1"},
+            "location": {"robot1_loc", "goal"},
+            "frontier": set(),
+            "object": set(),
+        },
+        operators=[construct_move_navigable_operator(move_time_fn)],
+        true_grid=true_grid,
+        robot_initial_poses={"robot1": Pose(2.0, 2.0, 0.0)},
+        location_registry=location_registry,
+        hidden_sites={},
+        config=NavigationConfig(
+            sensor_range=2.0,
+            correct_with_known_map=False,
+            interrupt_min_new_cells=100000,
+            interrupt_min_dt=100000.0,
+        ),
+    )
+    env_ref[0] = env
+
+    # Use a fully-known map to isolate cache behavior from observations.
+    env._observed_grid[:] = true_grid
+
+    t1 = env.estimate_move_time("robot1", "robot1_loc", "goal")
+    location_registry.register("robot1_loc", np.array([10, 10], dtype=float))
+    t2 = env.estimate_move_time("robot1", "robot1_loc", "goal")
+
+    assert t1 != t2, "Move-time cache should refresh after location coordinate changes"
+
+
+# ---------------------------------------------------------------------------
 # Test 6: Hidden site becomes navigable after cell observed
 # ---------------------------------------------------------------------------
 

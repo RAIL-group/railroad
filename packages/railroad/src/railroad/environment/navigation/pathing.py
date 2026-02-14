@@ -284,6 +284,7 @@ def compute_cost_grid_from_position(
     start: Union[List[float], np.ndarray],
     use_soft_cost: bool = False,
     obstacle_cost: float = -1,
+    unknown_as_obstacle: bool = True,
     ends: Union[List[Tuple[int, int]], None] = None,
     only_return_cost_grid: bool = False,
 ) -> Union[np.ndarray, Tuple[np.ndarray, Callable]]:
@@ -297,6 +298,7 @@ def compute_cost_grid_from_position(
         start: Source position ``(row, col)`` or array of positions.
         use_soft_cost: Whether to use soft inflation costs.
         obstacle_cost: Cost assigned to obstacles (use -1 for impassable).
+        unknown_as_obstacle: If True, treat UNOBSERVED cells as impassable.
         ends: Optional list of end positions for early termination.
         only_return_cost_grid: If True, only return the cost grid.
 
@@ -323,7 +325,10 @@ def compute_cost_grid_from_position(
         scale_factor = 1
         input_cost_grid = np.ones(occupancy_grid.shape)
 
-    input_cost_grid[occupancy_grid >= OBSTACLE_THRESHOLD] = obstacle_cost
+    obstacle_mask = occupancy_grid >= OBSTACLE_THRESHOLD
+    if unknown_as_obstacle:
+        obstacle_mask = np.logical_or(obstacle_mask, occupancy_grid == UNOBSERVED_VAL)
+    input_cost_grid[obstacle_mask] = obstacle_cost
 
     mcp = skimage.graph.MCP_Geometric(input_cost_grid)
     if ends is None:

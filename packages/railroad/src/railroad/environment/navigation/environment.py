@@ -50,7 +50,7 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
         self._frontiers: Dict[str, Frontier] = {}
         self._frames: list[np.ndarray] = []
         self._grid_generation: int = 0  # bumped when observed_grid changes
-        self._cost_grid_cache: Dict[str, Tuple[int, np.ndarray]] = {}  # robot -> (gen, cost_grid)
+        self._cost_grid_cache: Dict[str, Tuple[int, int, int, np.ndarray]] = {}
 
         # Interrupt tracking
         self._interrupt_requested = False
@@ -81,10 +81,8 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
 
     @property
     def state(self) -> State:
-        """Assemble state, filtering just-moved fluents for real execution."""
-        s = super().state
-        filtered = {f for f in s.fluents if f.name != "just-moved"}
-        return State(s.time, filtered, list(s.upcoming_effects))
+        """Assemble current state from fluents and active skill effects."""
+        return super().state
 
     @property
     def config(self) -> NavigationConfig:
@@ -311,21 +309,18 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
         """Compute 2xN grid path between two symbolic locations."""
         registry = self._location_registry
         if registry is None:
-            return np.array([[0], [0]])
+            return np.array([[]], dtype=int)
         start_coords = registry.get(loc_from)
         end_coords = registry.get(loc_to)
         if start_coords is None or end_coords is None:
-            return np.array([[0], [0]])
+            return np.array([[]], dtype=int)
 
         start = (int(round(float(start_coords[0]))), int(round(float(start_coords[1]))))
         end = (int(round(float(end_coords[0]))), int(round(float(end_coords[1]))))
         _cost, path = pathing.get_cost_and_path(self._observed_grid, start, end)
-        if path.size == 0:
-            # Fallback: straight line
-            return np.array([[start[0], end[0]], [start[1], end[1]]])
         return path
 
-    def _get_cost_grid(self, loc: str) -> np.ndarray | None:
+    def _get_cost_grid(self, loc: str) -> tuple[np.ndarray, tuple[int, int]] | None:
         """Return a cached Dijkstra cost grid from *loc*, recomputing if stale."""
         registry = self._location_registry
         if registry is None:
@@ -334,37 +329,53 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
         if coords is None:
             return None
 
-        cached = self._cost_grid_cache.get(loc)
-        if cached is not None and cached[0] == self._grid_generation:
-            return cached[1]
-
         start = (int(round(float(coords[0]))), int(round(float(coords[1]))))
+        cached = self._cost_grid_cache.get(loc)
+        if (
+            cached is not None
+            and cached[0] == self._grid_generation
+            and cached[1] == start[0]
+            and cached[2] == start[1]
+        ):
+            return cached[3], start
+
         cost_grid: np.ndarray = pathing.compute_cost_grid_from_position(  # type: ignore[assignment]
-            self._observed_grid, start=[start[0], start[1]], only_return_cost_grid=True,
+            self._observed_grid,
+            start=[start[0], start[1]],
+            unknown_as_obstacle=True,
+            only_return_cost_grid=True,
         )
-        self._cost_grid_cache[loc] = (self._grid_generation, cost_grid)
-        return cost_grid
+        self._cost_grid_cache[loc] = (
+            self._grid_generation,
+            start[0],
+            start[1],
+            cost_grid,
+        )
+        return cost_grid, start
 
     def estimate_move_time(self, robot: str, loc_from: str, loc_to: str) -> float:
         """Estimate move duration via cached Dijkstra cost grid lookup."""
         registry = self._location_registry
         if registry is None:
-            return 0.01
+            return float("inf")
         end_coords = registry.get(loc_to)
         if end_coords is None:
-            return 0.01
+            return float("inf")
 
-        cost_grid = self._get_cost_grid(loc_from)
-        if cost_grid is None:
-            return 0.01
+        cost_grid_payload = self._get_cost_grid(loc_from)
+        if cost_grid_payload is None:
+            return float("inf")
+        cost_grid, start = cost_grid_payload
 
         r, c = int(round(float(end_coords[0]))), int(round(float(end_coords[1])))
         r = max(0, min(r, cost_grid.shape[0] - 1))
         c = max(0, min(c, cost_grid.shape[1] - 1))
         cost = float(cost_grid[r, c])
-        if np.isinf(cost) or cost <= 0:
+        if np.isinf(cost) or np.isnan(cost):
+            return float("inf")
+        if (r, c) == start:
             return 0.01
-        return cost / self._config.speed_cells_per_sec
+        return max(0.01, cost / self._config.speed_cells_per_sec)
 
     def is_cell_observed(self, row: int, col: int) -> bool:
         """Check whether a grid cell has been observed."""
@@ -388,6 +399,23 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
     # ------------------------------------------------------------------
     # Skill creation (override SymbolicEnvironment)
     # ------------------------------------------------------------------
+
+    def _is_valid_action(self, action: Action) -> bool:
+        """Filter base-invalid actions and oversized move durations."""
+        if not super()._is_valid_action(action):
+            return False
+
+        parts = action.name.split()
+        if parts and parts[0] == "move":
+            delayed_times = [eff.time for eff in action.effects if eff.time > 1e-9]
+            if delayed_times and min(delayed_times) > self._config.max_move_action_time:
+                # Only filter from the robot's currently dispatchable source.
+                # Keeping high-cost non-current actions preserves relaxed
+                # reachability in heuristic computation.
+                if len(parts) > 2 and Fluent("at", parts[1], parts[2]) in self._fluents:
+                    return False
+
+        return True
 
     def create_skill(self, action: Action, time: float) -> ActiveSkill:
         """Create skill; use NavigationMoveSkill for move actions."""

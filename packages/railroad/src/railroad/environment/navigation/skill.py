@@ -48,6 +48,10 @@ class NavigationMoveSkill:
 
         # Build path from observed grid
         self._path = env.compute_move_path(self._move_origin, self._move_destination)
+        if self._path.size == 0 or self._path.shape[0] != 2:
+            raise ValueError(
+                f"No traversable path for action: {action.name}"
+            )
         self._path_length = pathing.path_total_length(self._path)
 
         # Compute move duration from path
@@ -57,13 +61,16 @@ class NavigationMoveSkill:
 
         # Build effect timeline — rewrite move_time effects to use actual path duration
         self._upcoming_effects: List[Tuple[float, GroundedEffect]] = []
+        delayed_effect_times = [eff.time for eff in action.effects if eff.time > 1e-9]
+        base_delay = min(delayed_effect_times) if delayed_effect_times else None
         for eff in action.effects:
             if eff.time <= 1e-9:
                 # Immediate effect at start time
                 self._upcoming_effects.append((start_time, eff))
             else:
-                # Delayed effect — use our computed end time
-                self._upcoming_effects.append((self._end_time, eff))
+                # Preserve offsets after the first delayed move effect.
+                offset = 0.0 if base_delay is None else (eff.time - base_delay)
+                self._upcoming_effects.append((self._end_time + offset, eff))
         self._upcoming_effects.sort(key=lambda el: el[0])
 
         # Sensing state
@@ -129,7 +136,8 @@ class NavigationMoveSkill:
         # Perform sensing at regular intervals
         while self._last_sense_time + self._sensor_dt <= time + 1e-9:
             self._last_sense_time += self._sensor_dt
-            nav_env.observe_from_pose(self._robot, pose, self._last_sense_time)
+            sense_pose = self._interpolate_pose(self._last_sense_time)
+            nav_env.observe_from_pose(self._robot, sense_pose, self._last_sense_time)
 
         # Apply due effects
         due_effects = [

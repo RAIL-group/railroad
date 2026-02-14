@@ -51,7 +51,7 @@ class Frontier(NamedTuple):
 class NavigationConfig:
     """Runtime configuration for unknown-space navigation."""
 
-    sensor_range: float = 120.0
+    sensor_range: float = 60.0
     sensor_fov_rad: float = 2 * math.pi
     sensor_num_rays: int = 181
     sensor_dt: float = 0.08
@@ -61,5 +61,6 @@ class NavigationConfig:
     connect_neighbor_distance: int = 2
     interrupt_min_new_cells: int = 20
     interrupt_min_dt: float = 1.0
+    max_move_action_time: float = float("inf")
     correct_with_known_map: bool = True
     record_frames: bool = True

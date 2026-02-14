@@ -74,10 +74,23 @@ def main(
 
     # Use a ref so the move-time closure can access env after construction
     env_ref: list[UnknownSpaceEnvironment | None] = [None]
+    unreachable_move_penalty = 1_000_000.0
 
     def move_time_fn(robot: str, loc_from: str, loc_to: str) -> float:
         if env_ref[0] is not None:
-            return env_ref[0].estimate_move_time(robot, loc_from, loc_to)
+            move_time = env_ref[0].estimate_move_time(robot, loc_from, loc_to)
+            if np.isinf(move_time):
+                if F("at", robot, loc_from) in env_ref[0].fluents:
+                    return unreachable_move_penalty
+                registry = env_ref[0].location_registry
+                speed = env_ref[0].config.speed_cells_per_sec
+                if registry is not None:
+                    c_from = registry.get(loc_from)
+                    c_to = registry.get(loc_to)
+                    if c_from is not None and c_to is not None:
+                        return float(np.linalg.norm(c_to - c_from)) / max(speed, 1e-6)
+                return 5.0
+            return move_time
         return 5.0
 
     def object_find_prob_fn(robot: str, location: str, obj: str) -> float:
@@ -98,6 +111,10 @@ def main(
     # ------------------------------------------------------------------
 
     config = NavigationConfig(
+        sensor_range=60.0,
+        sensor_fov_rad=2 * np.pi,
+        sensor_num_rays=181,
+        max_move_action_time=10_000.0,
         interrupt_min_new_cells=100000,   # effectively disable interrupt
         interrupt_min_dt=100000.0,
     )
