@@ -38,6 +38,7 @@ class NavigationMoveSkill:
         self._action = action
         self._start_time = start_time
         self._current_time = start_time
+        self._interruptible = env.config.move_execution_interruptible
 
         # Parse "move robot from to"
         parts = action.name.split()
@@ -104,7 +105,7 @@ class NavigationMoveSkill:
 
     @property
     def is_interruptible(self) -> bool:
-        return True
+        return self._interruptible
 
     @property
     def upcoming_effects(self) -> List[Tuple[float, GroundedEffect]]:
@@ -169,6 +170,8 @@ class NavigationMoveSkill:
 
     def interrupt(self, env: Environment) -> None:
         """Interrupt move: place robot at current pose, rewrite effects."""
+        if not self._interruptible:
+            return
         if self._current_time <= self._start_time:
             return
         if self.is_done:
