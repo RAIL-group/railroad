@@ -257,7 +257,7 @@ def test_unreachable_move_is_filtered_out():
     operators = [construct_move_navigable_operator(move_time_fn)]
 
     env = UnknownSpaceEnvironment(
-        state=State(0.0, {F("at robot1 start"), F("free robot1"), F("navigable goal")}, []),
+        state=State(0.0, {F("at robot1 start"), F("free robot1")}, []),
         objects_by_type={
             "robot": {"robot1"},
             "location": {"start", "goal"},
@@ -277,9 +277,6 @@ def test_unreachable_move_is_filtered_out():
         ),
     )
     env_ref[0] = env
-
-    # Keep the target navigable for this targeted move-validity test.
-    env.fluents.add(F("navigable goal"))
 
     actions = env.get_actions()
     move_names = {a.name for a in actions}
@@ -334,7 +331,7 @@ def test_move_time_cache_updates_when_location_moves():
     env = UnknownSpaceEnvironment(
         state=State(
             0.0,
-            {F("at robot1 robot1_loc"), F("free robot1"), F("navigable goal")},
+            {F("at robot1 robot1_loc"), F("free robot1")},
             [],
         ),
         objects_by_type={
@@ -368,38 +365,29 @@ def test_move_time_cache_updates_when_location_moves():
 
 
 # ---------------------------------------------------------------------------
-# Test 6: Hidden site becomes navigable after cell observed
+# Test 6: Observation should not reintroduce legacy navigable fluents
 # ---------------------------------------------------------------------------
 
 
-def test_hidden_site_unlock():
-    """A hidden site becomes navigable once its grid cell is observed."""
+def test_hidden_site_observation_does_not_add_navigable():
+    """Observed hidden cells should not add legacy (navigable *) fluents."""
     env = _make_environment(two_robots=False)
 
-    # Initially, hidden sites should not be navigable (may or may not be
-    # depending on initial observation, so let's check after construction)
-    # stash_west is at (15, 5) — in the west branch
-    # Depending on sensor range, the start position at (5,5) with range=9
-    # may or may not observe (15,5).
+    assert all(
+        not (f.name == "navigable" and not f.negated)
+        for f in env.fluents
+    )
 
-    # Check if stash_west cell is observed
-    if not env.is_cell_observed(15, 5):
-        assert F("navigable", "stash_west") not in env.fluents, (
-            "stash_west should not be navigable before its cell is observed"
-        )
-
-    # Simulate observing the stash_west cell by moving closer
-    # Place robot near the cell and observe
+    # Simulate observing a hidden site cell by moving closer.
     env._robot_poses["robot1"] = Pose(12.0, 5.0, math.pi / 2)
     env.observe_from_pose("robot1", env._robot_poses["robot1"], env.time + 0.1,
                           allow_interrupt=False)
     env.refresh_frontiers()
-    env.sync_dynamic_navigable_targets()
-
-    if env.is_cell_observed(15, 5):
-        assert F("navigable", "stash_west") in env.fluents, (
-            "stash_west should be navigable after its cell is observed"
-        )
+    env.sync_dynamic_targets()
+    assert all(
+        not (f.name == "navigable" and not f.negated)
+        for f in env.fluents
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -411,12 +399,11 @@ def test_search_lock_prevents_concurrent():
     """The (lock-search ?loc) fluent prevents two robots from searching the same site."""
     env = _make_environment(two_robots=True)
 
-    # Manually place both robots at stash_east and make it navigable + reachable
+    # Manually place both robots at stash_east
     env._fluents.add(F("at robot1 stash_east"))
     env._fluents.add(F("at robot2 stash_east"))
     env._fluents.discard(F("at robot1 start"))
     env._fluents.discard(F("at robot2 start2"))
-    env._fluents.add(F("navigable stash_east"))
 
     state = env.state
 
@@ -493,12 +480,11 @@ def test_end_to_end_smoke():
             env.observe_from_pose("robot1", env._robot_poses["robot1"],
                                   env.time + 1.0, allow_interrupt=False)
             env.refresh_frontiers()
-            env.sync_dynamic_navigable_targets()
+            env.sync_dynamic_targets()
 
             # Place robot at stash_east symbolically
             env._fluents.discard(F("at robot1 start"))
             env._fluents.add(F("at robot1 stash_east"))
-            env._fluents.add(F("navigable stash_east"))
 
         if step == 1:
             # Search stash_east with robot1 for Mug
@@ -517,11 +503,10 @@ def test_end_to_end_smoke():
             env.observe_from_pose("robot2", env._robot_poses["robot2"],
                                   env.time + 1.0, allow_interrupt=False)
             env.refresh_frontiers()
-            env.sync_dynamic_navigable_targets()
+            env.sync_dynamic_targets()
 
             env._fluents.discard(F("at robot2 start2"))
             env._fluents.add(F("at robot2 stash_north"))
-            env._fluents.add(F("navigable stash_north"))
 
         if step == 3:
             # Search stash_north with robot2 for Knife

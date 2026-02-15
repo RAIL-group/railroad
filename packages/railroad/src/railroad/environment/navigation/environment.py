@@ -77,7 +77,7 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
         # Initial observation from all robot poses (no interrupt during init)
         self.observe_all_robots(time=state.time, allow_interrupt=False)
         self.refresh_frontiers()
-        self.sync_dynamic_navigable_targets()
+        self.sync_dynamic_targets()
 
     @property
     def state(self) -> State:
@@ -271,46 +271,33 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
             self._fluents.discard(ec_fluent)
 
     # ------------------------------------------------------------------
-    # Dynamic navigable / hidden-site sync
+    # Dynamic target sync
     # ------------------------------------------------------------------
 
-    def sync_dynamic_navigable_targets(self) -> None:
-        """Synchronise (navigable *) fluents with current frontiers and sites."""
-        desired_navigable: set[str] = set()
+    def sync_dynamic_targets(self) -> None:
+        """Prune stale target-tracking fluents after frontier/location updates."""
+        valid_targets = set(self._objects_by_type.get("location", set()))
 
-        # All current frontiers are navigable
-        desired_navigable.update(self._objects_by_type.get("frontier", set()))
+        # Remove stale claims whose target no longer exists.
+        stale_claims = [
+            f for f in self._fluents
+            if f.name == "claimed" and not f.negated
+            and len(f.args) >= 1 and f.args[0] not in valid_targets
+        ]
+        for f in stale_claims:
+            self._fluents.discard(f)
 
-        # Previously unlocked hidden sites persist as navigable
-        for fluent in list(self._fluents):
-            if fluent.name == "navigable" and not fluent.negated and len(fluent.args) >= 1:
-                site = fluent.args[0]
-                if site in self._hidden_sites:
-                    desired_navigable.add(site)
-
-        # Unlock hidden sites whose cells are now observed
-        for site, (r, c) in self._hidden_sites.items():
-            if self.is_cell_observed(r, c):
-                desired_navigable.add(site)
-
-        # Replace all (navigable *) fluents
+        # Legacy cleanup: remove any leftover navigable fluents.
         stale_nav = [
             f for f in self._fluents
             if f.name == "navigable" and not f.negated
         ]
         for f in stale_nav:
             self._fluents.discard(f)
-        for loc in desired_navigable:
-            self._fluents.add(Fluent("navigable", loc))
 
-        # Prune stale claims
-        stale_claims = [
-            f for f in self._fluents
-            if f.name == "claimed" and not f.negated
-            and len(f.args) >= 1 and f.args[0] not in desired_navigable
-        ]
-        for f in stale_claims:
-            self._fluents.discard(f)
+    def sync_dynamic_navigable_targets(self) -> None:
+        """Backward-compatible alias for older call sites."""
+        self.sync_dynamic_targets()
 
     # ------------------------------------------------------------------
     # Path / move-time helpers
@@ -447,12 +434,12 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
         return super().create_skill(action, time)
 
     # ------------------------------------------------------------------
-    # Override act to sync navigable targets after each action
+    # Override act to sync dynamic targets after each action
     # ------------------------------------------------------------------
 
     def act(self, action, loop_callback_fn=None):
-        """Execute action, then sync frontiers and navigable targets."""
+        """Execute action, then sync frontiers and dynamic targets."""
         result = super().act(action, loop_callback_fn=loop_callback_fn)
         self.refresh_frontiers()
-        self.sync_dynamic_navigable_targets()
+        self.sync_dynamic_targets()
         return result
