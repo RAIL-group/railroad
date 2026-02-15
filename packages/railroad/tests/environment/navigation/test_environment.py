@@ -303,6 +303,25 @@ def test_just_moved_blocks_followup_move_actions():
 
 
 # ---------------------------------------------------------------------------
+# Regression: clear just-moved at transient robot_loc anchors
+# ---------------------------------------------------------------------------
+
+
+def test_sync_clears_just_moved_when_robot_at_robot_loc():
+    """When robot is at robot_loc, sync should clear just-moved for that robot."""
+    env = _make_environment(two_robots=False)
+
+    env.fluents.discard(F("at robot1 start"))
+    env.fluents.add(F("at robot1 robot1_loc"))
+    env.fluents.add(F("just-moved", "robot1"))
+    env.objects_by_type.setdefault("location", set()).add("robot1_loc")
+
+    env.sync_dynamic_targets()
+
+    assert F("just-moved", "robot1") not in env.fluents
+
+
+# ---------------------------------------------------------------------------
 # Regression: move-time cache must respect location coordinate updates
 # ---------------------------------------------------------------------------
 

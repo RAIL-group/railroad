@@ -295,6 +295,12 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
         for f in stale_nav:
             self._fluents.discard(f)
 
+        # If a robot is currently anchored to its transient {robot}_loc,
+        # clear just-moved so the next dispatch is not forced to no-op.
+        for robot in self._objects_by_type.get("robot", set()):
+            if Fluent("at", robot, f"{robot}_loc") in self._fluents:
+                self._fluents.discard(Fluent("just-moved", robot))
+
     def sync_dynamic_navigable_targets(self) -> None:
         """Backward-compatible alias for older call sites."""
         self.sync_dynamic_targets()

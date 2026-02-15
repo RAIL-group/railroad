@@ -102,6 +102,13 @@ EXAMPLES: Dict[str, ExampleInfo] = {
                 "help": "Number of robots",
                 "param_name": "num_robots",
             },
+            {
+                "name": "--disable-move-interruptions",
+                "is_flag": True,
+                "default": False,
+                "help": "Disable interruption of move skills",
+                "param_name": "disable_move_interruptions",
+            },
         ],
     },
 }
