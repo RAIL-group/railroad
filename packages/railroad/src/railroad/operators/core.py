@@ -470,17 +470,17 @@ def construct_no_op_operator(no_op_time: OptNumeric, extra_cost: float = 0.0) ->
 
 
 def construct_move_navigable_operator(move_time: OptNumeric) -> Operator:
-    """Construct a move operator requiring (navigable ?to) with claim locking.
+    """Construct a move operator with claim locking and just-moved throttling.
 
-    Suitable for unknown-space navigation where only dynamically discovered
-    locations (frontiers, unlocked hidden sites) are valid move targets.
+    Suitable for unknown-space navigation where the environment controls the
+    set of valid locations through ``objects_by_type["location"]``.
 
     Args:
         move_time: Time or function to compute movement duration.
             Function signature: (robot, from_location, to_location) -> float
 
     Returns:
-        Operator for moving to a navigable target.
+        Operator for moving to a known target location.
     """
     move_time_fn = _to_numeric(move_time)
     return Operator(
@@ -490,7 +490,6 @@ def construct_move_navigable_operator(move_time: OptNumeric) -> Operator:
             F("at ?r ?from"),
             F("free ?r"),
             ~F("just-moved ?r"),
-            F("navigable ?to"),
             ~F("claimed ?to"),
         ],
         effects=[

@@ -218,7 +218,6 @@ def main(
             if env.is_cell_observed(row, col):
                 env.register_discovered_location(site, snap_to_known_free_cell(row, col))
                 env.objects_by_type.setdefault("container", set()).add(site)
-                env.fluents.add(F(f"known-in-map {site}"))
 
     sync_known_hidden_sites()
 
@@ -229,7 +228,7 @@ def main(
     goal = reduce(and_, [F(f"found {obj}") for obj in target_objects])
 
     def fluent_filter(f):  # noqa: ANN001
-        return any(kw in f.name for kw in ["at", "found", "navigable", "known-in-map", "searched"])
+        return any(kw in f.name for kw in ["at", "found", "searched"])
 
     max_iterations = 80
 
