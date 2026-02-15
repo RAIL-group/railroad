@@ -7,13 +7,13 @@ from typing import Dict, List, Set, Tuple
 import numpy as np
 import scipy.ndimage
 
-from railroad._bindings import Action, Fluent, GroundedEffect, State
+from railroad._bindings import Action, Fluent, State
 from railroad.core import Operator
 
 from ..skill import ActiveSkill
 from ..symbolic import LocationRegistry, SymbolicEnvironment
 from . import laser, mapping, pathing
-from .constants import COLLISION_VAL, FREE_VAL, UNOBSERVED_VAL
+from .constants import UNOBSERVED_VAL
 from .frontiers import extract_frontiers, filter_reachable_frontiers
 from .skill import NavigationMoveSkill
 from .types import Frontier, NavigationConfig, Pose
@@ -107,6 +107,17 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
     @property
     def frames(self) -> list[np.ndarray]:
         return self._frames
+
+    def register_discovered_location(
+        self,
+        name: str,
+        coords: tuple[int, int] | np.ndarray | None = None,
+    ) -> None:
+        """Add a newly discovered map location to planner-visible locations."""
+        self._base_locations.add(name)
+        self._objects_by_type.setdefault("location", set()).add(name)
+        if coords is not None and self._location_registry is not None:
+            self._location_registry.register(name, np.asarray(coords, dtype=float))
 
     # ------------------------------------------------------------------
     # Observation
