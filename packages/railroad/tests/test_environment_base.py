@@ -36,16 +36,8 @@ class MinimalEnvironment(Environment):
         action = Action(set(), relative_effects, name="_initial_effects")
         return SymbolicSkill(action=action, start_time=start_time)
 
-    def apply_effect(self, effect):
-        for fluent in effect.resulting_fluents:
-            if fluent.negated:
-                self._fluents_set.discard(~fluent)
-            else:
-                self._fluents_set.add(fluent)
-        return []  # No delayed effects in this minimal implementation
-
-    def resolve_probabilistic_effect(self, effect, current_fluents):
-        return [effect], current_fluents
+    def get_objects_at_location(self, location: str) -> Dict[str, Set[str]]:
+        return {"object": set()}
 
 
 def test_environment_state_assembly():

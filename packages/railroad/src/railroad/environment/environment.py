@@ -19,20 +19,15 @@ class Environment(ABC):
     - State assembly (fluents + upcoming effects)
     - Action instantiation from operators
     - The act() loop (execute until a robot is free)
-
-    Subclasses implement environment-specific behavior:
-    - How fluents are stored/retrieved
-    - How skills are created for actions
-    - How effects are applied
-    - How probabilistic effects are resolved
+    - Common effect application and probabilistic resolution
     """
 
     def __init__(
         self,
         state: State,
-        operators: List[Operator],
+        operators: List[Operator] | None = None,
     ) -> None:
-        self._operators = operators
+        self._operators = operators or []
         self._time: float = state.time
         self._active_skills: List[ActiveSkill] = []
 
@@ -42,6 +37,14 @@ class Environment(ABC):
                 state.time, list(state.upcoming_effects)
             )
             self._active_skills.append(initial_skill)
+
+    @property
+    def operators(self) -> List[Operator]:
+        return self._operators
+
+    @operators.setter
+    def operators(self, value: List[Operator]) -> None:
+        self._operators = value
 
     @abstractmethod
     def _create_initial_effects_skill(
@@ -73,7 +76,6 @@ class Environment(ABC):
         """Create an ActiveSkill for this action."""
         ...
 
-    @abstractmethod
     def apply_effect(
         self, effect: GroundedEffect
     ) -> List[Tuple[float, GroundedEffect]]:
@@ -84,16 +86,116 @@ class Environment(ABC):
             scheduled later (e.g., nested effects inside prob_effects with time > 0).
             The caller is responsible for scheduling these at current_time + relative_time.
         """
-        ...
+        delayed_effects: List[Tuple[float, GroundedEffect]] = []
 
-    @abstractmethod
+        # Apply deterministic resulting_fluents
+        for fluent in effect.resulting_fluents:
+            if fluent.negated:
+                self.fluents.discard(~fluent)
+            else:
+                self.fluents.add(fluent)
+
+        # Handle probabilistic branches if present
+        if effect.is_probabilistic:
+            nested_effects, _ = self.resolve_probabilistic_effect(
+                effect, self.fluents
+            )
+            for nested in nested_effects:
+                if nested.time > 1e-9:
+                    # Schedule for later - time is relative to when parent fired
+                    delayed_effects.append((nested.time, nested))
+                else:
+                    # Apply immediately and collect any further delayed effects
+                    delayed_effects.extend(self.apply_effect(nested))
+
+        # Handle revelation (objects discovered when locations searched)
+        self._handle_revelation()
+
+        return delayed_effects
+
+    def _handle_revelation(self) -> None:
+        """Reveal objects when locations are searched."""
+        for fluent in list(self.fluents):
+            if fluent.name == "searched":
+                location = fluent.args[0]
+                revealed_fluent = Fluent("revealed", location)
+
+                if revealed_fluent not in self.fluents:
+                    self.fluents.add(revealed_fluent)
+
+                    # Reveal objects at this location
+                    objs_at_loc = self.get_objects_at_location(location)
+                    for obj_type, objs in objs_at_loc.items():
+                        for obj in objs:
+                            self.fluents.add(Fluent("found", obj))
+                            self.fluents.add(Fluent("at", obj, location))
+                            self.objects_by_type.setdefault(obj_type, set()).add(obj)
+
+    def get_objects_at_location(self, location: str) -> Dict[str, Set[str]]:
+        """Get ground truth objects at a location (perception).
+
+        Subclasses should override this if they have a perception system.
+        """
+        return {}
+
     def resolve_probabilistic_effect(
         self,
         effect: GroundedEffect,
         current_fluents: Set[Fluent],
     ) -> Tuple[List[GroundedEffect], Set[Fluent]]:
         """Resolve which branch of a probabilistic effect occurs."""
-        ...
+        if not effect.is_probabilistic:
+            return [effect], current_fluents
+
+        branches = effect.prob_effects
+        if not branches:
+            return [], current_fluents
+
+        # Find success branch (contains positive "found" fluent)
+        success_branch = None
+        target_object = None
+        location = None
+
+        for branch in branches:
+            _, branch_effects = branch
+            for eff in branch_effects:
+                for fluent in eff.resulting_fluents:
+                    if fluent.name == "found" and not fluent.negated:
+                        success_branch = branch
+                        target_object = fluent.args[0]
+                        location = self._find_search_location(eff, target_object)
+
+        # If we can resolve from ground truth, do so deterministically
+        if success_branch and target_object and location:
+            objs_at_loc = self.get_objects_at_location(location)
+            # Find if object is in any type category at this location
+            is_present = any(target_object in objs for objs in objs_at_loc.values())
+
+            if is_present:
+                _, effects = success_branch
+                return list(effects), current_fluents
+
+            # Object not at location - return failure branch deterministically
+            other_branches = [b for b in branches if b is not success_branch]
+            if other_branches:
+                _, effects = other_branches[0]
+                return list(effects), current_fluents
+
+        # Can't determine from ground truth or not a search - sample from distribution
+        import random
+        probs = [p for p, _ in branches]
+        _, effects = random.choices(branches, weights=probs, k=1)[0]
+        return list(effects), current_fluents
+
+    def _find_search_location(
+        self, effect: GroundedEffect, target_object: str
+    ) -> str | None:
+        """Find the location from 'at object location' fluent in a branch."""
+        for fluent in effect.resulting_fluents:
+            if fluent.name == "at" and len(fluent.args) >= 2:
+                if fluent.args[0] == target_object:
+                    return fluent.args[1]
+        return None
 
     @property
     def state(self) -> State:
@@ -166,12 +268,14 @@ class Environment(ABC):
         self,
         action: Action,
         loop_callback_fn: Optional[Callable[[], None]] = None,
+        do_interrupt: bool = True,
     ) -> State:
         """Execute action, return state when a robot is free for new dispatch.
 
         Args:
             action: The action to execute.
             loop_callback_fn: Optional callback called each iteration.
+            do_interrupt: Whether to interrupt ongoing skills when returning.
 
         Returns:
             The new state after execution.
@@ -206,16 +310,42 @@ class Environment(ABC):
             for s in self._active_skills:
                 s.advance(next_time, self)
 
+            dt = next_time - self._time
             self._time = next_time
+            self._on_act_loop_iteration(dt)
+
+            # Identify skills that just finished
+            newly_done = [s for s in self._active_skills if s.is_done]
+            for skill in newly_done:
+                self._on_skill_completed(skill)
+
             self._active_skills = [s for s in self._active_skills if not s.is_done]
 
             if loop_callback_fn is not None:
                 loop_callback_fn()
 
+            # Avoid tight busy-wait loop when polling.
+            # This is particularly important for physical environments.
+            import time
+            time.sleep(0.01)
+
         # Interrupt interruptible skills if requested
-        for skill in self._active_skills:
-            if skill.is_interruptible and not skill.is_done:
-                skill.interrupt(self)
+        if do_interrupt:
+            for skill in self._active_skills:
+                if skill.is_interruptible and not skill.is_done:
+                    skill.interrupt(self)
 
         self._active_skills = [s for s in self._active_skills if not s.is_done]
         return self.state
+
+    def _on_skill_completed(self, skill: ActiveSkill) -> None:
+        """Hook called when a skill completes during act()."""
+        pass
+
+    def _on_act_loop_iteration(self, dt: float) -> None:
+        """Hook called on each iteration of the act() loop.
+
+        Args:
+            dt: Time advanced in this iteration.
+        """
+        pass

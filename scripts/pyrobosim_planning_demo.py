@@ -1,9 +1,7 @@
-from railroad.environment.pyrobosim import PyRoboSimEnv, get_default_pyrobosim_world_file_path
+from railroad.environment.pyrobosim import PyRoboSimEnvironment, PyRoboSimScene, get_default_pyrobosim_world_file_path
 from railroad import operators
 from railroad.planner import MCTSPlanner
-from railroad.core import Fluent as F, get_action_by_name
-from railroad.experimental.environment import EnvironmentInterface
-from railroad._bindings import State
+from railroad.core import Fluent as F, get_action_by_name, State
 from railroad.dashboard import PlannerDashboard
 import argparse
 import logging
@@ -16,48 +14,46 @@ PLACE_TIME = 1.0
 
 
 def main(args):
-    # Create the PyRoboSim environment
-    env = PyRoboSimEnv(
-        world_file=args.world_file,
-        show_plot=args.show_plot,
-        record_plots=not args.no_video,
-    )
-
     # Goal: move apple and banana to counter
     goal = F("at apple0 counter0") & F("at banana0 counter0")
 
-    # Build initial state from environment
-    initial_fluents = set()
-    for robot_name in env.robots:
-        robot_loc = f"{robot_name}_loc"
-        initial_fluents.add(F("at", robot_name, robot_loc))
-        initial_fluents.add(F("free", robot_name))
-        initial_fluents.add(F("revealed", robot_loc))
-    initial_state = State(0.0, initial_fluents)
+    # 1. Initialize Scene
+    scene = PyRoboSimScene(args.world_file)
 
-    # Build objects_by_type from environment
-    objects_by_type = {
-        "robot": set(env.robots.keys()),
-        "location": set(env.locations.keys()),
-        "object": set(env.objects.keys()),
-    }
+    # 2. Create operators using scene info
+    move_time_fn = scene.get_move_cost_fn()
 
-    # Create operators - move uses distance-based time from environment
-    move_time_fn = env.get_skills_time_fn('move')
     def object_find_prob(r, loc, o):
         return 0.8 if loc == 'my_desk' and o == 'apple0' else 0.2
+
     move_op = operators.construct_move_operator_blocking(move_time_fn)
     search_op = operators.construct_search_operator(object_find_prob, SEARCH_TIME)
     pick_op = operators.construct_pick_operator_blocking(PICK_TIME)
     place_op = operators.construct_place_operator_blocking(PLACE_TIME)
     no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
+    ops = [no_op, pick_op, place_op, move_op, search_op]
 
-    # Create interface with environment and operators
-    env_interface = EnvironmentInterface(
-        initial_state=initial_state,
-        objects_by_type=objects_by_type,
-        operators=[no_op, pick_op, place_op, move_op, search_op],
-        environment=env,
+    # 3. Create the real PyRoboSim environment
+    robot_names = [r.name for r in scene.world.robots]
+    initial_fluents = set()
+    for robot in robot_names:
+        robot_loc = f"{robot}_loc"
+        initial_fluents.add(F("at", robot, robot_loc))
+        initial_fluents.add(F("free", robot))
+        initial_fluents.add(F("revealed", robot_loc))
+    state = State(0.0, initial_fluents)
+
+    env = PyRoboSimEnvironment(
+        scene=scene,
+        state=state,
+        objects_by_type={
+            "robot": set(robot_names),
+            "location": set(scene.locations.keys()),
+            "object": scene.objects,
+        },
+        operators=ops,
+        show_plot=args.show_plot,
+        record_plots=not args.no_video,
     )
 
     # Planning loop
@@ -65,17 +61,18 @@ def main(args):
 
     def fluent_filter(f):
         return any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
-    with PlannerDashboard(goal, env_interface, fluent_filter=fluent_filter) as dashboard:
+
+    with PlannerDashboard(goal, env, fluent_filter=fluent_filter) as dashboard:
         for iteration in range(max_iterations):
             # Check if goal is reached
-            if goal.evaluate(env_interface.state.fluents):
+            if goal.evaluate(env.state.fluents):
                 break
 
             # Get available actions
-            all_actions = env_interface.get_actions()
+            all_actions = env.get_actions()
             # Plan next action
             mcts = MCTSPlanner(all_actions)
-            action_name = mcts(env_interface.state, goal, max_iterations=10000, c=300, max_depth=20, heuristic_multiplier=3)
+            action_name = mcts(env.state, goal, max_iterations=10000, c=300, max_depth=20, heuristic_multiplier=3)
 
             if action_name == 'NONE':
                 dashboard.console.print("No more actions available. Goal may not be achievable.")
@@ -83,11 +80,16 @@ def main(args):
 
             # Execute action
             action = get_action_by_name(all_actions, action_name)
-            env_interface.advance(action, do_interrupt=False, loop_callback_fn=env.canvas.update)
+            loop_cb = env.canvas.update if env.canvas else None
+            env.act(action, loop_callback_fn=loop_cb, do_interrupt=False)
             dashboard.update(mcts, action_name)
-    if not args.no_video:
+
+    if not args.no_video and env.canvas:
+        from pathlib import Path
+        Path("./data").mkdir(parents=True, exist_ok=True)
         env.canvas.save_animation(filepath='./data/pyrobosim_planning_demo.mp4')
-    env.canvas.wait_for_close()
+    if env.canvas:
+        env.canvas.wait_for_close()
 
 
 if __name__ == "__main__":

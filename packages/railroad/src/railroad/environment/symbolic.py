@@ -370,115 +370,12 @@ class SymbolicEnvironment(Environment):
 
         return SymbolicSkill(action=action, start_time=time)
 
-    def apply_effect(
-        self, effect: GroundedEffect
-    ) -> List[Tuple[float, GroundedEffect]]:
-        """Apply an effect, handling adds, removes, and probabilistic branches.
-
-        Returns:
-            List of (relative_time, effect) tuples for effects that should be
-            scheduled later (nested effects with time > 0).
-        """
-        delayed_effects: List[Tuple[float, GroundedEffect]] = []
-
-        # Apply deterministic resulting_fluents
-        for fluent in effect.resulting_fluents:
-            if fluent.negated:
-                self._fluents.discard(~fluent)
-            else:
-                self._fluents.add(fluent)
-
-        # Handle probabilistic branches if present
-        if effect.is_probabilistic:
-            nested_effects, _ = self.resolve_probabilistic_effect(
-                effect, self._fluents
-            )
-            for nested in nested_effects:
-                if nested.time > 1e-9:
-                    # Schedule for later - time is relative to when parent fired
-                    delayed_effects.append((nested.time, nested))
-                else:
-                    # Apply immediately and collect any further delayed effects
-                    delayed_effects.extend(self.apply_effect(nested))
-
-        # Handle revelation (objects discovered when locations searched)
-        self._handle_revelation()
-
-        return delayed_effects
-
-    def _handle_revelation(self) -> None:
-        """Reveal objects when locations are searched."""
-        for fluent in list(self._fluents):
-            if fluent.name == "searched":
-                location = fluent.args[0]
-                revealed_fluent = Fluent("revealed", location)
-
-                if revealed_fluent not in self._fluents:
-                    self._fluents.add(revealed_fluent)
-
-                    # Reveal objects at this location
-                    for obj in self._objects_at_locations.get(location, set()):
-                        self._fluents.add(Fluent("found", obj))
-                        self._fluents.add(Fluent("at", obj, location))
-                        self._objects_by_type.setdefault("object", set()).add(obj)
-
-    def resolve_probabilistic_effect(
-        self,
-        effect: GroundedEffect,
-        current_fluents: Set[Fluent],
-    ) -> Tuple[List[GroundedEffect], Set[Fluent]]:
-        """Resolve probabilistic effect based on ground truth object locations.
-
-        For search actions, checks if target object is actually at location.
-        Otherwise, samples from the probability distribution.
-        """
-        if not effect.is_probabilistic:
-            return [effect], current_fluents
-
-        branches = effect.prob_effects
-        if not branches:
-            return [], current_fluents
-
-        # Find success branch (contains positive "found" fluent)
-        success_branch = None
-        target_object = None
-        location = None
-
-        for branch in branches:
-            _, branch_effects = branch
-            for eff in branch_effects:
-                for fluent in eff.resulting_fluents:
-                    if fluent.name == "found" and not fluent.negated:
-                        success_branch = branch
-                        target_object = fluent.args[0]
-                        location = self._find_search_location(eff, target_object)
-
-        # If we can resolve from ground truth, do so deterministically
-        if success_branch and target_object and location:
-            if self._is_object_at_location(target_object, location):
-                _, effects = success_branch
-                return list(effects), current_fluents
-            # Object not at location - return failure branch deterministically
-            other_branches = [b for b in branches if b is not success_branch]
-            if other_branches:
-                # No need to sample - ground truth determines the outcome
-                _, effects = other_branches[0]
-                return list(effects), current_fluents
-
-        # Can't determine from ground truth - sample from distribution
-        probs = [p for p, _ in branches]
-        _, effects = random.choices(branches, weights=probs, k=1)[0]
-        return list(effects), current_fluents
-
-    def _find_search_location(
-        self, effect: GroundedEffect, target_object: str
-    ) -> str | None:
-        """Find the location from 'at object location' fluent in a branch."""
-        for fluent in effect.resulting_fluents:
-            if fluent.name == "at" and len(fluent.args) >= 2:
-                if fluent.args[0] == target_object:
-                    return fluent.args[1]
-        return None
+    def get_objects_at_location(self, location: str) -> Dict[str, Set[str]]:
+        """Get objects at a location from symbolic ground truth."""
+        objs = self._objects_at_locations.get(location, set())
+        # SymbolicEnvironment assumes all objects are of type 'object'
+        # if not otherwise specified.
+        return {"object": objs}
 
     def _is_object_at_location(self, obj: str, location: str) -> bool:
         """Check if object is at location using fluents + ground truth.
@@ -504,5 +401,3 @@ class SymbolicEnvironment(Environment):
 
         # Fall back to ground truth
         return obj in self._objects_at_locations.get(location, set())
-
-

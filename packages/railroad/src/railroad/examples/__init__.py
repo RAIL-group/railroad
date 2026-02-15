@@ -72,6 +72,38 @@ EXAMPLES: Dict[str, ExampleInfo] = {
             },
         ],
     },
+    "pyrobosim-search": {
+        "main": _lazy_import("pyrobosim_search"),
+        "description": "Multi-robot search in PyRoboSim environment",
+        "options": [
+            {
+                "name": "--world-file",
+                "type": str,
+                "default": None,
+                "help": "Path to world YAML file",
+                "param_name": "world_file",
+            },
+            {
+                "name": "--seed",
+                "type": int,
+                "default": None,
+                "help": "Random seed",
+                "param_name": "seed",
+            },
+            {
+                "name": "--num-objects",
+                "default": 2,
+                "help": "Number of objects to search for",
+                "param_name": "num_objects",
+            },
+            {
+                "name": "--num-robots",
+                "default": 2,
+                "help": "Number of robots",
+                "param_name": "num_robots",
+            },
+        ],
+    },
 }
 
 # Only show procthor example if dependencies are installed

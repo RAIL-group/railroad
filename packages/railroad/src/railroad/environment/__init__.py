@@ -19,7 +19,8 @@ Legacy classes have been moved to railroad.experimental.environment:
 """
 
 from .environment import Environment
-from .skill import ActiveSkill
+from .physical import PhysicalEnvironment, PhysicalScene, PhysicalSkill
+from .skill import ActiveSkill, SkillStatus
 from .symbolic import (
     InterruptableMoveSymbolicSkill,
     LocationRegistry,
@@ -33,6 +34,10 @@ __all__ = [
     "Environment",
     "InterruptableMoveSymbolicSkill",
     "LocationRegistry",
+    "PhysicalEnvironment",
+    "PhysicalScene",
+    "PhysicalSkill",
+    "SkillStatus",
     "SymbolicEnvironment",
     "SymbolicSkill",
 ]

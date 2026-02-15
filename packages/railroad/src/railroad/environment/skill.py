@@ -1,11 +1,20 @@
 """Active skill protocol."""
 
+from enum import IntEnum
 from typing import TYPE_CHECKING, List, Protocol, Tuple, runtime_checkable
 
 from railroad._bindings import GroundedEffect
 
 if TYPE_CHECKING:
     from .environment import Environment
+
+
+class SkillStatus(IntEnum):
+    """Status of a robot skill execution."""
+
+    IDLE = -1
+    RUNNING = 0
+    DONE = 1
 
 
 @runtime_checkable
