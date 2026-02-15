@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Set, Tuple
+from typing import Dict, Iterable, List, Set, Tuple
 
 import numpy as np
 import scipy.ndimage
@@ -10,7 +10,7 @@ import scipy.ndimage
 from railroad._bindings import Action, Fluent, State
 from railroad.core import Operator
 
-from ..skill import ActiveSkill
+from ..skill import ActiveSkill, MotionSkill
 from ..symbolic import LocationRegistry, SymbolicEnvironment
 from . import laser, mapping, pathing
 from .constants import UNOBSERVED_VAL
@@ -91,6 +91,11 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
     @property
     def robot_poses(self) -> Dict[str, Pose]:
         return self._robot_poses
+
+    def set_robot_pose(self, robot: str, pose: object) -> None:
+        """Store current robot pose for continuous-motion consumers."""
+        if isinstance(pose, Pose):
+            self._robot_poses[robot] = pose
 
     @property
     def true_grid(self) -> np.ndarray:
@@ -416,12 +421,45 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
     # ------------------------------------------------------------------
 
     def should_interrupt_active_skills(self) -> bool:
-        return self._interrupt_requested
+        return (
+            self._interrupt_requested
+            and any(
+                skill.is_interruptible and not skill.is_done
+                for skill in self._active_skills
+            )
+        )
 
     def clear_interrupt_request(self) -> None:
         self._interrupt_requested = False
         self._new_cells_since_interrupt = 0
         self._last_interrupt_time = self._time
+
+    def _iter_active_motion_skills(self) -> Iterable[MotionSkill]:
+        """Yield active skills that expose continuous motion state."""
+        for skill in self._active_skills:
+            if isinstance(skill, MotionSkill):
+                yield skill
+
+    def _cap_next_advance_time(self, proposed_next_time: float) -> float:
+        """Bound scheduler step so sensing occurs at regular cadence in motion."""
+        sensor_dt = float(self._config.sensor_dt)
+        if sensor_dt <= 1e-9:
+            return proposed_next_time
+        if any(ms.is_motion_active_at(self._time) for ms in self._iter_active_motion_skills()):
+            return min(proposed_next_time, self._time + sensor_dt)
+        return proposed_next_time
+
+    def _after_skills_advanced(self, advanced_to_time: float) -> None:
+        """Perform sensing for robots that are actively moving."""
+        moving_robots = {
+            motion_skill.controlled_robot
+            for motion_skill in self._iter_active_motion_skills()
+            if motion_skill.is_motion_active_at(advanced_to_time)
+        }
+        for robot in moving_robots:
+            pose = self._robot_poses.get(robot)
+            if pose is not None:
+                self.observe_from_pose(robot, pose, advanced_to_time, allow_interrupt=True)
 
     # ------------------------------------------------------------------
     # Skill creation (override SymbolicEnvironment)

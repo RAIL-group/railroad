@@ -13,6 +13,7 @@ from railroad.environment.navigation.types import NavigationConfig, Pose
 from railroad.environment.symbolic import LocationRegistry
 from railroad.operators import (
     construct_move_navigable_operator,
+    construct_no_op_operator,
     construct_observe_site_operator,
     construct_search_at_site_operator,
 )
@@ -54,6 +55,7 @@ def _make_branching_grid() -> np.ndarray:
 def _make_environment(
     config: NavigationConfig | None = None,
     two_robots: bool = True,
+    include_no_op: bool = False,
 ) -> UnknownSpaceEnvironment:
     """Create a test UnknownSpaceEnvironment with the branching corridor grid."""
     true_grid = _make_branching_grid()
@@ -135,6 +137,8 @@ def _make_environment(
         construct_observe_site_operator(0.8, 1.0, container_type="container"),
         construct_search_at_site_operator(0.9, 2.0, container_type="container"),
     ]
+    if include_no_op:
+        operators.append(construct_no_op_operator(2.0))
 
     return UnknownSpaceEnvironment(
         state=state,
@@ -147,6 +151,17 @@ def _make_environment(
         true_object_locations=true_object_locations,
         config=config,
     )
+
+
+def _first_valid_move_action(env: UnknownSpaceEnvironment):
+    state = env.state
+    actions = env.get_actions()
+    move_actions = [
+        a for a in actions
+        if a.name.startswith("move") and state.satisfies_precondition(a)
+    ]
+    assert move_actions, "Should have at least one valid move action"
+    return move_actions[0]
 
 
 # ---------------------------------------------------------------------------
@@ -168,17 +183,7 @@ def test_move_interrupt_creates_robot_loc():
     )
     env = _make_environment(config=config, two_robots=False)
 
-    state = env.state
-
-    # Get actions and find a move action whose preconditions are met
-    actions = env.get_actions()
-    move_actions = [
-        a for a in actions
-        if a.name.startswith("move") and state.satisfies_precondition(a)
-    ]
-    assert len(move_actions) > 0, "Should have at least one valid move action"
-
-    action = move_actions[0]
+    action = _first_valid_move_action(env)
     result = env.act(action)
 
     # Check: robot should be free
@@ -209,15 +214,7 @@ def test_move_completes_with_high_thresholds():
     )
     env = _make_environment(config=config, two_robots=False)
 
-    state = env.state
-    actions = env.get_actions()
-    move_actions = [
-        a for a in actions
-        if a.name.startswith("move") and state.satisfies_precondition(a)
-    ]
-    assert len(move_actions) > 0
-
-    action = move_actions[0]
+    action = _first_valid_move_action(env)
     destination = action.name.split()[3]
 
     result = env.act(action)
@@ -227,6 +224,137 @@ def test_move_completes_with_high_thresholds():
         f"Robot should be at destination {destination}"
     )
     assert F("just-moved", "robot1") not in result.fluents
+
+
+def test_environment_manages_sensing_cadence_during_motion():
+    """Movement should trigger repeated sensing under env-managed sensor_dt."""
+    config = NavigationConfig(
+        sensor_range=9.0,
+        sensor_fov_rad=2 * math.pi,
+        sensor_num_rays=91,
+        sensor_dt=0.05,
+        speed_cells_per_sec=2.0,
+        interrupt_min_new_cells=100000,
+        interrupt_min_dt=100000.0,
+    )
+    env = _make_environment(config=config, two_robots=False)
+    action = _first_valid_move_action(env)
+
+    observed_times: list[float] = []
+    original_observe_from_pose = env.observe_from_pose
+
+    def wrapped_observe_from_pose(
+        robot: str,
+        pose: Pose,
+        time: float,
+        allow_interrupt: bool = True,
+    ) -> int:
+        observed_times.append(time)
+        return original_observe_from_pose(
+            robot, pose, time, allow_interrupt=allow_interrupt
+        )
+
+    env.observe_from_pose = wrapped_observe_from_pose  # type: ignore[assignment]
+    env.act(action)
+
+    assert len(observed_times) > 1, "Expected repeated sensing while moving"
+    diffs = np.diff(np.array(observed_times, dtype=float))
+    assert np.all(diffs <= config.sensor_dt + 1e-6), (
+        "Observed sensing intervals should be bounded by sensor_dt"
+    )
+
+
+def test_no_motion_action_not_capped_by_sensor_dt():
+    """Non-motion actions should not be forced into sensor_dt micro-steps."""
+    config = NavigationConfig(
+        sensor_range=9.0,
+        sensor_fov_rad=2 * math.pi,
+        sensor_num_rays=91,
+        sensor_dt=0.05,
+        speed_cells_per_sec=2.0,
+        interrupt_min_new_cells=100000,
+        interrupt_min_dt=100000.0,
+    )
+    env = _make_environment(config=config, two_robots=False, include_no_op=True)
+
+    state = env.state
+    no_op_actions = [
+        a for a in env.get_actions()
+        if a.name.startswith("no_op") and state.satisfies_precondition(a)
+    ]
+    assert no_op_actions, "Expected a valid no-op action"
+
+    result = env.act(no_op_actions[0])
+    assert math.isclose(result.time, 2.0, rel_tol=0.0, abs_tol=1e-9)
+
+
+def test_non_interruptible_move_completes_under_aggressive_interrupt_thresholds():
+    """Non-interruptible move should still complete despite interrupt trigger."""
+    config = NavigationConfig(
+        sensor_range=9.0,
+        sensor_fov_rad=2 * math.pi,
+        sensor_num_rays=91,
+        sensor_dt=0.05,
+        speed_cells_per_sec=2.0,
+        interrupt_min_new_cells=1,
+        interrupt_min_dt=0.0,
+        move_execution_interruptible=False,
+    )
+    env = _make_environment(config=config, two_robots=False)
+    action = _first_valid_move_action(env)
+    destination = action.name.split()[3]
+
+    result = env.act(action)
+
+    assert F("at", "robot1", destination) in result.fluents
+    assert F("at", "robot1", "robot1_loc") not in result.fluents
+
+
+def test_robot_pose_updates_without_continuous_robot_loc_registry_writes():
+    """During move, pose updates continuously while robot_loc is not re-registered."""
+    config = NavigationConfig(
+        sensor_range=9.0,
+        sensor_fov_rad=2 * math.pi,
+        sensor_num_rays=91,
+        sensor_dt=0.05,
+        speed_cells_per_sec=2.0,
+        interrupt_min_new_cells=100000,
+        interrupt_min_dt=100000.0,
+        move_execution_interruptible=False,
+    )
+    env = _make_environment(config=config, two_robots=False)
+    action = _first_valid_move_action(env)
+    registry = env.location_registry
+    assert registry is not None
+
+    registered_keys: list[str] = []
+    original_register = registry.register
+
+    def wrapped_register(key: str, coords) -> None:  # noqa: ANN001
+        registered_keys.append(key)
+        original_register(key, coords)
+
+    registry.register = wrapped_register  # type: ignore[assignment]
+
+    sensed_positions: list[tuple[float, float]] = []
+    original_observe_from_pose = env.observe_from_pose
+
+    def wrapped_observe_from_pose(
+        robot: str,
+        pose: Pose,
+        time: float,
+        allow_interrupt: bool = True,
+    ) -> int:
+        sensed_positions.append((pose.x, pose.y))
+        return original_observe_from_pose(
+            robot, pose, time, allow_interrupt=allow_interrupt
+        )
+
+    env.observe_from_pose = wrapped_observe_from_pose  # type: ignore[assignment]
+    env.act(action)
+
+    assert len({(round(x, 3), round(y, 3)) for x, y in sensed_positions}) > 1
+    assert registered_keys.count("robot1_loc") <= 1
 
 
 # ---------------------------------------------------------------------------

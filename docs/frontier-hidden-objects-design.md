@@ -296,25 +296,30 @@ After observation updates:
 - optionally record frame snapshots,
 - request interrupt if thresholds are crossed and no robot is free.
 
-## 5.4 Interruptible Navigation Move Skill Contract
+## 5.4 Motion Skill + Environment Cadence Contract
 
 A move skill must:
 
 1. Parse action identity: `move robot from to`.
 2. Build path at start.
-3. Advance in two event streams:
-   - effect events (action semantics),
-   - micro-step sensing events every `sensor_dt`.
-4. On each advance:
+3. On each advance:
    - update robot pose by interpolating along path,
-   - perform observation at current pose,
    - apply due symbolic effects.
+4. Expose motion state for environment-level sensing cadence:
+   - controlled robot identity,
+   - whether motion is active at absolute time `t`.
 5. On interruption:
    - place robot at current intermediate pose,
    - create/update transient location `<robot>_loc` in registry,
    - rewrite pending deterministic effects from old destination to new transient target,
    - clear any stale claim on previous target,
    - end skill.
+
+`UnknownSpaceEnvironment` owns sensing cadence and interrupt triggering:
+
+- cap scheduler advance while any motion skill is active so time increments are at most `sensor_dt`,
+- after each scheduler advance, sense for robots currently in active motion skills,
+- use observed-cell deltas to set interrupt requests via existing thresholds.
 
 Important: probabilistic pending effects should not be silently misapplied on interrupt. Preferred clean behavior is to drop or explicitly handle them; do not leave ambiguous half-applied probabilistic branches.
 
@@ -605,7 +610,7 @@ Phase 2: Starter-module integration + frontiers + unknown-space environment
 
 Phase 3: Interruptible movement and dynamic replanning
 
-- Implement move skill micro-step sensing.
+- Implement environment-managed sensing cadence for active motion skills.
 - Integrate interrupt policy into `act()` runtime.
 
 Phase 4: Hidden-site domain + end-to-end task
