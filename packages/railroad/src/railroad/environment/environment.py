@@ -174,12 +174,35 @@ class Environment(ABC):
         return any(f.name == "free" for f in self.fluents)
 
     def should_interrupt_active_skills(self) -> bool:
-        """Override in subclasses for custom interrupt policies."""
+        """Backward-compatible interrupt predicate hook.
+
+        Prefer overriding ``interrupt_skills()`` for custom policies.
+        """
         return False
 
     def clear_interrupt_request(self) -> None:
-        """Override in subclasses that track interrupt state."""
+        """Backward-compatible interrupt-state cleanup hook."""
         pass
+
+    def interrupt_skills(self, force: bool = False) -> bool:
+        """Interrupt active interruptible skills according to env policy.
+
+        Args:
+            force: If True, interrupt even when no robot is currently free.
+
+        Returns:
+            True if at least one skill was interrupted.
+        """
+        if not force and not self._any_robot_free():
+            return False
+        interrupted = False
+        for skill in self._active_skills:
+            if skill.is_interruptible and not skill.is_done:
+                skill.interrupt(self)
+                interrupted = True
+        if interrupted:
+            self.clear_interrupt_request()
+        return interrupted
 
     def _cap_next_advance_time(self, proposed_next_time: float) -> float:
         """Optional hook to constrain the scheduler's next advance time."""
@@ -228,7 +251,7 @@ class Environment(ABC):
             if all(s.is_done for s in self._active_skills):
                 break
 
-            if self.should_interrupt_active_skills():
+            if self.interrupt_skills():
                 break
 
             skill_times = [s.time_to_next_event for s in self._active_skills] or [float("inf")]
@@ -257,14 +280,9 @@ class Environment(ABC):
             if loop_callback_fn is not None:
                 loop_callback_fn()
 
-        # Interrupt interruptible skills when: subclass requests it, or when
-        # a non-interruptible skill freed a robot while interruptible ones remain
-        should_interrupt = self.should_interrupt_active_skills() or self._any_robot_free()
-        if should_interrupt:
-            for skill in self._active_skills:
-                if skill.is_interruptible and not skill.is_done:
-                    skill.interrupt(self)
-            self.clear_interrupt_request()
+        # If a non-interruptible action freed a robot while interruptible ones
+        # remain active, interrupt those remaining skills.
+        self.interrupt_skills()
 
         self._active_skills = [s for s in self._active_skills if not s.is_done]
         return self.state
