@@ -181,6 +181,18 @@ class Environment(ABC):
         """Override in subclasses that track interrupt state."""
         pass
 
+    def _cap_next_advance_time(self, proposed_next_time: float) -> float:
+        """Optional hook to constrain the scheduler's next advance time."""
+        return proposed_next_time
+
+    def _after_skills_advanced(self, advanced_to_time: float) -> None:
+        """Optional hook invoked after skills advance and cleanup."""
+        del advanced_to_time
+
+    def set_robot_pose(self, robot: str, pose: object) -> None:
+        """Optional hook for environments that track continuous robot pose."""
+        del robot, pose
+
     def act(
         self,
         action: Action,
@@ -223,6 +235,16 @@ class Environment(ABC):
             next_time = min(skill_times)
             if next_time == float("inf"):
                 break
+            next_time = self._cap_next_advance_time(next_time)
+            if next_time == float("inf"):
+                break
+            if next_time <= self._time + 1e-12:
+                next_time = min(
+                    (t for t in skill_times if t > self._time + 1e-12),
+                    default=float("inf"),
+                )
+                if next_time == float("inf"):
+                    break
 
             # Advance all skills to next event time
             for s in self._active_skills:
@@ -230,6 +252,7 @@ class Environment(ABC):
 
             self._time = next_time
             self._active_skills = [s for s in self._active_skills if not s.is_done]
+            self._after_skills_advanced(next_time)
 
             if loop_callback_fn is not None:
                 loop_callback_fn()

@@ -44,3 +44,21 @@ class ActiveSkill(Protocol):
     def interrupt(self, env: "Environment") -> None:
         """Interrupt this skill, applying partial effects to environment."""
         ...
+
+
+@runtime_checkable
+class MotionSkill(Protocol):
+    """Optional protocol for skills that provide continuous robot motion.
+
+    Environments may use this to run global sensing cadence while motion
+    actions are active, without requiring all skills to implement motion APIs.
+    """
+
+    @property
+    def controlled_robot(self) -> str:
+        """Robot name controlled by this motion skill."""
+        ...
+
+    def is_motion_active_at(self, time: float) -> bool:
+        """Whether the robot is actively moving at the given absolute time."""
+        ...
