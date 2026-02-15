@@ -13,7 +13,7 @@ from railroad.core import Operator
 from ..skill import ActiveSkill, MotionSkill
 from ..symbolic import LocationRegistry, SymbolicEnvironment
 from . import laser, mapping, pathing
-from .constants import UNOBSERVED_VAL
+from .constants import OBSTACLE_THRESHOLD, UNOBSERVED_VAL
 from .frontiers import extract_frontiers, filter_reachable_frontiers
 from .skill import NavigationMoveSkill
 from .types import Frontier, NavigationConfig, Pose
@@ -146,7 +146,6 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
             pose,
         )
 
-        was_unobserved = self._observed_grid == UNOBSERVED_VAL
         self._observed_grid, newly_observed = mapping.insert_scan(
             occupancy_grid=self._observed_grid,
             laser_scanner_directions=self._laser_directions,
@@ -158,26 +157,23 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
             unoccupied_prob=self._config.unoccupied_prob,
         )
 
-        # Optional: correct observed cells with true-grid values.
-        # Inflate the newly scanned region to fill diagonal/corner gaps
-        # between laser rays, then apply the true grid to the expanded area.
+        # Optional: correct observed cells with true-grid values, then
+        # reveal obstacle cells adjacent to observed free space.
         if self._config.correct_with_known_map:
-            scan_mask = was_unobserved & (self._observed_grid != UNOBSERVED_VAL)
-            radius = max(0.0, float(self._config.scan_inflation_radius))
-            kernel_size = int(1 + 2 * np.ceil(radius))
-            cind = int(np.ceil(radius))
-            y, x = np.ogrid[-cind:kernel_size - cind, -cind:kernel_size - cind]
-            kernel = (y * y + x * x <= radius * radius).astype(float)
-            inflated_scan = scipy.ndimage.convolve(
-                scan_mask.astype(float), kernel, mode="constant", cval=0,
-            ) >= 1.0
-            # Fill expanded cells that are still unobserved with true values
-            fill_mask = inflated_scan & (self._observed_grid == UNOBSERVED_VAL)
-            self._observed_grid[fill_mask] = self._true_grid[fill_mask]
-            newly_observed += int(np.count_nonzero(fill_mask))
             # Correct all observed cells with true values
             observed_mask = self._observed_grid != UNOBSERVED_VAL
             self._observed_grid[observed_mask] = self._true_grid[observed_mask]
+            # Inflate observed free cells with a 3x3 footprint, and reveal
+            # obstacle cells touched by that inflated free-space region.
+            known_free = observed_mask & (self._observed_grid < OBSTACLE_THRESHOLD)
+            inflated_free = scipy.ndimage.binary_dilation(
+                known_free,
+                structure=np.ones((3, 3), dtype=bool),
+            )
+            inflated_obstacles = inflated_free & (self._true_grid >= OBSTACLE_THRESHOLD)
+            new_obstacles = inflated_obstacles & (self._observed_grid == UNOBSERVED_VAL)
+            self._observed_grid[new_obstacles] = self._true_grid[new_obstacles]
+            newly_observed += int(np.count_nonzero(new_obstacles))
 
         self._new_cells_since_interrupt += newly_observed
         if newly_observed > 0:
