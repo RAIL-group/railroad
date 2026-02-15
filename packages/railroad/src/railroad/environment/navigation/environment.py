@@ -303,7 +303,13 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
     # Path / move-time helpers
     # ------------------------------------------------------------------
 
-    def compute_move_path(self, loc_from: str, loc_to: str) -> np.ndarray:
+    def compute_move_path(
+        self,
+        loc_from: str,
+        loc_to: str,
+        *,
+        use_theta: bool = False,
+    ) -> np.ndarray:
         """Compute 2xN grid path between two symbolic locations."""
         registry = self._location_registry
         if registry is None:
@@ -315,14 +321,24 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
 
         start = (int(round(float(start_coords[0]))), int(round(float(start_coords[1]))))
         end = (int(round(float(end_coords[0]))), int(round(float(end_coords[1]))))
-        _cost, path = pathing.get_cost_and_path(
-            self._observed_grid,
-            start,
-            end,
-            use_soft_cost=self._config.trajectory_use_soft_cost,
-            unknown_as_obstacle=True,
-            soft_cost_scale=self._config.trajectory_soft_cost_scale,
-        )
+        if use_theta:
+            _cost, path = pathing.get_cost_and_path_theta(
+                self._observed_grid,
+                start,
+                end,
+                use_soft_cost=self._config.trajectory_use_soft_cost,
+                unknown_as_obstacle=True,
+                soft_cost_scale=self._config.trajectory_soft_cost_scale,
+            )
+        else:
+            _cost, path = pathing.get_cost_and_path(
+                self._observed_grid,
+                start,
+                end,
+                use_soft_cost=self._config.trajectory_use_soft_cost,
+                unknown_as_obstacle=True,
+                soft_cost_scale=self._config.trajectory_soft_cost_scale,
+            )
         return path
 
     def _get_cost_grid(self, loc: str) -> tuple[np.ndarray, tuple[int, int]] | None:
