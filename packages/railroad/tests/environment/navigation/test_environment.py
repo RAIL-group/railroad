@@ -5,11 +5,9 @@ from __future__ import annotations
 import math
 
 import numpy as np
-import pytest
 
 from railroad._bindings import Fluent, State
-from railroad.core import Operator, Effect
-from railroad.environment.navigation.constants import COLLISION_VAL, FREE_VAL, UNOBSERVED_VAL
+from railroad.environment.navigation.constants import COLLISION_VAL, FREE_VAL
 from railroad.environment.navigation.environment import UnknownSpaceEnvironment
 from railroad.environment.navigation.types import NavigationConfig, Pose
 from railroad.environment.symbolic import LocationRegistry
@@ -189,6 +187,7 @@ def test_move_interrupt_creates_robot_loc():
     # Check: robot should be at some location
     at_fluents = [f for f in result.fluents if f.name == "at" and f.args[0] == "robot1"]
     assert len(at_fluents) == 1, f"Robot should be at exactly one location, got {at_fluents}"
+    assert F("just-moved", "robot1") not in result.fluents
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +226,7 @@ def test_move_completes_with_high_thresholds():
     assert F("at", "robot1", destination) in result.fluents, (
         f"Robot should be at destination {destination}"
     )
+    assert F("just-moved", "robot1") not in result.fluents
 
 
 # ---------------------------------------------------------------------------
@@ -284,6 +284,25 @@ def test_unreachable_move_is_filtered_out():
     actions = env.get_actions()
     move_names = {a.name for a in actions}
     assert "move robot1 start goal" not in move_names
+
+
+# ---------------------------------------------------------------------------
+# Regression: just-moved move precondition gate
+# ---------------------------------------------------------------------------
+
+
+def test_just_moved_blocks_followup_move_actions():
+    """(just-moved robot) should make move preconditions fail for that robot."""
+    env = _make_environment(two_robots=False)
+
+    env.fluents.add(F("just-moved", "robot1"))
+    state = env.state
+    actions = env.get_actions()
+    move_actions_with_satisfied_preconditions = [
+        a for a in actions
+        if a.name.startswith("move robot1 ") and state.satisfies_precondition(a)
+    ]
+    assert not move_actions_with_satisfied_preconditions
 
 
 # ---------------------------------------------------------------------------

@@ -489,6 +489,7 @@ def construct_move_navigable_operator(move_time: OptNumeric) -> Operator:
         preconditions=[
             F("at ?r ?from"),
             F("free ?r"),
+            ~F("just-moved ?r"),
             F("navigable ?to"),
             ~F("claimed ?to"),
         ],
@@ -499,7 +500,16 @@ def construct_move_navigable_operator(move_time: OptNumeric) -> Operator:
             ),
             Effect(
                 time=(move_time_fn, ["?r", "?from", "?to"]),
-                resulting_fluents={F("free ?r"), F("at ?r ?to"), F("not claimed ?to")},
+                resulting_fluents={
+                    F("free ?r"),
+                    F("at ?r ?to"),
+                    F("not claimed ?to"),
+                    F("just-moved ?r"),
+                },
+            ),
+            Effect(
+                time=(move_time_fn + 0.1, ["?r", "?from", "?to"]),
+                resulting_fluents={~F("just-moved ?r")},
             ),
         ],
     )
@@ -637,4 +647,89 @@ def construct_search_at_site_operator(
                 ],
             ),
         ],
+    )
+
+
+def construct_search_frontier_operator(
+    object_find_prob: OptNumeric,
+    search_time: OptNumeric,
+) -> Operator:
+    """Construct ``(search-frontier ?robot ?frontier ?object)``.
+
+    This is a frontier-conditioned object-search action. On success the
+    object is marked found and assigned to the frontier location for symbolic
+    planning purposes.
+
+    Args:
+        object_find_prob: Probability or function for finding the object.
+            Function signature: (robot, frontier, object) -> float
+        search_time: Time or function for search duration.
+            Function signature: (robot, frontier, object) -> float
+
+    Returns:
+        Operator for searching an object from a frontier.
+    """
+    prob_fn = _to_numeric(object_find_prob)
+    time_fn = _to_numeric(search_time)
+
+    return Operator(
+        name="search-frontier",
+        parameters=[
+            ("?r", "robot"),
+            ("?frontier", "frontier"),
+            ("?obj", "object"),
+        ],
+        preconditions=[
+            F("at ?r ?frontier"),
+            F("free ?r"),
+            ~F("found ?obj"),
+            ~F("searched-frontier ?frontier ?obj"),
+            ~F("lock-search-frontier ?obj"),
+        ],
+        effects=[
+            Effect(
+                time=0,
+                resulting_fluents={F("not free ?r"), F("lock-search-frontier ?obj")},
+            ),
+            Effect(
+                time=(time_fn, ["?r", "?frontier", "?obj"]),
+                resulting_fluents={
+                    F("free ?r"),
+                    F("searched-frontier ?frontier ?obj"),
+                    F("not lock-search-frontier ?obj"),
+                },
+                prob_effects=[
+                    (
+                        (prob_fn, ["?r", "?frontier", "?obj"]),
+                        [
+                            Effect(
+                                time=0,
+                                resulting_fluents={
+                                    F("found ?obj"),
+                                    F("at ?obj ?frontier"),
+                                },
+                            )
+                        ],
+                    ),
+                    (
+                        (1 - prob_fn, ["?r", "?frontier", "?obj"]),
+                        [],
+                    ),
+                ],
+            ),
+        ],
+    )
+
+
+def construct_observe_object_from_frontier_operator(
+    observe_success_prob: OptNumeric,
+    observe_time: OptNumeric,
+    *,
+    container_type: str | None = None,
+) -> Operator:
+    """Backward-compatible alias for :func:`construct_search_frontier_operator`."""
+    del container_type
+    return construct_search_frontier_operator(
+        object_find_prob=observe_success_prob,
+        search_time=observe_time,
     )

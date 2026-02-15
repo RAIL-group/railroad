@@ -214,6 +214,40 @@ class TestComputeBestPathProgress:
 
 
 # ------------------------------------------------------------------ #
+# Initialization guards
+# ------------------------------------------------------------------ #
+
+def test_raises_when_initial_heuristic_is_inf():
+    move_op = operators.construct_move_operator_blocking(lambda r, a, b: 1.0)
+    no_op = operators.construct_no_op_operator(no_op_time=1.0, extra_cost=10.0)
+    initial_state = State(0.0, {F("at r1 kitchen"), F("free r1")}, [])
+    env = SymbolicEnvironment(
+        state=initial_state,
+        objects_by_type={
+            "robot": {"r1"},
+            "location": {"kitchen", "bedroom"},
+        },
+        operators=[move_op, no_op],
+    )
+
+    class _InfHeuristicPlanner:
+        def heuristic(self, state, goal):
+            return float("inf")
+
+        def get_trace_from_last_mcts_tree(self):
+            return ""
+
+    with pytest.raises(ValueError, match="Initial heuristic is inf"):
+        PlannerDashboard(
+            F("at r1 bedroom"),
+            env,
+            force_interactive=False,
+            print_on_exit=False,
+            planner_factory=lambda _: _InfHeuristicPlanner(),
+        )
+
+
+# ------------------------------------------------------------------ #
 # Utility functions
 # ------------------------------------------------------------------ #
 

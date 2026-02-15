@@ -1,8 +1,8 @@
-"""Frontier-based exploration and object search example.
+"""Frontier-based exploration and object-search example.
 
 Demonstrates end-to-end planning: one or more robots explore unknown space by
-moving to frontiers, discovers hidden container sites as map cells are
-revealed, and searches those sites for target objects using the MCTS planner.
+moving to frontiers, then searching for target objects from those frontiers
+with symbolic ``(at object frontier)`` assignments used for planning.
 
 Two modes:
 - **Synthetic** (default): built-in 80x80 corridor grid with hidden sites.
@@ -43,12 +43,13 @@ def main(
     from railroad.core import Fluent as F, get_action_by_name
     from railroad.dashboard import PlannerDashboard
     from railroad.environment.navigation import NavigationConfig, Pose, UnknownSpaceEnvironment
+    from railroad.environment.navigation.constants import FREE_VAL, OBSTACLE_THRESHOLD
     from railroad.environment.symbolic import LocationRegistry
     from railroad.operators import (
         construct_move_navigable_operator,
         construct_no_op_operator,
-        construct_observe_site_operator,
         construct_search_at_site_operator,
+        construct_search_frontier_operator,
     )
     from railroad.planner import MCTSPlanner
 
@@ -81,6 +82,28 @@ def main(
     env_ref: list[UnknownSpaceEnvironment | None] = [None]
     unreachable_move_penalty = 1_000_000.0
 
+    def snap_to_known_free_cell(row: int, col: int) -> tuple[int, int]:
+        """Snap a map coordinate to the nearest observed free cell."""
+        if env_ref[0] is None:
+            return row, col
+        grid = env_ref[0].observed_grid
+        r = max(0, min(int(row), grid.shape[0] - 1))
+        c = max(0, min(int(col), grid.shape[1] - 1))
+
+        if FREE_VAL <= float(grid[r, c]) < OBSTACLE_THRESHOLD:
+            return r, c
+
+        free_coords = np.argwhere(
+            (grid >= FREE_VAL) & (grid < OBSTACLE_THRESHOLD)
+        )
+        if free_coords.size == 0:
+            return r, c
+
+        deltas = free_coords - np.array([r, c], dtype=int)
+        nearest_idx = int(np.argmin(np.sum(deltas * deltas, axis=1)))
+        nearest = free_coords[nearest_idx]
+        return int(nearest[0]), int(nearest[1])
+
     def move_time_fn(robot: str, loc_from: str, loc_to: str) -> float:
         if env_ref[0] is not None:
             move_time = env_ref[0].estimate_move_time(robot, loc_from, loc_to)
@@ -98,16 +121,38 @@ def main(
             return move_time
         return 5.0
 
-    def object_find_prob_fn(robot: str, location: str, obj: str) -> float:
-        for loc, objs in true_object_locations.items():
-            if obj in objs:
-                return 0.8 if loc == location else 0.1
-        return 0.1
+    def search_frontier_prob_fn(robot: str, frontier: str, obj: str) -> float:
+        return 0.5
+        # del robot
+        # if env_ref[0] is None or not hidden_sites:
+        #     return 0.10
+        # registry = env_ref[0].location_registry
+        # if registry is None:
+        #     return 0.10
+        # frontier_xy = registry.get(frontier)
+        # if frontier_xy is None:
+        #     return 0.10
+        # best_site = min(
+        #     hidden_sites.items(),
+        #     key=lambda kv: float(np.linalg.norm(frontier_xy - np.asarray(kv[1], dtype=float))),
+        # )[0]
+        # return 0.85 if obj in true_object_locations.get(best_site, set()) else 0.25
+
+    def search_container_prob_fn(robot: str, location: str, obj: str) -> float:
+        del robot
+        return 0.85 if obj in true_object_locations.get(location, set()) else 0.05
 
     operators = [
         construct_move_navigable_operator(move_time_fn),
-        construct_observe_site_operator(observe_success_prob=0.8, observe_time=1.0, container_type="container"),
-        construct_search_at_site_operator(object_find_prob_fn, search_time=2.0, container_type="container"),
+        construct_search_frontier_operator(
+            object_find_prob=search_frontier_prob_fn,
+            search_time=1.0,
+        ),
+        construct_search_at_site_operator(
+            search_container_prob_fn,
+            search_time=2.0,
+            container_type="container",
+        ),
         construct_no_op_operator(no_op_time=5.0, extra_cost=100.0),
     ]
 
@@ -132,7 +177,6 @@ def main(
             start_name: np.array(start_coords_list[i], dtype=float)
             for i, start_name in enumerate(start_names)
         }
-        | {k: np.array(v, dtype=float) for k, v in hidden_sites.items()}
     )
 
     fluents: set = set()
@@ -153,8 +197,8 @@ def main(
         state=State(0.0, fluents, []),
         objects_by_type={
             "robot": set(robots),
-            "location": set(start_names) | set(hidden_sites.keys()),
-            "container": set(hidden_sites.keys()),
+            "location": set(start_names),
+            "container": set(),
             "frontier": set(),
             "object": set(target_objects),
         },
@@ -168,6 +212,16 @@ def main(
     )
     env_ref[0] = env
 
+    def sync_known_hidden_sites() -> None:
+        """Expose hidden containers only after their map cells are observed."""
+        for site, (row, col) in hidden_sites.items():
+            if env.is_cell_observed(row, col):
+                env.register_discovered_location(site, snap_to_known_free_cell(row, col))
+                env.objects_by_type.setdefault("container", set()).add(site)
+                env.fluents.add(F(f"known-in-map {site}"))
+
+    sync_known_hidden_sites()
+
     # ------------------------------------------------------------------
     # Planning loop
     # ------------------------------------------------------------------
@@ -175,7 +229,7 @@ def main(
     goal = reduce(and_, [F(f"found {obj}") for obj in target_objects])
 
     def fluent_filter(f):  # noqa: ANN001
-        return any(kw in f.name for kw in ["at", "found", "searched", "navigable"])
+        return any(kw in f.name for kw in ["at", "found", "navigable", "known-in-map", "searched"])
 
     max_iterations = 80
 
@@ -207,6 +261,7 @@ def main(
 
             action = get_action_by_name(actions, action_name)
             env.act(action, loop_callback_fn=act_callback)
+            sync_known_hidden_sites()
             dashboard.update(mcts, action_name)
 
     dashboard.show_plots(

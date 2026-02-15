@@ -7,6 +7,7 @@ from rich.table import Table
 from rich.rule import Rule
 from rich.text import Text
 
+from math import isinf
 import re
 from time import sleep, perf_counter
 from typing import Any, List, Set, Union, Tuple, Callable
@@ -104,6 +105,10 @@ class PlannerDashboard(_PlottingMixin):
         factory = planner_factory or MCTSPlanner
         planner = factory(env.get_actions())
         self.initial_heuristic = planner.heuristic(env.state, self.goal)
+        if isinf(self.initial_heuristic):
+            raise ValueError(
+                "Initial heuristic is inf; provide a reachable goal or a planner heuristic with a finite fallback."
+            )
 
         # Actions stored as (action_name, start_time) tuples
         self.actions_taken: List[Tuple[str, float]] = []

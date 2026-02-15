@@ -40,6 +40,8 @@ from .core import (
     construct_no_op_operator,
     # Navigation operators
     construct_move_navigable_operator,
+    construct_search_frontier_operator,
+    construct_observe_object_from_frontier_operator,
     construct_observe_site_operator,
     construct_search_at_site_operator,
 )
@@ -72,6 +74,8 @@ __all__ = [
     "construct_no_op_operator",
     # Navigation operators
     "construct_move_navigable_operator",
+    "construct_search_frontier_operator",
+    "construct_observe_object_from_frontier_operator",
     "construct_observe_site_operator",
     "construct_search_at_site_operator",
     # Utilities
