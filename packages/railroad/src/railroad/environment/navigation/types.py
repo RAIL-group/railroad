@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import NamedTuple, Protocol, runtime_checkable
 
 import numpy as np
@@ -58,6 +58,9 @@ class NavigationConfig:
     speed_cells_per_sec: float = 2.0
     trajectory_use_soft_cost: bool = True
     trajectory_soft_cost_scale: float = 6.0
+    # Keep action-selection cost estimates cheap, but allow selected moves
+    # to execute on any-angle Theta* paths.
+    move_execution_use_theta_star: bool = False
     occupied_prob: float = 0.9
     unoccupied_prob: float = 0.1
     connect_neighbor_distance: int = 2

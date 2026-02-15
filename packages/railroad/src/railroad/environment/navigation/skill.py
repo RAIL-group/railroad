@@ -9,7 +9,6 @@ import numpy as np
 
 from railroad._bindings import Action, Fluent, GroundedEffect
 
-from ..skill import ActiveSkill
 from . import pathing
 from .types import Pose
 
@@ -46,8 +45,21 @@ class NavigationMoveSkill:
         self._move_origin = parts[2]
         self._move_destination = parts[3]
 
-        # Build path from observed grid
-        self._path = env.compute_move_path(self._move_origin, self._move_destination)
+        # Build path from observed grid. Prefer Theta* when configured, but
+        # fall back to Dijkstra if any-angle planning fails from rounded
+        # intermediate (robot_loc) coordinates.
+        use_theta = env.config.move_execution_use_theta_star
+        self._path = env.compute_move_path(
+            self._move_origin,
+            self._move_destination,
+            use_theta=use_theta,
+        )
+        if use_theta and (self._path.size == 0 or self._path.shape[0] != 2):
+            self._path = env.compute_move_path(
+                self._move_origin,
+                self._move_destination,
+                use_theta=False,
+            )
         if self._path.size == 0 or self._path.shape[0] != 2:
             raise ValueError(
                 f"No traversable path for action: {action.name}"
