@@ -64,6 +64,6 @@ class NavigationConfig:
     interrupt_min_new_cells: int = 20
     interrupt_min_dt: float = 1.0
     max_move_action_time: float = float("inf")
-    scan_inflation_radius: float = 2.5
+    scan_inflation_radius: float = 5.0
     correct_with_known_map: bool = True
     record_frames: bool = True

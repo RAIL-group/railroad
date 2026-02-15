@@ -140,13 +140,13 @@ def main(
 
     def search_container_prob_fn(robot: str, location: str, obj: str) -> float:
         del robot
-        return 0.85 if obj in true_object_locations.get(location, set()) else 0.05
+        return 0.85 if obj in true_object_locations.get(location, set()) else 0.15
 
     operators = [
         construct_move_navigable_operator(move_time_fn),
         construct_search_frontier_operator(
             object_find_prob=search_frontier_prob_fn,
-            search_time=1.0,
+            search_time=10.0,
         ),
         construct_search_at_site_operator(
             search_container_prob_fn,
@@ -161,12 +161,12 @@ def main(
     # ------------------------------------------------------------------
 
     config = NavigationConfig(
-        sensor_range=60.0,
+        sensor_range=120.0,
         sensor_fov_rad=2 * np.pi,
-        sensor_num_rays=181,
+        sensor_num_rays=361,
         max_move_action_time=10_000.0,
-        interrupt_min_new_cells=30,
-        interrupt_min_dt=30.0,
+        interrupt_min_new_cells=30000,
+        interrupt_min_dt=30000.0,
     )
 
     robots = [f"robot{i + 1}" for i in range(num_robots)]
