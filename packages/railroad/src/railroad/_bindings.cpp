@@ -580,7 +580,8 @@ PYBIND11_MODULE(_bindings, m) {
 
 
   py::class_<MCTSPlanner>(m, "MCTSPlanner")
-      .def(py::init<std::vector<Action>>(), py::arg("all_actions"))
+      .def(py::init<std::vector<Action>, bool>(),
+           py::arg("all_actions"), py::arg("use_det_heuristic") = false)
       .def(
           "__call__",
           [](MCTSPlanner &self, const State &s,
@@ -602,5 +603,14 @@ PYBIND11_MODULE(_bindings, m) {
           return ff_heuristic(state, goal.get(), all_actions);
         },
         "Compute FF heuristic value for a state with a Goal object",
+        py::arg("state"), py::arg("goal"), py::arg("all_actions"));
+
+  // det_ff_heuristic - deterministic (classic) FF heuristic
+  m.def("det_ff_heuristic",
+        [](const State &state, const GoalPtr &goal,
+           const std::vector<Action> &all_actions) {
+          return det_ff_heuristic(state, goal.get(), all_actions);
+        },
+        "Compute deterministic FF heuristic value (classic fast-forward, no probabilistic adjustments)",
         py::arg("state"), py::arg("goal"), py::arg("all_actions"));
 }

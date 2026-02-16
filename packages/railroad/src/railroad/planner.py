@@ -53,12 +53,15 @@ class MCTSPlanner:
         action_name = mcts(state, goal, max_iterations=1000, c=1.414)
     """
 
-    def __init__(self, actions: List[Action]):
+    def __init__(self, actions: List[Action], use_det_heuristic: bool = False):
         """Initialize MCTSPlanner with automatic preprocessing.
 
         Args:
             actions: List of Action objects to use for planning
+            use_det_heuristic: If True, use the deterministic (classic) FF
+                heuristic instead of the probabilistic version.
         """
+        self._use_det_heuristic = use_det_heuristic
         # Store original actions for later re-conversion if needed
         self._original_actions = actions
 
@@ -73,7 +76,7 @@ class MCTSPlanner:
         # Convert actions with base mapping and create initial C++ planner
         self._current_mapping = self._base_mapping
         self._converted_actions = self._convert_actions(actions, self._current_mapping)
-        self._cpp_planner = _MCTSPlannerCpp(self._converted_actions)
+        self._cpp_planner = _MCTSPlannerCpp(self._converted_actions, self._use_det_heuristic)
 
     def _convert_actions(
         self, actions: List[Action], mapping: Dict[Fluent, Fluent]
@@ -121,7 +124,7 @@ class MCTSPlanner:
             )
 
             # Create new C++ planner with re-converted actions
-            self._cpp_planner = _MCTSPlannerCpp(self._converted_actions)
+            self._cpp_planner = _MCTSPlannerCpp(self._converted_actions, self._use_det_heuristic)
 
     def __call__(
         self,
@@ -179,6 +182,9 @@ class MCTSPlanner:
         negative preconditions to positive equivalents, matching the
         internal heuristic used by the MCTS planner.
 
+        Uses the deterministic or probabilistic variant depending on
+        how the planner was initialized (use_det_heuristic flag).
+
         Args:
             state: Current state (will be automatically converted)
             goal: Goal to achieve. Can be:
@@ -189,6 +195,7 @@ class MCTSPlanner:
             Heuristic value (estimated cost to reach goal)
         """
         from railroad._bindings import ff_heuristic as _ff_heuristic_cpp
+        from railroad._bindings import det_ff_heuristic as _det_ff_heuristic_cpp
 
         # Normalize goal (wrap Fluent in LiteralGoal if needed)
         goal = _normalize_goal(goal)
@@ -206,7 +213,8 @@ class MCTSPlanner:
             goal, self._current_mapping
         )
 
-        return _ff_heuristic_cpp(
+        heuristic_fn = _det_ff_heuristic_cpp if self._use_det_heuristic else _ff_heuristic_cpp
+        return heuristic_fn(
             converted_state, converted_goal, self._converted_actions
         )
 
