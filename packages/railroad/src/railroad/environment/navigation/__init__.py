@@ -5,7 +5,8 @@ extraction, and hidden-site discovery for multi-robot planning.
 Requires optional dependencies: pip install railroad[navigation]
 """
 
-from .types import NavigationConfig, Pose
+from ..types import Pose
+from .types import NavigationConfig
 
 __all__ = [
     "is_available",

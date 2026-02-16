@@ -9,10 +9,10 @@ import numpy as np
 
 from railroad._bindings import Action, Fluent
 
+from ..motion_utils import get_coordinates_at_distance, path_total_length
 from ..skill import MotionSkill
 from ..symbolic import SymbolicSkill
-from . import pathing
-from .types import Pose
+from ..types import Pose
 
 if TYPE_CHECKING:
     from ..environment import Environment
@@ -55,7 +55,7 @@ class NavigationMoveSkill(SymbolicSkill, MotionSkill):
             raise ValueError(
                 f"No traversable path for action: {action.name}"
             )
-        self._path_length = pathing.path_total_length(self._path)
+        self._path_length = path_total_length(self._path)
 
         # Use the action's "free robot" effect as the move completion time.
         free_effect_times = [
@@ -86,11 +86,11 @@ class NavigationMoveSkill(SymbolicSkill, MotionSkill):
         """Compute robot pose at given time by interpolating along path."""
         elapsed = time - self._start_time
         distance = elapsed * self._speed
-        coords = pathing.get_coordinates_at_distance(self._path, distance)
+        coords = get_coordinates_at_distance(self._path, distance)
 
         # Compute yaw from path direction
         look_ahead = min(distance + 1.0, self._path_length)
-        ahead_coords = pathing.get_coordinates_at_distance(self._path, look_ahead)
+        ahead_coords = get_coordinates_at_distance(self._path, look_ahead)
         dx = ahead_coords[0] - coords[0]
         dy = ahead_coords[1] - coords[1]
         yaw = math.atan2(dy, dx) if (abs(dx) > 1e-6 or abs(dy) > 1e-6) else 0.0
