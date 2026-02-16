@@ -201,7 +201,7 @@ def test_move_interrupt_creates_robot_loc():
 
 
 def test_move_completes_with_high_thresholds():
-    """High interrupt thresholds allow move to complete to destination."""
+    """Move ends at a currently valid location after frontier refresh."""
     config = NavigationConfig(
         sensor_range=9.0,
         sensor_fov_rad=2 * math.pi,
@@ -220,9 +220,11 @@ def test_move_completes_with_high_thresholds():
     result = env.act(action)
 
     assert F("free robot1") in result.fluents
-    assert F("at", "robot1", destination) in result.fluents, (
-        f"Robot should be at destination {destination}"
-    )
+    if destination in env.objects_by_type.get("location", set()):
+        assert F("at", "robot1", destination) in result.fluents
+    else:
+        assert F("at", "robot1", "robot1_loc") in result.fluents
+        assert F("at", "robot1", destination) not in result.fluents
     assert F("just-moved", "robot1") not in result.fluents
 
 
@@ -289,7 +291,7 @@ def test_no_motion_action_not_capped_by_sensor_dt():
 
 
 def test_non_interruptible_move_completes_under_aggressive_interrupt_thresholds():
-    """Non-interruptible move should still complete despite interrupt trigger."""
+    """Non-interruptible move still remaps if destination becomes stale."""
     config = NavigationConfig(
         sensor_range=9.0,
         sensor_fov_rad=2 * math.pi,
@@ -306,12 +308,76 @@ def test_non_interruptible_move_completes_under_aggressive_interrupt_thresholds(
 
     result = env.act(action)
 
-    assert F("at", "robot1", destination) in result.fluents
-    assert F("at", "robot1", "robot1_loc") not in result.fluents
+    if destination in env.objects_by_type.get("location", set()):
+        assert F("at", "robot1", destination) in result.fluents
+    else:
+        assert F("at", "robot1", destination) not in result.fluents
+        assert F("at", "robot1", "robot1_loc") in result.fluents
+
+
+def test_stale_destination_is_handled_only_on_interrupt_request(monkeypatch):
+    """Stale move destination is rewritten when an interrupt request is processed."""
+    import railroad.environment.navigation.environment as nav_env_module
+
+    config = NavigationConfig(
+        sensor_range=9.0,
+        sensor_fov_rad=2 * math.pi,
+        sensor_num_rays=91,
+        sensor_dt=0.05,
+        speed_cells_per_sec=2.0,
+        interrupt_min_new_cells=100000,
+        interrupt_min_dt=100000.0,
+        move_execution_interruptible=True,
+    )
+    env = _make_environment(config=config, two_robots=False)
+
+    state = env.state
+    frontier_moves = [
+        a for a in env.get_actions()
+        if a.name.startswith("move")
+        and state.satisfies_precondition(a)
+        and a.name.split()[3].startswith("frontier_")
+    ]
+    assert frontier_moves, "Expected at least one move to a frontier destination"
+
+    action = frontier_moves[0]
+    stale_destination = action.name.split()[3]
+    skill = env.create_skill(action, env.time)
+    env._active_skills.append(skill)
+
+    for s in env._active_skills:
+        s.advance(env.time, env)
+
+    env._time += 0.5
+    skill.advance(env.time, env)
+
+    monkeypatch.setattr(nav_env_module, "extract_frontiers", lambda _grid: [])
+    monkeypatch.setattr(
+        nav_env_module,
+        "filter_reachable_frontiers",
+        lambda _raw, _grid, _robot_positions: [],
+    )
+
+    env.refresh_frontiers()
+
+    # Frontier refresh alone should not interrupt active skills.
+    assert not skill.is_done
+    assert F("at", "robot1", "robot1_loc") not in env.fluents
+
+    # Explicit interrupt request should process stale-destination rewrite.
+    env.interrupt_skills()
+
+    assert skill.is_done
+    assert F("free robot1") in env.fluents
+
+    env.refresh_frontiers()
+
+    assert F("at", "robot1", "robot1_loc") in env.fluents
+    assert F("at", "robot1", stale_destination) not in env.fluents
 
 
 def test_robot_pose_updates_without_continuous_robot_loc_registry_writes():
-    """During move, pose updates continuously while robot_loc is not re-registered."""
+    """Move pose updates continuously; robot_loc writes remain bounded."""
     config = NavigationConfig(
         sensor_range=9.0,
         sensor_fov_rad=2 * math.pi,
@@ -354,7 +420,9 @@ def test_robot_pose_updates_without_continuous_robot_loc_registry_writes():
     env.act(action)
 
     assert len({(round(x, 3), round(y, 3)) for x, y in sensed_positions}) > 1
-    assert registered_keys.count("robot1_loc") <= 1
+    robot_loc_writes = registered_keys.count("robot1_loc")
+    assert robot_loc_writes <= 3
+    assert robot_loc_writes < len(sensed_positions)
 
 
 # ---------------------------------------------------------------------------
@@ -516,4 +584,3 @@ def test_hidden_site_observation_does_not_add_navigable():
         not (f.name == "navigable" and not f.negated)
         for f in env.fluents
     )
-

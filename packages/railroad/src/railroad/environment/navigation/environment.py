@@ -303,10 +303,6 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
             if Fluent("at", robot, f"{robot}_loc") in self._fluents:
                 self._fluents.discard(Fluent("just-moved", robot))
 
-    def sync_dynamic_navigable_targets(self) -> None:
-        """Backward-compatible alias for older call sites."""
-        self.sync_dynamic_targets()
-
     # ------------------------------------------------------------------
     # Path / move-time helpers
     # ------------------------------------------------------------------
@@ -442,8 +438,11 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
             for skill in self._active_skills
         )
 
-    def interrupt_skills(self, force: bool = False) -> bool:
+    def interrupt_skills(self) -> None:
         """Interrupt according to nav policy (new-info or robot-free)."""
+        self.refresh_frontiers()
+        self.sync_dynamic_targets()
+
         has_interruptible = any(
             skill.is_interruptible and not skill.is_done
             for skill in self._active_skills
@@ -454,13 +453,13 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
                 # Avoid stale interrupt requests when all active moves are
                 # non-interruptible.
                 self._clear_interrupt_request()
-                return False
-            interrupted = super().interrupt_skills(force=True)
+                return
+            interrupted = super().interrupt_skills()
             # Always clear request after an interrupt attempt.
             self._clear_interrupt_request()
             return interrupted
 
-        return super().interrupt_skills(force=force)
+        super().interrupt_skills()
 
     def _iter_active_motion_skills(self) -> Iterable[MotionSkill]:
         """Yield active skills that expose continuous motion state."""

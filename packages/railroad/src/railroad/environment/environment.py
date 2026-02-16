@@ -173,7 +173,7 @@ class Environment(ABC):
         """Check if any robot is free."""
         return any(f.name == "free" for f in self.fluents)
 
-    def interrupt_skills(self, force: bool = False) -> bool:
+    def interrupt_skills(self) -> None:
         """Interrupt active interruptible skills according to env policy.
 
         Args:
@@ -182,14 +182,8 @@ class Environment(ABC):
         Returns:
             True if at least one skill was interrupted.
         """
-        if not force and not self._any_robot_free():
-            return False
-        interrupted = False
         for skill in self._active_skills:
-            if skill.is_interruptible and not skill.is_done:
-                skill.interrupt(self)
-                interrupted = True
-        return interrupted
+            skill.interrupt(self)
 
     def _should_interrupt_skills(self) -> bool:
         """Internal predicate hook for early loop interruption."""

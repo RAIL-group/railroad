@@ -108,24 +108,35 @@ class NavigationMoveSkill(SymbolicSkill, MotionSkill):
         # Delegate symbolic effect execution to shared base logic.
         super().advance(time, env)
 
+    def _destination_is_stale(self, env: Environment) -> bool:
+        """Whether this move's destination is no longer planner-usable."""
+        # Prefer symbolic location typing when available.
+        locations = set(env.objects_by_type.get("location", set()))
+        if locations and self._move_destination not in locations:
+            return True
 
-class InterruptibleNavigationMoveSkill(NavigationMoveSkill):
-    """Navigation move skill that supports mid-execution interruption."""
+        # Also respect registry removals when environments prune coordinates.
+        registry = getattr(env, "location_registry", None)
+        if registry is not None and self._move_destination not in registry:
+            return True
 
-    def __init__(
+        return False
+
+    def _interrupt_with_destination_rewrite(
         self,
-        action: Action,
-        start_time: float,
         env: Environment,
+        *,
+        require_stale_destination: bool,
     ) -> None:
-        super().__init__(action=action, start_time=start_time, env=env)
-        self._is_interruptible = True
-
-    def interrupt(self, env: Environment) -> None:
-        """Interrupt move: place robot at current pose, rewrite effects."""
+        """Interrupt move and rewrite pending effects to a robot-local anchor."""
         if self._current_time <= self._start_time:
             return
         if self.is_done:
+            return
+        if self._move_destination is None or self._robot is None:
+            return
+        stale_destination = self._destination_is_stale(env)
+        if require_stale_destination and not stale_destination:
             return
 
         # Get current interpolated pose
@@ -167,3 +178,30 @@ class InterruptibleNavigationMoveSkill(NavigationMoveSkill):
 
         # Clear remaining effects
         self._upcoming_effects = []
+
+    def interrupt(self, env: Environment) -> None:
+        """Interrupt only when destination became stale."""
+        self._interrupt_with_destination_rewrite(
+            env,
+            require_stale_destination=True,
+        )
+
+
+class InterruptibleNavigationMoveSkill(NavigationMoveSkill):
+    """Navigation move skill that supports unconditional interruption."""
+
+    def __init__(
+        self,
+        action: Action,
+        start_time: float,
+        env: Environment,
+    ) -> None:
+        super().__init__(action=action, start_time=start_time, env=env)
+        self._is_interruptible = True
+
+    def interrupt(self, env: Environment) -> None:
+        """Interrupt move immediately when requested by the environment."""
+        self._interrupt_with_destination_rewrite(
+            env,
+            require_stale_destination=False,
+        )
