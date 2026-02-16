@@ -228,19 +228,31 @@ class ProcTHORScene:
         coords = procthor_utils.get_coordinates_at_time(path, elapsed_time)
         return int(coords[0]), int(coords[1])
 
-    def get_trajectory(
+    def compute_move_path(
         self,
-        waypoints: list[tuple[float, float]],
-    ) -> list[tuple[float, float]]:
-        """Compute obstacle-respecting trajectory through waypoints.
+        start: tuple[float, float],
+        end: tuple[float, float],
+        *,
+        use_theta: bool = True,
+    ) -> np.ndarray:
+        """Compute 2xN grid path between two coordinates.
 
         Args:
-            waypoints: List of (x, y) grid coordinates to visit in order.
+            start: Start coordinate (x, y).
+            end: End coordinate (x, y).
+            use_theta: Whether to try Theta* before Dijkstra.
 
         Returns:
-            List of (x, y) coordinates forming the complete path.
+            2xN integer path array.
         """
-        return procthor_utils.get_trajectory(self._thor.occupancy_grid, waypoints)
+        start_xy = (int(round(float(start[0]))), int(round(float(start[1]))))
+        end_xy = (int(round(float(end[0]))), int(round(float(end[1]))))
+        return procthor_utils.compute_move_path(
+            self._thor.occupancy_grid,
+            start_xy,
+            end_xy,
+            use_theta=use_theta,
+        )
 
     def get_top_down_image(self, orthographic: bool = True) -> np.ndarray:
         """Get top-down view image of the scene."""

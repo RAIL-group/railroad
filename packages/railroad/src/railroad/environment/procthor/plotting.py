@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .utils import get_trajectory
+from .utils import compute_move_path
 
 try:
     import matplotlib.pyplot as plt
@@ -171,7 +171,17 @@ def plot_robot_trajectory(
         return
 
     # Compute obstacle-respecting trajectory through waypoints
-    trajectory = get_trajectory(grid, waypoints)
+    trajectory: list[tuple[float, float]] = []
+    for i in range(len(waypoints) - 1):
+        start = (int(waypoints[i][0]), int(waypoints[i][1]))
+        end = (int(waypoints[i + 1][0]), int(waypoints[i + 1][1]))
+        path = compute_move_path(grid, start, end, use_theta=True)
+        if path.size == 0:
+            trajectory.append(waypoints[i])
+            continue
+        start_idx = 0 if i == 0 else 1
+        for j in range(start_idx, path.shape[1]):
+            trajectory.append((float(path[0, j]), float(path[1, j])))
 
     if len(trajectory) < 2:
         return
