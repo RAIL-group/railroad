@@ -1,4 +1,5 @@
 import threading
+import multiprocessing
 import time as time_module
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Set, Tuple, Optional, Union, Type
@@ -9,6 +10,7 @@ from railroad._bindings import State, Fluent, Action
 from railroad.environment import PhysicalEnvironment, PhysicalScene, SkillStatus, ActiveSkill
 from railroad.core import Operator
 
+from pyrobosim.core import Room, Location, ObjectSpawn
 from pyrobosim.core.yaml_utils import WorldYamlLoader
 from pyrobosim.utils.knowledge import query_to_entity, graph_node_from_entity
 from pyrobosim.gui.world_canvas import WorldCanvas
@@ -38,12 +40,284 @@ def _run_async(func: Callable) -> Callable:
     return wrapper
 
 
+class PyRoboSimServer:
+    """Agnostic simulator server that runs PyRoboSim in a separate process.
+
+    Tracks command execution state using IDs to ensure robust synchronization.
+    """
+
+    def __init__(
+        self,
+        world_file: str | Path,
+        show_plot: bool = True,
+        record_plots: bool = False,
+        skip_canvas: bool = False,
+    ):
+        self.world_file = world_file
+        self.show_plot = show_plot
+        self._world = WorldYamlLoader().from_file(Path(world_file))
+        self._robots = {robot.name: robot for robot in self._world.robots}
+
+        # Robot State Tracking
+        # Maps robot_name -> { "current_id": int|None, "last_completed_id": int }
+        self._robot_metadata = {
+            name: {"current_id": None, "last_completed_id": -1}
+            for name in self._robots
+        }
+
+        self._is_saving_animation = False
+        self.canvas = None
+        if not skip_canvas:
+            self.canvas = MatplotlibWorldCanvas(
+                self._world, show_plot=show_plot, record_plots=record_plots
+            )
+
+    def run(self, command_queue: multiprocessing.Queue, status_queue: multiprocessing.Queue):
+        """Main loop for the simulator process."""
+        import queue
+        try:
+            dt = self.canvas.options.animation_dt if self.canvas else 0.01
+            while True:
+                start_time = time_module.time()
+
+                # 1. Process commands
+                while True:
+                    try:
+                        cmd = command_queue.get_nowait()
+                        cmd_type = cmd[0]
+
+                        if cmd_type == "execute":
+                            _, robot_name, skill_name, args, cmd_id = cmd
+                            # print(f"DEBUG: Simulator server dispatching {skill_name} for {robot_name} (ID: {cmd_id})")
+                            self._handle_execute(robot_name, skill_name, args, cmd_id)
+                        elif cmd_type == "stop":
+                            _, robot_name = cmd
+                            self._stop_robot(robot_name)
+                        elif cmd_type == "save_animation":
+                            _, filepath = cmd
+                            if self.canvas:
+                                self._is_saving_animation = True
+                                try:
+                                    self.canvas.save_animation(filepath)
+                                finally:
+                                    self._is_saving_animation = False
+                        elif cmd_type == "exit":
+                            return
+                    except queue.Empty:
+                        break
+
+                # 2. Publish Status
+                status_update = self._collect_status()
+                status_queue.put(status_update)
+
+                # 3. Update GUI and capture frame
+                if self.canvas:
+                    self.canvas.update()
+
+                # 4. Maintain timing
+                elapsed = time_module.time() - start_time
+                sleep_time = max(0, dt - elapsed)
+                time_module.sleep(sleep_time)
+
+        except Exception as e:
+            print(f"CRITICAL: Simulator server crashed: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _handle_execute(self, robot_name: str, skill_name: str, args: Any, cmd_id: int):
+        """Dispatch execution command."""
+        # Update metadata to show we are working on this ID
+        self._robot_metadata[robot_name]["current_id"] = cmd_id
+
+        if skill_name == "pick":
+            obj_name = args[2] if len(args) > 2 else args[1]
+            self._pick(robot_name, obj_name, cmd_id)
+        elif skill_name == "place":
+            self._place(robot_name, cmd_id)
+        elif skill_name == "move":
+            loc_to = args[2] if len(args) > 2 else args[1]
+            # Need to handle initial locations
+            initial_locs = {f"{r.name}_loc": r.pose for r in self._world.robots}
+            if loc_to in initial_locs:
+                self._move(robot_name, initial_locs[loc_to], cmd_id)
+            else:
+                self._move(robot_name, loc_to, cmd_id)
+        elif skill_name == "no_op":
+            self._no_op(robot_name, cmd_id)
+        elif skill_name == "search":
+            self._search(robot_name, cmd_id)
+
+    def _on_task_complete(self, robot_name: str, cmd_id: int):
+        """Callback when an async task completes."""
+        meta = self._robot_metadata[robot_name]
+        # Only update if this was the current task (handle cancellations/overwrites)
+        if meta["current_id"] == cmd_id:
+            meta["current_id"] = None
+            meta["last_completed_id"] = cmd_id
+
+    def _collect_status(self) -> Dict:
+        """Snapshot the world state."""
+        robot_states = {}
+        for name, robot in self._robots.items():
+            meta = self._robot_metadata[name]
+
+            # Determine location info
+            loc_name = None
+            loc_type = None
+            if robot.location:
+                if isinstance(robot.location, (Location, ObjectSpawn)):
+                    loc_type = "location"
+                    if isinstance(robot.location, ObjectSpawn):
+                        loc_name = robot.location.parent.name
+                    else:
+                        loc_name = robot.location.name
+                elif isinstance(robot.location, Room):
+                    loc_type = "room"
+                    loc_name = robot.location.name
+
+            robot_states[name] = {
+                "pose": (robot.pose.x, robot.pose.y),
+                "holding": robot.manipulated_object.name if robot.manipulated_object else None,
+                "location": loc_name,
+                "location_type": loc_type,
+                # Command tracking
+                "current_id": meta["current_id"],
+                "last_completed_id": meta["last_completed_id"]
+            }
+
+        object_states = {}
+        for obj in self._world.objects:
+            loc_name = None
+            loc_type = None
+            if obj.parent:
+                if isinstance(obj.parent, (Location, ObjectSpawn)):
+                    loc_type = "location"
+                    if isinstance(obj.parent, ObjectSpawn):
+                        loc_name = obj.parent.parent.name
+                    else:
+                        loc_name = obj.parent.name
+                else:
+                    loc_name = obj.parent.name
+                    loc_type = "room"
+
+            object_states[obj.name] = {
+                "location": loc_name,
+                "location_type": loc_type
+            }
+
+        return {
+            "time": time_module.time(),
+            "is_saving_animation": self._is_saving_animation,
+            "robots": robot_states,
+            "objects": object_states
+        }
+
+    def _stop_robot(self, robot_name: str) -> None:
+        if self._robots[robot_name].is_busy():
+            self._robots[robot_name].cancel_actions()
+            # Note: We don't mark task complete here, the async task will exit and
+            # might not call complete, or we can handle "cancelled" state.
+            # For simplicity, if we stop, we just clear current_id.
+            self._robot_metadata[robot_name]["current_id"] = None
+
+    @_run_async
+    def _pick(self, robot_name: str, object_name: str, cmd_id: int) -> None:
+        success = self._robots[robot_name].pick_object(object_name)
+        self._on_task_complete(robot_name, cmd_id)
+
+    @_run_async
+    def _place(self, robot_name: str, cmd_id: int) -> None:
+        success = self._robots[robot_name].place_object()
+        self._on_task_complete(robot_name, cmd_id)
+
+    @_run_async
+    def _move(self, robot_name: str, goal: Any, cmd_id: int) -> None:
+        success = self._robots[robot_name].navigate(goal=goal)
+        self._on_task_complete(robot_name, cmd_id)
+
+    @_run_async
+    def _no_op(self, robot_name: str, cmd_id: int) -> None:
+        time_module.sleep(1.0)
+        self._on_task_complete(robot_name, cmd_id)
+
+    @_run_async
+    def _search(self, robot_name: str, cmd_id: int) -> None:
+        # Search is essentially a delay in pyrobosim
+        time_module.sleep(1.0)
+        self._on_task_complete(robot_name, cmd_id)
+
+
+class PyRoboSimBridge:
+    """Manages the simulator process and IPC queues."""
+
+    def __init__(
+        self,
+        world_file: str | Path,
+        show_plot: bool = True,
+        record_plots: bool = False,
+        skip_canvas: bool = False,
+    ):
+        self.world_file = world_file
+        self.show_plot = show_plot
+        self.record_plots = record_plots
+        self.skip_canvas = skip_canvas
+        self.command_queue = multiprocessing.Queue()
+        self.status_queue = multiprocessing.Queue()
+        self.process = multiprocessing.Process(
+            target=self._simulator_worker,
+            args=(
+                self.world_file,
+                self.show_plot,
+                self.record_plots,
+                self.skip_canvas,
+                self.command_queue,
+                self.status_queue,
+            ),
+            daemon=True,
+        )
+        self._latest_status = None
+
+    @staticmethod
+    def _simulator_worker(world_file, show_plot, record_plots, skip_canvas, cmd_q, status_q):
+        server = PyRoboSimServer(
+            world_file, show_plot=show_plot, record_plots=record_plots, skip_canvas=skip_canvas
+        )
+        server.run(cmd_q, status_q)
+
+    def start(self):
+        self.process.start()
+
+    def stop(self):
+        self.command_queue.put(("exit",))
+        self.process.join(timeout=2.0)
+        if self.process.is_alive():
+            self.process.terminate()
+
+    def send_command(self, cmd_type: str, *args):
+        try:
+            self.command_queue.put((cmd_type, *args))
+        except (BrokenPipeError, EOFError, ConnectionResetError):
+            print("Error: Failed to send command to simulator process (Broken Pipe).")
+
+    def get_latest_status(self) -> Optional[Dict]:
+        """Drain status queue and return latest status."""
+        if not self.process.is_alive():
+            return self._latest_status
+
+        try:
+            # Drain the queue to get the absolute latest update
+            while not self.status_queue.empty():
+                self._latest_status = self.status_queue.get_nowait()
+        except (BrokenPipeError, EOFError, ConnectionResetError, Exception):
+            pass
+        return self._latest_status
 
 
 class PyRoboSimScene(PhysicalScene):
     """PyRoboSim scene data provider."""
 
     def __init__(self, world_file: str | Path) -> None:
+        self.world_file = world_file
         self._world = WorldYamlLoader().from_file(Path(world_file))
         self._initial_robot_locations = {
             f"{r.name}_loc": r.pose for r in self._world.robots
@@ -256,6 +530,299 @@ class PyRoboSimEnvironment(PhysicalEnvironment):
         self._is_no_op_running[robot_name] = False
 
 
+class DecoupledPyRoboSimEnvironment(PhysicalEnvironment):
+    """PyRoboSim environment that runs the simulator in a separate process.
+
+    Uses PyRoboSimBridge for IPC. Maintains state synchronization by mapping
+    simulator status snapshots back to PDDL fluents.
+    """
+
+    def __init__(
+        self,
+        scene: PyRoboSimScene,
+        state: State,
+        objects_by_type: Dict[str, Set[str]],
+        operators: List[Operator],
+        show_plot: bool = True,
+        record_plots: bool = False,
+        skip_canvas: bool = False,
+        skill_overrides: Optional[Dict[str, Type[ActiveSkill]]] = None,
+        location_registry: Any = None,
+    ) -> None:
+        super().__init__(
+            scene=scene,
+            state=state,
+            objects_by_type=objects_by_type,
+            operators=operators,
+            skill_overrides=skill_overrides,
+            location_registry=location_registry,
+        )
+        self._scene = scene
+        self._bridge = PyRoboSimBridge(
+            scene.world_file,
+            show_plot=show_plot,
+            record_plots=record_plots,
+            skip_canvas=skip_canvas,
+        )
+        self._bridge.start()
+
+        # Maps robot_name -> last dispatched command ID
+        self._last_dispatched_id: Dict[str, int] = {}
+        self._next_command_id = 0
+
+        # Build room mapping for consistency checks
+        self._loc_to_room = {}
+        for room in self._scene.world.rooms:
+            for loc in room.locations:
+                self._loc_to_room[loc.name] = room.name
+                for spawn in loc.children:
+                    self._loc_to_room[spawn.name] = room.name
+
+        # Give simulator a moment to start
+        time_module.sleep(1.0)
+
+        # Initial synchronization
+        self._latest_status: Optional[Dict] = None
+        start_wait = time_module.time()
+        while self._latest_status is None and time_module.time() - start_wait < 5.0:
+            self._latest_status = self._bridge.get_latest_status()
+            time_module.sleep(0.1)
+
+        if self._latest_status:
+            self._sync_state(self._latest_status)
+
+    def __del__(self):
+        if hasattr(self, "_bridge"):
+            self._bridge.stop()
+
+    @property
+    def robots(self):
+        return self._scene.robots
+
+    @property
+    def locations(self):
+        return self._scene.locations
+
+    @property
+    def objects(self):
+        return {obj.name: obj for obj in self._scene.world.objects}
+
+    def save_animation(self, filepath: str | Path) -> None:
+        """Saves animation and blocks until simulator process reports completion."""
+        print(f"Requesting animation save to {filepath}...")
+        self._bridge.send_command("save_animation", str(filepath))
+
+        # 1. Wait for simulator to acknowledge and start saving
+        start_wait = time_module.time()
+        started = False
+        while time_module.time() - start_wait < 10.0:
+            status = self._bridge.get_latest_status()
+            if status and status.get("is_saving_animation"):
+                started = True
+                break
+            time_module.sleep(0.1)
+
+        if not started:
+            # Maybe it finished extremely fast or failed to start
+            pass
+
+        # 2. Wait for simulator to finish saving
+        start_save = time_module.time()
+        while time_module.time() - start_save < 60.0:
+            status = self._bridge.get_latest_status()
+            if status and not status.get("is_saving_animation"):
+                print("Animation save completed.")
+                return
+            time_module.sleep(0.5)
+
+        print("Warning: Animation save timed out or simulator process unresponsive.")
+
+    def _on_skill_completed(self, skill: ActiveSkill) -> None:
+        pass
+
+    def _on_act_loop_iteration(self, dt: float) -> None:
+        status = self._bridge.get_latest_status()
+        if status:
+            self._latest_status = status
+            self._sync_state(status)
+
+    def _sync_state(self, status: Dict):
+        """Map simulator status back to PDDL fluents."""
+        known_robots = self.objects_by_type.get("robot", set())
+        for name, robot in status["robots"].items():
+            if name not in known_robots:
+                continue
+
+            loc = robot["location"]
+            loc_type = robot["location_type"]
+
+            # Check execution status using IDs
+            last_dispatched = self._last_dispatched_id.get(name, -1)
+            completed_id = robot["last_completed_id"]
+            current_id = robot["current_id"]
+
+            # We consider the robot "busy" if we sent a command that isn't finished.
+            # Finished means: last_completed_id >= last_dispatched
+            is_busy = last_dispatched > completed_id
+
+            # Update free status based on our robust ID check
+            if is_busy:
+                self.fluents.discard(Fluent("free", name))
+            else:
+                self.fluents.add(Fluent("free", name))
+
+            # Update location - ONLY if not busy (to avoid clobbering planned moves)
+            # OR if we are busy but the simulator reports a location update that matches our goal?
+            # Actually, safe bet: if not busy, trust simulator. If busy, trust planner/simulator transition.
+
+            if not is_busy:
+                if loc_type == "location":
+                    # Trust specific locations
+                    for f in list(self.fluents):
+                        if f.name == "at" and f.args[0] == name and f.args[1] != loc:
+                            self.fluents.discard(f)
+                    self.fluents.add(Fluent("at", name, loc))
+                elif loc_type == "room":
+                    # Trust room, but don't clobber specific location if it matches room
+                    # If existing loc is in a DIFFERENT room, clobber it.
+                    for f in list(self.fluents):
+                        if f.name == "at" and f.args[0] == name:
+                            existing = f.args[1]
+
+                            # Check room consistency
+                            if existing in self._loc_to_room:
+                                if self._loc_to_room[existing] != loc:
+                                    self.fluents.discard(f)
+                            elif existing.endswith("_loc"):
+                                # If it's a proxy loc NOT in our mapping (should not happen),
+                                # we can't verify room. But if it WAS in mapping, we already checked.
+                                pass
+                            elif existing not in self.scene.locations:
+                                # existing is likely a room name itself
+                                if existing != loc:
+                                    self.fluents.discard(f)
+                            else:
+                                # Specific location but not in _loc_to_room?
+                                # This shouldn't happen with current init.
+                                # Discard to be safe since Room report is authoritative.
+                                self.fluents.discard(f)
+
+                    # Add room fluent if no specific one exists
+                    has_at = any(f.name == "at" and f.args[0] == name for f in self.fluents)
+                    if not has_at:
+                        self.fluents.add(Fluent("at", name, loc))
+
+            # 3. Update holding status
+            # Always trust simulator for holding
+            holding = robot["holding"]
+            for f in list(self.fluents):
+                if f.name == "holding" and f.args[0] == name:
+                    if f.args[1] != holding:
+                        self.fluents.discard(f)
+
+            if holding:
+                self.fluents.add(Fluent("holding", name, holding))
+                self.fluents.add(Fluent("hand-full", name))
+            else:
+                self.fluents.discard(Fluent("hand-full", name))
+                for f in list(self.fluents):
+                    if f.name == "holding" and f.args[0] == name:
+                        self.fluents.discard(f)
+
+        # Update object fluents
+        known_objects = self.objects_by_type.get("object", set())
+        for name, obj in status["objects"].items():
+            if name not in known_objects:
+                continue
+
+            loc = obj["location"]
+            loc_type = obj["location_type"]
+
+            if loc_type == "location":
+                for f in list(self.fluents):
+                    if f.name == "at" and f.args[0] == name and f.args[1] != loc:
+                        self.fluents.discard(f)
+                self.fluents.add(Fluent("at", name, loc))
+            else:
+                # If object isn't at a specific location (held, room, moving), remove 'at'
+                for f in list(self.fluents):
+                    if f.name == "at" and f.args[0] == name:
+                        self.fluents.discard(f)
+
+    def execute_skill(self, robot_name: str, skill_name: str, *args: Any, **kwargs: Any) -> None:
+        cmd_id = self._next_command_id
+        self._next_command_id += 1
+        self._last_dispatched_id[robot_name] = cmd_id
+
+        # Optimistic update: mark busy immediately so subsequent logic sees it
+        self.fluents.discard(Fluent("free", robot_name))
+
+        # If moving, clear current location immediately to reflect transition
+        if skill_name == "move":
+            for f in list(self.fluents):
+                if f.name == "at" and f.args[0] == robot_name:
+                    self.fluents.discard(f)
+
+        self._bridge.send_command("execute", robot_name, skill_name, args, cmd_id)
+        # No sleep needed really, local state is updated
+
+    def get_executed_skill_status(self, robot_name: str, skill_name: str) -> SkillStatus:
+        # Check our local tracking vs remote status
+        if self._latest_status:
+            robot = self._latest_status["robots"].get(robot_name)
+            if robot:
+                last_dispatched = self._last_dispatched_id.get(robot_name, -1)
+                last_completed = robot["last_completed_id"]
+
+                # If we dispatched something that isn't complete yet -> RUNNING
+                if last_dispatched > last_completed:
+                    return SkillStatus.RUNNING
+
+                return SkillStatus.DONE
+
+        # Default fallback
+        return SkillStatus.DONE
+
+    def stop_robot(self, robot_name: str) -> None:
+        self._bridge.send_command("stop", robot_name)
+
+    def act(
+        self,
+        action: Action,
+        loop_callback_fn: Optional[Callable[[], None]] = None,
+        do_interrupt: bool = True,
+    ) -> State:
+        """Execute action and ensure final state sync before returning."""
+        state = super().act(action, loop_callback_fn, do_interrupt)
+
+        # Wait for the action to be fully reflected in the status
+        # We need to wait until the simulator confirms the action we just finished IS done.
+        # This prevents act() from returning before the final state update (e.g. arrival at goal) reaches us.
+
+        # Identify the robot involved in this action
+        parts = action.name.split()
+        robot_name = parts[1] if len(parts) > 1 else None
+
+        if robot_name:
+            target_id = self._last_dispatched_id.get(robot_name, -1)
+            start_wait = time_module.time()
+            while time_module.time() - start_wait < 5.0:
+                status = self._bridge.get_latest_status()
+                if status:
+                    self._latest_status = status
+                    self._sync_state(status)
+
+                    robot_info = status["robots"].get(robot_name)
+                    if robot_info:
+                        finished = robot_info["last_completed_id"] >= target_id
+                        started = robot_info["current_id"] == target_id
+                        if finished or started:
+                            break
+                time_module.sleep(0.05)
+
+        return self.state
+
+
 class MatplotlibWorldCanvas(WorldCanvas):
     """
     Matplotlib-based visualization canvas for PyRoboSim worlds.
@@ -313,7 +880,7 @@ class MatplotlibWorldCanvas(WorldCanvas):
         self.show()
         self.axes.autoscale()
         self.axes.axis("equal")
-        self._plot_frames = []
+        self._plot_frames = [] if record_plots else None
 
     def _show_all_paths(self):
         """Custom method to draw paths for EVERY robot in the world."""
@@ -373,7 +940,8 @@ class MatplotlibWorldCanvas(WorldCanvas):
         """Updates the world visualization in a loop."""
         self.show()
         self.fig.canvas.draw_idle()
-        self._plot_frames.append(self._get_frame())
+        if self._plot_frames is not None:
+            self._plot_frames.append(self._get_frame())
         if self.show_plot:
             plt.pause(self.options.animation_dt)
 
