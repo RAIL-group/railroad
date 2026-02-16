@@ -4,38 +4,16 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import NamedTuple, Protocol, runtime_checkable
+from typing import NamedTuple
 
 import numpy as np
 
+from ..types import Pose as _Pose
+from ..types import PoseLike as _PoseLike
 
-@runtime_checkable
-class PoseLike(Protocol):
-    """Protocol for objects with x, y, yaw properties (grid coordinates)."""
-
-    @property
-    def x(self) -> float: ...
-
-    @property
-    def y(self) -> float: ...
-
-    @property
-    def yaw(self) -> float: ...
-
-
-@dataclass
-class Pose:
-    """Concrete robot pose in grid coordinates.
-
-    Attributes:
-        x: Row position (float).
-        y: Column position (float).
-        yaw: Heading in radians.
-    """
-
-    x: float
-    y: float
-    yaw: float = 0.0
+# Backward-compatible re-exports.
+Pose = _Pose
+PoseLike = _PoseLike
 
 
 class Frontier(NamedTuple):

@@ -147,14 +147,14 @@ def main(
         construct_move_navigable_operator(move_time_fn),
         construct_search_frontier_operator(
             object_find_prob=search_frontier_prob_fn,
-            search_time=10.0,
+            search_time=20.0,
         ),
         construct_search_at_site_operator(
             search_container_prob_fn,
-            search_time=2.0,
+            search_time=20.0,
             container_type="container",
         ),
-        construct_no_op_operator(no_op_time=5.0, extra_cost=100.0),
+        construct_no_op_operator(no_op_time=300.0, extra_cost=100.0),
     ]
 
     # ------------------------------------------------------------------

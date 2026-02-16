@@ -12,11 +12,12 @@ from railroad.core import Operator
 
 from ..skill import ActiveSkill, MotionSkill
 from ..symbolic import LocationRegistry, SymbolicEnvironment
+from ..types import Pose
 from . import laser, mapping, pathing
 from .constants import OBSTACLE_THRESHOLD, UNOBSERVED_VAL
 from .frontiers import extract_frontiers, filter_reachable_frontiers
 from .skill import InterruptibleNavigationMoveSkill, NavigationMoveSkill
-from .types import Frontier, NavigationConfig, Pose
+from .types import Frontier, NavigationConfig
 
 
 class UnknownSpaceEnvironment(SymbolicEnvironment):
@@ -500,8 +501,10 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
         parts = action.name.split()
         if parts and parts[0] == "move":
             if len(parts) > 3 and Fluent("at", parts[1], parts[2]) in self._fluents:
-                path = self.compute_move_path(parts[2], parts[3])
-                if path.size == 0:
+                # Fast reachability guard: use cached cost-grid lookup
+                # instead of reconstructing a full path per action candidate.
+                move_time = self.estimate_move_time(parts[1], parts[2], parts[3])
+                if not np.isfinite(move_time):
                     return False
             delayed_times = [eff.time for eff in action.effects if eff.time > 1e-9]
             if delayed_times and min(delayed_times) > self._config.max_move_action_time:

@@ -20,6 +20,7 @@ Legacy classes have been moved to railroad.experimental.environment:
 
 from .environment import Environment
 from .skill import ActiveSkill
+from .types import Pose, PoseLike
 from .symbolic import (
     InterruptableMoveSymbolicSkill,
     LocationRegistry,
@@ -33,6 +34,8 @@ __all__ = [
     "Environment",
     "InterruptableMoveSymbolicSkill",
     "LocationRegistry",
+    "Pose",
+    "PoseLike",
     "SymbolicEnvironment",
     "SymbolicSkill",
 ]
@@ -44,6 +47,7 @@ try:
     if _nav_available():
         from .navigation import UnknownSpaceEnvironment
 
+        globals()["UnknownSpaceEnvironment"] = UnknownSpaceEnvironment
         __all__.append("UnknownSpaceEnvironment")
 except ImportError:
     pass
