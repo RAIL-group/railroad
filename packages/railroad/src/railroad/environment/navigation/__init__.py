@@ -5,10 +5,15 @@ extraction, and hidden-site discovery for multi-robot planning.
 Requires optional dependencies: pip install railroad[navigation]
 """
 
+from .types import NavigationConfig, Pose
+
 __all__ = [
     "is_available",
     "NavigationConfig",
     "Pose",
+    "NavigationMoveSkill",
+    "InterruptibleNavigationMoveSkill",
+    "UnknownSpaceEnvironment",
 ]
 
 _REQUIRED_PACKAGES = ["scipy", "skimage"]
@@ -26,10 +31,6 @@ def is_available() -> bool:
     return all(importlib.util.find_spec(pkg) is not None for pkg in _REQUIRED_PACKAGES)
 
 
-# Always-available lightweight types
-from .types import NavigationConfig, Pose
-
-
 def __getattr__(name: str):
     if name == "UnknownSpaceEnvironment":
         try:
@@ -41,6 +42,12 @@ def __getattr__(name: str):
         try:
             from .skill import NavigationMoveSkill
             return NavigationMoveSkill
+        except ImportError as e:
+            raise ImportError(_INSTALL_MSG) from e
+    if name == "InterruptibleNavigationMoveSkill":
+        try:
+            from .skill import InterruptibleNavigationMoveSkill
+            return InterruptibleNavigationMoveSkill
         except ImportError as e:
             raise ImportError(_INSTALL_MSG) from e
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

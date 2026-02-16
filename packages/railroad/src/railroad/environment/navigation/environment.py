@@ -15,7 +15,7 @@ from ..symbolic import LocationRegistry, SymbolicEnvironment
 from . import laser, mapping, pathing
 from .constants import OBSTACLE_THRESHOLD, UNOBSERVED_VAL
 from .frontiers import extract_frontiers, filter_reachable_frontiers
-from .skill import NavigationMoveSkill
+from .skill import InterruptibleNavigationMoveSkill, NavigationMoveSkill
 from .types import Frontier, NavigationConfig, Pose
 
 
@@ -315,7 +315,7 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
         loc_from: str,
         loc_to: str,
         *,
-        use_theta: bool = False,
+        use_theta: bool = True,
     ) -> np.ndarray:
         """Compute 2xN grid path between two symbolic locations."""
         registry = self._location_registry
@@ -337,6 +337,17 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
                 unknown_as_obstacle=True,
                 soft_cost_scale=self._config.trajectory_soft_cost_scale,
             )
+            # Prefer Theta* for trajectory quality, but robustly fall back to
+            # grid-constrained planning when any-angle search fails.
+            if path.size == 0 or path.shape[0] != 2:
+                _cost, path = pathing.get_cost_and_path(
+                    self._observed_grid,
+                    start,
+                    end,
+                    use_soft_cost=self._config.trajectory_use_soft_cost,
+                    unknown_as_obstacle=True,
+                    soft_cost_scale=self._config.trajectory_soft_cost_scale,
+                )
         else:
             _cost, path = pathing.get_cost_and_path(
                 self._observed_grid,
@@ -503,9 +514,15 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
         return True
 
     def create_skill(self, action: Action, time: float) -> ActiveSkill:
-        """Create skill; use NavigationMoveSkill for move actions."""
+        """Create skill; use navigation move skill variants for move actions."""
         parts = action.name.split()
         if parts[0] == "move":
+            if self._config.move_execution_interruptible:
+                return InterruptibleNavigationMoveSkill(
+                    action=action,
+                    start_time=time,
+                    env=self,
+                )
             return NavigationMoveSkill(action=action, start_time=time, env=self)
         return super().create_skill(action, time)
 
