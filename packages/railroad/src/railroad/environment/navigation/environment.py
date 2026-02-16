@@ -416,10 +416,19 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
     # Interrupt hooks (override base Environment)
     # ------------------------------------------------------------------
 
-    def clear_interrupt_request(self) -> None:
+    def _clear_interrupt_request(self) -> None:
         self._interrupt_requested = False
         self._new_cells_since_interrupt = 0
         self._last_interrupt_time = self._time
+
+    def _should_interrupt_skills(self) -> bool:
+        """Interrupt only when new map info exists and an interruptible skill runs."""
+        if not self._interrupt_requested:
+            return False
+        return any(
+            skill.is_interruptible and not skill.is_done
+            for skill in self._active_skills
+        )
 
     def interrupt_skills(self, force: bool = False) -> bool:
         """Interrupt according to nav policy (new-info or robot-free)."""
@@ -432,12 +441,11 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
             if not has_interruptible:
                 # Avoid stale interrupt requests when all active moves are
                 # non-interruptible.
-                self.clear_interrupt_request()
+                self._clear_interrupt_request()
                 return False
             interrupted = super().interrupt_skills(force=True)
             # Always clear request after an interrupt attempt.
-            if not interrupted:
-                self.clear_interrupt_request()
+            self._clear_interrupt_request()
             return interrupted
 
         return super().interrupt_skills(force=force)
