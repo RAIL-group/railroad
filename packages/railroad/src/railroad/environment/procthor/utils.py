@@ -392,6 +392,44 @@ def get_cost_and_path(
     return float(cost_grid[end[0], end[1]]), path
 
 
+def compute_move_path(
+    grid: np.ndarray,
+    start: Tuple[int, int],
+    end: Tuple[int, int],
+    *,
+    use_theta: bool = True,
+    use_soft_cost: bool = True,
+) -> np.ndarray:
+    """Compute a 2xN move path, preferring Theta* with Dijkstra fallback.
+
+    Args:
+        grid: Occupancy grid (0=free, 1=occupied)
+        start: Start position (x, y)
+        end: End position (x, y)
+        use_theta: Whether to try Theta* first.
+        use_soft_cost: Whether to use soft obstacle inflation for Theta*.
+
+    Returns:
+        2xN path array. Empty array if no traversable path exists.
+    """
+    if use_theta:
+        try:
+            _cost, path = get_cost_and_path_theta(
+                grid,
+                start,
+                end,
+                use_soft_cost=use_soft_cost,
+            )
+        except Exception:
+            path = np.array([[]], dtype=int)
+
+        if path.size != 0 and path.shape[0] == 2:
+            return path
+
+    _cost, path = get_cost_and_path(grid, start, end)
+    return path
+
+
 def get_coordinates_at_time(path: np.ndarray, time: float) -> np.ndarray:
     """Get coordinates along a path at a given time (distance).
 
@@ -408,46 +446,6 @@ def get_coordinates_at_time(path: np.ndarray, time: float) -> np.ndarray:
     idx = np.searchsorted(cumulative_lengths, time, side='left')
     idx = min(idx, path.shape[1] - 1)
     return path[:, idx]
-
-
-def get_trajectory(
-    grid: np.ndarray,
-    waypoints: List[Tuple[float, float]],
-) -> List[Tuple[float, float]]:
-    """Compute obstacle-respecting trajectory through waypoints.
-
-    Given a list of waypoints (e.g., location coordinates), computes the full
-    path that avoids obstacles using the occupancy grid.
-
-    Args:
-        grid: Occupancy grid (0=free, 1=occupied)
-        waypoints: List of (x, y) waypoint coordinates to visit in order
-
-    Returns:
-        List of (x, y) coordinates forming the complete trajectory
-    """
-    if len(waypoints) < 2:
-        return list(waypoints)
-
-    trajectory: List[Tuple[float, float]] = []
-
-    for i in range(len(waypoints) - 1):
-        start = (int(waypoints[i][0]), int(waypoints[i][1]))
-        end = (int(waypoints[i + 1][0]), int(waypoints[i + 1][1]))
-
-        _, path = get_cost_and_path(grid, start, end)
-
-        if path.size == 0:
-            # Planning failed, fall back to straight line
-            trajectory.append(waypoints[i])
-            continue
-
-        # Add path points (skip first point for subsequent segments to avoid duplicates)
-        start_idx = 0 if i == 0 else 1
-        for j in range(start_idx, path.shape[1]):
-            trajectory.append((float(path[0, j]), float(path[1, j])))
-
-    return trajectory
 
 
 def get_edges_for_connected_graph(

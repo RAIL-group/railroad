@@ -118,7 +118,7 @@ class _PlottingMixin:
 
         Handles: environment coordinate lookup, ``location_coords`` conflict
         check, missing-coordinate generation, robot/object separation, and
-        scene ``get_trajectory`` expansion.
+        scene ``compute_move_path`` expansion when available.
 
         Args:
             location_coords: Optional explicit location->(x,y) mapping.
@@ -167,7 +167,7 @@ class _PlottingMixin:
 
         # Scene-aware trajectory expansion
         scene = getattr(self._env, "scene", None)
-        get_trajectory_fn = getattr(scene, "get_trajectory", None)
+        compute_move_path_fn = getattr(scene, "compute_move_path", None)
 
         trajectories: dict[str, tuple[list[tuple[float, float]], list[float]]] = {}
 
@@ -204,15 +204,29 @@ class _PlottingMixin:
                 trajectories[entity] = (waypoints, times)
                 continue
 
-            # Expand through scene trajectory if available
-            if get_trajectory_fn is not None:
+            # Expand through scene pathing if available
+            if compute_move_path_fn is not None:
                 import numpy as np
                 expanded_wps: list[tuple[float, float]] = []
                 expanded_ts: list[float] = []
                 for seg_i in range(len(waypoints) - 1):
-                    path = get_trajectory_fn([waypoints[seg_i], waypoints[seg_i + 1]])
+                    seg_start = waypoints[seg_i]
+                    seg_end = waypoints[seg_i + 1]
+
+                    path: list[tuple[float, float]] | None = None
+                    if callable(compute_move_path_fn):
+                        try:
+                            path_arr = compute_move_path_fn(seg_start, seg_end, use_theta=True)
+                            if getattr(path_arr, "size", 0) != 0 and path_arr.shape[0] == 2:
+                                path = [
+                                    (float(path_arr[0, j]), float(path_arr[1, j]))
+                                    for j in range(path_arr.shape[1])
+                                ]
+                        except Exception:
+                            path = None
+
                     if not path or len(path) < 2:
-                        path = [waypoints[seg_i], waypoints[seg_i + 1]]
+                        path = [seg_start, seg_end]
                     pts = np.array(path)
                     cum_dist = np.concatenate(([0], np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))))
                     t0, t1 = times[seg_i], times[seg_i + 1]
