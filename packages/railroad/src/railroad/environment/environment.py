@@ -173,17 +173,6 @@ class Environment(ABC):
         """Check if any robot is free."""
         return any(f.name == "free" for f in self.fluents)
 
-    def should_interrupt_active_skills(self) -> bool:
-        """Backward-compatible interrupt predicate hook.
-
-        Prefer overriding ``interrupt_skills()`` for custom policies.
-        """
-        return False
-
-    def clear_interrupt_request(self) -> None:
-        """Backward-compatible interrupt-state cleanup hook."""
-        pass
-
     def interrupt_skills(self, force: bool = False) -> bool:
         """Interrupt active interruptible skills according to env policy.
 
@@ -200,9 +189,11 @@ class Environment(ABC):
             if skill.is_interruptible and not skill.is_done:
                 skill.interrupt(self)
                 interrupted = True
-        if interrupted:
-            self.clear_interrupt_request()
         return interrupted
+
+    def _should_interrupt_skills(self) -> bool:
+        """Internal predicate hook for early loop interruption."""
+        return False
 
     def _cap_next_advance_time(self, proposed_next_time: float) -> float:
         """Optional hook to constrain the scheduler's next advance time."""
@@ -251,7 +242,7 @@ class Environment(ABC):
             if all(s.is_done for s in self._active_skills):
                 break
 
-            if self.interrupt_skills():
+            if self._should_interrupt_skills():
                 break
 
             skill_times = [s.time_to_next_event for s in self._active_skills] or [float("inf")]
@@ -280,8 +271,9 @@ class Environment(ABC):
             if loop_callback_fn is not None:
                 loop_callback_fn()
 
-        # If a non-interruptible action freed a robot while interruptible ones
-        # remain active, interrupt those remaining skills.
+        # Interrupt once after loop exit. This handles both explicit interrupt
+        # requests and the case where a non-interruptible action freed a robot
+        # while interruptible skills remain active.
         self.interrupt_skills()
 
         self._active_skills = [s for s in self._active_skills if not s.is_done]
