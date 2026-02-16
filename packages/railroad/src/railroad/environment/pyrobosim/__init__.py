@@ -1,6 +1,6 @@
 from .pyrobosim import (
     DecoupledPyRoboSimEnvironment,
-    PyRoboSimBridge,
+    PyRoboSimClient,
     PyRoboSimEnvironment,
     PyRoboSimScene,
     PyRoboSimServer,
@@ -10,7 +10,7 @@ from .pyrobosim import (
 
 __all__ = [
     "DecoupledPyRoboSimEnvironment",
-    "PyRoboSimBridge",
+    "PyRoboSimClient",
     "PyRoboSimEnvironment",
     "PyRoboSimScene",
     "PyRoboSimServer",

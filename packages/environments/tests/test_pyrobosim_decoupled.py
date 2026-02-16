@@ -85,7 +85,8 @@ def test_pyrobosim_decoupled_execution():
 
     finally:
         # Ensure process is cleaned up
-        env._bridge.stop()
+        if hasattr(env, "_client"):
+            env._client.stop()
 
 
 def test_pyrobosim_decoupled_concurrency():
@@ -141,9 +142,10 @@ def test_pyrobosim_decoupled_concurrency():
 
         # Wait for robot2
         time.sleep(1.5)
-        # Force sync
-        env._on_act_loop_iteration(0.1)
+        # Accessing state triggers _update_skills which checks physical status
+        _ = env.state
         assert F("free", "robot2") in env.fluents
 
     finally:
-        env._bridge.stop()
+        if hasattr(env, "_client"):
+            env._client.stop()

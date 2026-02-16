@@ -13,7 +13,6 @@ import time
 
 
 # Fixed operator times for non-move skills
-SEARCH_TIME = 1.0
 PICK_TIME = 1.0
 PLACE_TIME = 1.0
 
@@ -35,34 +34,42 @@ def main(args):
 
     move_time_fn = get_move_cost_fn()
 
-    def object_find_prob(r, loc, o):
-        return 0.8 if loc == "my_desk" and o == "apple0" else 0.2
-
     move_op = operators.construct_move_operator_blocking(move_time_fn)
-    search_op = operators.construct_search_operator(object_find_prob, SEARCH_TIME)
     pick_op = operators.construct_pick_operator_blocking(PICK_TIME)
     place_op = operators.construct_place_operator_blocking(PLACE_TIME)
     no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
-    ops = [no_op, pick_op, place_op, move_op, search_op]
+
+    # Removed search_op
+    ops = [no_op, pick_op, place_op, move_op]
 
     # 3. Create the initial state fluents
     robot_names = ["robot1", "robot2"]
     initial_fluents = set()
+
+    # Reveal all locations and objects
+    for loc_name in scene.locations.keys():
+        initial_fluents.add(F("revealed", loc_name))
+
+    for loc_name, objects in scene.object_locations.items():
+        for obj_name in objects:
+            initial_fluents.add(F("found", obj_name))
+            initial_fluents.add(F("at", obj_name, loc_name))
+
     for robot in robot_names:
         robot_loc = f"{robot}_loc"
         initial_fluents.add(F("at", robot, robot_loc))
         initial_fluents.add(F("free", robot))
         initial_fluents.add(F("revealed", robot_loc))
+
     state = State(0.0, initial_fluents)
 
     # 4. Create the DECOUPLED PyRoboSim environment
-    # This will spawn the simulator in a separate process
     env = DecoupledPyRoboSimEnvironment(
         scene=scene,
         state=state,
         objects_by_type={
             "robot": set(robot_names),
-            "location": set(scene.locations.keys()),
+            "location": set(scene.locations.keys()) | {f"{r}_loc" for r in robot_names},
             "object": scene.objects,
         },
         operators=ops,
@@ -71,11 +78,11 @@ def main(args):
     )
 
     # Planning loop
-    max_iterations = 60  # Limit iterations to avoid infinite loops
+    max_iterations = 60
 
     def fluent_filter(f):
         return any(
-            keyword in f.name for keyword in ["at", "holding", "found", "searched"]
+            keyword in f.name for keyword in ["at", "holding", "found"]
         )
 
     try:
@@ -98,12 +105,12 @@ def main(args):
 
                 # Plan next action
                 mcts = MCTSPlanner(all_actions)
-                # In decoupled mode, the planner runs concurrently with simulator
+                # In fully revealed mode, planning should be very fast
                 t_plan_start = time.time()
                 action_name = mcts(
                     env.state,
                     goal,
-                    max_iterations=20000,
+                    max_iterations=10000, # Lower iterations needed for revealed world
                     c=300,
                     max_depth=20,
                     heuristic_multiplier=2,
@@ -123,25 +130,23 @@ def main(args):
                         break
 
                 # Execute action
-                # act() will return immediately if there's another free robot!
                 action = get_action_by_name(all_actions, action_name)
 
                 # Keep dashboard responsive during physical execution
-                last_dash_update = [0.0] # Use a list for nonlocal-like behavior in lambda
+                last_dash_update = [0.0]
                 def dash_callback():
                     now = time.time()
-                    if now - last_dash_update[0] > 0.1: # 10Hz update
+                    if now - last_dash_update[0] > 0.1:
                         dashboard.refresh()
                         last_dash_update[0] = now
 
                 env.act(action, loop_callback_fn=dash_callback, do_interrupt=False)
                 dashboard.update(mcts, action_name)
 
-            # Final Wait: Ensure all robots are idle before closing
+            # Final Wait
             dashboard.console.print("[bold yellow]Waiting for all robots to become idle...[/bold yellow]")
             start_final_wait = time.time()
             while any(F("free", r) not in env.fluents for r in robot_names) and time.time() - start_final_wait < 30.0:
-                # Accessing env.state triggers symbolic update from physical status
                 _ = env.state
                 dashboard.refresh()
                 time.sleep(0.1)
@@ -153,14 +158,10 @@ def main(args):
                     "[bold red]Failed to reach goal within max iterations.[/bold red]"
                 )
 
-            # Keep dashboard visible for a moment
-            # time.sleep(2.0)
-
         if not args.no_video:
             from pathlib import Path
-
             Path("./data").mkdir(parents=True, exist_ok=True)
-            output_path = "./data/pyrobosim_decoupled_demo.mp4"
+            output_path = "./data/pyrobosim_revealed_demo.mp4"
             print(f"Saving animation to {output_path}...")
             env.save_animation(filepath=output_path)
 
@@ -172,7 +173,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Demo of planning with Decoupled PyRoboSim Environment."
+        description="Demo of planning with Decoupled PyRoboSim Environment (Fully Revealed)."
     )
     parser.add_argument(
         "--world-file",
@@ -190,7 +191,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    # Turn off all logging of level INFO and below (to suppress pyrobosim logs)
+    # Turn off all logging of level INFO and below
     logging.disable(logging.INFO)
 
     main(args)
