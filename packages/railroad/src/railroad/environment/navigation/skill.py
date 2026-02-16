@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 
@@ -16,28 +16,24 @@ from .types import Pose
 
 if TYPE_CHECKING:
     from ..environment import Environment
-    from .environment import UnknownSpaceEnvironment
 
 
 class NavigationMoveSkill(SymbolicSkill, MotionSkill):
-    """Interruptible move skill with path-following and effect scheduling.
+    """Move skill with path-following and effect scheduling.
 
     The skill:
     1. Builds a path at creation time using the observed grid.
     2. Advances the robot pose along the path over time.
     3. Applies symbolic effects at their scheduled times.
-    4. On interrupt, places the robot at its current interpolated pose
-       and rewrites pending effects to a transient location.
     """
 
     def __init__(
         self,
         action: Action,
         start_time: float,
-        env: UnknownSpaceEnvironment,
+        env: Environment,
     ) -> None:
         super().__init__(action=action, start_time=start_time)
-        self._is_interruptible = env.config.move_execution_interruptible
 
         # Parse "move robot from to"
         parts = action.name.split()
@@ -45,38 +41,35 @@ class NavigationMoveSkill(SymbolicSkill, MotionSkill):
         self._move_origin = parts[2]
         self._move_destination = parts[3]
 
-        # Build path from observed grid. Prefer Theta* when configured, but
-        # fall back to Dijkstra if any-angle planning fails from rounded
-        # intermediate (robot_loc) coordinates.
-        use_theta = env.config.move_execution_use_theta_star
-        self._path = env.compute_move_path(
+        compute_move_path = getattr(env, "compute_move_path", None)
+        if not callable(compute_move_path):
+            raise TypeError(
+                "NavigationMoveSkill requires env.compute_move_path(loc_from, loc_to)"
+            )
+        compute_move_path_fn: Callable[[str, str], np.ndarray] = compute_move_path
+        self._path = compute_move_path_fn(
             self._move_origin,
             self._move_destination,
-            use_theta=use_theta,
         )
-        if use_theta and (self._path.size == 0 or self._path.shape[0] != 2):
-            self._path = env.compute_move_path(
-                self._move_origin,
-                self._move_destination,
-                use_theta=False,
-            )
         if self._path.size == 0 or self._path.shape[0] != 2:
             raise ValueError(
                 f"No traversable path for action: {action.name}"
             )
         self._path_length = pathing.path_total_length(self._path)
 
-        # Preserve operator timeline as-is. Scale interpolation speed so the
-        # trajectory reaches destination at the move's planned effect time.
-        delayed_effect_times = [eff.time for eff in action.effects if eff.time > 1e-9]
-        self._move_duration = min(delayed_effect_times) if delayed_effect_times else 0.01
-        self._move_duration = max(0.01, float(self._move_duration))
-        self._end_time = start_time + self._move_duration
+        # Use the action's "free robot" effect as the move completion time.
+        free_effect_times = [
+            float(eff.time)
+            for eff in action.effects
+            if Fluent("free", self._robot) in eff.resulting_fluents
+        ]
+        planned_duration = min(free_effect_times) if free_effect_times else 0.0
+        self._end_time = start_time + planned_duration
 
         # Effective speed along the realized trajectory to match planned timing.
         self._speed = (
-            (self._path_length / self._move_duration)
-            if self._path_length > 0
+            (self._path_length / planned_duration)
+            if self._path_length > 0 and planned_duration > 0.0
             else 0.0
         )
 
@@ -115,10 +108,21 @@ class NavigationMoveSkill(SymbolicSkill, MotionSkill):
         # Delegate symbolic effect execution to shared base logic.
         super().advance(time, env)
 
+
+class InterruptibleNavigationMoveSkill(NavigationMoveSkill):
+    """Navigation move skill that supports mid-execution interruption."""
+
+    def __init__(
+        self,
+        action: Action,
+        start_time: float,
+        env: Environment,
+    ) -> None:
+        super().__init__(action=action, start_time=start_time, env=env)
+        self._is_interruptible = True
+
     def interrupt(self, env: Environment) -> None:
         """Interrupt move: place robot at current pose, rewrite effects."""
-        if not self._is_interruptible:
-            return
         if self._current_time <= self._start_time:
             return
         if self.is_done:
@@ -134,8 +138,7 @@ class NavigationMoveSkill(SymbolicSkill, MotionSkill):
         if registry is not None:
             registry.register(new_target, np.array([pose.x, pose.y]))
 
-        # Update robot pose
-        # FIXME: I _think_ this is optional.
+        # Keep continuous pose state in sync at the interrupt instant.
         env.set_robot_pose(self._robot, pose)
 
         # Collect and rewrite fluents from remaining effects
