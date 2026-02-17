@@ -1,5 +1,6 @@
 #pragma once
 
+#include "railroad/constants.hpp"
 #include "railroad/core.hpp"
 #include "railroad/state.hpp"
 
@@ -506,7 +507,7 @@ double ff_backward_cost(
   // Results are cached in forward.probabilistic_delta for reuse across goal branches
   for (const auto& f : on_path) {
     if (forward.has_probabilistic_achiever.count(f)) {
-      total_cost += get_or_compute_delta(forward, f);
+      total_cost += PROBABILISTIC_DELTA_MULTIPLIER * get_or_compute_delta(forward, f);
     }
   }
 
