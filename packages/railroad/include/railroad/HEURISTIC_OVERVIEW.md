@@ -60,6 +60,11 @@ Each achiever stores:
 - `exec_cost` (action duration),
 - success probability.
 
+For probabilistic actions, achiever probability for `(action, fluent)` is computed
+as the summed probability mass of outcomes where the fluent is present (clamped to 1.0).
+So a fluent present in all branches is treated as deterministic (`p=1.0`), even if
+branch timings differ.
+
 ### 2.5 Expected-cost fixed point (`compute_expected_costs`)
 
 `D(f)` is iteratively updated (max 100 iterations):

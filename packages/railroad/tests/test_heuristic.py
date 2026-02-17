@@ -14,6 +14,7 @@ from railroad.core import (
 )
 from railroad._bindings import Action, GroundedEffect
 from railroad.core import ff_heuristic, LiteralGoal
+from railroad._bindings import debug_ff_heuristic
 
 F = Fluent
 
@@ -635,6 +636,30 @@ def test_convert_state_with_upcoming_effects():
     assert ~F("not-found obj") in success_effect.resulting_fluents
 
 
+def test_ff_heuristic_branch_sum_to_one_treated_deterministic():
+    """Fluent added across all branches should be treated as deterministic (p=1)."""
+    uncertain_ready = Operator(
+        name="uncertain_ready",
+        parameters=[("?r", "robot")],
+        preconditions=[F("free ?r")],
+        effects=[
+            Effect(
+                time=6.0,
+                prob_effects=[
+                    (0.25, [Effect(time=0.0, resulting_fluents={F("ready ?r"), F("free ?r")})]),
+                    (0.75, [Effect(time=0.0, resulting_fluents={F("ready ?r"), F("free ?r")})]),
+                ],
+            )
+        ],
+    )
+
+    all_actions = list(uncertain_ready.instantiate({"robot": ["r1"]}))
+    initial_state = State(time=0, fluents={F("free r1")})
+
+    h_value = ff_heuristic(initial_state, F("ready r1"), all_actions)
+    assert h_value == pytest.approx(6.0), f"Expected 6.0, got {h_value}"
+
+
 def test_expected_cost_single_achiever():
     """With one probabilistic achiever, expected cost = reach + action cost."""
     # Single search action with p=0.5, cost=10
@@ -722,8 +747,9 @@ def test_expected_cost_multiple_achievers():
     goal = F("found obj")
     h_value = ff_heuristic(initial_state, goal, all_actions)
 
-    # Expected: 6 + 0.5 * 7 = 9.5
-    assert abs(h_value - 9.5) < 0.01, f"Expected ~9.5, got {h_value}"
+    # Base expected one-shot cost is 9.5; with PROBABILISTIC_DELTA_MULTIPLIER=2.0
+    # the heuristic adds a doubled probabilistic delta and returns 13.0.
+    assert abs(h_value - 13.0) < 0.01, f"Expected ~13.0, got {h_value}"
 
 
 def test_goal_goal_count():
@@ -761,3 +787,27 @@ def test_goal_goal_count():
     }
     assert goal.goal_count(active_fluents_4) == 3
     assert goal.evaluate(active_fluents_4)
+
+
+def test_debug_ff_heuristic_includes_achievers_and_probabilistic_delta_section():
+    """Debug report should include achievers and probabilistic delta fluents per branch."""
+    search_op = construct_search_operator(find_prob=0.5, search_cost=10.0)
+    all_actions = list(
+        search_op.instantiate(
+            {
+                "robot": ["r1"],
+                "location": ["loc1"],
+                "object": ["obj1"],
+            }
+        )
+    )
+    state = State(time=0, fluents={F("at r1 loc1"), F("free r1")})
+    goal = LiteralGoal(F("found obj1"))
+
+    report = debug_ff_heuristic(state, goal, all_actions)
+
+    assert "FF Debug Report" in report
+    assert "Branch[0]" in report
+    assert "achievers_considered" in report
+    assert "probabilistic_delta_fluents" in report
+    assert "found obj1" in report

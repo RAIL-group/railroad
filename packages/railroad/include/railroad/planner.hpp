@@ -734,6 +734,10 @@ public:
     return last_mcts_tree_trace_;
   }
 
+  std::string debug_heuristic(const State &state, const GoalPtr &goal) {
+    return ff_heuristic_debug_report(state, goal.get(), all_actions_, &ff_memory_);
+  }
+
 private:
   std::vector<Action> all_actions_;
   FFMemory ff_memory_;

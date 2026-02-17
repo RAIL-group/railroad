@@ -55,6 +55,8 @@ h = ff_heuristic(state, goal, all_actions, mode="default")
 
 - **Efficiency ordering**: Probabilistic achievers are tried in order of efficiency (probability / exec_cost), which minimizes expected cost.
 
+- **Branch-probability aggregation**: For each `(action, fluent)`, the achiever probability is the total probability mass of action outcomes that contain the fluent. If that sums to `1.0`, the achiever is treated as deterministic.
+
 - **Non-relaxed time**: Using the time to first action completion (rather than all actions) gives a tighter lower bound, especially important for multi-robot scenarios where robots act in parallel.
 
 ### Future Heuristic Modes
