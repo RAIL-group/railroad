@@ -22,4 +22,7 @@ const double PROGRESSIVE_WIDENING_ALPHA = 0.5;
 const double LANDMARK_PROGRESS_REWARD = 25.0;
 const double GOAL_REGRESSION_PENALTY = 50.0;
 
+// Multiplier for probabilistic backward-extraction delta in FF heuristic.
+const double PROBABILISTIC_DELTA_MULTIPLIER = 2.0;
+
 }
