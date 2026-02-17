@@ -811,3 +811,42 @@ def test_debug_ff_heuristic_includes_achievers_and_probabilistic_delta_section()
     assert "achievers_considered" in report
     assert "probabilistic_delta_fluents" in report
     assert "found obj1" in report
+
+
+def test_at_implies_found_for_objects_encountered_in_achievers():
+    """Objects encountered in achiever chains auto-inject found-object landmarks."""
+    move = Action(
+        {F("at r1 start"), F("free r1")},
+        [GroundedEffect(time=5.0, resulting_fluents={F("at r1 target"), F("free r1")})],
+        name="move r1 start target",
+    )
+    prepare_toolkit = Action(
+        {F("at r1 target"), F("free r1")},
+        [GroundedEffect(time=2.0, resulting_fluents={F("at toolkit storage"), F("free r1")})],
+        name="prepare toolkit",
+    )
+    place_package = Action(
+        {F("at r1 target"), F("free r1"), F("holding r1 package"), F("at toolkit storage")},
+        [GroundedEffect(time=1.0, resulting_fluents={F("at package target"), F("free r1")})],
+        name="place package",
+    )
+    search_toolkit = Action(
+        {F("at r1 target"), F("free r1")},
+        [GroundedEffect(time=3.0, resulting_fluents={F("found toolkit"), F("free r1")})],
+        name="search toolkit",
+    )
+    all_actions = [move, prepare_toolkit, place_package, search_toolkit]
+
+    state = State(
+        time=0.0,
+        fluents={F("at r1 start"), F("free r1"), F("holding r1 package")},
+    )
+
+    h_value = ff_heuristic(state, F("at package target"), all_actions)
+    report = debug_ff_heuristic(state, LiteralGoal(F("at package target")), all_actions)
+
+    # Without found-landmark augmentation this setup is 8.0 (move+prepare+place).
+    # The heuristic should now be higher because it also requires found toolkit.
+    assert h_value > 8.0
+    assert "auto_added_found_landmarks" in report
+    assert "found toolkit" in report

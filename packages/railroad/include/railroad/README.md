@@ -45,7 +45,7 @@ h = ff_heuristic(state, goal, all_actions, mode="default")
    - **Phase 1**: Compute D(f) for all fluents using fixed-point iteration. D(f) is the optimistic cost using deterministic achievers (or best probabilistic if none exists).
    - **Phase 2**: For fluents with probabilistic achievers, compute delta(f) = E_attempt - D_best, where E_attempt is the expected cost of trying achievers in efficiency order.
 
-5. **Backward Phase**: Extract the relaxed plan via BFS from goals to initial fluents. Sum D(goal) + deltas for all fluents on the extraction path.
+5. **Backward Phase**: Extract the relaxed plan via BFS from goals to initial fluents. During extraction, apply an `at-implies-found` augmentation: for object fluents encountered along achiever chains, add `found <obj>` to effective goals if reachable. Then sum D(goal) + deltas for fluents on the extraction path.
 
 **Key Design Decisions:**
 
@@ -56,6 +56,8 @@ h = ff_heuristic(state, goal, all_actions, mode="default")
 - **Efficiency ordering**: Probabilistic achievers are tried in order of efficiency (probability / exec_cost), which minimizes expected cost.
 
 - **Branch-probability aggregation**: For each `(action, fluent)`, the achiever probability is the total probability mass of action outcomes that contain the fluent. If that sums to `1.0`, the achiever is treated as deterministic.
+
+- **At-implies-found augmentation**: Backward extraction can auto-add `found <obj>` landmarks for objects encountered in achiever chains (not only objects explicitly in goal literals), but only when `found <obj>` is reachable in the relaxed forward result.
 
 - **Non-relaxed time**: Using the time to first action completion (rather than all actions) gives a tighter lower bound, especially important for multi-robot scenarios where robots act in parallel.
 

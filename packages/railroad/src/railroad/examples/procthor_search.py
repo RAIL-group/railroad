@@ -143,7 +143,7 @@ def main(
 
             all_actions = env.get_actions()
             mcts = MCTSPlanner(all_actions)
-            dashboard.console.print(mcts.debug_heuristic(env.state, goal))
+            # dashboard.console.print(mcts.debug_heuristic(env.state, goal))
             action_name = mcts(
                 env.state,
                 goal,
