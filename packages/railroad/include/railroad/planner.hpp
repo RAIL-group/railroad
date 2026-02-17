@@ -12,6 +12,7 @@
 #include "railroad/constants.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <iostream>
 #include <iomanip>
@@ -80,6 +81,132 @@ get_next_actions(const State &state, const std::vector<Action> &all_actions) {
   }
 
   return fallback;
+}
+
+inline std::unordered_set<Fluent> get_unsatisfied_goal_literals(const State &state,
+                                                                const GoalBase *goal) {
+  std::unordered_set<Fluent> unsatisfied;
+  if (!goal) {
+    return unsatisfied;
+  }
+
+  for (const auto &lit : goal->get_all_literals()) {
+    bool satisfied = false;
+    if (lit.is_negated()) {
+      satisfied = !state.fluents().count(lit.invert());
+    } else {
+      satisfied = state.fluents().count(lit);
+    }
+    if (!satisfied) {
+      unsatisfied.insert(lit);
+    }
+  }
+  return unsatisfied;
+}
+
+inline std::vector<const Action *> get_goal_relevant_next_actions(
+    const State &state,
+    const std::vector<Action> &all_actions,
+    const GoalBase *goal,
+    const std::unordered_map<const Action *, std::unordered_set<Fluent>> &action_adds_map,
+    int relevance_depth = 2) {
+  auto applicable = get_next_actions(state, all_actions);
+  if (applicable.empty() || !goal) {
+    return applicable;
+  }
+
+  std::unordered_set<Fluent> relevant_fluents = get_unsatisfied_goal_literals(state, goal);
+  if (relevant_fluents.empty()) {
+    return applicable;
+  }
+
+  std::unordered_set<const Action *> relevant_actions;
+  for (int depth = 0; depth < relevance_depth; ++depth) {
+    std::unordered_set<Fluent> next_relevant_fluents;
+    bool any_added = false;
+
+    for (const auto &action : all_actions) {
+      const Action *a = &action;
+      auto add_it = action_adds_map.find(a);
+      if (add_it == action_adds_map.end()) {
+        continue;
+      }
+
+      bool adds_relevant = false;
+      for (const auto &f : add_it->second) {
+        if (relevant_fluents.count(f)) {
+          adds_relevant = true;
+          break;
+        }
+      }
+      if (!adds_relevant) {
+        continue;
+      }
+
+      relevant_actions.insert(a);
+      for (const auto &p : a->pos_preconditions()) {
+        if (!relevant_fluents.count(p)) {
+          next_relevant_fluents.insert(p);
+          any_added = true;
+        }
+      }
+    }
+
+    if (!any_added) {
+      break;
+    }
+    relevant_fluents.insert(next_relevant_fluents.begin(), next_relevant_fluents.end());
+  }
+
+  if (relevant_actions.empty()) {
+    return applicable;
+  }
+
+  std::vector<const Action *> filtered;
+  filtered.reserve(applicable.size());
+  for (const Action *a : applicable) {
+    if (relevant_actions.count(a)) {
+      filtered.push_back(a);
+    }
+  }
+
+  if (filtered.empty()) {
+    filtered = applicable;
+  }
+
+  // Prefer actions that directly add currently-unsatisfied goal literals.
+  auto unsatisfied_goals = get_unsatisfied_goal_literals(state, goal);
+  std::unordered_map<const Action *, int> action_score;
+  action_score.reserve(filtered.size());
+  for (const Action *a : filtered) {
+    int adds_unsatisfied = 0;
+    int adds_relevant = 0;
+    auto add_it = action_adds_map.find(a);
+    if (add_it != action_adds_map.end()) {
+      for (const auto &f : add_it->second) {
+        if (relevant_fluents.count(f)) {
+          ++adds_relevant;
+        }
+        if (unsatisfied_goals.count(f)) {
+          ++adds_unsatisfied;
+        }
+      }
+    }
+    action_score[a] = 100 * adds_unsatisfied + adds_relevant;
+  }
+
+  std::sort(filtered.begin(), filtered.end(),
+            [&action_score](const Action *lhs, const Action *rhs) {
+              auto ls = action_score.find(lhs);
+              auto rs = action_score.find(rhs);
+              int lval = (ls == action_score.end()) ? 0 : ls->second;
+              int rval = (rs == action_score.end()) ? 0 : rs->second;
+              if (lval != rval) {
+                return lval > rval;
+              }
+              return lhs->name() < rhs->name();
+            });
+  return filtered;
 }
 
 using HeuristicFn = std::function<double(const State &)>;
@@ -171,6 +298,8 @@ struct MCTSDecisionNode {
   MCTSChanceNode *parent = nullptr; // non-owning
   std::unordered_map<const Action *, std::unique_ptr<MCTSChanceNode>> children;
   std::vector<const Action *> untried_actions;
+  int goal_count = 0;
+  int path_best_goal_count = 0;
 
   int visits = 0;
   double value = 0.0;
@@ -191,6 +320,79 @@ struct MCTSChanceNode {
 
   MCTSChanceNode(const Action *a, MCTSDecisionNode *p) : action(a), parent(p) {}
 };
+
+inline void set_goal_progress_fields(MCTSDecisionNode &node, const GoalBase *goal,
+                                     int parent_path_best_goal_count = 0) {
+  if (!goal) {
+    node.goal_count = 0;
+    node.path_best_goal_count = parent_path_best_goal_count;
+    return;
+  }
+  node.goal_count = goal->goal_count(node.state.fluents());
+  node.path_best_goal_count = std::max(parent_path_best_goal_count, node.goal_count);
+}
+
+inline std::size_t progressive_widening_limit(
+    int visits, double k = PROGRESSIVE_WIDENING_K,
+    double alpha = PROGRESSIVE_WIDENING_ALPHA) {
+  int safe_visits = std::max(1, visits);
+  double raw = k * std::pow(static_cast<double>(safe_visits), alpha);
+  return std::max<std::size_t>(1, static_cast<std::size_t>(std::floor(raw)));
+}
+
+inline bool should_expand_node(const MCTSDecisionNode &node) {
+  if (node.untried_actions.empty()) {
+    return false;
+  }
+  std::size_t limit = progressive_widening_limit(node.visits + 1);
+  return node.children.size() < limit;
+}
+
+inline const Action *pop_next_action_to_expand(
+    MCTSDecisionNode &node, const GoalBase *goal,
+    const std::unordered_map<const Action *, std::unordered_set<Fluent>>
+        &action_adds_map) {
+  if (node.untried_actions.empty()) {
+    return nullptr;
+  }
+
+  if (!goal) {
+    const Action *a = node.untried_actions.back();
+    node.untried_actions.pop_back();
+    return a;
+  }
+
+  auto unsatisfied = get_unsatisfied_goal_literals(node.state, goal);
+  if (unsatisfied.empty()) {
+    const Action *a = node.untried_actions.back();
+    node.untried_actions.pop_back();
+    return a;
+  }
+
+  std::size_t best_index = node.untried_actions.size() - 1;
+  int best_score = -1;
+  for (std::size_t i = 0; i < node.untried_actions.size(); ++i) {
+    const Action *candidate = node.untried_actions[i];
+    int score = 0;
+    auto add_it = action_adds_map.find(candidate);
+    if (add_it != action_adds_map.end()) {
+      for (const auto &f : add_it->second) {
+        if (unsatisfied.count(f)) {
+          ++score;
+        }
+      }
+    }
+    if (score > best_score) {
+      best_score = score;
+      best_index = i;
+    }
+  }
+
+  const Action *chosen = node.untried_actions[best_index];
+  node.untried_actions[best_index] = node.untried_actions.back();
+  node.untried_actions.pop_back();
+  return chosen;
+}
 
 // What we return.
 struct MCTSResult {
@@ -324,9 +526,28 @@ inline std::string mcts(const State &root_state,
 
   auto all_actions = get_usable_actions(root_state, all_actions_base);
 
+  std::unordered_map<const Action *, std::unordered_set<Fluent>> action_adds_map;
+  action_adds_map.reserve(all_actions.size());
+  for (const auto &action : all_actions) {
+    const Action *a = &action;
+    std::unordered_set<Fluent> adds;
+    const auto &succs = a->get_relaxed_successors();
+    for (const auto &[succ_state, succ_prob] : succs) {
+      if (succ_prob <= 0.0) {
+        continue;
+      }
+      for (const auto &f : succ_state.fluents()) {
+        adds.insert(f);
+      }
+    }
+    action_adds_map[a] = std::move(adds);
+  }
+
   // Root node
   auto root = std::make_unique<MCTSDecisionNode>(root_state.copy_and_zero_out_time());
-  root->untried_actions = get_next_actions(root_state, all_actions);
+  set_goal_progress_fields(*root, goal, 0);
+  root->untried_actions =
+      get_goal_relevant_next_actions(root_state, all_actions, goal, action_adds_map);
 
   // Select heuristic: deterministic (classic FF) or probabilistic
   HeuristicFn heuristic_fn;
@@ -356,15 +577,15 @@ inline std::string mcts(const State &root_state,
 
     // ---------------- Selection ----------------
     while (depth < max_depth) {
-      if (!node->untried_actions.empty())
-        break;
-      if (node->children.empty())
-        break;
       // Use GoalBase::evaluate for goal check
       if (goal->evaluate(node->state.fluents())) {
         is_node_goal = true;
         break;
       }
+      if (should_expand_node(*node))
+        break;
+      if (node->children.empty())
+        break;
 
       MCTSChanceNode *best_chance = nullptr;
       double best_score = -std::numeric_limits<double>::infinity();
@@ -388,9 +609,12 @@ inline std::string mcts(const State &root_state,
     }
 
     // ---------------- Expansion ----------------
-    if (!node->untried_actions.empty() && !is_node_goal) {
-      const Action *action = node->untried_actions.back();
-      node->untried_actions.pop_back();
+    if (should_expand_node(*node) && !is_node_goal) {
+      const Action *action =
+          pop_next_action_to_expand(*node, goal, action_adds_map);
+      if (!action) {
+        continue;
+      }
 
       accumulated_extra_cost += action->extra_cost();
 
@@ -408,8 +632,9 @@ inline std::string mcts(const State &root_state,
             continue;
           auto child_decision =
               std::make_unique<MCTSDecisionNode>(succ, chance_raw);
+          set_goal_progress_fields(*child_decision, goal, node->path_best_goal_count);
           child_decision->untried_actions =
-              get_next_actions(child_decision->state, all_actions);
+              get_goal_relevant_next_actions(child_decision->state, all_actions, goal, action_adds_map);
           chance_raw->outcome_weights.push_back(prob);
           chance_raw->children.push_back(std::move(child_decision));
         }
@@ -426,9 +651,13 @@ inline std::string mcts(const State &root_state,
     // ---------------- Simulation / Evaluation ----------------
     double reward;
     double h = 0.0;
-    int goal_count_val = goal->goal_count(node->state.fluents());
+    int goal_count_val = node->goal_count;
+    int regression = std::max(0, node->path_best_goal_count - node->goal_count);
+    double progress_bonus = LANDMARK_PROGRESS_REWARD * static_cast<double>(goal_count_val);
+    double regression_penalty = GOAL_REGRESSION_PENALTY * static_cast<double>(regression);
     if (goal->evaluate(node->state.fluents())) {
-      reward = -node->state.time() + SUCCESS_REWARD + 0 * goal_count_val - accumulated_extra_cost;
+      reward = -node->state.time() + SUCCESS_REWARD + progress_bonus - regression_penalty -
+               accumulated_extra_cost;
     } else {
       h = heuristic_fn ? heuristic_fn(node->state) : 0.0;
       if (h > 1e10) {
@@ -437,7 +666,8 @@ inline std::string mcts(const State &root_state,
       if (did_need_relaxed_transition)
         h += 100;
 
-      reward = -node->state.time() - h * heuristic_multiplier + 0 * goal_count_val - accumulated_extra_cost;
+      reward = -node->state.time() - h * heuristic_multiplier + progress_bonus -
+               regression_penalty - accumulated_extra_cost;
     }
 
     // ---------------- Backpropagation ----------------
