@@ -131,6 +131,7 @@ class MCTSPlanner:
         max_depth: SupportsInt = 100,
         c: SupportsFloat = 1.414,
         heuristic_multiplier: SupportsFloat = 5.0,
+        debug_heuristic: bool = False,
     ) -> str:
         """Run MCTS planning to find the next action.
 
@@ -143,6 +144,7 @@ class MCTSPlanner:
             max_depth: Maximum depth for rollouts
             c: Exploration constant for UCB1
             heuristic_multiplier: Multiplier for heuristic in reward calculation
+            debug_heuristic: If True, prints detailed FF heuristic debug report
 
         Returns:
             Name of the selected action as a string
@@ -162,6 +164,9 @@ class MCTSPlanner:
         converted_goal = convert_goal_to_positive_preconditions(
             goal, self._current_mapping
         )
+
+        if debug_heuristic:
+            print(self._cpp_planner.debug_heuristic(converted_state, converted_goal))
 
         return self._cpp_planner(
             converted_state, converted_goal, max_iterations, max_depth, c,
@@ -207,6 +212,30 @@ class MCTSPlanner:
         )
 
         return _ff_heuristic_cpp(converted_state, converted_goal, self._converted_actions)
+
+    def debug_heuristic(self, state: State, goal: Union[Goal, Fluent]) -> str:
+        """Return a detailed FF heuristic debug report for the given state/goal.
+
+        The report includes per-branch achievers considered during backward
+        extraction and the probabilistic fluents contributing delta penalties.
+        """
+        # Normalize goal (wrap Fluent in LiteralGoal if needed)
+        goal = _normalize_goal(goal)
+
+        # Ensure mapping includes goal's negative fluents
+        self._ensure_mapping_includes_goal(goal)
+
+        # Convert state with (possibly extended) mapping
+        converted_state = convert_state_to_positive_preconditions(
+            state, self._current_mapping
+        )
+
+        # Convert goal with (possibly extended) mapping
+        converted_goal = convert_goal_to_positive_preconditions(
+            goal, self._current_mapping
+        )
+
+        return self._cpp_planner.debug_heuristic(converted_state, converted_goal)
 
 
 def reconstruct_path(came_from, current):

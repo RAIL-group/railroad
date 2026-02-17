@@ -385,6 +385,13 @@ PYBIND11_MODULE(_bindings, m) {
         py::arg("input_state"), py::arg("fluent"), py::arg("all_actions"),
         "Get relaxed expected cost for a single fluent from the given state");
 
+  m.def("debug_ff_heuristic",
+        [](const State &input_state, const GoalPtr &goal, const std::vector<Action> &all_actions) {
+          return ff_heuristic_debug_report(input_state, goal.get(), all_actions, nullptr);
+        },
+        py::arg("input_state"), py::arg("goal"), py::arg("all_actions"),
+        "Get a detailed FF heuristic debug report (achievers, branches, and probabilistic deltas).");
+
   m.def("astar", &astar, py::arg("start_state"), py::arg("all_actions"),
         py::arg("goal"), py::arg("heuristic_fn") = nullptr,
         "Run A* search and return the action path");
@@ -593,7 +600,13 @@ PYBIND11_MODULE(_bindings, m) {
           py::arg("c") = 1.414, py::arg("heuristic_multiplier") = 5.0,
           "Plan with a Goal object (supports complex AND/OR goals)")
       .def("get_trace_from_last_mcts_tree", &MCTSPlanner::get_trace_from_last_mcts_tree,
-           "Get the tree trace from the most recent MCTS planning call");
+           "Get the tree trace from the most recent MCTS planning call")
+      .def("debug_heuristic",
+           [](MCTSPlanner &self, const State &s, const GoalPtr &goal) {
+             return self.debug_heuristic(s, goal);
+           },
+           py::arg("state"), py::arg("goal"),
+           "Get FF heuristic debug details for a state/goal using planner's converted action set and cache.");
 
   // ff_heuristic with Goal object
   m.def("ff_heuristic",

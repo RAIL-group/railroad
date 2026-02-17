@@ -5,8 +5,10 @@
 #include "railroad/state.hpp"
 
 #include <algorithm>
+#include <iomanip>
 #include <limits>
 #include <optional>
+#include <sstream>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -141,6 +143,7 @@ FFForwardResult ff_forward_phase(
   std::unordered_set<Fluent> newly_added = result.known_fluents;
   std::unordered_set<const Action *> visited_actions;
   std::unordered_set<const Action *> all_actions_set;
+  std::unordered_set<Fluent> has_deterministic_achiever;
   for (const auto &a : all_actions) {
     all_actions_set.insert(&a);
   }
@@ -159,32 +162,43 @@ FFForwardResult ff_forward_phase(
       if (succs.empty()) continue;
 
       double duration = 0;
+      std::unordered_map<Fluent, double> fluent_prob_mass;
       for (const auto &[succ_state, succ_prob] : succs) {
         duration = std::max(succ_state.time(), duration);
         if (succ_prob <= 0.0) continue;
 
         for (const auto &f : succ_state.fluents()) {
-          // Always record this as an achiever for f
-          result.achievers_by_fluent[f].push_back({
-              a, 0.0, duration, succ_prob  // wait_cost=0 (computed in phase 2), exec_cost=duration
-          });
+          fluent_prob_mass[f] += succ_prob;
+        }
+      }
 
-          // Track fluents with probabilistic achievers for lazy delta computation
-          if (succ_prob < 1.0 - 1e-9) {
-            result.has_probabilistic_achiever.insert(f);
-          }
+      for (const auto& [f, prob_mass] : fluent_prob_mass) {
+        const double achievement_probability =
+            std::min(1.0, std::max(0.0, prob_mass));
+        if (achievement_probability <= FF_TOLERANCE) continue;
 
-          if (!result.known_fluents.count(f)) {
-            result.known_fluents.insert(f);
-            next_new.insert(f);
+        // Record one achiever per (action, fluent), with cumulative success probability
+        // across all action outcomes that contain the fluent.
+        result.achievers_by_fluent[f].push_back({
+            a, 0.0, duration, achievement_probability
+        });
+
+        if (achievement_probability >= 1.0 - FF_TOLERANCE) {
+          has_deterministic_achiever.insert(f);
+        } else {
+          result.has_probabilistic_achiever.insert(f);
+        }
+
+        if (!result.known_fluents.count(f)) {
+          result.known_fluents.insert(f);
+          next_new.insert(f);
+          result.fact_to_action[f] = a;
+          result.fact_to_probability[f] = achievement_probability;
+        } else {
+          result.fact_to_probability[f] =
+              std::max(result.fact_to_probability[f], achievement_probability);
+          if (duration < result.action_to_duration[result.fact_to_action[f]]) {
             result.fact_to_action[f] = a;
-            result.fact_to_probability[f] = succ_prob;
-          } else {
-            result.fact_to_probability[f] =
-                std::max(result.fact_to_probability[f], succ_prob);
-            if (duration < result.action_to_duration[result.fact_to_action[f]]) {
-              result.fact_to_action[f] = a;
-            }
           }
         }
       }
@@ -195,6 +209,12 @@ FFForwardResult ff_forward_phase(
     for (const Action *a : visited_actions) {
       all_actions_set.erase(a);
     }
+  }
+
+  // If any deterministic achiever exists for a fluent, do not treat it as
+  // probabilistic for delta computation.
+  for (const auto& f : has_deterministic_achiever) {
+    result.has_probabilistic_achiever.erase(f);
   }
 
   return result;
@@ -297,6 +317,14 @@ inline double get_or_compute_delta(const FFForwardResult& forward, const Fluent&
   }
 
   const auto& achievers = achievers_it->second;
+
+  // If a deterministic achiever exists, uncertainty adds no extra penalty.
+  for (const auto& a : achievers) {
+    if (a.probability >= 1.0 - FF_TOLERANCE) {
+      forward.probabilistic_delta[f] = 0.0;
+      return 0.0;
+    }
+  }
 
   // Collect probabilistic achievers only
   std::vector<ProbabilisticAchiever> prob_achievers;
@@ -690,6 +718,242 @@ inline const std::vector<std::unordered_set<Fluent>>& extract_or_branches(const 
   static const std::vector<std::unordered_set<Fluent>> empty_branches;
   if (!goal) return empty_branches;
   return goal->get_dnf_branches();
+}
+
+inline std::string fluent_to_debug_string(const Fluent& f) {
+  std::ostringstream out;
+  if (f.is_negated()) out << "not ";
+  out << f.name();
+  for (const auto& arg : f.args()) {
+    out << " " << arg;
+  }
+  return out.str();
+}
+
+inline std::vector<Fluent> sort_fluents_for_debug(
+    const std::unordered_set<Fluent>& fluents) {
+  std::vector<Fluent> out(fluents.begin(), fluents.end());
+  std::sort(out.begin(), out.end(), [](const Fluent& a, const Fluent& b) {
+    return fluent_to_debug_string(a) < fluent_to_debug_string(b);
+  });
+  return out;
+}
+
+inline std::string ff_heuristic_debug_report(
+    const State& input_state,
+    const GoalBase* goal,
+    const std::vector<Action>& all_actions,
+    FFMemory* ff_memory = nullptr) {
+  std::ostringstream out;
+  out << std::fixed << std::setprecision(3);
+
+  if (!goal) {
+    out << "FF Debug: null goal -> 0.0\n";
+    return out.str();
+  }
+  GoalType type = goal->get_type();
+  if (type == GoalType::TRUE_GOAL) {
+    out << "FF Debug: TRUE_GOAL -> 0.0\n";
+    return out.str();
+  }
+  if (type == GoalType::FALSE_GOAL) {
+    out << "FF Debug: FALSE_GOAL -> inf\n";
+    return out.str();
+  }
+
+  auto relaxed_result = transition(input_state, nullptr, true);
+  if (relaxed_result.empty()) {
+    out << "No relaxed transition outcomes. heuristic=inf\n";
+    return out.str();
+  }
+  State relaxed = relaxed_result[0].first;
+
+  auto nonrelaxed_result = transition(input_state, nullptr, false);
+  double dtime = 0.0;
+  if (!nonrelaxed_result.empty()) {
+    dtime = nonrelaxed_result[0].first.time() - input_state.time();
+  }
+
+  std::unordered_set<Fluent> initial_fluents(
+      relaxed.fluents().begin(), relaxed.fluents().end());
+
+  relaxed.set_time(0);
+
+  const std::size_t memo_key = relaxed.hash();
+  bool memo_hit = false;
+  double memo_value = std::numeric_limits<double>::infinity();
+  if (ff_memory) {
+    auto it = ff_memory->find(memo_key);
+    if (it != ff_memory->end()) {
+      memo_hit = true;
+      memo_value = it->second;
+    }
+  }
+
+  auto forward = ff_forward_phase(initial_fluents, all_actions);
+  compute_expected_costs(forward);
+
+  out << "FF Debug Report\n";
+  out << "state.time=" << input_state.time()
+      << ", base_fluents=" << input_state.fluents().size()
+      << ", upcoming_effects=" << input_state.upcoming_effects().size() << "\n";
+  out << "memo_key=" << memo_key << ", memo_hit=" << (memo_hit ? "true" : "false");
+  if (memo_hit) {
+    out << ", memo_value=" << memo_value;
+  }
+  out << "\n";
+  out << "dtime_addend=" << dtime << "\n";
+  out << "initial_seed_fluents=" << initial_fluents.size()
+      << ", reachable_fluents=" << forward.known_fluents.size() << "\n";
+  out << "seed_fluents (t=0 in relaxed view):\n";
+  for (const auto& f : sort_fluents_for_debug(initial_fluents)) {
+    out << "  - " << fluent_to_debug_string(f) << "\n";
+  }
+
+  auto branches = extract_or_branches(goal);
+  if (branches.empty()) {
+    out << "No DNF branches (unsatisfiable goal)\n";
+    return out.str();
+  }
+
+  double min_cost = std::numeric_limits<double>::infinity();
+  std::size_t min_branch = 0;
+
+  std::size_t branch_index = 0;
+  for (const auto& branch_fluents : branches) {
+    double branch_cost = ff_backward_cost(forward, branch_fluents);
+    bool reachable = branch_cost < std::numeric_limits<double>::infinity();
+    if (reachable && branch_cost < min_cost) {
+      min_cost = branch_cost;
+      min_branch = branch_index;
+    }
+
+    out << "\nBranch[" << branch_index << "] ";
+    out << (reachable ? "reachable" : "unreachable");
+    if (reachable) out << ", backward_cost=" << branch_cost;
+    out << "\n";
+
+    auto sorted_goals = sort_fluents_for_debug(branch_fluents);
+    out << "  goals:\n";
+    for (const auto& gf : sorted_goals) {
+      out << "    - " << fluent_to_debug_string(gf) << "\n";
+    }
+
+    std::unordered_set<Fluent> on_path;
+    std::unordered_set<Fluent> frontier = branch_fluents;
+    std::unordered_map<Fluent, const Action*> extracted_achiever;
+    auto pick_best_achiever = [&](const Fluent& f) -> const Action* {
+      auto best_it = forward.best_achiever_action.find(f);
+      if (best_it != forward.best_achiever_action.end()) {
+        return best_it->second;
+      }
+      auto fallback = forward.fact_to_action.find(f);
+      if (fallback != forward.fact_to_action.end()) {
+        return fallback->second;
+      }
+      return nullptr;
+    };
+
+    while (!frontier.empty()) {
+      std::unordered_set<Fluent> next_frontier;
+      for (const auto& f : frontier) {
+        if (on_path.count(f) || forward.initial_fluents.count(f)) continue;
+        on_path.insert(f);
+        const Action* best_action = pick_best_achiever(f);
+        if (best_action) {
+          extracted_achiever[f] = best_action;
+          for (const auto& prec : best_action->pos_preconditions()) {
+            next_frontier.insert(prec);
+          }
+        }
+      }
+      frontier = std::move(next_frontier);
+    }
+
+    auto sorted_path = sort_fluents_for_debug(on_path);
+    out << "  extracted_path_fluents:\n";
+    for (const auto& f : sorted_path) {
+      out << "    - " << fluent_to_debug_string(f);
+      auto ea_it = extracted_achiever.find(f);
+      if (ea_it != extracted_achiever.end() && ea_it->second) {
+        out << " <- " << ea_it->second->name();
+      }
+      out << "\n";
+    }
+
+    std::unordered_set<Fluent> delta_fluents;
+    std::unordered_map<Fluent, double> weighted_delta_by_fluent;
+    double delta_sum = 0.0;
+    for (const auto& f : on_path) {
+      if (!forward.has_probabilistic_achiever.count(f)) continue;
+      delta_fluents.insert(f);
+      double d = get_or_compute_delta(forward, f);
+      double weighted = PROBABILISTIC_DELTA_MULTIPLIER * d;
+      weighted_delta_by_fluent[f] = weighted;
+      delta_sum += weighted;
+    }
+
+    auto sorted_delta_fluents = sort_fluents_for_debug(delta_fluents);
+    out << "  probabilistic_delta_fluents:\n";
+    if (sorted_delta_fluents.empty()) {
+      out << "    - (none)\n";
+    } else {
+      for (const auto& f : sorted_delta_fluents) {
+        out << "    - " << fluent_to_debug_string(f)
+            << ", weighted_delta=" << weighted_delta_by_fluent[f] << "\n";
+      }
+    }
+    out << "  total_weighted_delta=" << delta_sum << "\n";
+
+    std::unordered_set<Fluent> achiever_targets = on_path;
+    achiever_targets.insert(branch_fluents.begin(), branch_fluents.end());
+    auto sorted_targets = sort_fluents_for_debug(achiever_targets);
+
+    out << "  achievers_considered:\n";
+    for (const auto& f : sorted_targets) {
+      out << "    " << fluent_to_debug_string(f) << ":\n";
+      auto ach_it = forward.achievers_by_fluent.find(f);
+      if (ach_it == forward.achievers_by_fluent.end() || ach_it->second.empty()) {
+        out << "      - (seed/no achiever required)\n";
+        continue;
+      }
+
+      std::vector<ProbabilisticAchiever> achievers = ach_it->second;
+      std::sort(achievers.begin(), achievers.end(),
+                [](const ProbabilisticAchiever& a, const ProbabilisticAchiever& b) {
+                  if (a.probability != b.probability) return a.probability > b.probability;
+                  if (a.exec_cost != b.exec_cost) return a.exec_cost < b.exec_cost;
+                  return a.action->name() < b.action->name();
+                });
+      for (const auto& ach : achievers) {
+        out << "      - action=" << ach.action->name()
+            << ", p=" << ach.probability
+            << ", wait=" << ach.wait_cost
+            << ", exec=" << ach.exec_cost;
+        if (ach.probability >= 1.0 - FF_TOLERANCE) {
+          out << " (det)";
+        } else {
+          out << " (prob)";
+        }
+        out << "\n";
+      }
+    }
+
+    ++branch_index;
+  }
+
+  if (min_cost < std::numeric_limits<double>::infinity()) {
+    out << "\nmin_branch=" << min_branch << ", branch_cost=" << min_cost
+        << ", dtime_addend=" << dtime
+        << ", heuristic_total=" << (dtime + min_cost) << "\n";
+    if (ff_memory) {
+      (*ff_memory)[memo_key] = min_cost;
+    }
+  } else {
+    out << "\nNo reachable branch. heuristic=inf\n";
+  }
+
+  return out.str();
 }
 
 // FF heuristic for complex goals with OR branches

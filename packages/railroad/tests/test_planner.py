@@ -178,3 +178,47 @@ def test_basic_planning():
     # Verify we got a valid result (either an action name or "NONE")
     assert isinstance(action_name, str)
     assert len(action_name) > 0
+
+
+def test_mcts_debug_heuristic_output():
+    """Planner exposes heuristic debug report for converted state/goal."""
+    objects_by_type = {
+        "robot": ["r1"],
+        "location": ["start", "a"],
+    }
+    move_op = construct_move_visited_operator(lambda *args: 5.0)
+    all_actions = move_op.instantiate(objects_by_type)
+
+    initial_state = State(
+        time=0,
+        fluents={F("at r1 start"), F("free r1"), F("visited start")}
+    )
+    goal = F("visited a")
+
+    mcts = MCTSPlanner(all_actions)
+    report = mcts.debug_heuristic(initial_state, goal)
+
+    assert isinstance(report, str)
+    assert "FF Debug Report" in report
+    assert "Branch[0]" in report
+
+
+def test_mcts_call_with_debug_heuristic_flag_prints_report(capsys):
+    """Calling planner with debug_heuristic=True prints the heuristic debug report."""
+    objects_by_type = {
+        "robot": ["r1"],
+        "location": ["start", "a"],
+    }
+    move_op = construct_move_visited_operator(lambda *args: 5.0)
+    all_actions = move_op.instantiate(objects_by_type)
+
+    initial_state = State(
+        time=0,
+        fluents={F("at r1 start"), F("free r1"), F("visited start")}
+    )
+    goal = F("visited a")
+
+    mcts = MCTSPlanner(all_actions)
+    _ = mcts(initial_state, goal, max_iterations=10, debug_heuristic=True)
+    captured = capsys.readouterr()
+    assert "FF Debug Report" in captured.out
