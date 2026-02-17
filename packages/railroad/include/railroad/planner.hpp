@@ -529,8 +529,7 @@ inline std::string mcts(const State &root_state,
                         int max_iterations = 1000, int max_depth = 20,
                         double c = std::sqrt(2.0),
                         double heuristic_multiplier = HEURISTIC_MULTIPLIER,
-                        std::string* out_tree_trace = nullptr,
-                        bool use_det_heuristic = false) {
+                        std::string* out_tree_trace = nullptr) {
   // RNG
   static thread_local std::mt19937 rng{std::random_device{}()};
 
@@ -559,17 +558,9 @@ inline std::string mcts(const State &root_state,
   root->untried_actions =
       get_goal_relevant_next_actions(root_state, all_actions, goal, action_adds_map);
 
-  // Select heuristic: deterministic (classic FF) or probabilistic
-  HeuristicFn heuristic_fn;
-  if (use_det_heuristic) {
-    heuristic_fn = [goal, all_actions, ff_memory](const State& s) -> double {
-      return det_ff_heuristic(s, goal, all_actions, ff_memory);
-    };
-  } else {
-    heuristic_fn = [goal, all_actions, ff_memory](const State& s) -> double {
-      return ff_heuristic(s, goal, all_actions, ff_memory);
-    };
-  }
+  HeuristicFn heuristic_fn = [goal, all_actions, ff_memory](const State& s) -> double {
+    return ff_heuristic(s, goal, all_actions, ff_memory);
+  };
   std::bernoulli_distribution do_extra_exploration(PROB_EXTRA_EXPLORE);
 
   for (int it = 0; it < max_iterations; ++it) {
@@ -720,10 +711,8 @@ inline std::string mcts(const State &root_state,
 
 class MCTSPlanner {
 public:
-  explicit MCTSPlanner(std::vector<Action> all_actions,
-                       bool use_det_heuristic = false)
-      : all_actions_(std::move(all_actions)),
-        use_det_heuristic_(use_det_heuristic) {}
+  explicit MCTSPlanner(std::vector<Action> all_actions)
+      : all_actions_(std::move(all_actions)) {}
 
   // Call operator: planner(initial_state, goal) → string
   std::string operator()(const State &root_state,
@@ -734,7 +723,7 @@ public:
                          double heuristic_multiplier = HEURISTIC_MULTIPLIER) {
     return mcts(root_state, all_actions_, goal.get(), &ff_memory_,
                 max_iterations, max_depth, c, heuristic_multiplier,
-                &last_mcts_tree_trace_, use_det_heuristic_);
+                &last_mcts_tree_trace_);
   }
 
   void clear_cache() { ff_memory_.clear(); }
@@ -747,7 +736,6 @@ public:
 
 private:
   std::vector<Action> all_actions_;
-  bool use_det_heuristic_;
   FFMemory ff_memory_;
   std::string last_mcts_tree_trace_;
 };
