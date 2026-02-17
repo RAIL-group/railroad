@@ -1,158 +1,186 @@
-# FF Heuristic and MCTS Goal-Shaping Overview
+# FF Heuristic + Planner Integration Overview
 
-This document explains the current heuristic pipeline in:
+This document describes how the heuristic in
+`packages/railroad/include/railroad/ff_heuristic.hpp`
+and the MCTS planner in
+`packages/railroad/include/railroad/planner.hpp`
+work together.
 
-- `packages/railroad/include/railroad/ff_heuristic.hpp`
-- `packages/railroad/include/railroad/planner.hpp`
+## 1. End-to-End Interaction Loop
 
-It also covers the new reward-shaping terms:
+`mcts(...)` integrates with the FF heuristic in this order:
 
-- `LANDMARK_PROGRESS_REWARD`
-- `GOAL_REGRESSION_PENALTY`
+1. Pre-prune the action set once at the root with `get_usable_actions(...)`.
+2. Build `action_adds_map` from relaxed successors (only outcomes with `prob > 0`).
+3. Run MCTS (selection, expansion, evaluation, backpropagation).
+4. During evaluation of non-goal nodes, call either:
+   - `ff_heuristic(...)` (probabilistic version), or
+   - `det_ff_heuristic(...)` (deterministic ablation version).
+5. Pick the root action with the highest visit count.
 
-## 1. High-Level Flow
+`MCTSPlanner` stores a shared `FFMemory` cache and passes it into each heuristic call, so relaxed-state values are reused across simulations and across planner invocations until `clear_cache()` is called.
 
-The planner uses MCTS for action selection, and evaluates leaf states with the FF-style heuristic.
+## 2. `ff_heuristic(...)` (Probabilistic) Pipeline
 
-At each MCTS evaluation point:
+### 2.1 Early exits
 
-1. Compute `h(s)` with `ff_heuristic(...)` (or `det_ff_heuristic(...)` if configured).
-2. Convert that to reward with time, extra action cost, and goal-shaping terms.
-3. Backpropagate that reward up the search tree.
+- `nullptr` or `TRUE_GOAL` -> `0.0`
+- `FALSE_GOAL` -> `+infinity`
 
-## 2. FF Heuristic: End-to-End
+### 2.2 Dual transition views
 
-## 2.1 Entry Conditions and Early Exits
+The heuristic uses two transitions from the same input state:
 
-`ff_heuristic` returns:
+1. `transition(state, nullptr, true)` for relaxed fluent reachability.
+2. `transition(state, nullptr, false)` for near-term time lower bound.
 
-- `0.0` for null goal or `TRUE_GOAL`
-- `+infinity` for `FALSE_GOAL`
+Returned value:
 
-## 2.2 Two Transition Views
+`h(s) = dtime + min_branch_backward_cost`
 
-The probabilistic FF heuristic uses two transition calls:
+where `dtime` is the first non-relaxed time increment.
 
-1. Relaxed transition (`transition(..., true)`) for fluent reachability.
-2. Non-relaxed transition (`transition(..., false)`) for near-term time advance.
+### 2.3 Memoization key
 
-The returned heuristic is:
+After relaxed transition, the relaxed state's time is set to `0` before hashing.
+That hash is the `FFMemory` key. This reuses heuristic work for states with the same relaxed fluent situation even if absolute times differ.
 
-`h(s) = dtime + backward_cost`
+### 2.4 Forward relaxed phase (`ff_forward_phase`)
 
-where `dtime` is the first non-relaxed time increment and `backward_cost` is computed from the relaxed graph.
+Forward phase computes:
 
-## 2.3 Memoization
+- `known_fluents` (relaxed reachability closure),
+- `achievers_by_fluent` (`ProbabilisticAchiever` entries),
+- fallback achiever info (`fact_to_action`, `fact_to_probability`),
+- `action_to_duration` (max relaxed successor time per action),
+- `has_probabilistic_achiever`.
 
-After relaxed transition, time is zeroed (`relaxed.set_time(0)`), then the relaxed state hash is used as the memo key (`FFMemory`).
+Each achiever stores:
 
-This lets states with the same relaxed fluent set reuse heuristic work even if wall-clock times differ.
+- action pointer,
+- `wait_cost` (filled later),
+- `exec_cost` (action duration),
+- success probability.
 
-## 2.4 Forward Phase: Reachability and Achievers
+### 2.5 Expected-cost fixed point (`compute_expected_costs`)
 
-`ff_forward_phase(...)` computes:
+`D(f)` is iteratively updated (max 100 iterations):
 
-- reachable fluents (`known_fluents`)
-- achievers per fluent (`achievers_by_fluent`)
-- fallback achiever map (`fact_to_action`)
-- action duration map (`action_to_duration`)
+1. `wait_cost` for each achiever becomes `max(D(preconditions))`.
+2. `scan_achievers(...)` ranks achievers with deterministic preference and tie breaks.
+3. `D(f)` choice:
+   - use best deterministic cost if any deterministic achiever exists,
+   - otherwise use best probabilistic candidate.
+4. `best_achiever_action[f]` is recorded for backward extraction.
 
-Each achiever records:
+### 2.6 Backward extraction and base cost (`ff_backward_cost`)
 
-- action pointer
-- wait cost (filled later in fixed-point iteration)
-- exec cost (action duration)
-- success probability
+For one DNF goal branch:
 
-## 2.5 Expected-Cost Fixed Point (`compute_expected_costs`)
+1. Validate branch fluents are reachable.
+2. Backward extract achievers from goals to preconditions using:
+   - `best_achiever_action` first,
+   - `fact_to_action` as fallback.
+3. Build relaxed arrival times for extracted fluents.
+4. Compute hybrid base cost:
 
-For each fluent `f`, the code computes optimistic cost `D(f)` by iterating until convergence.
+`base = max_goal_time + 0.5 * max(0, sum_goal_time - max_goal_time)`
 
-Key behavior:
+The max term keeps critical-path signal; the additive term preserves gradient for multi-goal branches.
 
-- Preconditions contribute `wait_cost = max(D(preconditions))`.
-- Achievers are scanned with deterministic-first policy:
-  - If any deterministic achiever exists, `D(f)` uses best deterministic cost.
-  - Otherwise it uses the best probabilistic achiever (probability-first tie break).
-- The best achiever action is stored in `best_achiever_action[f]` for backward extraction.
+### 2.7 Probabilistic delta term
 
-## 2.6 Backward Extraction and Base Cost
+For each extracted fluent with probabilistic achievers:
 
-`ff_backward_cost(...)` does backward extraction from goal fluents:
+- lazily compute `delta(f)` with `get_or_compute_delta(...)`,
+- cache in `forward.probabilistic_delta`,
+- add `PROBABILISTIC_DELTA_MULTIPLIER * delta(f)`.
 
-1. Build extraction frontier from goals to preconditions.
-2. Choose achievers via `best_achiever_action`, with fallback to `fact_to_action`.
-3. Build a relaxed arrival schedule `T(f)` over extracted fluents.
+Delta is:
 
-Base cost is a hybrid of makespan and additive pressure:
+`delta(f) = min_orderings(E_attempt) - D_prob_best`
 
-`base = max_goal_time + lambda * (sum_goal_time - max_goal_time)`, with `lambda = 0.5`.
+Orderings tried:
 
-This keeps critical-path sensitivity while still giving gradient for multiple goals.
+1. efficiency (`p / exec_cost`) descending,
+2. probability descending,
+3. attempt cost ascending.
 
-## 2.7 Probabilistic Delta Term
+Small negative numerical artifacts are clamped to `0`.
 
-For path fluents with probabilistic achievers, delta is computed lazily:
+### 2.8 OR goals / DNF branches
 
-`delta(f) = E_attempt(f) - D_prob_best(f)`
+`extract_or_branches(goal)` uses `goal->get_dnf_branches()`.
+The heuristic evaluates each branch independently via `ff_backward_cost` and returns the minimum finite branch cost.
 
-where `E_attempt` is the best expected attempt cost among several achiever orderings.
+## 3. `det_ff_heuristic(...)` Differences
 
-Final backward cost:
+`det_ff_heuristic(...)` shares goal handling and memoization structure, but:
 
-`total = base + PROBABILISTIC_DELTA_MULTIPLIER * sum(delta(f) on extracted path)`
+- uses only relaxed transition time increment (`relaxed.time() - t0`) for `dtime`,
+- uses `det_ff_backward_cost(...)` instead of probabilistic backward cost,
+- does no probabilistic delta adjustment.
 
-Default multiplier is currently `2.0`.
+`det_ff_backward_cost(...)` performs ablation-style required fluent detection and sums durations of unique extracted actions.
 
-## 2.8 Goal Structure Handling
+## 4. Goal-Relevant Action Prioritization in `planner.hpp`
 
-Complex goals are decomposed into DNF branches (`goal->get_dnf_branches()`), and heuristic cost is the minimum branch cost.
+Before expansion, planner narrows and ranks applicable actions:
 
-This supports nested AND/OR structure efficiently.
+1. `get_unsatisfied_goal_literals(...)` picks one active DNF branch (best currently satisfied, then fewer missing literals, then smaller branch).
+2. `get_goal_relevant_next_actions(...)` expands relevance backward through preconditions up to `relevance_depth` (default `2`).
+3. Applicable actions not in the relevant set are filtered out if possible.
+4. Remaining actions are scored:
+   - `100 * adds_unsatisfied_goals + weighted_adds_relevant`.
+5. Actions are sorted ascending by score, then popped from the back during expansion, so higher-score actions are expanded first.
 
-## 3. MCTS Reward and the New Goal-Shaping Terms
+This keeps expansion focused on actions that support the currently most promising goal branch while preserving fallback behavior if relevance filtering becomes too strict.
 
-The planner now tracks per-node progress:
+## 5. MCTS Evaluation and Reward Shaping
 
-- `goal_count`: satisfied leaf progress at this node (`goal->goal_count(...)`)
-- `path_best_goal_count`: best progress seen from root to this node
+Per decision node:
 
-From those values:
+- `goal_count = goal->goal_count(state.fluents())`
+- `path_best_goal_count = max(parent_path_best_goal_count, goal_count)`
+
+Shaping terms:
 
 - `progress_bonus = LANDMARK_PROGRESS_REWARD * goal_count`
 - `regression = max(0, path_best_goal_count - goal_count)`
 - `regression_penalty = GOAL_REGRESSION_PENALTY * regression`
 
-Current defaults:
-
-- `LANDMARK_PROGRESS_REWARD = 25.0`
-- `GOAL_REGRESSION_PENALTY = 50.0`
-
 Reward equations:
 
-- Goal node:
-  - `reward = -time + SUCCESS_REWARD + progress_bonus - regression_penalty - extra_cost`
-- Non-goal node:
-  - `reward = -time - heuristic_multiplier * h + progress_bonus - regression_penalty - extra_cost`
+- goal node:
+  `reward = -time + SUCCESS_REWARD + progress_bonus - regression_penalty - accumulated_extra_cost`
+- non-goal node:
+  `reward = -time - heuristic_multiplier * h + progress_bonus - regression_penalty - accumulated_extra_cost`
 
-## 4. Intuition for the New Terms
+If heuristic returns a very large value (`h > 1e10`), planner substitutes `HEURISTIC_CANNOT_FIND_GOAL_PENALTY`.
 
-`LANDMARK_PROGRESS_REWARD`:
+### 5.1 How `planner.hpp` uses `LANDMARK_PROGRESS_REWARD` and `GOAL_REGRESSION_PENALTY`
 
-- Gives positive signal before full goal completion.
-- Helps MCTS value partial progress, not only terminal success.
+In `planner.hpp`, usage is direct in the simulation/evaluation block of `mcts(...)`:
 
-`GOAL_REGRESSION_PENALTY`:
+1. `goal_count` and `path_best_goal_count` are populated by `set_goal_progress_fields(...)`.
+2. Regression is measured as:
+   `regression = max(0, path_best_goal_count - goal_count)`.
+3. The constants are applied as:
+   - `progress_bonus = LANDMARK_PROGRESS_REWARD * goal_count`
+   - `regression_penalty = GOAL_REGRESSION_PENALTY * regression`
 
-- Penalizes states that undo previously achieved goal progress on the sampled path.
-- Reduces oscillatory behavior where search repeatedly gains and loses goal literals.
+With current defaults, the shaping contribution at any evaluated node is:
 
-Together, they shape value estimates to prefer monotonic goal progress.
+`shaping = +25.0 * goal_count - 50.0 * regression`
 
-## 5. Practical Tuning Notes
+This shaping term is added to both goal-node and non-goal-node reward equations, so it affects action selection and all backpropagated value estimates throughout the MCTS tree.
 
-1. If planning becomes overly conservative, reduce `GOAL_REGRESSION_PENALTY`.
-2. If search ignores partial progress, increase `LANDMARK_PROGRESS_REWARD`.
-3. If heuristic dominates too strongly, lower `HEURISTIC_MULTIPLIER`.
-4. If probabilistic tasks become over-penalized, lower `PROBABILISTIC_DELTA_MULTIPLIER` toward `1.0`.
+## 6. Current Constant Defaults (from `constants.hpp`)
 
+- `HEURISTIC_MULTIPLIER = 5`
+- `SUCCESS_REWARD = 0.0`
+- `LANDMARK_PROGRESS_REWARD = 25.0`
+- `GOAL_REGRESSION_PENALTY = 50.0`
+- `PROBABILISTIC_DELTA_MULTIPLIER = 2.0`
+
+`PROB_EXTRA_EXPLORE` is currently defined and a Bernoulli distribution is instantiated in `mcts(...)`, but that draw is not currently used to alter planner behavior in this header.
