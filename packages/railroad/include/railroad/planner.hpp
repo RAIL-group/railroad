@@ -90,14 +90,49 @@ inline std::unordered_set<Fluent> get_unsatisfied_goal_literals(const State &sta
     return unsatisfied;
   }
 
-  for (const auto &lit : goal->get_all_literals()) {
-    bool satisfied = false;
+  auto literal_satisfied = [&state](const Fluent &lit) {
     if (lit.is_negated()) {
-      satisfied = !state.fluents().count(lit.invert());
-    } else {
-      satisfied = state.fluents().count(lit);
+      return !state.fluents().count(lit.invert());
     }
-    if (!satisfied) {
+    return state.fluents().count(lit) > 0;
+  };
+
+  // Pick one active DNF branch so OR goals are guided by the most promising
+  // branch instead of the union of all branch literals.
+  const auto &branches = goal->get_dnf_branches();
+  const std::unordered_set<Fluent> *best_branch = nullptr;
+  int best_satisfied = -1;
+  int best_unsatisfied = std::numeric_limits<int>::max();
+  std::size_t best_size = std::numeric_limits<std::size_t>::max();
+
+  for (const auto &branch : branches) {
+    int satisfied = 0;
+    int branch_unsatisfied = 0;
+    for (const auto &lit : branch) {
+      if (literal_satisfied(lit)) {
+        ++satisfied;
+      } else {
+        ++branch_unsatisfied;
+      }
+    }
+
+    if (!best_branch || satisfied > best_satisfied ||
+        (satisfied == best_satisfied && branch_unsatisfied < best_unsatisfied) ||
+        (satisfied == best_satisfied && branch_unsatisfied == best_unsatisfied &&
+         branch.size() < best_size)) {
+      best_branch = &branch;
+      best_satisfied = satisfied;
+      best_unsatisfied = branch_unsatisfied;
+      best_size = branch.size();
+    }
+  }
+
+  if (!best_branch) {
+    return unsatisfied;
+  }
+
+  for (const auto &lit : *best_branch) {
+    if (!literal_satisfied(lit)) {
       unsatisfied.insert(lit);
     }
   }
@@ -118,6 +153,11 @@ inline std::vector<const Action *> get_goal_relevant_next_actions(
   std::unordered_set<Fluent> relevant_fluents = get_unsatisfied_goal_literals(state, goal);
   if (relevant_fluents.empty()) {
     return applicable;
+  }
+  std::unordered_map<Fluent, int> fluent_relevance_level;
+  fluent_relevance_level.reserve(relevant_fluents.size() * 2 + 8);
+  for (const auto &f : relevant_fluents) {
+    fluent_relevance_level[f] = 0;
   }
 
   std::unordered_set<const Action *> relevant_actions;
@@ -147,6 +187,7 @@ inline std::vector<const Action *> get_goal_relevant_next_actions(
       for (const auto &p : a->pos_preconditions()) {
         if (!relevant_fluents.count(p)) {
           next_relevant_fluents.insert(p);
+          fluent_relevance_level.emplace(p, depth + 1);
           any_added = true;
         }
       }
@@ -184,8 +225,11 @@ inline std::vector<const Action *> get_goal_relevant_next_actions(
     auto add_it = action_adds_map.find(a);
     if (add_it != action_adds_map.end()) {
       for (const auto &f : add_it->second) {
-        if (relevant_fluents.count(f)) {
-          ++adds_relevant;
+        auto rel_it = fluent_relevance_level.find(f);
+        if (rel_it != fluent_relevance_level.end()) {
+          int level = rel_it->second;
+          int weight = std::max(1, relevance_depth + 1 - level);
+          adds_relevant += weight;
         }
         if (unsatisfied_goals.count(f)) {
           ++adds_unsatisfied;
@@ -202,9 +246,9 @@ inline std::vector<const Action *> get_goal_relevant_next_actions(
               int lval = (ls == action_score.end()) ? 0 : ls->second;
               int rval = (rs == action_score.end()) ? 0 : rs->second;
               if (lval != rval) {
-                return lval > rval;
+                return lval < rval;
               }
-              return lhs->name() < rhs->name();
+              return lhs->name() > rhs->name();
             });
   return filtered;
 }
@@ -351,70 +395,11 @@ inline bool should_expand_node(const MCTSDecisionNode &node) {
   return node.children.size() < limit;
 }
 
-inline const Action *pop_next_action_to_expand(
-    MCTSDecisionNode &node, const GoalBase *goal,
-    const std::unordered_map<const Action *, std::unordered_set<Fluent>>
-        &action_adds_map) {
+inline const Action *pop_next_action_to_expand(MCTSDecisionNode &node) {
   if (node.untried_actions.empty()) {
     return nullptr;
   }
-
-  if (!goal) {
-    const Action *a = node.untried_actions.back();
-    node.untried_actions.pop_back();
-    return a;
-  }
-
-  auto unsatisfied = get_unsatisfied_goal_literals(node.state, goal);
-  if (unsatisfied.empty()) {
-    const Action *a = node.untried_actions.back();
-    node.untried_actions.pop_back();
-    return a;
-  }
-
-  std::size_t best_index = node.untried_actions.size() - 1;
-  int best_score = -1;
-  double best_prob_score = -1.0;
-  constexpr double TOLERANCE = 1e-9;
-  for (std::size_t i = 0; i < node.untried_actions.size(); ++i) {
-    const Action *candidate = node.untried_actions[i];
-    int score = 0;
-    auto add_it = action_adds_map.find(candidate);
-    if (add_it != action_adds_map.end()) {
-      for (const auto &f : add_it->second) {
-        if (unsatisfied.count(f)) {
-          ++score;
-        }
-      }
-    }
-    double prob_score = 0.0;
-    const auto &succs = candidate->get_relaxed_successors();
-    for (const auto &goal_fluent : unsatisfied) {
-      double best_p_for_goal = 0.0;
-      for (const auto &[succ_state, succ_prob] : succs) {
-        if (succ_prob <= 0.0) {
-          continue;
-        }
-        if (succ_state.fluents().count(goal_fluent)) {
-          best_p_for_goal = std::max(best_p_for_goal, succ_prob);
-        }
-      }
-      prob_score += best_p_for_goal;
-    }
-
-    if (score > best_score ||
-        (score == best_score && prob_score > best_prob_score + TOLERANCE) ||
-        (score == best_score &&
-         std::abs(prob_score - best_prob_score) <= TOLERANCE &&
-         candidate->name() < node.untried_actions[best_index]->name())) {
-      best_score = score;
-      best_prob_score = prob_score;
-      best_index = i;
-    }
-  }
-
-  const Action *chosen = node.untried_actions[best_index];
-  node.untried_actions[best_index] = node.untried_actions.back();
+  const Action *chosen = node.untried_actions.back();
   node.untried_actions.pop_back();
   return chosen;
 }
@@ -635,8 +620,7 @@ inline std::string mcts(const State &root_state,
 
     // ---------------- Expansion ----------------
     if (should_expand_node(*node) && !is_node_goal) {
-      const Action *action =
-          pop_next_action_to_expand(*node, goal, action_adds_map);
+      const Action *action = pop_next_action_to_expand(*node);
       if (!action) {
         continue;
       }
