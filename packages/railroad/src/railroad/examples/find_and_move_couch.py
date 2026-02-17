@@ -121,7 +121,7 @@ def main(
 
             all_actions = env.get_actions()
             mcts = MCTSPlanner(all_actions)
-            action_name = mcts(env.state, goal, max_iterations=4000, c=300, max_depth=20)
+            action_name = mcts(env.state, goal, max_iterations=4000, c=300, max_depth=20, heuristic_multiplier=1)
 
             if action_name == "NONE":
                 dashboard.console.print("No more actions available. Goal may not be achievable.")

@@ -149,7 +149,7 @@ def main(
                 max_iterations=10000,
                 c=300,
                 max_depth=20,
-                heuristic_multiplier=2,
+                heuristic_multiplier=1,
             )
 
             if action_name == "NONE":
