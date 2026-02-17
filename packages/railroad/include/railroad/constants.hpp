@@ -12,4 +12,14 @@ const int NUM_EXTRA_VISITS_PROB = 0;
 const double SEARCH_PHASE_RATIO = 0.00;  // [0,1] Initial search phase as % of total iterations.
 const double PROB_EXTRA_EXPLORE = 0.0;  // [0,1] Prob randomly decide to prioritize search
 
+// Progressive widening for high branching-factor decision states in MCTS.
+const double PROGRESSIVE_WIDENING_K = 1.0;
+const double PROGRESSIVE_WIDENING_ALPHA = 0.5;
+
+// Goal-shaping terms for MCTS reward.
+// Reward states that satisfy more goal structure and penalize regressions from
+// the best progress reached along the current path.
+const double LANDMARK_PROGRESS_REWARD = 25.0;
+const double GOAL_REGRESSION_PENALTY = 50.0;
+
 }
