@@ -13,9 +13,7 @@ work together.
 1. Pre-prune the action set once at the root with `get_usable_actions(...)`.
 2. Build `action_adds_map` from relaxed successors (only outcomes with `prob > 0`).
 3. Run MCTS (selection, expansion, evaluation, backpropagation).
-4. During evaluation of non-goal nodes, call either:
-   - `ff_heuristic(...)` (probabilistic version), or
-   - `det_ff_heuristic(...)` (deterministic ablation version).
+4. During evaluation of non-goal nodes, call `ff_heuristic(...)`.
 5. Pick the root action with the highest visit count.
 
 `MCTSPlanner` stores a shared `FFMemory` cache and passes it into each heuristic call, so relaxed-state values are reused across simulations and across planner invocations until `clear_cache()` is called.
@@ -113,17 +111,7 @@ Small negative numerical artifacts are clamped to `0`.
 `extract_or_branches(goal)` uses `goal->get_dnf_branches()`.
 The heuristic evaluates each branch independently via `ff_backward_cost` and returns the minimum finite branch cost.
 
-## 3. `det_ff_heuristic(...)` Differences
-
-`det_ff_heuristic(...)` shares goal handling and memoization structure, but:
-
-- uses only relaxed transition time increment (`relaxed.time() - t0`) for `dtime`,
-- uses `det_ff_backward_cost(...)` instead of probabilistic backward cost,
-- does no probabilistic delta adjustment.
-
-`det_ff_backward_cost(...)` performs ablation-style required fluent detection and sums durations of unique extracted actions.
-
-## 4. Goal-Relevant Action Prioritization in `planner.hpp`
+## 3. Goal-Relevant Action Prioritization in `planner.hpp`
 
 Before expansion, planner narrows and ranks applicable actions:
 
@@ -136,7 +124,7 @@ Before expansion, planner narrows and ranks applicable actions:
 
 This keeps expansion focused on actions that support the currently most promising goal branch while preserving fallback behavior if relevance filtering becomes too strict.
 
-## 5. MCTS Evaluation and Reward Shaping
+## 4. MCTS Evaluation and Reward Shaping
 
 Per decision node:
 
@@ -158,7 +146,7 @@ Reward equations:
 
 If heuristic returns a very large value (`h > 1e10`), planner substitutes `HEURISTIC_CANNOT_FIND_GOAL_PENALTY`.
 
-### 5.1 How `planner.hpp` uses `LANDMARK_PROGRESS_REWARD` and `GOAL_REGRESSION_PENALTY`
+### 4.1 How `planner.hpp` uses `LANDMARK_PROGRESS_REWARD` and `GOAL_REGRESSION_PENALTY`
 
 In `planner.hpp`, usage is direct in the simulation/evaluation block of `mcts(...)`:
 
@@ -175,7 +163,7 @@ With current defaults, the shaping contribution at any evaluated node is:
 
 This shaping term is added to both goal-node and non-goal-node reward equations, so it affects action selection and all backpropagated value estimates throughout the MCTS tree.
 
-## 6. Current Constant Defaults (from `constants.hpp`)
+## 5. Current Constant Defaults (from `constants.hpp`)
 
 - `HEURISTIC_MULTIPLIER = 5`
 - `SUCCESS_REWARD = 0.0`
