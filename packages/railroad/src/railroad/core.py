@@ -8,7 +8,6 @@ from railroad._bindings import LiteralGoal, AndGoal, OrGoal, Goal
 
 __all__ = ["transition"]  # re-exported from _bindings
 from railroad._bindings import ff_heuristic as _ff_heuristic_cpp
-from railroad._bindings import det_ff_heuristic as _det_ff_heuristic_cpp
 
 
 def ff_heuristic(state: State, goal: Union[Goal, Fluent], all_actions: List[Action]) -> float:
@@ -28,27 +27,6 @@ def ff_heuristic(state: State, goal: Union[Goal, Fluent], all_actions: List[Acti
     if isinstance(goal, Fluent):
         goal = LiteralGoal(goal)
     return _ff_heuristic_cpp(state, goal, all_actions)
-
-
-def det_ff_heuristic(state: State, goal: Union[Goal, Fluent], all_actions: List[Action]) -> float:
-    """Compute deterministic FF heuristic value (classic fast-forward).
-
-    Uses ablation-based backward cost and relaxed transition time.
-    No probabilistic cost adjustments - pure action duration summing.
-
-    Args:
-        state: The current state
-        goal: Goal to achieve. Can be:
-            - A Goal object: F("a") & F("b"), AndGoal([...]), etc.
-            - A single Fluent: F("visited a") (auto-wrapped to LiteralGoal)
-        all_actions: List of all available actions
-
-    Returns:
-        Heuristic value (estimated cost to reach goal)
-    """
-    if isinstance(goal, Fluent):
-        goal = LiteralGoal(goal)
-    return _det_ff_heuristic_cpp(state, goal, all_actions)
 
 Num = Union[float, int]
 
