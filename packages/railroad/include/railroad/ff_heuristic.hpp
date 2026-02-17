@@ -340,6 +340,58 @@ double ff_backward_cost(
   // Track which fluents are on the extraction path
   std::unordered_set<Fluent> on_path;
   std::unordered_set<Fluent> frontier = goal_fluents;
+  std::unordered_map<Fluent, const Action*> extracted_achiever;
+  constexpr double TOLERANCE = 1e-9;
+
+  auto pick_best_achiever = [&](const Fluent& f) -> const Action* {
+    const Action* best_action = nullptr;
+    double best_cost = std::numeric_limits<double>::infinity();
+    bool best_is_deterministic = false;
+    double best_probability = -1.0;
+
+    auto ach_it = forward.achievers_by_fluent.find(f);
+    if (ach_it != forward.achievers_by_fluent.end()) {
+      for (const auto& ach : ach_it->second) {
+        if (ach.probability <= TOLERANCE) continue;
+        double cost = ach.wait_cost + ach.exec_cost;
+        if (cost >= std::numeric_limits<double>::infinity()) continue;
+
+        bool is_deterministic = ach.probability >= 1.0 - TOLERANCE;
+        bool better = false;
+
+        if (cost + TOLERANCE < best_cost) {
+          better = true;
+        } else if (cost <= best_cost + TOLERANCE) {
+          if (is_deterministic && !best_is_deterministic) {
+            better = true;
+          } else if (is_deterministic == best_is_deterministic &&
+                     ach.probability > best_probability + TOLERANCE) {
+            better = true;
+          } else if (is_deterministic == best_is_deterministic &&
+                     ach.probability >= best_probability - TOLERANCE &&
+                     best_action &&
+                     ach.exec_cost < forward.action_to_duration.at(best_action) - TOLERANCE) {
+            better = true;
+          }
+        }
+
+        if (better) {
+          best_action = ach.action;
+          best_cost = cost;
+          best_is_deterministic = is_deterministic;
+          best_probability = ach.probability;
+        }
+      }
+    }
+
+    if (best_action) return best_action;
+
+    auto fallback = forward.fact_to_action.find(f);
+    if (fallback != forward.fact_to_action.end()) {
+      return fallback->second;
+    }
+    return nullptr;
+  };
 
   while (!frontier.empty()) {
     std::unordered_set<Fluent> next_frontier;
@@ -349,9 +401,10 @@ double ff_backward_cost(
       on_path.insert(f);
 
       // Add preconditions of the achieving action to the frontier
-      auto action_it = forward.fact_to_action.find(f);
-      if (action_it != forward.fact_to_action.end()) {
-        for (const auto& prec : action_it->second->pos_preconditions()) {
+      const Action* best_action = pick_best_achiever(f);
+      if (best_action) {
+        extracted_achiever[f] = best_action;
+        for (const auto& prec : best_action->pos_preconditions()) {
           next_frontier.insert(prec);
         }
       }
@@ -360,18 +413,93 @@ double ff_backward_cost(
     frontier = std::move(next_frontier);
   }
 
-  // Sum D(goal fluents) + deltas for all probabilistic fluents on path
-  double total_cost = 0.0;
+  // Build a relaxed schedule over extracted achievers.
+  // T(f): earliest arrival time for fluent f along extracted achiever links.
+  std::unordered_map<Fluent, double> fluent_arrival;
+  for (const auto& f : on_path) {
+    fluent_arrival[f] = std::numeric_limits<double>::infinity();
+  }
 
-  // Add D cost for goal fluents (this is the optimistic cost)
+  bool changed = true;
+  std::size_t iter = 0;
+  const std::size_t max_iter = on_path.size() + 2;
+
+  while (changed && iter < max_iter) {
+    changed = false;
+    ++iter;
+
+    for (const auto& f : on_path) {
+      auto ach_it = extracted_achiever.find(f);
+      if (ach_it == extracted_achiever.end()) continue;
+
+      const Action* a = ach_it->second;
+      double start_time = 0.0;
+      bool preconditions_known = true;
+
+      for (const auto& p : a->pos_preconditions()) {
+        double p_time = 0.0;
+        if (forward.initial_fluents.count(p)) {
+          p_time = 0.0;
+        } else {
+          auto pit = fluent_arrival.find(p);
+          if (pit != fluent_arrival.end() &&
+              pit->second < std::numeric_limits<double>::infinity()) {
+            p_time = pit->second;
+          } else {
+            // Fallback to D(p) if p was not explicitly extracted.
+            auto dit = forward.expected_cost.find(p);
+            if (dit != forward.expected_cost.end()) {
+              p_time = dit->second;
+            } else {
+              preconditions_known = false;
+              break;
+            }
+          }
+        }
+        start_time = std::max(start_time, p_time);
+      }
+
+      if (!preconditions_known) continue;
+
+      auto dur_it = forward.action_to_duration.find(a);
+      double duration = (dur_it != forward.action_to_duration.end()) ? dur_it->second : 0.0;
+      double finish_time = start_time + duration;
+
+      if (finish_time < fluent_arrival[f]) {
+        fluent_arrival[f] = finish_time;
+        changed = true;
+      }
+    }
+  }
+
+  // Hybrid base cost:
+  // makespan term preserves reach+execute critical path,
+  // additive term restores gradient across multiple goals.
+  constexpr double GOAL_SUM_LAMBDA = 0.5;
+  double max_goal_time = 0.0;
+  double sum_goal_time = 0.0;
   for (const auto& gf : goal_fluents) {
     if (forward.initial_fluents.count(gf)) continue;
 
-    auto it = forward.expected_cost.find(gf);
-    if (it != forward.expected_cost.end()) {
-      total_cost += it->second;
+    double goal_time = std::numeric_limits<double>::infinity();
+    auto fit = fluent_arrival.find(gf);
+    if (fit != fluent_arrival.end()) {
+      goal_time = fit->second;
+    } else {
+      auto dit = forward.expected_cost.find(gf);
+      if (dit != forward.expected_cost.end()) {
+        goal_time = dit->second;
+      }
     }
+
+    if (goal_time >= std::numeric_limits<double>::infinity()) {
+      return std::numeric_limits<double>::infinity();
+    }
+    max_goal_time = std::max(max_goal_time, goal_time);
+    sum_goal_time += goal_time;
   }
+  double total_cost =
+      max_goal_time + GOAL_SUM_LAMBDA * std::max(0.0, sum_goal_time - max_goal_time);
 
   // Lazily compute and add probabilistic deltas for fluents on the extraction path
   // Only compute for fluents that have probabilistic achievers (skip purely deterministic)
