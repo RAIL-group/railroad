@@ -344,6 +344,9 @@ inline bool should_expand_node(const MCTSDecisionNode &node) {
   if (node.untried_actions.empty()) {
     return false;
   }
+  if (!USE_PROGRESSIVE_WIDENING) {
+    return true;
+  }
   std::size_t limit = progressive_widening_limit(node.visits + 1);
   return node.children.size() < limit;
 }
@@ -371,6 +374,8 @@ inline const Action *pop_next_action_to_expand(
 
   std::size_t best_index = node.untried_actions.size() - 1;
   int best_score = -1;
+  double best_prob_score = -1.0;
+  constexpr double TOLERANCE = 1e-9;
   for (std::size_t i = 0; i < node.untried_actions.size(); ++i) {
     const Action *candidate = node.untried_actions[i];
     int score = 0;
@@ -382,8 +387,28 @@ inline const Action *pop_next_action_to_expand(
         }
       }
     }
-    if (score > best_score) {
+    double prob_score = 0.0;
+    const auto &succs = candidate->get_relaxed_successors();
+    for (const auto &goal_fluent : unsatisfied) {
+      double best_p_for_goal = 0.0;
+      for (const auto &[succ_state, succ_prob] : succs) {
+        if (succ_prob <= 0.0) {
+          continue;
+        }
+        if (succ_state.fluents().count(goal_fluent)) {
+          best_p_for_goal = std::max(best_p_for_goal, succ_prob);
+        }
+      }
+      prob_score += best_p_for_goal;
+    }
+
+    if (score > best_score ||
+        (score == best_score && prob_score > best_prob_score + TOLERANCE) ||
+        (score == best_score &&
+         std::abs(prob_score - best_prob_score) <= TOLERANCE &&
+         candidate->name() < node.untried_actions[best_index]->name())) {
       best_score = score;
+      best_prob_score = prob_score;
       best_index = i;
     }
   }
