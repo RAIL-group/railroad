@@ -10,6 +10,7 @@ This directory contains the C++ implementation of the Multi-Robot Probabilistic 
 - **ff_heuristic.hpp**: FF (Fast-Forward) heuristic implementation
 - **planner.hpp**: MCTS planner implementation
 - **constants.hpp**: Global constants
+- **HEURISTIC_OVERVIEW.md**: Detailed walkthrough of heuristic pipeline and MCTS goal-shaping terms
 
 ## Heuristic Functions
 
