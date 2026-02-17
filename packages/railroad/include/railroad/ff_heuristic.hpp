@@ -398,6 +398,108 @@ inline double get_or_compute_delta(const FFForwardResult& forward, const Fluent&
   return delta;
 }
 
+struct FFBackwardExtractionResult {
+  std::unordered_set<Fluent> effective_goals;
+  std::unordered_set<Fluent> on_path;
+  std::unordered_map<Fluent, const Action*> extracted_achiever;
+  std::unordered_set<Fluent> auto_added_found_landmarks;
+};
+
+inline const Action* pick_best_achiever_for_fluent(
+    const FFForwardResult& forward,
+    const Fluent& f) {
+  auto best_it = forward.best_achiever_action.find(f);
+  if (best_it != forward.best_achiever_action.end()) {
+    return best_it->second;
+  }
+
+  auto fallback = forward.fact_to_action.find(f);
+  if (fallback != forward.fact_to_action.end()) {
+    return fallback->second;
+  }
+  return nullptr;
+}
+
+inline void collect_object_candidates_from_at_fluent(
+    const Fluent& f,
+    std::unordered_set<std::string>& objects) {
+  const auto& args = f.args();
+  if (f.name() == "at" && args.size() >= 2) objects.insert(args[0]);
+}
+
+inline bool has_finite_found_cost(
+    const FFForwardResult& forward,
+    const Fluent& found_fluent) {
+  if (forward.initial_fluents.count(found_fluent)) {
+    return true;
+  }
+  auto it = forward.expected_cost.find(found_fluent);
+  return it != forward.expected_cost.end() &&
+         it->second < std::numeric_limits<double>::infinity();
+}
+
+inline FFBackwardExtractionResult build_backward_extraction(
+    const FFForwardResult& forward,
+    const std::unordered_set<Fluent>& goal_fluents) {
+  FFBackwardExtractionResult result;
+  result.effective_goals = goal_fluents;
+
+  auto recompute_extraction =
+      [&](const std::unordered_set<Fluent>& goals,
+          std::unordered_set<Fluent>& on_path,
+          std::unordered_map<Fluent, const Action*>& extracted_achiever) {
+        on_path.clear();
+        extracted_achiever.clear();
+        std::unordered_set<Fluent> frontier = goals;
+        while (!frontier.empty()) {
+          std::unordered_set<Fluent> next_frontier;
+          for (const auto& f : frontier) {
+            if (on_path.count(f) || forward.initial_fluents.count(f)) continue;
+            on_path.insert(f);
+            const Action* best_action = pick_best_achiever_for_fluent(forward, f);
+            if (best_action) {
+              extracted_achiever[f] = best_action;
+              for (const auto& prec : best_action->pos_preconditions()) {
+                next_frontier.insert(prec);
+              }
+            }
+          }
+          frontier = std::move(next_frontier);
+        }
+      };
+
+  constexpr std::size_t MAX_FOUND_AUGMENT_ITERS = 8;
+  for (std::size_t iter = 0; iter < MAX_FOUND_AUGMENT_ITERS; ++iter) {
+    recompute_extraction(result.effective_goals, result.on_path, result.extracted_achiever);
+
+    std::unordered_set<std::string> object_candidates;
+    for (const auto& f : result.effective_goals) {
+      collect_object_candidates_from_at_fluent(f, object_candidates);
+    }
+    for (const auto& f : result.on_path) {
+      collect_object_candidates_from_at_fluent(f, object_candidates);
+    }
+
+    bool added_any = false;
+    for (const auto& object_name : object_candidates) {
+      Fluent found_fluent("found " + object_name);
+      if (result.effective_goals.count(found_fluent)) continue;
+      if (!forward.known_fluents.count(found_fluent)) continue;
+      if (!has_finite_found_cost(forward, found_fluent)) continue;
+
+      result.effective_goals.insert(found_fluent);
+      result.auto_added_found_landmarks.insert(found_fluent);
+      added_any = true;
+    }
+    if (!added_any) {
+      return result;
+    }
+  }
+
+  recompute_extraction(result.effective_goals, result.on_path, result.extracted_achiever);
+  return result;
+}
+
 // Backward cost computation given forward results and goal fluents
 // Extracts the relaxed plan and sums D(f) + deltas for probabilistic fluents
 // Note: Negative goals should already be converted to positive equivalents
@@ -418,44 +520,17 @@ double ff_backward_cost(
     }
   }
 
-  // Extract the relaxed plan: BFS from goals back to initial fluents
-  // Track which fluents are on the extraction path
-  std::unordered_set<Fluent> on_path;
-  std::unordered_set<Fluent> frontier = goal_fluents;
-  std::unordered_map<Fluent, const Action*> extracted_achiever;
+  FFBackwardExtractionResult extraction =
+      build_backward_extraction(forward, goal_fluents);
 
-  auto pick_best_achiever = [&](const Fluent& f) -> const Action* {
-    auto best_it = forward.best_achiever_action.find(f);
-    if (best_it != forward.best_achiever_action.end()) {
-      return best_it->second;
+  for (const auto& gf : extraction.effective_goals) {
+    if (!forward.known_fluents.count(gf)) {
+      return std::numeric_limits<double>::infinity();
     }
-
-    auto fallback = forward.fact_to_action.find(f);
-    if (fallback != forward.fact_to_action.end()) {
-      return fallback->second;
-    }
-    return nullptr;
-  };
-
-  while (!frontier.empty()) {
-    std::unordered_set<Fluent> next_frontier;
-
-    for (const auto& f : frontier) {
-      if (on_path.count(f) || forward.initial_fluents.count(f)) continue;
-      on_path.insert(f);
-
-      // Add preconditions of the achieving action to the frontier
-      const Action* best_action = pick_best_achiever(f);
-      if (best_action) {
-        extracted_achiever[f] = best_action;
-        for (const auto& prec : best_action->pos_preconditions()) {
-          next_frontier.insert(prec);
-        }
-      }
-    }
-
-    frontier = std::move(next_frontier);
   }
+
+  const auto& on_path = extraction.on_path;
+  const auto& extracted_achiever = extraction.extracted_achiever;
 
   // Build a relaxed schedule over extracted achievers.
   // T(f): earliest arrival time for fluent f along extracted achiever links.
@@ -518,11 +593,10 @@ double ff_backward_cost(
 
   // Hybrid base cost:
   // makespan term preserves reach+execute critical path,
-  // additive term restores gradient across multiple goals.
-  constexpr double GOAL_SUM_LAMBDA = 0.5;
+  // additive term adds pressure from the extracted relaxed plan volume.
+  constexpr double ACTION_SUM_LAMBDA = 0.5;
   double max_goal_time = 0.0;
-  double sum_goal_time = 0.0;
-  for (const auto& gf : goal_fluents) {
+  for (const auto& gf : extraction.effective_goals) {
     if (forward.initial_fluents.count(gf)) continue;
 
     double goal_time = std::numeric_limits<double>::infinity();
@@ -540,10 +614,25 @@ double ff_backward_cost(
       return std::numeric_limits<double>::infinity();
     }
     max_goal_time = std::max(max_goal_time, goal_time);
-    sum_goal_time += goal_time;
   }
+
+  // Sum execution durations of unique extracted achiever actions.
+  // Counting each action once approximates relaxed-plan size while avoiding
+  // double-counting when one action supports multiple extracted fluents.
+  std::unordered_set<const Action*> unique_extracted_actions;
+  double extracted_action_exec_sum = 0.0;
+  for (const auto& [_, action] : extracted_achiever) {
+    if (!action) continue;
+    if (!unique_extracted_actions.insert(action).second) continue;
+    auto dur_it = forward.action_to_duration.find(action);
+    double duration =
+        (dur_it != forward.action_to_duration.end()) ? dur_it->second : 0.0;
+    extracted_action_exec_sum += duration;
+  }
+
   double total_cost =
-      max_goal_time + GOAL_SUM_LAMBDA * std::max(0.0, sum_goal_time - max_goal_time);
+      max_goal_time + ACTION_SUM_LAMBDA *
+                          std::max(0.0, extracted_action_exec_sum - max_goal_time);
 
   // Lazily compute and add probabilistic deltas for fluents on the extraction path
   // Only compute for fluents that have probabilistic achievers (skip purely deterministic)
@@ -833,43 +922,33 @@ inline std::string ff_heuristic_debug_report(
     if (reachable) out << ", backward_cost=" << branch_cost;
     out << "\n";
 
+    FFBackwardExtractionResult extraction =
+        build_backward_extraction(forward, branch_fluents);
+
     auto sorted_goals = sort_fluents_for_debug(branch_fluents);
-    out << "  goals:\n";
+    out << "  goals (original branch):\n";
     for (const auto& gf : sorted_goals) {
       out << "    - " << fluent_to_debug_string(gf) << "\n";
     }
 
-    std::unordered_set<Fluent> on_path;
-    std::unordered_set<Fluent> frontier = branch_fluents;
-    std::unordered_map<Fluent, const Action*> extracted_achiever;
-    auto pick_best_achiever = [&](const Fluent& f) -> const Action* {
-      auto best_it = forward.best_achiever_action.find(f);
-      if (best_it != forward.best_achiever_action.end()) {
-        return best_it->second;
+    auto sorted_auto_added = sort_fluents_for_debug(extraction.auto_added_found_landmarks);
+    out << "  auto_added_found_landmarks:\n";
+    if (sorted_auto_added.empty()) {
+      out << "    - (none)\n";
+    } else {
+      for (const auto& f : sorted_auto_added) {
+        out << "    - " << fluent_to_debug_string(f) << "\n";
       }
-      auto fallback = forward.fact_to_action.find(f);
-      if (fallback != forward.fact_to_action.end()) {
-        return fallback->second;
-      }
-      return nullptr;
-    };
-
-    while (!frontier.empty()) {
-      std::unordered_set<Fluent> next_frontier;
-      for (const auto& f : frontier) {
-        if (on_path.count(f) || forward.initial_fluents.count(f)) continue;
-        on_path.insert(f);
-        const Action* best_action = pick_best_achiever(f);
-        if (best_action) {
-          extracted_achiever[f] = best_action;
-          for (const auto& prec : best_action->pos_preconditions()) {
-            next_frontier.insert(prec);
-          }
-        }
-      }
-      frontier = std::move(next_frontier);
     }
 
+    auto sorted_effective_goals = sort_fluents_for_debug(extraction.effective_goals);
+    out << "  goals (effective):\n";
+    for (const auto& gf : sorted_effective_goals) {
+      out << "    - " << fluent_to_debug_string(gf) << "\n";
+    }
+
+    const auto& on_path = extraction.on_path;
+    const auto& extracted_achiever = extraction.extracted_achiever;
     auto sorted_path = sort_fluents_for_debug(on_path);
     out << "  extracted_path_fluents:\n";
     for (const auto& f : sorted_path) {

@@ -81,15 +81,20 @@ branch timings differ.
 For one DNF goal branch:
 
 1. Validate branch fluents are reachable.
-2. Backward extract achievers from goals to preconditions using:
+2. Build effective goals with `at-implies-found`: collect object fluents encountered along backward achiever chains and auto-add reachable `found <obj>` landmarks.
+3. Backward extract achievers from effective goals to preconditions using:
    - `best_achiever_action` first,
    - `fact_to_action` as fallback.
-3. Build relaxed arrival times for extracted fluents.
-4. Compute hybrid base cost:
+4. Build relaxed arrival times for extracted fluents.
+5. Compute hybrid base cost:
 
-`base = max_goal_time + 0.5 * max(0, sum_goal_time - max_goal_time)`
+`base = max_goal_time + 0.5 * max(0, extracted_action_exec_sum - max_goal_time)`
 
-The max term keeps critical-path signal; the additive term preserves gradient for multi-goal branches.
+where `extracted_action_exec_sum` is the sum of execution durations of unique
+actions selected during backward extraction.
+
+The max term keeps critical-path signal; the additive term preserves gradient
+from relaxed-plan size even for single-goal branches with large extracted support.
 
 ### 2.7 Probabilistic delta term
 
