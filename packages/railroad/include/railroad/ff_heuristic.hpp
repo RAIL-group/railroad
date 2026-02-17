@@ -15,6 +15,7 @@ namespace railroad {
 
 using HeuristicFn = std::function<double(const State &)>;
 using FFMemory = std::unordered_map<std::size_t, double>;
+constexpr double FF_TOLERANCE = 1e-9;
 
 // Information about an action that can achieve a fluent
 struct ProbabilisticAchiever {
@@ -33,6 +34,66 @@ struct ProbabilisticAchiever {
     }
 };
 
+struct AchieverScanResult {
+  const Action* best_action = nullptr;
+  double best_cost = std::numeric_limits<double>::infinity();
+  bool best_is_deterministic = false;
+  double best_probability = -1.0;
+  double best_exec_cost = std::numeric_limits<double>::infinity();
+  double det_cost = std::numeric_limits<double>::infinity();
+  double prob_cost = std::numeric_limits<double>::infinity();
+  double prob_best_probability = 0.0;
+};
+
+inline AchieverScanResult scan_achievers(
+    const std::vector<ProbabilisticAchiever>& achievers,
+    double tolerance = FF_TOLERANCE) {
+  AchieverScanResult result;
+
+  for (const auto& ach : achievers) {
+    if (ach.probability <= tolerance) continue;
+
+    const double cost = ach.wait_cost + ach.exec_cost;
+    if (cost >= std::numeric_limits<double>::infinity()) continue;
+
+    const bool is_deterministic = ach.probability >= 1.0 - tolerance;
+    if (is_deterministic) {
+      result.det_cost = std::min(result.det_cost, cost);
+    } else if (ach.probability > result.prob_best_probability ||
+               (ach.probability >= result.prob_best_probability - tolerance &&
+                cost < result.prob_cost)) {
+      result.prob_cost = cost;
+      result.prob_best_probability = ach.probability;
+    }
+
+    bool better = false;
+    if (cost + tolerance < result.best_cost) {
+      better = true;
+    } else if (cost <= result.best_cost + tolerance) {
+      if (is_deterministic && !result.best_is_deterministic) {
+        better = true;
+      } else if (is_deterministic == result.best_is_deterministic &&
+                 ach.probability > result.best_probability + tolerance) {
+        better = true;
+      } else if (is_deterministic == result.best_is_deterministic &&
+                 ach.probability >= result.best_probability - tolerance &&
+                 ach.exec_cost + tolerance < result.best_exec_cost) {
+        better = true;
+      }
+    }
+
+    if (better) {
+      result.best_action = ach.action;
+      result.best_cost = cost;
+      result.best_is_deterministic = is_deterministic;
+      result.best_probability = ach.probability;
+      result.best_exec_cost = ach.exec_cost;
+    }
+  }
+
+  return result;
+}
+
 // Result of the forward relaxed reachability phase (goal-independent)
 struct FFForwardResult {
   std::unordered_set<Fluent> known_fluents;      // All reachable fluents
@@ -44,6 +105,7 @@ struct FFForwardResult {
   // Fields for expected cost computation
   std::unordered_map<Fluent, std::vector<ProbabilisticAchiever>> achievers_by_fluent;
   std::unordered_map<Fluent, double> expected_cost;  // D(f) - optimistic cost
+  std::unordered_map<Fluent, const Action*> best_achiever_action;
 
   // Fluents that have at least one probabilistic achiever (p < 1.0)
   // Used to skip delta computation for purely deterministic fluents
@@ -53,6 +115,12 @@ struct FFForwardResult {
   // Mutable so it can be populated on-demand during const backward extraction
   mutable std::unordered_map<Fluent, double> probabilistic_delta;
 };
+
+inline const Action* select_best_achiever_action(
+    const std::vector<ProbabilisticAchiever>& achievers,
+    double tolerance = FF_TOLERANCE) {
+  return scan_achievers(achievers, tolerance).best_action;
+}
 
 // Forward relaxed reachability phase - goal independent
 // Takes initial fluents (after relaxed transition) and computes reachability
@@ -135,7 +203,6 @@ FFForwardResult ff_forward_phase(
 // Compute D(f) for all fluents (optimistic, treating all achievers as deterministic)
 // Deltas for probabilistic fluents are computed lazily during backward extraction
 inline void compute_expected_costs(FFForwardResult& result) {
-  const double TOLERANCE = 1e-9;
   const int MAX_ITERATIONS = 100;
 
   // Initialize: D(f) = 0 for initial, +infinity otherwise
@@ -152,6 +219,7 @@ inline void compute_expected_costs(FFForwardResult& result) {
   // D is the optimistic cost using deterministic achievers (or best probabilistic if none)
   bool changed = true;
   int iteration = 0;
+  result.best_achiever_action.clear();
 
   while (changed && iteration < MAX_ITERATIONS) {
     changed = false;
@@ -172,32 +240,19 @@ inline void compute_expected_costs(FFForwardResult& result) {
         achiever.wait_cost = max_prec_cost;
       }
 
-      // D(f) = min of deterministic achievers (p >= 1.0)
-      // If no deterministic achievers, use best probabilistic (highest p, then lowest cost)
-      double D_det = std::numeric_limits<double>::infinity();
-      double D_prob = std::numeric_limits<double>::infinity();
-      double best_prob = 0.0;
-
-      for (const auto& achiever : achievers) {
-        double cost = achiever.wait_cost + achiever.exec_cost;
-        if (achiever.probability >= 1.0 - TOLERANCE) {
-          D_det = std::min(D_det, cost);
-        } else if (achiever.probability > TOLERANCE) {
-          // For probabilistic, prefer higher probability, then lower cost
-          if (achiever.probability > best_prob ||
-              (achiever.probability >= best_prob - TOLERANCE && cost < D_prob)) {
-            D_prob = cost;
-            best_prob = achiever.probability;
-          }
-        }
+      AchieverScanResult scan = scan_achievers(achievers);
+      if (scan.best_action) {
+        result.best_achiever_action[f] = scan.best_action;
+      } else {
+        result.best_achiever_action.erase(f);
       }
 
       // Determine which value to use
       double D_f;
-      bool use_det = D_det < std::numeric_limits<double>::infinity();
+      bool use_det = scan.det_cost < std::numeric_limits<double>::infinity();
 
       if (use_det) {
-        D_f = D_det;
+        D_f = scan.det_cost;
         // If we're switching from prob to det, force update
         bool was_prob = !has_det_achiever.count(f) &&
                         result.expected_cost[f] < std::numeric_limits<double>::infinity();
@@ -209,10 +264,10 @@ inline void compute_expected_costs(FFForwardResult& result) {
         }
         has_det_achiever.insert(f);
       } else {
-        D_f = D_prob;
+        D_f = scan.prob_cost;
       }
 
-      if (D_f < result.expected_cost[f] - TOLERANCE) {
+      if (D_f < result.expected_cost[f] - FF_TOLERANCE) {
         result.expected_cost[f] = D_f;
         changed = true;
       }
@@ -224,8 +279,6 @@ inline void compute_expected_costs(FFForwardResult& result) {
 // Returns the delta value, caching it in forward.probabilistic_delta for reuse
 // Returns 0.0 if the fluent has no probabilistic achievers
 inline double get_or_compute_delta(const FFForwardResult& forward, const Fluent& f) {
-  const double TOLERANCE = 1e-9;
-
   // Check cache first
   auto cached_it = forward.probabilistic_delta.find(f);
   if (cached_it != forward.probabilistic_delta.end()) {
@@ -248,7 +301,7 @@ inline double get_or_compute_delta(const FFForwardResult& forward, const Fluent&
   // Collect probabilistic achievers only
   std::vector<ProbabilisticAchiever> prob_achievers;
   for (const auto& a : achievers) {
-    if (a.probability > TOLERANCE && a.probability < 1.0 - TOLERANCE) {
+    if (a.probability > FF_TOLERANCE && a.probability < 1.0 - FF_TOLERANCE) {
       prob_achievers.push_back(a);
     }
   }
@@ -308,7 +361,7 @@ inline double get_or_compute_delta(const FFForwardResult& forward, const Fluent&
 
   // delta = E_attempt - D_best (extra cost due to probabilistic uncertainty)
   double delta = min_E_attempt - D_prob_best;
-  if (delta < TOLERANCE) {
+  if (delta < FF_TOLERANCE) {
     delta = 0.0;
   }
 
@@ -342,50 +395,12 @@ double ff_backward_cost(
   std::unordered_set<Fluent> on_path;
   std::unordered_set<Fluent> frontier = goal_fluents;
   std::unordered_map<Fluent, const Action*> extracted_achiever;
-  constexpr double TOLERANCE = 1e-9;
 
   auto pick_best_achiever = [&](const Fluent& f) -> const Action* {
-    const Action* best_action = nullptr;
-    double best_cost = std::numeric_limits<double>::infinity();
-    bool best_is_deterministic = false;
-    double best_probability = -1.0;
-
-    auto ach_it = forward.achievers_by_fluent.find(f);
-    if (ach_it != forward.achievers_by_fluent.end()) {
-      for (const auto& ach : ach_it->second) {
-        if (ach.probability <= TOLERANCE) continue;
-        double cost = ach.wait_cost + ach.exec_cost;
-        if (cost >= std::numeric_limits<double>::infinity()) continue;
-
-        bool is_deterministic = ach.probability >= 1.0 - TOLERANCE;
-        bool better = false;
-
-        if (cost + TOLERANCE < best_cost) {
-          better = true;
-        } else if (cost <= best_cost + TOLERANCE) {
-          if (is_deterministic && !best_is_deterministic) {
-            better = true;
-          } else if (is_deterministic == best_is_deterministic &&
-                     ach.probability > best_probability + TOLERANCE) {
-            better = true;
-          } else if (is_deterministic == best_is_deterministic &&
-                     ach.probability >= best_probability - TOLERANCE &&
-                     best_action &&
-                     ach.exec_cost < forward.action_to_duration.at(best_action) - TOLERANCE) {
-            better = true;
-          }
-        }
-
-        if (better) {
-          best_action = ach.action;
-          best_cost = cost;
-          best_is_deterministic = is_deterministic;
-          best_probability = ach.probability;
-        }
-      }
+    auto best_it = forward.best_achiever_action.find(f);
+    if (best_it != forward.best_achiever_action.end()) {
+      return best_it->second;
     }
-
-    if (best_action) return best_action;
 
     auto fallback = forward.fact_to_action.find(f);
     if (fallback != forward.fact_to_action.end()) {

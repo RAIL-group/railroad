@@ -13,6 +13,7 @@ const double SEARCH_PHASE_RATIO = 0.00;  // [0,1] Initial search phase as % of t
 const double PROB_EXTRA_EXPLORE = 0.0;  // [0,1] Prob randomly decide to prioritize search
 
 // Progressive widening for high branching-factor decision states in MCTS.
+const bool USE_PROGRESSIVE_WIDENING = false;
 const double PROGRESSIVE_WIDENING_K = 1.0;
 const double PROGRESSIVE_WIDENING_ALPHA = 0.5;
 
