@@ -121,7 +121,7 @@ with PlannerDashboard(goal, env) as dashboard:
 
         actions = env.get_actions()
         planner = MCTSPlanner(actions)
-        action_name = planner(env.state, goal, max_iterations=10000, c=200, heuristic_multiplier=1, debug_heuristic=True)
+        action_name = planner(env.state, goal, max_iterations=10000, c=20, heuristic_multiplier=2)
         action = get_action_by_name(actions, action_name)
         env.act(action)
         dashboard.update(planner, action_name)

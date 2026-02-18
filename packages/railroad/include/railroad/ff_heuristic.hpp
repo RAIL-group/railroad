@@ -392,6 +392,7 @@ inline double get_or_compute_delta(const FFForwardResult& forward, const Fluent&
   if (delta < FF_TOLERANCE) {
     delta = 0.0;
   }
+  delta = min_E_attempt;
 
   // Cache and return
   forward.probabilistic_delta[f] = delta;
@@ -594,8 +595,9 @@ double ff_backward_cost(
   // Hybrid base cost:
   // makespan term preserves reach+execute critical path,
   // additive term adds pressure from the extracted relaxed plan volume.
-  constexpr double ACTION_SUM_LAMBDA = 0.5;
+  constexpr double ACTION_SUM_LAMBDA = 1.0;
   double max_goal_time = 0.0;
+  double sum_goal_time = 0.0;
   for (const auto& gf : extraction.effective_goals) {
     if (forward.initial_fluents.count(gf)) continue;
 
@@ -614,6 +616,7 @@ double ff_backward_cost(
       return std::numeric_limits<double>::infinity();
     }
     max_goal_time = std::max(max_goal_time, goal_time);
+    sum_goal_time += goal_time;
   }
 
   // Sum execution durations of unique extracted achiever actions.
@@ -633,6 +636,8 @@ double ff_backward_cost(
   double total_cost =
       max_goal_time + ACTION_SUM_LAMBDA *
                           std::max(0.0, extracted_action_exec_sum - max_goal_time);
+  total_cost = (extracted_action_exec_sum + max_goal_time)/2;
+  total_cost = (extracted_action_exec_sum + sum_goal_time)/2;
 
   // Lazily compute and add probabilistic deltas for fluents on the extraction path
   // Only compute for fluents that have probabilistic achievers (skip purely deterministic)
