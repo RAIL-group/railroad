@@ -20,10 +20,10 @@ const double PROGRESSIVE_WIDENING_ALPHA = 0.5;
 // Goal-shaping terms for MCTS reward.
 // Reward states that satisfy more goal structure and penalize regressions from
 // the best progress reached along the current path.
-const double LANDMARK_PROGRESS_REWARD = 25.0;
-const double GOAL_REGRESSION_PENALTY = 50.0;
+const double LANDMARK_PROGRESS_REWARD = 250.0;
+const double GOAL_REGRESSION_PENALTY = 500.0;
 
 // Multiplier for probabilistic backward-extraction delta in FF heuristic.
-const double PROBABILISTIC_DELTA_MULTIPLIER = 2.0;
+const double PROBABILISTIC_DELTA_MULTIPLIER = 4.0;
 
 }
