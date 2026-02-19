@@ -1,13 +1,10 @@
 """ProcTHOR scene data provider."""
 
-from typing import Callable, Dict, Set, Tuple, List
+from typing import Callable, Dict, List, Set, Tuple
 
 import numpy as np
 
-from railroad._bindings import Action
-
 from .thor_interface import ThorInterface
-from . import utils as procthor_utils
 
 
 class ProcTHORScene:
@@ -16,16 +13,11 @@ class ProcTHORScene:
     Loads a ProcTHOR scene and extracts all information needed for planning:
     - Location names and coordinates
     - Object names and their ground truth locations
-    - Move cost function
-    - Path interpolation for interrupted moves
 
     Example:
         scene = ProcTHORScene(seed=4001)
         print(scene.locations)  # All container locations
         print(scene.objects)    # All objects in scene
-
-        # Create move operator with scene's cost function
-        move_op = operators.construct_move_operator_blocking(scene.get_move_cost_fn())
     """
 
     def __init__(self, seed: int, resolution: float = 0.05) -> None:
@@ -108,36 +100,6 @@ class ProcTHORScene:
 
         return result
 
-    def get_move_cost_fn(self) -> Callable[[str, str, str], float]:
-        """Get move cost function for operator construction.
-
-        Returns:
-            Function (robot, loc_from, loc_to) -> cost
-        """
-        # Build lookup from location name to container ID
-        loc_to_id: Dict[str, str] = {'start_loc': 'initial_robot_pose'}
-        for container in self._thor.containers:
-            idx = self._thor.scene_graph.asset_id_to_node_idx_map[container['id']]
-            name = f"{procthor_utils.get_generic_name(container['id'])}_{idx}"
-            loc_to_id[name] = container['id']
-
-        def move_cost_fn(robot: str, loc_from: str, loc_to: str) -> float:
-            id_from = loc_to_id.get(loc_from)
-            id_to = loc_to_id.get(loc_to)
-
-            if id_from and id_to and id_from in self._thor.known_cost:
-                return self._thor.known_cost[id_from].get(id_to, float('inf'))
-
-            # Fall back to grid-based cost
-            coord_from = self._locations.get(loc_from)
-            coord_to = self._locations.get(loc_to)
-            if coord_from is None or coord_to is None:
-                return float('inf')
-
-            return procthor_utils.get_cost(self._thor.occupancy_grid, coord_from, coord_to)
-
-        return move_cost_fn
-
     def get_object_find_prob_fn(
         self,
         nn_model_path: str,
@@ -189,70 +151,6 @@ class ProcTHORScene:
             return object_find_prob
 
         return get_object_find_prob
-
-    def get_intermediate_coordinates(
-        self,
-        action: Action,
-        elapsed_time: float
-    ) -> Tuple[int, int]:
-        """Get coordinates along move path at elapsed time.
-
-        Args:
-            action: A move action with name "move robot loc_from loc_to"
-            elapsed_time: Time elapsed since move started
-
-        Returns:
-            Grid coordinates at that time
-        """
-        parts = action.name.split()
-        if len(parts) < 4 or parts[0] != 'move':
-            raise ValueError(f"Expected move action, got: {action.name}")
-
-        loc_from = parts[2]
-        loc_to = parts[3]
-
-        coord_from = self._locations.get(loc_from)
-        coord_to = self._locations.get(loc_to)
-
-        if coord_from is None or coord_to is None:
-            raise ValueError(f"Unknown location: {loc_from} or {loc_to}")
-
-        # Get full path
-        _, path = procthor_utils.get_cost_and_path(
-            self._thor.occupancy_grid,
-            coord_from,
-            coord_to
-        )
-
-        # Interpolate along path
-        coords = procthor_utils.get_coordinates_at_time(path, elapsed_time)
-        return int(coords[0]), int(coords[1])
-
-    def compute_move_path(
-        self,
-        start: tuple[float, float],
-        end: tuple[float, float],
-        *,
-        use_theta: bool = True,
-    ) -> np.ndarray:
-        """Compute 2xN grid path between two coordinates.
-
-        Args:
-            start: Start coordinate (x, y).
-            end: End coordinate (x, y).
-            use_theta: Whether to try Theta* before Dijkstra.
-
-        Returns:
-            2xN integer path array.
-        """
-        start_xy = (int(round(float(start[0]))), int(round(float(start[1]))))
-        end_xy = (int(round(float(end[0]))), int(round(float(end[1]))))
-        return procthor_utils.compute_move_path(
-            self._thor.occupancy_grid,
-            start_xy,
-            end_xy,
-            use_theta=use_theta,
-        )
 
     def get_top_down_image(self, orthographic: bool = True) -> np.ndarray:
         """Get top-down view image of the scene."""

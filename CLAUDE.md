@@ -39,10 +39,10 @@ Provides abstractions for planning execution:
 - **`symbolic.py`**: `SymbolicEnvironment` and skill implementations
   - `SymbolicEnvironment`: Concrete environment for symbolic execution
   - `SymbolicSkill`: Standard skill implementation (non-interruptible)
-  - `InterruptableMoveSymbolicSkill`: Moves that can be interrupted mid-execution
+  - `InterruptibleNavigationMoveSkill`: Moves that can be interrupted mid-execution
   - `LocationRegistry`: Coordinates robot locations during interruptible moves
 
-- **`skill.py`**: `ActiveSkill` protocol defining the skill interface
+- **`skill/`**: Skill protocols + navigation skill implementations
 
 - **`procthor/`**: ProcTHOR simulator interface (optional dependency)
   - `ThorInterface`: Main underlying interface to AI2-THOR/ProcTHOR scenes

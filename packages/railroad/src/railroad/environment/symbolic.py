@@ -1,8 +1,10 @@
 """Symbolic environment implementation."""
 
+import inspect
 import random
-import warnings
 from typing import Any, Callable, Dict, List, Set, Tuple, Type
+
+import numpy as np
 
 from railroad._bindings import Action, Fluent, GroundedEffect, State
 from railroad.core import Operator
@@ -34,7 +36,7 @@ class LocationRegistry:
         env = SymbolicEnvironment(
             ...,
             location_registry=registry,
-            skill_overrides={"move": InterruptableMoveSymbolicSkill},
+            skill_overrides={"move": InterruptibleNavigationMoveSkill},
         )
     """
 
@@ -90,7 +92,7 @@ class SymbolicSkill(ActiveSkill):
 
     Implements ActiveSkill protocol for symbolic mode where skills
     step through effects immediately when asked. Not interruptible
-    by default - use InterruptableMoveSymbolicSkill for moves that
+    by default - use InterruptibleNavigationMoveSkill for moves that
     can be interrupted when another robot becomes free.
     """
 
@@ -158,113 +160,6 @@ class SymbolicSkill(ActiveSkill):
         pass
 
 
-class InterruptableMoveSymbolicSkill(SymbolicSkill):
-    """Move skill that can be interrupted when another robot becomes free.
-
-    When interrupted mid-execution, rewrites destination fluents to an
-    intermediate location (robot_loc), enabling the planner to account
-    for partial progress.
-
-    If the environment has a LocationRegistry, the intermediate location's
-    coordinates are computed via linear interpolation and registered
-    automatically. Without a registry, the interrupt still works but
-    subsequent move actions from the intermediate location may not have
-    correct time estimates.
-    """
-
-    def __init__(
-        self,
-        action: Action,
-        start_time: float,
-    ) -> None:
-        """Initialize an interruptable move skill.
-
-        Args:
-            action: The move action being executed.
-            start_time: Start time of the move.
-        """
-        super().__init__(action, start_time)
-        self._is_interruptible = True
-
-        # Extract robot, origin, and destination from action name: "move robot from to"
-        parts = action.name.split()
-        self._robot = parts[1] if len(parts) >= 2 else None
-        self._move_origin = parts[2] if len(parts) >= 3 else None
-        self._move_destination = parts[3] if len(parts) >= 4 else None
-
-        # Calculate end time from the last effect (when move completes)
-        if self._upcoming_effects:
-            self._end_time = max(t for t, _ in self._upcoming_effects)
-        else:
-            self._end_time = start_time
-
-    def interrupt(self, env: "Environment") -> None:
-        """Interrupt move and create intermediate location.
-
-        Creates a robot_loc intermediate location and rewrites
-        destination fluents to point there instead of the original end.
-        If the environment has a location_registry, registers the
-        intermediate location's coordinates.
-        """
-        if self._current_time <= self._start_time:
-            return  # Cannot interrupt before start
-
-        if self.is_done:
-            return  # Already complete
-
-        if self._move_destination is None or self._robot is None:
-            return  # Not a valid move action
-
-        # For move actions: create intermediate location and rewrite effects
-        old_target = self._move_destination
-        new_target = f"{self._robot}_loc"
-
-        # Register intermediate location coordinates if registry available
-        registry: LocationRegistry | None = getattr(env, "location_registry", None)
-        if registry is not None and self._move_origin is not None:
-            origin_coords = registry.get(self._move_origin)
-            dest_coords = registry.get(self._move_destination)
-            if origin_coords is not None and dest_coords is not None:
-                # Calculate progress fraction
-                total_time = self._end_time - self._start_time
-                if total_time > 0:
-                    progress = (self._current_time - self._start_time) / total_time
-                    progress = max(0.0, min(1.0, progress))
-                else:
-                    progress = 1.0
-                # Linear interpolation
-                intermediate_coords = origin_coords + progress * (dest_coords - origin_coords)
-                registry.register(new_target, intermediate_coords)
-
-        # Collect fluents from remaining effects, rewriting destination
-        new_fluents: Set[Fluent] = set()
-        for _, eff in self._upcoming_effects:
-            if eff.is_probabilistic:
-                raise ValueError("Probabilistic effects cannot be interrupted.")
-            for fluent in eff.resulting_fluents:
-                # Remove conflicting negation if present
-                if (~fluent) in new_fluents:
-                    new_fluents.remove(~fluent)
-                # Rewrite fluent args, replacing old target with new
-                new_args = [
-                    arg if arg != old_target else new_target
-                    for arg in fluent.args
-                ]
-                new_fluents.add(
-                    Fluent(" ".join([fluent.name] + new_args), negated=fluent.negated)
-                )
-
-        # Apply the rewritten fluents directly to environment
-        for fluent in new_fluents:
-            if fluent.negated:
-                env.fluents.discard(~fluent)
-            else:
-                env.fluents.add(fluent)
-
-        # Clear remaining effects
-        self._upcoming_effects = []
-
-
 class SymbolicEnvironment(Environment):
     """Environment for symbolic (non-physical) execution.
 
@@ -292,10 +187,10 @@ class SymbolicEnvironment(Environment):
             true_object_locations: Ground truth object locations for search
                 resolution. If None, search always fails.
             skill_overrides: Optional mapping from action type prefix to skill
-                class. E.g., {"move": InterruptableMoveSymbolicSkill}
+                class. E.g., {"move": InterruptibleNavigationMoveSkill}
             location_registry: Optional LocationRegistry for interruptible moves.
-                Required for InterruptableMoveSymbolicSkill to properly compute
-                intermediate location coordinates when moves are interrupted.
+                Required by movement-path-aware skills such as
+                InterruptibleNavigationMoveSkill.
         """
         # Initialize subclass state before super().__init__
         # because _create_initial_effects_skill may need these
@@ -307,25 +202,6 @@ class SymbolicEnvironment(Environment):
         )
         self._skill_overrides = skill_overrides or {}
         self._location_registry = location_registry
-
-        # Warn if using InterruptableMoveSymbolicSkill without a registry
-        if (
-            location_registry is None
-            and skill_overrides
-            and any(
-                issubclass(cls, InterruptableMoveSymbolicSkill)
-                for cls in skill_overrides.values()
-                if isinstance(cls, type)
-            )
-        ):
-            warnings.warn(
-                "Using InterruptableMoveSymbolicSkill without a LocationRegistry. "
-                "Interrupted moves will create intermediate locations without "
-                "coordinate information, which may cause move time calculations "
-                "to fail. Consider passing a LocationRegistry to the environment.",
-                UserWarning,
-                stacklevel=2,
-            )
 
         super().__init__(state=state, operators=operators)
 
@@ -341,6 +217,36 @@ class SymbolicEnvironment(Environment):
     def location_registry(self) -> LocationRegistry | None:
         """Location coordinate registry for interruptible moves."""
         return self._location_registry
+
+    def compute_move_path(
+        self,
+        loc_from: str,
+        loc_to: str,
+        *,
+        use_theta: bool = True,
+    ) -> np.ndarray:
+        """Compute a straight-line 2-point path from symbolic coordinates."""
+        del use_theta
+        if self._location_registry is None:
+            raise TypeError(
+                "SymbolicEnvironment.compute_move_path requires location_registry."
+            )
+        start = self._location_registry.get(loc_from)
+        end = self._location_registry.get(loc_to)
+        if start is None or end is None:
+            return np.empty((2, 0), dtype=float)
+
+        start_xy = np.asarray(start, dtype=float).reshape(-1)
+        end_xy = np.asarray(end, dtype=float).reshape(-1)
+        if start_xy.size < 2 or end_xy.size < 2:
+            raise TypeError(
+                "LocationRegistry coordinates must provide at least x/y components."
+            )
+
+        return np.array(
+            [[start_xy[0], end_xy[0]], [start_xy[1], end_xy[1]]],
+            dtype=float,
+        )
 
     def _create_initial_effects_skill(
         self,
@@ -366,6 +272,8 @@ class SymbolicEnvironment(Environment):
 
         if action_type in self._skill_overrides:
             skill_class = self._skill_overrides[action_type]
+            if "env" in inspect.signature(skill_class.__init__).parameters:
+                return skill_class(action=action, start_time=time, env=self)
             return skill_class(action=action, start_time=time)
 
         return SymbolicSkill(action=action, start_time=time)
@@ -504,5 +412,3 @@ class SymbolicEnvironment(Environment):
 
         # Fall back to ground truth
         return obj in self._objects_at_locations.get(location, set())
-
-

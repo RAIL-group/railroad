@@ -118,7 +118,7 @@ class _PlottingMixin:
 
         Handles: environment coordinate lookup, ``location_coords`` conflict
         check, missing-coordinate generation, robot/object separation, and
-        scene ``compute_move_path`` expansion when available.
+        environment ``compute_move_path`` expansion when available.
 
         Args:
             location_coords: Optional explicit location->(x,y) mapping.
@@ -128,7 +128,7 @@ class _PlottingMixin:
 
         Returns:
             (trajectories, env_coords, grid) where *trajectories* maps entity
-            names to (waypoints, times) lists with scene-expanded paths.
+            names to (waypoints, times) lists with path-expanded routes.
         """
         # Get environment coordinates + grid
         env_coords, grid, _graph = self._get_location_coords()
@@ -165,9 +165,8 @@ class _PlottingMixin:
             else:
                 object_entities[entity] = positions
 
-        # Scene-aware trajectory expansion
-        scene = getattr(self._env, "scene", None)
-        compute_move_path_fn = getattr(scene, "compute_move_path", None)
+        # Environment-aware trajectory expansion
+        compute_move_path_fn = getattr(self._env, "compute_move_path", None)
 
         trajectories: dict[str, tuple[list[tuple[float, float]], list[float]]] = {}
 
@@ -192,38 +191,42 @@ class _PlottingMixin:
 
             waypoints = []
             times = []
+            waypoint_locs: list[str] = []
             for t, loc_name, stored_coords in positions:
                 if stored_coords is not None:
                     waypoints.append(stored_coords)
                     times.append(t)
+                    waypoint_locs.append(loc_name)
                 elif loc_name in env_coords:
                     waypoints.append(env_coords[loc_name])
                     times.append(t)
+                    waypoint_locs.append(loc_name)
 
             if len(waypoints) < 2:
                 trajectories[entity] = (waypoints, times)
                 continue
 
-            # Expand through scene pathing if available
-            if compute_move_path_fn is not None:
+            # Expand through environment pathing if available.
+            if callable(compute_move_path_fn):
                 import numpy as np
                 expanded_wps: list[tuple[float, float]] = []
                 expanded_ts: list[float] = []
                 for seg_i in range(len(waypoints) - 1):
                     seg_start = waypoints[seg_i]
                     seg_end = waypoints[seg_i + 1]
+                    seg_loc_from = waypoint_locs[seg_i]
+                    seg_loc_to = waypoint_locs[seg_i + 1]
 
                     path: list[tuple[float, float]] | None = None
-                    if callable(compute_move_path_fn):
-                        try:
-                            path_arr = compute_move_path_fn(seg_start, seg_end, use_theta=True)
-                            if getattr(path_arr, "size", 0) != 0 and path_arr.shape[0] == 2:
-                                path = [
-                                    (float(path_arr[0, j]), float(path_arr[1, j]))
-                                    for j in range(path_arr.shape[1])
-                                ]
-                        except Exception:
-                            path = None
+                    try:
+                        path_arr = compute_move_path_fn(seg_loc_from, seg_loc_to, use_theta=True)
+                        if getattr(path_arr, "size", 0) != 0 and path_arr.shape[0] == 2:
+                            path = [
+                                (float(path_arr[0, j]), float(path_arr[1, j]))
+                                for j in range(path_arr.shape[1])
+                            ]
+                    except Exception:
+                        path = None
 
                     if not path or len(path) < 2:
                         path = [seg_start, seg_end]

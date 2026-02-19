@@ -51,10 +51,10 @@ def test_symbolic_skill_move_not_interruptible_by_default():
     assert skill.is_interruptible is False
 
 
-def test_interruptable_move_skill_interrupt_behavior():
-    """Test that InterruptableMoveSymbolicSkill.interrupt() rewrites fluents correctly."""
-    from railroad.environment import InterruptableMoveSymbolicSkill
-    from railroad.environment import SymbolicEnvironment
+def test_interruptible_navigation_move_skill_interrupt_behavior():
+    """Test that InterruptibleNavigationMoveSkill.interrupt() rewrites fluents correctly."""
+    import numpy as np
+    from railroad.environment import InterruptibleNavigationMoveSkill, LocationRegistry, SymbolicEnvironment
     from railroad._bindings import Fluent as F, State
     from railroad.core import Effect, Operator
 
@@ -69,20 +69,25 @@ def test_interruptable_move_skill_interrupt_behavior():
         ]
     )
 
-    # Create environment (without registry - fluent rewriting still works)
+    # Create environment with registry for trajectory construction
     initial_state = State(0.0, {F("at", "r1", "kitchen"), F("free", "r1")})
+    registry = LocationRegistry({
+        "kitchen": np.array([0.0, 0.0]),
+        "bedroom": np.array([10.0, 0.0]),
+    })
     env = SymbolicEnvironment(
         state=initial_state,
         objects_by_type={"robot": {"r1"}, "location": {"kitchen", "bedroom"}},
         operators=[move_op],
+        location_registry=registry,
     )
 
     actions = move_op.instantiate({"robot": ["r1"], "location": ["kitchen", "bedroom"]})
     action = [a for a in actions if "kitchen" in a.name and "bedroom" in a.name][0]
 
-    skill = InterruptableMoveSymbolicSkill(action=action, start_time=0.0)
+    skill = InterruptibleNavigationMoveSkill(action=action, start_time=0.0, env=env)
 
-    # InterruptableMoveSymbolicSkill IS interruptible
+    # InterruptibleNavigationMoveSkill is interruptible
     assert skill.is_interruptible is True
 
     # Advance partway (apply first effect at t=0)
@@ -156,7 +161,7 @@ def test_location_registry_move_time_fn():
 def test_location_registry_interrupt_registers_coords():
     """Test that interrupt registers intermediate location coordinates."""
     import numpy as np
-    from railroad.environment import InterruptableMoveSymbolicSkill, LocationRegistry, SymbolicEnvironment
+    from railroad.environment import InterruptibleNavigationMoveSkill, LocationRegistry, SymbolicEnvironment
     from railroad._bindings import Fluent as F, State
     from railroad.core import Effect, Operator
 
@@ -184,14 +189,14 @@ def test_location_registry_interrupt_registers_coords():
         state=initial_state,
         objects_by_type={"robot": {"r1"}, "location": {"kitchen", "bedroom"}},
         operators=[move_op],
-        skill_overrides={"move": InterruptableMoveSymbolicSkill},
+        skill_overrides={"move": InterruptibleNavigationMoveSkill},
         location_registry=registry,
     )
 
     actions = move_op.instantiate({"robot": ["r1"], "location": ["kitchen", "bedroom"]})
     action = [a for a in actions if "kitchen" in a.name and "bedroom" in a.name][0]
 
-    skill = InterruptableMoveSymbolicSkill(action=action, start_time=0.0)
+    skill = InterruptibleNavigationMoveSkill(action=action, start_time=0.0, env=env)
 
     # Advance to 50% progress (5s out of 10s)
     skill.advance(0.0, env)
@@ -215,11 +220,15 @@ def test_location_registry_interrupt_registers_coords():
 
 def test_skill_overrides_mapping():
     """Test that SymbolicEnvironment respects skill_overrides."""
-    from railroad.environment import SymbolicSkill, InterruptableMoveSymbolicSkill, SymbolicEnvironment, LocationRegistry
+    from railroad.environment import (
+        InterruptibleNavigationMoveSkill,
+        LocationRegistry,
+        SymbolicEnvironment,
+        SymbolicSkill,
+    )
     from railroad._bindings import Fluent as F, State
     from railroad.core import Effect, Operator
 
-    # Create registry to suppress warning
     import numpy as np
     registry = LocationRegistry({"kitchen": np.array([0, 0]), "bedroom": np.array([10, 0])})
 
@@ -228,7 +237,7 @@ def test_skill_overrides_mapping():
         state=State(0.0, {F("at", "r1", "kitchen"), F("free", "r1")}, []),
         objects_by_type={"robot": {"r1"}, "location": {"kitchen", "bedroom"}},
         operators=[],
-        skill_overrides={"move": InterruptableMoveSymbolicSkill},
+        skill_overrides={"move": InterruptibleNavigationMoveSkill},
         location_registry=registry,
     )
 
@@ -252,13 +261,13 @@ def test_skill_overrides_mapping():
     move_action = [a for a in move_actions if "kitchen" in a.name and "bedroom" in a.name][0]
     wait_action = wait_actions[0]
 
-    # Move should get InterruptableMoveSymbolicSkill
+    # Move should get InterruptibleNavigationMoveSkill
     move_skill = env.create_skill(move_action, 0.0)
-    assert isinstance(move_skill, InterruptableMoveSymbolicSkill)
+    assert isinstance(move_skill, InterruptibleNavigationMoveSkill)
     assert move_skill.is_interruptible is True
 
     # Wait should get default SymbolicSkill
     wait_skill = env.create_skill(wait_action, 0.0)
     assert isinstance(wait_skill, SymbolicSkill)
-    assert not isinstance(wait_skill, InterruptableMoveSymbolicSkill)
+    assert not isinstance(wait_skill, InterruptibleNavigationMoveSkill)
     assert wait_skill.is_interruptible is False

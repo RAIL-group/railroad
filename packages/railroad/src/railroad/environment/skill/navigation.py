@@ -10,28 +10,22 @@ import numpy as np
 from railroad._bindings import Action, Fluent
 
 from ..motion_utils import get_coordinates_at_distance, path_total_length
-from ..skill import MotionSkill
 from ..symbolic import SymbolicSkill
 from ..types import Pose
+from .protocols import MotionSkill, SupportsMovePathEnvironment
 
 if TYPE_CHECKING:
     from ..environment import Environment
 
 
 class NavigationMoveSkill(SymbolicSkill, MotionSkill):
-    """Move skill with path-following and effect scheduling.
-
-    The skill:
-    1. Builds a path at creation time using the observed grid.
-    2. Advances the robot pose along the path over time.
-    3. Applies symbolic effects at their scheduled times.
-    """
+    """Move skill with path-following and effect scheduling."""
 
     def __init__(
         self,
         action: Action,
         start_time: float,
-        env: Environment,
+        env: SupportsMovePathEnvironment,
     ) -> None:
         super().__init__(action=action, start_time=start_time)
 
@@ -41,6 +35,7 @@ class NavigationMoveSkill(SymbolicSkill, MotionSkill):
         self._move_origin = parts[2]
         self._move_destination = parts[3]
 
+        # Keep a runtime guard for dynamic callers that bypass static typing.
         compute_move_path = getattr(env, "compute_move_path", None)
         if not callable(compute_move_path):
             raise TypeError(
@@ -125,8 +120,6 @@ class NavigationMoveSkill(SymbolicSkill, MotionSkill):
     def _interrupt_with_destination_rewrite(
         self,
         env: Environment,
-        *,
-        require_stale_destination: bool,
     ) -> None:
         """Interrupt move and rewrite pending effects to a robot-local anchor."""
         if self._current_time <= self._start_time:
@@ -134,9 +127,6 @@ class NavigationMoveSkill(SymbolicSkill, MotionSkill):
         if self.is_done:
             return
         if self._move_destination is None or self._robot is None:
-            return
-        stale_destination = self._destination_is_stale(env)
-        if require_stale_destination and not stale_destination:
             return
 
         # Get current interpolated pose
@@ -181,10 +171,9 @@ class NavigationMoveSkill(SymbolicSkill, MotionSkill):
 
     def interrupt(self, env: Environment) -> None:
         """Interrupt only when destination became stale."""
-        self._interrupt_with_destination_rewrite(
-            env,
-            require_stale_destination=True,
-        )
+        if not self._destination_is_stale(env):
+            return
+        self._interrupt_with_destination_rewrite(env)
 
 
 class InterruptibleNavigationMoveSkill(NavigationMoveSkill):
@@ -194,14 +183,11 @@ class InterruptibleNavigationMoveSkill(NavigationMoveSkill):
         self,
         action: Action,
         start_time: float,
-        env: Environment,
+        env: SupportsMovePathEnvironment,
     ) -> None:
         super().__init__(action=action, start_time=start_time, env=env)
         self._is_interruptible = True
 
     def interrupt(self, env: Environment) -> None:
         """Interrupt move immediately when requested by the environment."""
-        self._interrupt_with_destination_rewrite(
-            env,
-            require_stale_destination=False,
-        )
+        self._interrupt_with_destination_rewrite(env)

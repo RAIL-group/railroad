@@ -19,10 +19,9 @@ Legacy classes have been moved to railroad.experimental.environment:
 """
 
 from .environment import Environment
-from .skill import ActiveSkill
+from .skill import ActiveSkill, InterruptibleNavigationMoveSkill, MotionSkill, NavigationMoveSkill
 from .types import Pose, PoseLike
 from .symbolic import (
-    InterruptableMoveSymbolicSkill,
     LocationRegistry,
     SymbolicEnvironment,
     SymbolicSkill,
@@ -32,8 +31,10 @@ __all__ = [
     # Core classes
     "ActiveSkill",
     "Environment",
-    "InterruptableMoveSymbolicSkill",
+    "InterruptibleNavigationMoveSkill",
     "LocationRegistry",
+    "MotionSkill",
+    "NavigationMoveSkill",
     "Pose",
     "PoseLike",
     "SymbolicEnvironment",

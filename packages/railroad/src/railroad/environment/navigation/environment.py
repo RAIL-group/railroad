@@ -10,17 +10,22 @@ import scipy.ndimage
 from railroad._bindings import Action, Fluent, State
 from railroad.core import Operator
 
-from ..skill import ActiveSkill, MotionSkill
+from ..skill import (
+    ActiveSkill,
+    InterruptibleNavigationMoveSkill,
+    MotionSkill,
+    NavigationMoveSkill,
+)
 from ..symbolic import LocationRegistry, SymbolicEnvironment
 from ..types import Pose
-from . import laser, mapping, pathing
+from . import laser, mapping
 from .constants import OBSTACLE_THRESHOLD, UNOBSERVED_VAL
 from .frontiers import extract_frontiers, filter_reachable_frontiers
-from .skill import InterruptibleNavigationMoveSkill, NavigationMoveSkill
+from .occupancy_grid_mixin import OccupancyGridPathingMixin
 from .types import Frontier, NavigationConfig
 
 
-class UnknownSpaceEnvironment(SymbolicEnvironment):
+class UnknownSpaceEnvironment(OccupancyGridPathingMixin, SymbolicEnvironment):
     """Environment for multi-robot exploration of an unknown occupancy grid.
 
     Extends :class:`SymbolicEnvironment` with:
@@ -51,7 +56,10 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
         self._frontiers: Dict[str, Frontier] = {}
         self._frames: list[np.ndarray] = []
         self._grid_generation: int = 0  # bumped when observed_grid changes
-        self._cost_grid_cache: Dict[str, Tuple[int, int, int, np.ndarray]] = {}
+        self._cost_grid_cache: Dict[
+            str,
+            Tuple[int, int, int, bool, bool, float, np.ndarray],
+        ] = {}
 
         # Interrupt tracking
         self._interrupt_requested = False
@@ -307,111 +315,29 @@ class UnknownSpaceEnvironment(SymbolicEnvironment):
     # Path / move-time helpers
     # ------------------------------------------------------------------
 
-    def compute_move_path(
-        self,
-        loc_from: str,
-        loc_to: str,
-        *,
-        use_theta: bool = True,
-    ) -> np.ndarray:
-        """Compute 2xN grid path between two symbolic locations."""
-        registry = self._location_registry
-        if registry is None:
-            return np.array([[]], dtype=int)
-        start_coords = registry.get(loc_from)
-        end_coords = registry.get(loc_to)
-        if start_coords is None or end_coords is None:
-            return np.array([[]], dtype=int)
+    @property
+    def occupancy_grid(self) -> np.ndarray:
+        return self._observed_grid
 
-        start = (int(round(float(start_coords[0]))), int(round(float(start_coords[1]))))
-        end = (int(round(float(end_coords[0]))), int(round(float(end_coords[1]))))
-        if use_theta:
-            _cost, path = pathing.get_cost_and_path_theta(
-                self._observed_grid,
-                start,
-                end,
-                use_soft_cost=self._config.trajectory_use_soft_cost,
-                unknown_as_obstacle=True,
-                soft_cost_scale=self._config.trajectory_soft_cost_scale,
-            )
-            # Prefer Theta* for trajectory quality, but robustly fall back to
-            # grid-constrained planning when any-angle search fails.
-            if path.size == 0 or path.shape[0] != 2:
-                _cost, path = pathing.get_cost_and_path(
-                    self._observed_grid,
-                    start,
-                    end,
-                    use_soft_cost=self._config.trajectory_use_soft_cost,
-                    unknown_as_obstacle=True,
-                    soft_cost_scale=self._config.trajectory_soft_cost_scale,
-                )
-        else:
-            _cost, path = pathing.get_cost_and_path(
-                self._observed_grid,
-                start,
-                end,
-                use_soft_cost=self._config.trajectory_use_soft_cost,
-                unknown_as_obstacle=True,
-                soft_cost_scale=self._config.trajectory_soft_cost_scale,
-            )
-        return path
+    @property
+    def _pathing_unknown_as_obstacle(self) -> bool:
+        return True
 
-    def _get_cost_grid(self, loc: str) -> tuple[np.ndarray, tuple[int, int]] | None:
-        """Return a cached Dijkstra cost grid from *loc*, recomputing if stale."""
-        registry = self._location_registry
-        if registry is None:
-            return None
-        coords = registry.get(loc)
-        if coords is None:
-            return None
+    @property
+    def _pathing_use_soft_cost(self) -> bool:
+        return self._config.trajectory_use_soft_cost
 
-        start = (int(round(float(coords[0]))), int(round(float(coords[1]))))
-        cached = self._cost_grid_cache.get(loc)
-        if (
-            cached is not None
-            and cached[0] == self._grid_generation
-            and cached[1] == start[0]
-            and cached[2] == start[1]
-        ):
-            return cached[3], start
+    @property
+    def _pathing_soft_cost_scale(self) -> float:
+        return self._config.trajectory_soft_cost_scale
 
-        cost_grid: np.ndarray = pathing.compute_cost_grid_from_position(  # type: ignore[assignment]
-            self._observed_grid,
-            start=[start[0], start[1]],
-            unknown_as_obstacle=True,
-            only_return_cost_grid=True,
-        )
-        self._cost_grid_cache[loc] = (
-            self._grid_generation,
-            start[0],
-            start[1],
-            cost_grid,
-        )
-        return cost_grid, start
+    @property
+    def _pathing_generation(self) -> int:
+        return self._grid_generation
 
-    def estimate_move_time(self, robot: str, loc_from: str, loc_to: str) -> float:
-        """Estimate move duration via cached Dijkstra cost grid lookup."""
-        registry = self._location_registry
-        if registry is None:
-            return float("inf")
-        end_coords = registry.get(loc_to)
-        if end_coords is None:
-            return float("inf")
-
-        cost_grid_payload = self._get_cost_grid(loc_from)
-        if cost_grid_payload is None:
-            return float("inf")
-        cost_grid, start = cost_grid_payload
-
-        r, c = int(round(float(end_coords[0]))), int(round(float(end_coords[1])))
-        r = max(0, min(r, cost_grid.shape[0] - 1))
-        c = max(0, min(c, cost_grid.shape[1] - 1))
-        cost = float(cost_grid[r, c])
-        if np.isinf(cost) or np.isnan(cost):
-            return float("inf")
-        if (r, c) == start:
-            return 0.01
-        return max(0.01, cost / self._config.speed_cells_per_sec)
+    @property
+    def _pathing_speed_cells_per_sec(self) -> float:
+        return self._config.speed_cells_per_sec
 
     def is_cell_observed(self, row: int, col: int) -> bool:
         """Check whether a grid cell has been observed."""
