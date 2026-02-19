@@ -12,6 +12,7 @@ __all__ = [
     "is_available",
     "NavigationConfig",
     "Pose",
+    "OccupancyGridPathingMixin",
     "NavigationMoveSkill",
     "InterruptibleNavigationMoveSkill",
     "UnknownSpaceEnvironment",
@@ -39,15 +40,21 @@ def __getattr__(name: str):
             return UnknownSpaceEnvironment
         except ImportError as e:
             raise ImportError(_INSTALL_MSG) from e
+    if name == "OccupancyGridPathingMixin":
+        try:
+            from .occupancy_grid_mixin import OccupancyGridPathingMixin
+            return OccupancyGridPathingMixin
+        except ImportError as e:
+            raise ImportError(_INSTALL_MSG) from e
     if name == "NavigationMoveSkill":
         try:
-            from .skill import NavigationMoveSkill
+            from ..skill import NavigationMoveSkill
             return NavigationMoveSkill
         except ImportError as e:
             raise ImportError(_INSTALL_MSG) from e
     if name == "InterruptibleNavigationMoveSkill":
         try:
-            from .skill import InterruptibleNavigationMoveSkill
+            from ..skill import InterruptibleNavigationMoveSkill
             return InterruptibleNavigationMoveSkill
         except ImportError as e:
             raise ImportError(_INSTALL_MSG) from e

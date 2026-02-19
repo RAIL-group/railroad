@@ -18,9 +18,9 @@ from railroad.dashboard import PlannerDashboard
 from railroad import operators
 from railroad.environment import SymbolicEnvironment
 from railroad.environment.symbolic import (
-    InterruptableMoveSymbolicSkill,
     LocationRegistry,
 )
+from railroad.environment.skill import InterruptibleNavigationMoveSkill
 from railroad._bindings import State
 
 
@@ -137,7 +137,7 @@ def main(
     skill_overrides: dict | None = None
     if use_interruptible_moves:
         location_registry = LocationRegistry(LOCATIONS)
-        skill_overrides = {"move": InterruptableMoveSymbolicSkill}
+        skill_overrides = {"move": InterruptibleNavigationMoveSkill}
 
     # Create operators with robot-type-specific times
     move_time_fn = make_move_time_fn(location_registry)

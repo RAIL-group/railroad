@@ -17,7 +17,15 @@ _INSTALL_MSG = (
 )
 
 # Required packages for procthor functionality
-_REQUIRED_PACKAGES = ["ai2thor", "sentence_transformers", "prior", "shapely", "networkx"]
+_REQUIRED_PACKAGES = [
+    "ai2thor",
+    "sentence_transformers",
+    "prior",
+    "shapely",
+    "networkx",
+    "scipy",
+    "skimage",
+]
 
 
 def is_available() -> bool:

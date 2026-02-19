@@ -272,7 +272,7 @@ The `SymbolicEnvironment` executes plans by managing skills:
 import numpy as np
 from railroad.environment import (
     SymbolicEnvironment,
-    InterruptableMoveSymbolicSkill,
+    InterruptibleNavigationMoveSkill,
     LocationRegistry,
 )
 
@@ -287,7 +287,7 @@ env = SymbolicEnvironment(
     objects_by_type=objects,
     operators=[move_op],
     location_registry=registry,
-    skill_overrides={"move": InterruptableMoveSymbolicSkill},
+    skill_overrides={"move": InterruptibleNavigationMoveSkill},
 )
 ```
 

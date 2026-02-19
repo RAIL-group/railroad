@@ -83,25 +83,17 @@ def test_single_robot_plotting(scene, target_objects, target_locations):
     obj1, obj2 = target_objects
     loc1, loc2 = target_locations
 
-    # Create operators
-    move_cost_fn = scene.get_move_cost_fn()
-    def search_time_fn(r, loc, o):
-        return 10.0
-
-    def pick_time_fn(r, loc, o):
-        return 5.0
-
-    def place_time_fn(r, loc, o):
-        return 5.0
-
-    def object_find_prob(r, loc, o):
-        return 1.0  # Perfect search for faster tests
-
-    move_op = operators.construct_move_operator_blocking(move_cost_fn)
-    search_op = operators.construct_search_operator(object_find_prob, search_time_fn)
-    pick_op = operators.construct_pick_operator_blocking(pick_time_fn)
-    place_op = operators.construct_place_operator_blocking(place_time_fn)
-    no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
+    class SingleRobotProcTHOREnvironment(ProcTHOREnvironment):
+        def define_operators(self):
+            move_op = operators.construct_move_operator_blocking(self.estimate_move_time)
+            search_op = operators.construct_search_operator(
+                lambda r, loc, o: 1.0,  # Perfect search for faster tests.
+                10.0,
+            )
+            pick_op = operators.construct_pick_operator_blocking(5.0)
+            place_op = operators.construct_place_operator_blocking(5.0)
+            no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
+            return [move_op, search_op, pick_op, place_op, no_op]
 
     # Initial state
     initial_state = State(0.0, {
@@ -114,15 +106,14 @@ def test_single_robot_plotting(scene, target_objects, target_locations):
     goal = F(f"at {obj1} {loc1}") & F(f"at {obj2} {loc2}")
 
     # Create environment
-    env = ProcTHOREnvironment(
-        scene=scene,
+    env = SingleRobotProcTHOREnvironment(
+        seed=SEED,
         state=initial_state,
         objects_by_type={
             "robot": {"robot1"},
             "location": set(scene.locations.keys()),
             "object": {obj1, obj2},
         },
-        operators=[move_op, search_op, pick_op, place_op, no_op],
     )
 
     # Planning loop with dashboard
@@ -167,29 +158,22 @@ def test_multi_robot_unknown_plotting(scene, target_objects, target_locations):
     obj1, obj2 = target_objects
     loc1, loc2 = target_locations
 
-    # Create operators
-    move_cost_fn = scene.get_move_cost_fn()
-    def search_time_fn(r, loc, o):
-        return 10.0
+    class UnknownMultiRobotProcTHOREnvironment(ProcTHOREnvironment):
+        def define_operators(self):
+            move_op = operators.construct_move_operator_blocking(self.estimate_move_time)
 
-    def pick_time_fn(r, loc, o):
-        return 5.0
+            def object_find_prob(robot: str, location: str, obj: str) -> float:
+                del robot
+                for loc, objs in self.scene.object_locations.items():
+                    if obj in objs:
+                        return 0.9 if loc == location else 0.1
+                return 0.1
 
-    def place_time_fn(r, loc, o):
-        return 5.0
-
-    # Probability based on ground truth
-    def object_find_prob(robot: str, location: str, obj: str) -> float:
-        for loc, objs in scene.object_locations.items():
-            if obj in objs:
-                return 0.9 if loc == location else 0.1
-        return 0.1
-
-    move_op = operators.construct_move_operator_blocking(move_cost_fn)
-    search_op = operators.construct_search_operator(object_find_prob, search_time_fn)
-    pick_op = operators.construct_pick_operator_blocking(pick_time_fn)
-    place_op = operators.construct_place_operator_blocking(place_time_fn)
-    no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
+            search_op = operators.construct_search_operator(object_find_prob, 10.0)
+            pick_op = operators.construct_pick_operator_blocking(5.0)
+            place_op = operators.construct_place_operator_blocking(5.0)
+            no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
+            return [move_op, search_op, pick_op, place_op, no_op]
 
     # Initial state - objects locations unknown
     initial_state = State(0.0, {
@@ -200,15 +184,14 @@ def test_multi_robot_unknown_plotting(scene, target_objects, target_locations):
 
     goal = F(f"at {obj1} {loc1}") & F(f"at {obj2} {loc2}")
 
-    env = ProcTHOREnvironment(
-        scene=scene,
+    env = UnknownMultiRobotProcTHOREnvironment(
+        seed=SEED,
         state=initial_state,
         objects_by_type={
             "robot": {"robot1", "robot2"},
             "location": set(scene.locations.keys()),
             "object": {obj1, obj2},
         },
-        operators=[move_op, search_op, pick_op, place_op, no_op],
     )
 
     # Planning loop with dashboard
@@ -274,18 +257,13 @@ def test_multi_robot_known_plotting(scene, target_objects, target_locations):
     if obj1_loc is None or obj2_loc is None:
         pytest.skip("Could not find target objects in scene")
 
-    # Create operators (no search needed)
-    move_cost_fn = scene.get_move_cost_fn()
-    def pick_time_fn(r, loc, o):
-        return 5.0
-
-    def place_time_fn(r, loc, o):
-        return 5.0
-
-    move_op = operators.construct_move_operator_blocking(move_cost_fn)
-    pick_op = operators.construct_pick_operator_blocking(pick_time_fn)
-    place_op = operators.construct_place_operator_blocking(place_time_fn)
-    no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
+    class KnownMultiRobotProcTHOREnvironment(ProcTHOREnvironment):
+        def define_operators(self):
+            move_op = operators.construct_move_operator_blocking(self.estimate_move_time)
+            pick_op = operators.construct_pick_operator_blocking(5.0)
+            place_op = operators.construct_place_operator_blocking(5.0)
+            no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
+            return [move_op, pick_op, place_op, no_op]
 
     # Initial state with known object locations
     initial_state = State(0.0, {
@@ -298,15 +276,14 @@ def test_multi_robot_known_plotting(scene, target_objects, target_locations):
 
     goal = F(f"at {obj1} {loc1}") & F(f"at {obj2} {loc2}")
 
-    env = ProcTHOREnvironment(
-        scene=scene,
+    env = KnownMultiRobotProcTHOREnvironment(
+        seed=SEED,
         state=initial_state,
         objects_by_type={
             "robot": {"robot1", "robot2"},
             "location": set(scene.locations.keys()),
             "object": {obj1, obj2},
         },
-        operators=[move_op, pick_op, place_op, no_op],
     )
 
     # Planning loop with dashboard
