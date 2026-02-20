@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from railroad.environment.procthor.utils import (
-    OBSTACLE_THRESHOLD,
+from railroad.environment.navigation.constants import OBSTACLE_THRESHOLD
+from railroad.environment.navigation.pathing import (
     _line_of_sight,
     _supercover_line,
     _theta_star,
@@ -225,4 +225,3 @@ class TestGetCostAndPathDelegation:
         assert np.isfinite(cost)
         assert path.shape[0] == 2
         assert path.shape[1] >= 2
-

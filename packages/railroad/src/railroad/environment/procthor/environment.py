@@ -48,6 +48,7 @@ class ProcTHOREnvironment(OccupancyGridPathingMixin, SymbolicEnvironment, ABC):
         seed: int,
         state: State,
         objects_by_type: Dict[str, Set[str]],
+        operators: List[Operator] | None = None,
         resolution: float = 0.05,
         validate: bool = True,
     ) -> None:
@@ -57,6 +58,8 @@ class ProcTHOREnvironment(OccupancyGridPathingMixin, SymbolicEnvironment, ABC):
             seed: ProcTHOR scene seed
             state: Initial planning state
             objects_by_type: Objects organized by type
+            operators: Optional explicit operators. If omitted, this class
+                resolves operators from ``define_operators()``.
             resolution: Grid resolution in meters
             validate: Whether to validate objects/locations exist in scene
         """
@@ -75,8 +78,6 @@ class ProcTHOREnvironment(OccupancyGridPathingMixin, SymbolicEnvironment, ABC):
 
         if validate:
             self._validate(objects_by_type)
-
-        operators = self.define_operators()
 
         super().__init__(
             state=state,

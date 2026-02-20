@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .utils import compute_move_path
+from ..navigation import pathing
 
 try:
     import matplotlib.pyplot as plt
@@ -175,7 +175,23 @@ def plot_robot_trajectory(
     for i in range(len(waypoints) - 1):
         start = (int(waypoints[i][0]), int(waypoints[i][1]))
         end = (int(waypoints[i + 1][0]), int(waypoints[i + 1][1]))
-        path = compute_move_path(grid, start, end, use_theta=True)
+        _cost, path = pathing.get_cost_and_path_theta(
+            grid,
+            start,
+            end,
+            use_soft_cost=True,
+            unknown_as_obstacle=False,
+            soft_cost_scale=12.0,
+        )
+        if path.size == 0 or path.shape[0] != 2:
+            _cost, path = pathing.get_cost_and_path(
+                grid,
+                start,
+                end,
+                use_soft_cost=True,
+                unknown_as_obstacle=False,
+                soft_cost_scale=12.0,
+            )
         if path.size == 0:
             trajectory.append(waypoints[i])
             continue

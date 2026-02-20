@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 from shapely import geometry
 
+from ..navigation import pathing
 from .scenegraph import SceneGraph
 from . import utils
 from .resources import get_procthor_10k_dir
@@ -276,10 +277,13 @@ class ThorInterface:
                 if cnt1_id == cnt2_id:
                     known_cost[cnt1_id][cnt2_id] = 0.0
                     continue
-                cost = utils.get_cost(
+                cost, _ = pathing.get_cost_and_path(
                     self.occupancy_grid,
-                    cnt_positions[i],
-                    cnt_positions[j]
+                    (int(cnt_positions[i][0]), int(cnt_positions[i][1])),
+                    (int(cnt_positions[j][0]), int(cnt_positions[j][1])),
+                    use_soft_cost=True,
+                    unknown_as_obstacle=False,
+                    soft_cost_scale=12.0,
                 )
                 known_cost[cnt1_id][cnt2_id] = round(cost, 4)
                 known_cost[cnt2_id][cnt1_id] = round(cost, 4)
