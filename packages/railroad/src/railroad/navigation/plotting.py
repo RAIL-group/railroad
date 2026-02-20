@@ -1,8 +1,10 @@
-"""Plotting utilities for ProcTHOR environments."""
+"""Plotting utilities for occupancy grids."""
 
 from typing import Any
 
 import numpy as np
+
+from .constants import COLLISION_VAL, FREE_VAL
 
 try:
     from skimage.morphology import erosion
@@ -10,8 +12,6 @@ try:
 except ImportError:
     HAS_PLOTTING_DEPS = False
 
-COLLISION_VAL = 1
-FREE_VAL = 0
 FOOT_PRINT = np.array([[1, 1, 1], [1, 1, 1], [1, 1, 1]])
 
 
