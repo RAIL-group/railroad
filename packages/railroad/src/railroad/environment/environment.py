@@ -2,6 +2,7 @@
 
 import itertools
 import math
+import warnings
 from abc import ABC, abstractmethod
 from typing import Callable, Collection, Dict, List, Optional, Set, Tuple
 
@@ -30,9 +31,17 @@ class Environment(ABC):
     def __init__(
         self,
         state: State,
-        operators: List[Operator],
+        operators: List[Operator] | None = None,
     ) -> None:
-        self._operators = operators
+        if operators is not None:
+            warnings.warn(
+                "Passing `operators` to Environment.__init__ is deprecated and "
+                "will be removed in a future release. Prefer overriding "
+                "define_operators().",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        self._operators = self._resolve_operators(operators, _from_init=True)
         self._time: float = state.time
         self._active_skills: List[ActiveSkill] = []
 
@@ -42,6 +51,43 @@ class Environment(ABC):
                 state.time, list(state.upcoming_effects)
             )
             self._active_skills.append(initial_skill)
+
+    def define_operators(self) -> List[Operator] | None:
+        """Optional operator factory hook for subclasses."""
+        return None
+
+    def _resolve_operators(
+        self,
+        operators: List[Operator] | None,
+        *,
+        _from_init: bool = False,
+    ) -> List[Operator]:
+        """Resolve operators from explicit input or define_operators hook."""
+        if not _from_init:
+            warnings.warn(
+                "Environment._resolve_operators() is deprecated and will be "
+                "removed in a future release. Prefer overriding "
+                "define_operators().",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        has_custom_define_operators = type(self).define_operators is not Environment.define_operators
+
+        if operators is not None:
+            if has_custom_define_operators:
+                raise ValueError(
+                    "Received explicit operators, but define_operators() is also "
+                    "overridden. Use only one source of operators."
+                )
+            return operators
+
+        defined = self.define_operators()
+        if defined is None:
+            raise ValueError(
+                "No operators provided. Pass operators=... or override "
+                "define_operators()."
+            )
+        return defined
 
     @abstractmethod
     def _create_initial_effects_skill(

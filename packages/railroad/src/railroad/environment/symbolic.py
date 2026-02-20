@@ -173,7 +173,7 @@ class SymbolicEnvironment(Environment):
         self,
         state: State,
         objects_by_type: Dict[str, Set[str]],
-        operators: List[Operator],
+        operators: List[Operator] | None = None,
         true_object_locations: Dict[str, Set[str]] | None = None,
         skill_overrides: Dict[str, Type[ActiveSkill]] | None = None,
         location_registry: LocationRegistry | None = None,
@@ -183,7 +183,8 @@ class SymbolicEnvironment(Environment):
         Args:
             state: Initial state (fluents, time, and optional upcoming effects).
             objects_by_type: Objects organized by type.
-            operators: List of operators for action instantiation.
+            operators: Optional explicit operators for action instantiation.
+                If None, Environment.define_operators() is used.
             true_object_locations: Ground truth object locations for search
                 resolution. If None, search always fails.
             skill_overrides: Optional mapping from action type prefix to skill
