@@ -122,8 +122,8 @@ class _PlottingMixin:
 
         Args:
             location_coords: Optional explicit location->(x,y) mapping.
-                Raises ValueError if any stored positions already have
-                coordinates from the environment.
+                Overrides environment-provided coords for matching keys;
+                per-position stored coordinates still take priority.
             include_objects: If True, also include non-robot entities.
 
         Returns:
@@ -133,18 +133,9 @@ class _PlottingMixin:
         # Get environment coordinates + grid
         env_coords, grid, _graph = self._get_location_coords()
 
-        # Handle explicit location_coords
+        # Handle explicit location_coords — overrides environment coords.
+        # Per-position stored_coords still take priority at usage time.
         if location_coords is not None:
-            for entity, positions in self._entity_positions.items():
-                for _, loc_name, stored_coords in positions:
-                    if stored_coords is not None:
-                        raise ValueError(
-                            f"Cannot pass location_coords when positions already "
-                            f"have coordinates from the environment "
-                            f"(entity={entity!r}, location={loc_name!r}). "
-                            f"Use location_coords only when the environment does "
-                            f"not provide coordinates."
-                        )
             env_coords.update(location_coords)
 
         # Generate coordinates for locations that still lack them
