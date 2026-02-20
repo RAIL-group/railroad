@@ -41,14 +41,6 @@ __all__ = [
     "SymbolicSkill",
 ]
 
-# Conditionally export navigation environment when deps are available
-try:
-    from .navigation import is_available as _nav_available
+from .navigation import UnknownSpaceEnvironment
 
-    if _nav_available():
-        from .navigation import UnknownSpaceEnvironment
-
-        globals()["UnknownSpaceEnvironment"] = UnknownSpaceEnvironment
-        __all__.append("UnknownSpaceEnvironment")
-except ImportError:
-    pass
+__all__.append("UnknownSpaceEnvironment")
