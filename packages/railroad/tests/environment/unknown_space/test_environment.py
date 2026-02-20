@@ -7,9 +7,9 @@ import math
 import numpy as np
 
 from railroad._bindings import Fluent, State
-from railroad.environment.navigation.constants import COLLISION_VAL, FREE_VAL
-from railroad.environment.navigation.environment import UnknownSpaceEnvironment
-from railroad.environment.navigation.types import NavigationConfig, Pose
+from railroad.navigation.constants import COLLISION_VAL, FREE_VAL
+from railroad.environment.unknown_space.environment import UnknownSpaceEnvironment
+from railroad.environment.unknown_space.types import NavigationConfig, Pose
 from railroad.environment.symbolic import LocationRegistry
 from railroad.operators import (
     construct_move_navigable_operator,
@@ -317,7 +317,7 @@ def test_non_interruptible_move_completes_under_aggressive_interrupt_thresholds(
 
 def test_stale_destination_is_handled_only_on_interrupt_request(monkeypatch):
     """Stale move destination is rewritten when an interrupt request is processed."""
-    import railroad.environment.navigation.environment as nav_env_module
+    import railroad.environment.unknown_space.environment as nav_env_module
 
     config = NavigationConfig(
         sensor_range=9.0,

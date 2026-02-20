@@ -122,6 +122,6 @@ def test_navigation_skill_constructor_has_runtime_guard_for_missing_compute_move
 
 
 def test_navigation_skill_import_paths_remain_backward_compatible():
-    from railroad.environment.navigation import NavigationMoveSkill as FromNavigationModule
+    from railroad.environment.skill.navigation import NavigationMoveSkill as FromSkillModule
 
-    assert FromNavigationModule is NavigationMoveSkill
+    assert FromSkillModule is NavigationMoveSkill

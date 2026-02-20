@@ -2,17 +2,17 @@
 
 import numpy as np
 
-from railroad.environment.navigation.constants import (
+from railroad.navigation.constants import (
     COLLISION_VAL,
     FREE_VAL,
     UNOBSERVED_VAL,
 )
-from railroad.environment.navigation.laser import (
+from railroad.environment.unknown_space.laser import (
     get_laser_scanner_directions,
     simulate_sensor_measurement,
 )
-from railroad.environment.navigation.mapping import insert_scan
-from railroad.environment.navigation.types import Pose
+from railroad.environment.unknown_space.mapping import insert_scan
+from railroad.environment.unknown_space.types import Pose
 
 
 def _make_corridor_grid(size: int = 30) -> np.ndarray:

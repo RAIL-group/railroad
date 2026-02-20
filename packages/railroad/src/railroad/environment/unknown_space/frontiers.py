@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 import scipy.ndimage
 
-from .constants import FREE_VAL, OBSTACLE_THRESHOLD, UNOBSERVED_VAL
-from .pathing import build_traversal_costs
+from railroad.navigation.constants import FREE_VAL, OBSTACLE_THRESHOLD, UNOBSERVED_VAL
+from railroad.navigation.pathing import build_traversal_costs
 from .types import Frontier
 
 

@@ -19,9 +19,9 @@ from ..skill import (
 from ..symbolic import LocationRegistry, SymbolicEnvironment
 from ..types import Pose
 from . import laser, mapping
-from .constants import OBSTACLE_THRESHOLD, UNOBSERVED_VAL
+from railroad.navigation.constants import OBSTACLE_THRESHOLD, UNOBSERVED_VAL
 from .frontiers import extract_frontiers, filter_reachable_frontiers
-from .occupancy_grid_mixin import OccupancyGridPathingMixin
+from railroad.navigation import OccupancyGridPathingMixin
 from .types import Frontier, NavigationConfig
 
 
