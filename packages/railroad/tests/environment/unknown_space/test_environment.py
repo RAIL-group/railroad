@@ -11,12 +11,12 @@ from railroad.navigation.constants import COLLISION_VAL, FREE_VAL
 from railroad.environment.unknown_space.environment import UnknownSpaceEnvironment
 from railroad.environment.unknown_space.types import NavigationConfig, Pose
 from railroad.environment.symbolic import LocationRegistry
-from railroad.operators import (
+from railroad.environment.unknown_space.operators import (
     construct_move_navigable_operator,
-    construct_no_op_operator,
     construct_observe_site_operator,
     construct_search_at_site_operator,
 )
+from railroad.operators import construct_no_op_operator
 
 F = Fluent
 

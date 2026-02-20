@@ -18,6 +18,8 @@ Available operators:
 - Pick: construct_pick_operator, construct_pick_operator_blocking
 - Place: construct_place_operator, construct_place_operator_blocking
 - Wait: construct_wait_operator, construct_no_op_operator
+
+Navigation/frontier operators are in ``railroad.environment.unknown_space.operators``.
 """
 
 from .core import (
@@ -38,12 +40,6 @@ from .core import (
     # Wait operators
     construct_wait_operator,
     construct_no_op_operator,
-    # Navigation operators
-    construct_move_navigable_operator,
-    construct_search_frontier_operator,
-    construct_observe_object_from_frontier_operator,
-    construct_observe_site_operator,
-    construct_search_at_site_operator,
 )
 
 from ._utils import (
@@ -72,12 +68,6 @@ __all__ = [
     # Wait operators
     "construct_wait_operator",
     "construct_no_op_operator",
-    # Navigation operators
-    "construct_move_navigable_operator",
-    "construct_search_frontier_operator",
-    "construct_observe_object_from_frontier_operator",
-    "construct_observe_site_operator",
-    "construct_search_at_site_operator",
     # Utilities
     "Numeric",
     "numeric",
