@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from ..navigation import pathing
+from railroad.navigation import pathing
 
 try:
     import matplotlib.pyplot as plt

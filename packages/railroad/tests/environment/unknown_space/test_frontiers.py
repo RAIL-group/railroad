@@ -2,12 +2,12 @@
 
 import numpy as np
 
-from railroad.environment.navigation.constants import (
+from railroad.navigation.constants import (
     COLLISION_VAL,
     FREE_VAL,
     UNOBSERVED_VAL,
 )
-from railroad.environment.navigation.frontiers import (
+from railroad.environment.unknown_space.frontiers import (
     extract_frontiers,
     filter_reachable_frontiers,
 )

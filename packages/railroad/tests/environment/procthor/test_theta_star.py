@@ -3,8 +3,8 @@
 import numpy as np
 import pytest
 
-from railroad.environment.navigation.constants import OBSTACLE_THRESHOLD
-from railroad.environment.navigation.pathing import (
+from railroad.navigation.constants import OBSTACLE_THRESHOLD
+from railroad.navigation.pathing import (
     _line_of_sight,
     _supercover_line,
     _theta_star,

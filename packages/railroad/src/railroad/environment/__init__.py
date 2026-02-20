@@ -18,14 +18,15 @@ Legacy classes have been moved to railroad.experimental.environment:
     )
 """
 
-from .environment import Environment
-from .skill import ActiveSkill, InterruptibleNavigationMoveSkill, MotionSkill, NavigationMoveSkill
+from .environment import ActiveSkill, Environment
+from .skill import InterruptibleNavigationMoveSkill, MotionSkill, NavigationMoveSkill
 from .types import Pose, PoseLike
 from .symbolic import (
     LocationRegistry,
     SymbolicEnvironment,
     SymbolicSkill,
 )
+from .unknown_space import UnknownSpaceEnvironment
 
 __all__ = [
     # Core classes
@@ -39,8 +40,5 @@ __all__ = [
     "PoseLike",
     "SymbolicEnvironment",
     "SymbolicSkill",
+    "UnknownSpaceEnvironment",
 ]
-
-from .navigation import UnknownSpaceEnvironment
-
-__all__.append("UnknownSpaceEnvironment")

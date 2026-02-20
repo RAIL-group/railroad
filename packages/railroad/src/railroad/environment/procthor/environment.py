@@ -7,7 +7,7 @@ import numpy as np
 
 from railroad._bindings import State
 from railroad.core import Operator
-from ..navigation.occupancy_grid_mixin import OccupancyGridPathingMixin
+from railroad.navigation import OccupancyGridPathingMixin
 from ..symbolic import LocationRegistry, SymbolicEnvironment
 
 from .scene import ProcTHORScene

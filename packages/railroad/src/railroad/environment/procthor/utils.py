@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Sequence, Tuple, cast
 import networkx as nx
 import numpy as np
 
-from ..navigation import pathing
+from railroad.navigation import pathing
 
 
 def get_nearest_free_point(

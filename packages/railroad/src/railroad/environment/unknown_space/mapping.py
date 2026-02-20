@@ -8,7 +8,7 @@ from matplotlib.path import Path
 import numpy as np
 import scipy.ndimage
 
-from .constants import (
+from railroad.navigation.constants import (
     COLLISION_VAL,
     FREE_VAL,
     OBSTACLE_THRESHOLD,

@@ -43,8 +43,8 @@ def main(
     from railroad._bindings import State
     from railroad.core import Fluent as F, get_action_by_name
     from railroad.dashboard import PlannerDashboard
-    from railroad.environment.navigation import NavigationConfig, Pose, UnknownSpaceEnvironment
-    from railroad.environment.navigation.constants import FREE_VAL, OBSTACLE_THRESHOLD
+    from railroad.environment.unknown_space import NavigationConfig, Pose, UnknownSpaceEnvironment
+    from railroad.navigation.constants import FREE_VAL, OBSTACLE_THRESHOLD
     from railroad.environment.symbolic import LocationRegistry
     from railroad.operators import (
         construct_move_navigable_operator,
@@ -297,7 +297,7 @@ def _setup_synthetic(num_robots: int = 1) -> tuple[
     """Build a synthetic corridor grid with hidden container sites."""
     import numpy as np
 
-    from railroad.environment.navigation.constants import COLLISION_VAL, FREE_VAL
+    from railroad.navigation.constants import COLLISION_VAL, FREE_VAL
 
     size = 80
     mid = size // 2

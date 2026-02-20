@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 import numpy as np
 from shapely import geometry
 
-from ..navigation import pathing
+from railroad.navigation import pathing
 from .scenegraph import SceneGraph
 from . import utils
 from .resources import get_procthor_10k_dir

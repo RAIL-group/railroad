@@ -9,8 +9,7 @@ import numpy as np
 from railroad._bindings import Action, Fluent, GroundedEffect, State
 from railroad.core import Operator
 
-from .environment import Environment
-from .skill import ActiveSkill
+from .environment import ActiveSkill, Environment
 
 
 class LocationRegistry:
