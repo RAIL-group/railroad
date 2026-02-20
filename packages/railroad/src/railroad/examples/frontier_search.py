@@ -249,11 +249,6 @@ def main(
                 dashboard.console.print("[red]No actions available — stuck.[/red]")
                 break
 
-            dashboard.console.print("Before MCTS:")
-            dashboard.console.print(env.state)
-            dashboard.console.print(env.objects_by_type)
-            dashboard.console.print(env.location_registry._coords)
-            dashboard.console.print("========")
             mcts = MCTSPlanner(actions)
             action_name = mcts(
                 env.state,
