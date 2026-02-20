@@ -123,45 +123,48 @@ class OccupancyGridPathingMixin:
             return float("inf")
         return max(0.01, cost / speed)
 
-    def compute_move_path(
+    def compute_path_between_points(
         self,
-        loc_from: str,
-        loc_to: str,
-        *,
-        use_theta: bool = True,
+        start: tuple[float, float],
+        end: tuple[float, float],
     ) -> np.ndarray:
-        """Compute 2xN path between two symbolic locations."""
-        start = self._lookup_location_xy(loc_from)
-        end = self._lookup_location_xy(loc_to)
-        if start is None or end is None:
-            return np.array([[]], dtype=int)
+        """Compute 2xN obstacle-aware path between two world-coordinate points."""
+        start_int = (int(round(start[0])), int(round(start[1])))
+        end_int = (int(round(end[0])), int(round(end[1])))
 
         occupancy_grid = self.occupancy_grid
-        if use_theta:
-            _cost, path = pathing.get_cost_and_path_theta(
-                occupancy_grid,
-                start,
-                end,
-                use_soft_cost=self._pathing_use_soft_cost,
-                unknown_as_obstacle=self._pathing_unknown_as_obstacle,
-                soft_cost_scale=self._pathing_soft_cost_scale,
-            )
-            if path.size == 0 or path.shape[0] != 2:
-                _cost, path = pathing.get_cost_and_path(
-                    occupancy_grid,
-                    start,
-                    end,
-                    use_soft_cost=self._pathing_use_soft_cost,
-                    unknown_as_obstacle=self._pathing_unknown_as_obstacle,
-                    soft_cost_scale=self._pathing_soft_cost_scale,
-                )
-        else:
+        _cost, path = pathing.get_cost_and_path_theta(
+            occupancy_grid,
+            start_int,
+            end_int,
+            use_soft_cost=self._pathing_use_soft_cost,
+            unknown_as_obstacle=self._pathing_unknown_as_obstacle,
+            soft_cost_scale=self._pathing_soft_cost_scale,
+        )
+        if path.size == 0 or path.shape[0] != 2:
             _cost, path = pathing.get_cost_and_path(
                 occupancy_grid,
-                start,
-                end,
+                start_int,
+                end_int,
                 use_soft_cost=self._pathing_use_soft_cost,
                 unknown_as_obstacle=self._pathing_unknown_as_obstacle,
                 soft_cost_scale=self._pathing_soft_cost_scale,
             )
         return path
+
+    def compute_move_path(
+        self,
+        loc_from: str,
+        loc_to: str,
+        robot: str | None = None,
+    ) -> np.ndarray:
+        """Compute 2xN path between two symbolic locations."""
+        del robot
+        start = self._lookup_location_xy(loc_from)
+        end = self._lookup_location_xy(loc_to)
+        if start is None or end is None:
+            return np.array([[]], dtype=int)
+        return self.compute_path_between_points(
+            (float(start[0]), float(start[1])),
+            (float(end[0]), float(end[1])),
+        )

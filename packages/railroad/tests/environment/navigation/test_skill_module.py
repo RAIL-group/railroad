@@ -54,10 +54,9 @@ class _FakeNavigationEnv:
         self,
         loc_from: str,
         loc_to: str,
-        *,
-        use_theta: bool = True,
+        robot: str | None = None,
     ) -> np.ndarray:
-        del loc_from, loc_to, use_theta
+        del loc_from, loc_to, robot
         return np.array([[0, 0, 0], [0, 1, 2]], dtype=int)
 
     def set_robot_pose(self, robot: str, pose: object) -> None:
