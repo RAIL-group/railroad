@@ -46,12 +46,12 @@ def main(
     from railroad.environment.unknown_space import NavigationConfig, Pose, UnknownSpaceEnvironment
     from railroad.navigation.constants import FREE_VAL, OBSTACLE_THRESHOLD
     from railroad.environment.symbolic import LocationRegistry
-    from railroad.operators import (
+    from railroad.environment.unknown_space.operators import (
         construct_move_navigable_operator,
-        construct_no_op_operator,
         construct_search_at_site_operator,
         construct_search_frontier_operator,
     )
+    from railroad.operators import construct_no_op_operator
     from railroad.planner import MCTSPlanner
 
     # ------------------------------------------------------------------
@@ -280,69 +280,6 @@ def main(
 # ======================================================================
 # Setup helpers
 # ======================================================================
-
-
-def _setup_synthetic(num_robots: int = 1) -> tuple[
-    "np.ndarray",
-    dict[str, tuple[int, int]],
-    dict[str, set[str]],
-    list[tuple[int, int]],
-    list[str],
-]:
-    """Build a synthetic corridor grid with hidden container sites."""
-    import numpy as np
-
-    from railroad.navigation.constants import COLLISION_VAL, FREE_VAL
-
-    size = 80
-    mid = size // 2
-
-    grid = np.full((size, size), COLLISION_VAL)
-
-    # Central hub (16x16)
-    hub_half = 8
-    grid[mid - hub_half : mid + hub_half, mid - hub_half : mid + hub_half] = FREE_VAL
-
-    # Four corridors
-    cor_half = 3
-    grid[1 : mid - hub_half + 1, mid - cor_half : mid + cor_half + 1] = FREE_VAL  # North
-    grid[mid + hub_half - 1 : size - 1, mid - cor_half : mid + cor_half + 1] = FREE_VAL  # South
-    grid[mid - cor_half : mid + cor_half + 1, 1 : mid - hub_half + 1] = FREE_VAL  # West
-    grid[mid - cor_half : mid + cor_half + 1, mid + hub_half - 1 : size - 1] = FREE_VAL  # East
-
-    # Side rooms off each corridor
-    grid[4:12, mid - cor_half - 8 : mid - cor_half] = FREE_VAL
-    grid[4:12, mid + cor_half + 1 : mid + cor_half + 9] = FREE_VAL
-    grid[size - 12 : size - 4, mid - cor_half - 8 : mid - cor_half] = FREE_VAL
-    grid[size - 12 : size - 4, mid + cor_half + 1 : mid + cor_half + 9] = FREE_VAL
-    grid[mid - cor_half - 8 : mid - cor_half, 4:12] = FREE_VAL
-    grid[mid + cor_half + 1 : mid + cor_half + 9, 4:12] = FREE_VAL
-    grid[mid - cor_half - 8 : mid - cor_half, size - 12 : size - 4] = FREE_VAL
-    grid[mid + cor_half + 1 : mid + cor_half + 9, size - 12 : size - 4] = FREE_VAL
-
-    # Small obstacles in the hub
-    for dr, dc in [(-3, -3), (-3, 3), (3, -3), (3, 3)]:
-        r, c = mid + dr, mid + dc
-        grid[r, c] = COLLISION_VAL
-        grid[r - 1, c] = COLLISION_VAL
-        grid[r, c - 1] = COLLISION_VAL
-
-    hidden_sites: dict[str, tuple[int, int]] = {
-        "container_north": (8, mid),
-        "container_south": (size - 8, mid),
-        "container_east": (mid, size - 8),
-    }
-
-    true_object_locations: dict[str, set[str]] = {
-        "container_north": {"Mug"},
-        "container_east": {"Knife"},
-    }
-
-    target_objects = ["Mug", "Knife"]
-    start_coords = [(mid, mid)] * num_robots
-
-    return grid, hidden_sites, true_object_locations, start_coords, target_objects
-
 
 def _setup_procthor(
     seed: int | None = None,
