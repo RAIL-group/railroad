@@ -251,14 +251,7 @@ class Environment(ABC):
         return any(f.name == "free" for f in self.fluents)
 
     def interrupt_skills(self) -> None:
-        """Interrupt active interruptible skills according to env policy.
-
-        Args:
-            force: If True, interrupt even when no robot is currently free.
-
-        Returns:
-            True if at least one skill was interrupted.
-        """
+        """Interrupt active interruptible skills according to env policy."""
         for skill in self._active_skills:
             skill.interrupt(self)
 
