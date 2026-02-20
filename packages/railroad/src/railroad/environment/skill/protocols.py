@@ -67,8 +67,7 @@ class SupportsMovePathEnvironment(Protocol):
         self,
         loc_from: str,
         loc_to: str,
-        *,
-        use_theta: bool = True,
+        robot: str | None = None,
     ) -> np.ndarray:
         """Compute 2xN path between symbolic locations."""
         ...

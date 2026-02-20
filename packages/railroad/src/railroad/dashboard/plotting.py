@@ -157,6 +157,7 @@ class _PlottingMixin:
                 object_entities[entity] = positions
 
         # Environment-aware trajectory expansion
+        compute_path_between_points_fn = getattr(self._env, "compute_path_between_points", None)
         compute_move_path_fn = getattr(self._env, "compute_move_path", None)
 
         trajectories: dict[str, tuple[list[tuple[float, float]], list[float]]] = {}
@@ -198,7 +199,7 @@ class _PlottingMixin:
                 continue
 
             # Expand through environment pathing if available.
-            if callable(compute_move_path_fn):
+            if callable(compute_path_between_points_fn) or callable(compute_move_path_fn):
                 import numpy as np
                 expanded_wps: list[tuple[float, float]] = []
                 expanded_ts: list[float] = []
@@ -209,15 +210,30 @@ class _PlottingMixin:
                     seg_loc_to = waypoint_locs[seg_i + 1]
 
                     path: list[tuple[float, float]] | None = None
-                    try:
-                        path_arr = compute_move_path_fn(seg_loc_from, seg_loc_to, use_theta=True)
-                        if getattr(path_arr, "size", 0) != 0 and path_arr.shape[0] == 2:
-                            path = [
-                                (float(path_arr[0, j]), float(path_arr[1, j]))
-                                for j in range(path_arr.shape[1])
-                            ]
-                    except Exception:
-                        path = None
+
+                    # Prefer coordinate-based pathing (uses dashboard's stored coords)
+                    if callable(compute_path_between_points_fn):
+                        try:
+                            path_arr = compute_path_between_points_fn(seg_start, seg_end)
+                            if getattr(path_arr, "size", 0) != 0 and path_arr.shape[0] == 2:
+                                path = [
+                                    (float(path_arr[0, j]), float(path_arr[1, j]))
+                                    for j in range(path_arr.shape[1])
+                                ]
+                        except Exception:
+                            path = None
+
+                    # Fall back to name-based pathing
+                    if (not path or len(path) < 2) and callable(compute_move_path_fn):
+                        try:
+                            path_arr = compute_move_path_fn(seg_loc_from, seg_loc_to)
+                            if getattr(path_arr, "size", 0) != 0 and path_arr.shape[0] == 2:
+                                path = [
+                                    (float(path_arr[0, j]), float(path_arr[1, j]))
+                                    for j in range(path_arr.shape[1])
+                                ]
+                        except Exception:
+                            path = None
 
                     if not path or len(path) < 2:
                         path = [seg_start, seg_end]

@@ -219,15 +219,25 @@ class SymbolicEnvironment(Environment):
         """Location coordinate registry for interruptible moves."""
         return self._location_registry
 
+    def compute_path_between_points(
+        self,
+        start: tuple[float, float],
+        end: tuple[float, float],
+    ) -> np.ndarray:
+        """Compute a straight-line 2-point path between world-coordinate points."""
+        return np.array(
+            [[start[0], end[0]], [start[1], end[1]]],
+            dtype=float,
+        )
+
     def compute_move_path(
         self,
         loc_from: str,
         loc_to: str,
-        *,
-        use_theta: bool = True,
+        robot: str | None = None,
     ) -> np.ndarray:
         """Compute a straight-line 2-point path from symbolic coordinates."""
-        del use_theta
+        del robot
         if self._location_registry is None:
             raise TypeError(
                 "SymbolicEnvironment.compute_move_path requires location_registry."
@@ -244,9 +254,9 @@ class SymbolicEnvironment(Environment):
                 "LocationRegistry coordinates must provide at least x/y components."
             )
 
-        return np.array(
-            [[start_xy[0], end_xy[0]], [start_xy[1], end_xy[1]]],
-            dtype=float,
+        return self.compute_path_between_points(
+            (float(start_xy[0]), float(start_xy[1])),
+            (float(end_xy[0]), float(end_xy[1])),
         )
 
     def _create_initial_effects_skill(
