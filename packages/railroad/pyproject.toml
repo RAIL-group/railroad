@@ -13,8 +13,8 @@ dependencies = [
     "rich",
     "matplotlib",
     "pyqt5",
-    "scipy>=1.11.0",
-    "scikit-image>=0.21.0",
+    "scipy",
+    "scikit-image",
 ]
 
 [project.optional-dependencies]
