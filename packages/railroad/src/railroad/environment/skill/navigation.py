@@ -9,7 +9,7 @@ import numpy as np
 
 from railroad._bindings import Action, Fluent
 
-from ..motion_utils import get_coordinates_at_distance, path_total_length
+from ..navigation.pathing import get_coordinates_at_distance, path_total_length
 from ..symbolic import SymbolicSkill
 from ..types import Pose
 from .protocols import MotionSkill, SupportsMovePathEnvironment
