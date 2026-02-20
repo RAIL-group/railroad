@@ -311,7 +311,7 @@ class _PlottingMixin:
         # Plot grid background if available (ProcTHOR tier)
         if grid is not None:
             try:
-                from railroad.environment.procthor.plotting import plot_grid
+                from railroad.navigation.plotting import plot_grid
                 plot_grid(ax, grid)
             except ImportError:
                 pass
@@ -671,7 +671,7 @@ class _PlottingMixin:
         # Plot grid background if available
         if grid is not None:
             try:
-                from railroad.environment.procthor.plotting import plot_grid
+                from railroad.navigation.plotting import plot_grid
                 plot_grid(main_ax, grid)
             except ImportError:
                 pass

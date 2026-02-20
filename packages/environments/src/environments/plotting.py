@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from matplotlib.collections import LineCollection
 
-from railroad.environment.procthor.plotting import make_plotting_grid
+from railroad.navigation.plotting import make_plotting_grid
 
 
 def plot_grid(ax, grid):

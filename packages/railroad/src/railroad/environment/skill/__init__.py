@@ -1,7 +1,9 @@
 """Skill protocols and concrete skill implementations."""
 
 from .navigation import InterruptibleNavigationMoveSkill, NavigationMoveSkill
-from .protocols import ActiveSkill, MotionSkill, SupportsMovePathEnvironment
+from railroad.environment.environment import ActiveSkill
+
+from .protocols import MotionSkill, SupportsMovePathEnvironment
 
 __all__ = [
     "ActiveSkill",
