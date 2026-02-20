@@ -3,7 +3,6 @@
 from .environment import UnknownSpaceEnvironment
 from .operators import (
     construct_move_navigable_operator,
-    construct_observe_site_operator,
     construct_search_at_site_operator,
     construct_search_frontier_operator,
 )
@@ -16,7 +15,6 @@ __all__ = [
     "Pose",
     "UnknownSpaceEnvironment",
     "construct_move_navigable_operator",
-    "construct_observe_site_operator",
     "construct_search_at_site_operator",
     "construct_search_frontier_operator",
 ]
