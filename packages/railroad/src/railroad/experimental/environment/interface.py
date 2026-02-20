@@ -471,14 +471,13 @@ class OngoingMoveAction(OngoingAction):
                 raise ValueError("Probabilistic effects cannot be interrupted.")
             sorted_fluents = sorted(eff.resulting_fluents, key=lambda f: f.negated, reverse=True)
             for fluent in sorted_fluents:
-                if (~fluent) in new_fluents:
-                    new_fluents.remove(~fluent)
-                new_fluents.add(
-                    F(
-                        " ".join([fluent.name] + [fa if fa != old_target else new_target for fa in fluent.args]),
-                        negated=fluent.negated,
-                    )
+                fluent_to_add = F(
+                    " ".join([fluent.name] + [fa if fa != old_target else new_target for fa in fluent.args]),
+                    negated=fluent.negated,
                 )
+                new_fluents.add(fluent_to_add)
+                if (~fluent_to_add) in new_fluents:
+                    new_fluents.remove(~fluent_to_add)
 
         self._upcoming_effects = []
         return new_fluents
