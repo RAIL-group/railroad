@@ -103,36 +103,26 @@ class ProcTHORScene:
     def get_object_find_prob_fn(
         self,
         nn_model_path: str,
-        objects_to_find: List[str],
-        objects_with_idx: bool = True
     ) -> Callable[[str, str, str], float]:
+        """Get learned object find probability function.
+
+        Returns a function ``(robot, location, object) -> probability`` that
+        computes and caches NN-based probabilities lazily per object on first
+        access, so callers do not need to know the target object set upfront.
         """
-        Get learned object find probability function.
-        Args:
-            nn_model_path: Path to trained neural network model
-            objects_to_find: List of object names to find
-            objects_with_idx: Whether objects_to_find includes indices (e.g., 'teddybear_6')
-        Returns:
-            Function (robot, location, object) -> probability
-        """
-        # Get the learned model
         from . import learning
-        self.obj_prob_net = learning.models.FCNN.get_net_eval_fn(nn_model_path)
-
-        # if objects in objects_to_find have index (e.g., 'teddybear_6'), remove the index
-        if objects_with_idx:
-            objects_without_idx = []
-            for obj in objects_to_find:
-                objects_without_idx.append(obj.split('_')[0])
-            objects_to_find = objects_without_idx
+        obj_prob_net = learning.models.FCNN.get_net_eval_fn(nn_model_path)
         object_free_scene_graph = self.scene_graph.get_object_free_graph()
-        node_features_dict = learning.utils.prepare_fcnn_input(
-            object_free_scene_graph, self.scene_graph.container_indices, objects_to_find)
+        containers = self.scene_graph.container_indices
+        cache: dict[str, dict[int, float]] = {}
 
-        object_container_prop_dict = {}
-        for obj in objects_to_find:
-            datum = {'node_feats': node_features_dict[obj]}
-            object_container_prop_dict[obj] = self.obj_prob_net(datum, self.scene_graph.container_indices)
+        def _ensure_cached(obj_name: str) -> dict[int, float]:
+            if obj_name not in cache:
+                node_features_dict = learning.utils.prepare_fcnn_input(
+                    object_free_scene_graph, containers, [obj_name])
+                datum = {'node_feats': node_features_dict[obj_name]}
+                cache[obj_name] = obj_prob_net(datum, containers)
+            return cache[obj_name]
 
         def get_object_find_prob(robot: str, location: str, obj: str) -> float:
             idx = location.split('_')[1]
@@ -140,15 +130,7 @@ class ProcTHORScene:
                 return 0.0
             idx = int(idx)
             obj_name = obj.split('_')[0]
-            '''TODO: Fix this (discuss to find more elegant solution). When reinstantiation of search operator occurs
-            with newly found object, it is not found in dict, because we don't need to search for it. e.g.,
-            objects_to_find = ['teddybear', 'pencil'], but after searching bed, robot finds 'pillow'. Reinstantiation
-            of search operator with pillow for other containers fails here because pillow is not in objects_to_find.
-            '''
-            if obj_name not in object_container_prop_dict:
-                return 0.0
-            object_find_prob = round(object_container_prop_dict[obj_name][idx], 3)
-            return object_find_prob
+            return round(_ensure_cached(obj_name)[idx], 3)
 
         return get_object_find_prob
 
