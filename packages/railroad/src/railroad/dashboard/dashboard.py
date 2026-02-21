@@ -173,36 +173,26 @@ class PlannerDashboard(_PlottingMixin):
             return {f for f in state.fluents if self._fluent_filter(f)}
         return set(state.fluents)
 
-    def _get_location_coords(self) -> tuple[
-        dict[str, tuple[float, float]],  # location_name -> (x, y)
-        Any,                              # occupancy grid or None
-        Any,                              # scene graph or None
-    ]:
+    def _get_location_coords(self) -> dict[str, tuple[float, float]]:
         """Get location coordinates from the environment.
 
-        Three-tier detection:
-        1. ProcTHOR: env.scene with .locations, .grid, .scene_graph
-        2. LocationRegistry: env.location_registry with .get()
-        3. Pure symbolic: empty dict (coordinates deferred to plot time)
+        Combines coordinates from all available sources:
+        1. ProcTHOR scene: env.scene.locations (static map locations)
+        2. LocationRegistry: env.location_registry (dynamically discovered)
+        Registry entries take priority for overlapping names.
         """
         env = self._env
         coords: dict[str, tuple[float, float]] = {}
-        grid = None
-        graph = None
 
-        # Tier 1: ProcTHOR environment
+        # ProcTHOR scene locations
         scene = getattr(env, "scene", None)
         if scene is not None and hasattr(scene, "locations"):
             for name, xy in scene.locations.items():
                 coords[name] = (float(xy[0]), float(xy[1]))
-            grid = getattr(scene, "grid", None)
-            graph = getattr(scene, "scene_graph", None)
-            return coords, grid, graph
 
-        # Tier 2: LocationRegistry
+        # LocationRegistry (may add dynamically discovered locations)
         registry = getattr(env, "location_registry", None)
         if registry is not None:
-            # Collect all location names from current entity positions
             all_locs: set[str] = set()
             for positions in self._entity_positions.values():
                 for _, loc_name, _ in positions:
@@ -211,10 +201,8 @@ class PlannerDashboard(_PlottingMixin):
                 c = registry.get(loc)
                 if c is not None:
                     coords[loc] = (float(c[0]), float(c[1]))
-            return coords, None, None
 
-        # Tier 3: Pure symbolic — no coordinates available
-        return coords, None, None
+        return coords
 
     def __enter__(self) -> "PlannerDashboard":
         if self._interactive:
@@ -720,7 +708,7 @@ class PlannerDashboard(_PlottingMixin):
         state = self._env.state
         self._goal_time = state.time
 
-        coord_lookup, _, _ = self._get_location_coords()
+        coord_lookup = self._get_location_coords()
         for effect_time, effect in state.upcoming_effects:
             for fluent in effect.resulting_fluents:
                 if fluent.name == "at" and len(fluent.args) >= 2:
@@ -762,7 +750,7 @@ class PlannerDashboard(_PlottingMixin):
 
     def _record_entity_positions(self, state: State) -> None:
         """Extract and record entity positions from (at entity location) fluents."""
-        coord_lookup, _, _ = self._get_location_coords()
+        coord_lookup = self._get_location_coords()
         for fluent in state.fluents:
             if fluent.name == "at" and len(fluent.args) >= 2:
                 entity_name = fluent.args[0]
