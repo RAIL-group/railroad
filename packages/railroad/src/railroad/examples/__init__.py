@@ -77,13 +77,6 @@ EXAMPLES: Dict[str, ExampleInfo] = {
         "description": "Explore unknown space and search discovered sites for objects",
         "options": [
             {
-                "name": "--procthor",
-                "is_flag": True,
-                "default": False,
-                "help": "Use ProcTHOR scene instead of synthetic grid",
-                "param_name": "procthor",
-            },
-            {
                 "name": "--seed",
                 "type": int,
                 "default": None,
