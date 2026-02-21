@@ -39,8 +39,6 @@ class NavigationConfig:
     # Keep action-selection cost estimates cheap, but allow selected moves
     # to execute on any-angle Theta* paths.
     move_execution_use_theta_star: bool = True
-    # If False, move skills will ignore interrupt requests and run to completion.
-    move_execution_interruptible: bool = True
     occupied_prob: float = 0.9
     unoccupied_prob: float = 0.1
     connect_neighbor_distance: int = 2

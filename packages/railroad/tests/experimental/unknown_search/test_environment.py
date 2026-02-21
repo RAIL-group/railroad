@@ -15,6 +15,7 @@ from railroad.experimental.unknown_search.operators import (
     construct_move_navigable_operator,
     construct_search_at_site_operator,
 )
+from railroad.environment.skill import InterruptibleNavigationMoveSkill, NavigationMoveSkill
 from railroad.operators import construct_no_op_operator
 
 F = Fluent
@@ -55,6 +56,7 @@ def _make_environment(
     config: NavigationConfig | None = None,
     two_robots: bool = True,
     include_no_op: bool = False,
+    move_skill: type = InterruptibleNavigationMoveSkill,
 ) -> UnknownSpaceEnvironment:
     """Create a test UnknownSpaceEnvironment with the branching corridor grid."""
     true_grid = _make_branching_grid()
@@ -145,6 +147,7 @@ def _make_environment(
         true_grid=true_grid,
         robot_initial_poses=robot_initial_poses,
         location_registry=registry,
+        skill_overrides={"move": move_skill},
         hidden_sites=hidden_sites,
         true_object_locations=true_object_locations,
         config=config,
@@ -298,9 +301,8 @@ def test_non_interruptible_move_completes_under_aggressive_interrupt_thresholds(
         speed_cells_per_sec=2.0,
         interrupt_min_new_cells=1,
         interrupt_min_dt=0.0,
-        move_execution_interruptible=False,
     )
-    env = _make_environment(config=config, two_robots=False)
+    env = _make_environment(config=config, two_robots=False, move_skill=NavigationMoveSkill)
     action = _first_valid_move_action(env)
     destination = action.name.split()[3]
 
@@ -325,7 +327,6 @@ def test_stale_destination_is_handled_only_on_interrupt_request(monkeypatch):
         speed_cells_per_sec=2.0,
         interrupt_min_new_cells=100000,
         interrupt_min_dt=100000.0,
-        move_execution_interruptible=True,
     )
     env = _make_environment(config=config, two_robots=False)
 
@@ -384,9 +385,8 @@ def test_robot_pose_updates_without_continuous_robot_loc_registry_writes():
         speed_cells_per_sec=2.0,
         interrupt_min_new_cells=100000,
         interrupt_min_dt=100000.0,
-        move_execution_interruptible=False,
     )
-    env = _make_environment(config=config, two_robots=False)
+    env = _make_environment(config=config, two_robots=False, move_skill=NavigationMoveSkill)
     action = _first_valid_move_action(env)
     registry = env.location_registry
     assert registry is not None
@@ -462,6 +462,7 @@ def test_unreachable_move_is_filtered_out():
         true_grid=true_grid,
         robot_initial_poses={"robot1": Pose(6.0, 2.0, 0.0)},
         location_registry=location_registry,
+        skill_overrides={"move": NavigationMoveSkill},
         hidden_sites={},
         config=NavigationConfig(
             sensor_range=2.0,
@@ -538,6 +539,7 @@ def test_move_time_cache_updates_when_location_moves():
         true_grid=true_grid,
         robot_initial_poses={"robot1": Pose(2.0, 2.0, 0.0)},
         location_registry=location_registry,
+        skill_overrides={"move": NavigationMoveSkill},
         hidden_sites={},
         config=NavigationConfig(
             sensor_range=2.0,
