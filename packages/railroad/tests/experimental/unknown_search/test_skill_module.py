@@ -16,21 +16,24 @@ if TYPE_CHECKING:
     from railroad.environment import Environment
 
 
-def _move_action():
+def _move_action(*, with_claim: bool = False):
+    time0_fluents: set = {~F("free", "?robot")}
+    completion_fluents: set = {
+        ~F("at", "?robot", "?from"),
+        F("at", "?robot", "?to"),
+        F("free", "?robot"),
+    }
+    if with_claim:
+        time0_fluents.add(F("claimed", "?to"))
+        completion_fluents.add(~F("claimed", "?to"))
+
     move_op = Operator(
         name="move",
         parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
         preconditions=[F("at", "?robot", "?from"), F("free", "?robot")],
         effects=[
-            Effect(time=0.0, resulting_fluents={~F("free", "?robot")}),
-            Effect(
-                time=10.0,
-                resulting_fluents={
-                    ~F("at", "?robot", "?from"),
-                    F("at", "?robot", "?to"),
-                    F("free", "?robot"),
-                },
-            ),
+            Effect(time=0.0, resulting_fluents=time0_fluents),
+            Effect(time=10.0, resulting_fluents=completion_fluents),
         ],
     )
     actions = move_op.instantiate({"robot": ["r1"], "location": ["start", "goal"]})
@@ -125,3 +128,35 @@ def test_navigation_skill_import_paths_remain_backward_compatible():
     from railroad.environment.skill.navigation import NavigationMoveSkill as FromSkillModule
 
     assert FromSkillModule is NavigationMoveSkill
+
+
+def test_interrupt_clears_claimed_on_original_destination():
+    """Interrupting a move must undo time-0 effects like ``claimed goal``.
+
+    The operator sets ``claimed goal`` at time-0 and ``not claimed goal``
+    in the completion effect.  When the move is interrupted, the
+    completion effect is applied early; it must still reference the
+    original destination so that the claim is properly cleared.
+    """
+    env = _FakeNavigationEnv(destination_known=True)
+    typed_env = cast("Environment", env)
+
+    action = _move_action(with_claim=True)
+    skill = InterruptibleNavigationMoveSkill(
+        action=action, start_time=0.0, env=env,
+    )
+
+    # time-0 effects: claimed goal is set, robot is not free
+    skill.advance(0.0, typed_env)
+    assert F("claimed", "goal") in env.fluents
+
+    # Advance partway then interrupt
+    skill.advance(5.0, typed_env)
+    skill.interrupt(typed_env)
+
+    assert skill.is_done
+    # Robot lands at intermediate location, not the original destination
+    assert F("at", "r1", "r1_loc") in env.fluents
+    assert F("at", "r1", "goal") not in env.fluents
+    # The claim on the original destination must be cleared
+    assert F("claimed", "goal") not in env.fluents
