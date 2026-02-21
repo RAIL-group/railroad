@@ -42,7 +42,7 @@ class ROSRealScene(PhysicalScene):
     def _get_distance(self, location1: str, location2: str) -> float:
         if location2.endswith('_loc'):
             location1, location2 = location2, location1
-            if location1.endswith('_loc'):
+            if location2.endswith('_loc'):
                 return float('inf')
         request = roslibpy.ServiceRequest({'to_name': location2, 'from_name': location1})
         result = self._get_distance_service.call(request, timeout=10)
