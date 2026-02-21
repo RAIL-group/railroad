@@ -32,13 +32,13 @@ class NavigationConfig:
     sensor_range: float = 60.0
     sensor_fov_rad: float = 2 * math.pi
     sensor_num_rays: int = 181
-    sensor_dt: float = 0.08
+    sensor_dt: float = 2.0
     speed_cells_per_sec: float = 2.0
-    trajectory_use_soft_cost: bool = True
-    trajectory_soft_cost_scale: float = 6.0
+    trajectory_use_soft_cost: bool = False
+    trajectory_soft_cost_scale: float = 12.0
     # Keep action-selection cost estimates cheap, but allow selected moves
     # to execute on any-angle Theta* paths.
-    move_execution_use_theta_star: bool = False
+    move_execution_use_theta_star: bool = True
     # If False, move skills will ignore interrupt requests and run to completion.
     move_execution_interruptible: bool = True
     occupied_prob: float = 0.9
