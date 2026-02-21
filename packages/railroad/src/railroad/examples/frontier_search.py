@@ -140,12 +140,7 @@ def main(
 
     config = NavigationConfig(
         sensor_range=120.0,
-        sensor_fov_rad=2 * np.pi,
-        sensor_num_rays=361,
-        move_execution_use_theta_star=True,
         move_execution_interruptible=not disable_move_interruptions,
-        trajectory_use_soft_cost=False,
-        trajectory_soft_cost_scale=12.0,
         max_move_action_time=10_000.0,
         interrupt_min_new_cells=30000,
         interrupt_min_dt=30000.0,
