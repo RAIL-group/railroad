@@ -18,6 +18,9 @@ Available operators:
 - Pick: construct_pick_operator, construct_pick_operator_blocking
 - Place: construct_place_operator, construct_place_operator_blocking
 - Wait: construct_wait_operator, construct_no_op_operator
+
+Navigation/frontier operators are in
+``railroad.experimental.unknown_search.operators``.
 """
 
 from .core import (

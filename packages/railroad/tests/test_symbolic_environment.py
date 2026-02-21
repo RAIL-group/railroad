@@ -73,7 +73,8 @@ def test_symbolic_environment_act():
 
 def test_symbolic_environment_multi_robot_interrupt():
     """Test that robot1's move is interrupted when robot2 becomes free."""
-    from railroad.environment import InterruptableMoveSymbolicSkill, LocationRegistry
+    import numpy as np
+    from railroad.environment import InterruptibleNavigationMoveSkill, LocationRegistry
     from railroad.core import get_action_by_name
 
     # Two robots: robot1 at kitchen, robot2 at bedroom
@@ -108,8 +109,12 @@ def test_symbolic_environment_multi_robot_interrupt():
         state=State(0.0, initial_fluents, []),
         objects_by_type={"robot": {"robot1", "robot2"}, "location": {"kitchen", "bedroom", "living_room"}},
         operators=[move_op, wait_op],
-        skill_overrides={"move": InterruptableMoveSymbolicSkill},
-        location_registry=LocationRegistry({}),  # Optional, but avoids warning
+        skill_overrides={"move": InterruptibleNavigationMoveSkill},
+        location_registry=LocationRegistry({
+            "kitchen": np.array([0.0, 0.0]),
+            "bedroom": np.array([10.0, 0.0]),
+            "living_room": np.array([10.0, 5.0]),
+        }),
     )
     actions = env.get_actions()
 
@@ -147,7 +152,7 @@ def test_interrupt_then_move_to_different_destination():
     """
     import math
     import numpy as np
-    from railroad.environment import InterruptableMoveSymbolicSkill, LocationRegistry
+    from railroad.environment import InterruptibleNavigationMoveSkill, LocationRegistry
     from railroad.core import get_action_by_name
 
     # Create registry with locations
@@ -200,7 +205,7 @@ def test_interrupt_then_move_to_different_destination():
         state=State(0.0, initial_fluents, initial_effects),
         objects_by_type={"robot": {"robot1", "robot2"}, "location": {"kitchen", "bedroom", "living_room"}},
         operators=[move_op, wait_op],
-        skill_overrides={"move": InterruptableMoveSymbolicSkill},
+        skill_overrides={"move": InterruptibleNavigationMoveSkill},
         location_registry=registry,
     )
 
@@ -321,7 +326,8 @@ def test_symbolic_environment_create_skill():
 
 def test_symbolic_environment_create_move_skill():
     """Test move skill creation via factory method."""
-    from railroad.environment import SymbolicSkill, InterruptableMoveSymbolicSkill
+    import numpy as np
+    from railroad.environment import InterruptibleNavigationMoveSkill, SymbolicSkill
 
     env = SymbolicEnvironment(
         state=State(0.0, set(), []),
@@ -349,7 +355,7 @@ def test_symbolic_environment_create_move_skill():
 
     # Move skills use SymbolicSkill by default (not interruptible)
     assert isinstance(skill, SymbolicSkill)
-    assert not isinstance(skill, InterruptableMoveSymbolicSkill)
+    assert not isinstance(skill, InterruptibleNavigationMoveSkill)
     assert not skill.is_interruptible
 
     # Can use skill_overrides to make moves interruptible
@@ -357,12 +363,49 @@ def test_symbolic_environment_create_move_skill():
         state=State(0.0, set(), []),
         objects_by_type={},
         operators=[],
-        skill_overrides={"move": InterruptableMoveSymbolicSkill},
-        location_registry=LocationRegistry({}),
+        skill_overrides={"move": InterruptibleNavigationMoveSkill},
+        location_registry=LocationRegistry({
+            "kitchen": np.array([0.0, 0.0]),
+            "bedroom": np.array([10.0, 0.0]),
+        }),
     )
     skill_interruptible = env_with_override.create_skill(action, time=0.0)
-    assert isinstance(skill_interruptible, InterruptableMoveSymbolicSkill)
+    assert isinstance(skill_interruptible, InterruptibleNavigationMoveSkill)
     assert skill_interruptible.is_interruptible
+
+
+def test_symbolic_environment_interruptible_override_requires_location_registry():
+    """Env-aware interruptible move skill requires registry-backed pathing."""
+    from railroad.environment import InterruptibleNavigationMoveSkill
+
+    env = SymbolicEnvironment(
+        state=State(0.0, set(), []),
+        objects_by_type={},
+        operators=[],
+        skill_overrides={"move": InterruptibleNavigationMoveSkill},
+    )
+
+    op = Operator(
+        name="move",
+        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F("at", "?robot", "?from"), F("free", "?robot")],
+        effects=[
+            Effect(time=0.0, resulting_fluents={~F("free", "?robot")}),
+            Effect(
+                time=10.0,
+                resulting_fluents={
+                    ~F("at", "?robot", "?from"),
+                    F("at", "?robot", "?to"),
+                    F("free", "?robot"),
+                },
+            ),
+        ],
+    )
+    actions = op.instantiate({"robot": ["r1"], "location": ["kitchen", "bedroom"]})
+    action = [a for a in actions if "kitchen" in a.name and "bedroom" in a.name][0]
+
+    with pytest.raises(TypeError, match="requires location_registry"):
+        env.create_skill(action, time=0.0)
 
 
 def test_symbolic_environment_create_search_skill():

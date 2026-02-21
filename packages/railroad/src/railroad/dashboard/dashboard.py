@@ -7,6 +7,7 @@ from rich.table import Table
 from rich.rule import Rule
 from rich.text import Text
 
+from math import isinf
 import re
 from time import sleep, perf_counter
 from typing import Any, List, Set, Union, Tuple, Callable
@@ -104,6 +105,10 @@ class PlannerDashboard(_PlottingMixin):
         factory = planner_factory or MCTSPlanner
         planner = factory(env.get_actions())
         self.initial_heuristic = planner.heuristic(env.state, self.goal)
+        if isinf(self.initial_heuristic):
+            raise ValueError(
+                "Initial heuristic is inf; provide a reachable goal or a planner heuristic with a finite fallback."
+            )
 
         # Actions stored as (action_name, start_time) tuples
         self.actions_taken: List[Tuple[str, float]] = []
@@ -117,6 +122,8 @@ class PlannerDashboard(_PlottingMixin):
         # Trajectory tracking: entity_name -> [(time, location_name, (x,y) or None), ...]
         self._entity_positions: dict[str, list[tuple[float, str, tuple[float, float] | None]]] = {}
         self._goal_time: float | None = None
+        self._nav_grid_snapshots: list[tuple[float, Any]] = []
+        self._nav_continuous_positions: dict[str, list[tuple[float, float, float]]] = {}
 
         # Root layout
         self.layout = self._make_layout()
@@ -166,36 +173,26 @@ class PlannerDashboard(_PlottingMixin):
             return {f for f in state.fluents if self._fluent_filter(f)}
         return set(state.fluents)
 
-    def _get_location_coords(self) -> tuple[
-        dict[str, tuple[float, float]],  # location_name -> (x, y)
-        Any,                              # occupancy grid or None
-        Any,                              # scene graph or None
-    ]:
+    def _get_location_coords(self) -> dict[str, tuple[float, float]]:
         """Get location coordinates from the environment.
 
-        Three-tier detection:
-        1. ProcTHOR: env.scene with .locations, .grid, .scene_graph
-        2. LocationRegistry: env.location_registry with .get()
-        3. Pure symbolic: empty dict (coordinates deferred to plot time)
+        Combines coordinates from all available sources:
+        1. ProcTHOR scene: env.scene.locations (static map locations)
+        2. LocationRegistry: env.location_registry (dynamically discovered)
+        Registry entries take priority for overlapping names.
         """
         env = self._env
         coords: dict[str, tuple[float, float]] = {}
-        grid = None
-        graph = None
 
-        # Tier 1: ProcTHOR environment
+        # ProcTHOR scene locations
         scene = getattr(env, "scene", None)
         if scene is not None and hasattr(scene, "locations"):
             for name, xy in scene.locations.items():
                 coords[name] = (float(xy[0]), float(xy[1]))
-            grid = getattr(scene, "grid", None)
-            graph = getattr(scene, "scene_graph", None)
-            return coords, grid, graph
 
-        # Tier 2: LocationRegistry
+        # LocationRegistry (may add dynamically discovered locations)
         registry = getattr(env, "location_registry", None)
         if registry is not None:
-            # Collect all location names from current entity positions
             all_locs: set[str] = set()
             for positions in self._entity_positions.values():
                 for _, loc_name, _ in positions:
@@ -204,10 +201,8 @@ class PlannerDashboard(_PlottingMixin):
                 c = registry.get(loc)
                 if c is not None:
                     coords[loc] = (float(c[0]), float(c[1]))
-            return coords, None, None
 
-        # Tier 3: Pure symbolic — no coordinates available
-        return coords, None, None
+        return coords
 
     def __enter__(self) -> "PlannerDashboard":
         if self._interactive:
@@ -713,7 +708,7 @@ class PlannerDashboard(_PlottingMixin):
         state = self._env.state
         self._goal_time = state.time
 
-        coord_lookup, _, _ = self._get_location_coords()
+        coord_lookup = self._get_location_coords()
         for effect_time, effect in state.upcoming_effects:
             for fluent in effect.resulting_fluents:
                 if fluent.name == "at" and len(fluent.args) >= 2:
@@ -755,7 +750,7 @@ class PlannerDashboard(_PlottingMixin):
 
     def _record_entity_positions(self, state: State) -> None:
         """Extract and record entity positions from (at entity location) fluents."""
-        coord_lookup, _, _ = self._get_location_coords()
+        coord_lookup = self._get_location_coords()
         for fluent in state.fluents:
             if fluent.name == "at" and len(fluent.args) >= 2:
                 entity_name = fluent.args[0]
@@ -770,6 +765,41 @@ class PlannerDashboard(_PlottingMixin):
                 # the entity as stationary during non-movement actions.
                 if not positions or positions[-1][1] != location_name or positions[-1][0] != state.time:
                     positions.append((state.time, location_name, coords))
+
+    def make_act_callback(self) -> Callable[[], None]:
+        """Create a callback for ``env.act()`` that captures intermediate state.
+
+        For navigation environments, this records robot poses (for smooth,
+        obstacle-respecting trajectories) and observed-grid snapshots (for
+        animated grid evolution in videos) at every act-loop time step.
+
+        Returns a reusable callback — create it once and pass it to every
+        ``env.act(action, loop_callback_fn=callback)`` call.
+        """
+        last_snapshot_time: list[float] = [float('-inf')]
+        min_snapshot_interval = 0.5  # seconds of sim-time between grid copies
+
+        def _callback() -> None:
+            env = self._env
+            t = env.time  # type: ignore[union-attr]
+
+            # Capture robot poses (cheap — just a few tuples per call)
+            robot_poses = getattr(env, 'robot_poses', None)
+            if robot_poses is not None:
+                for robot, pose in robot_poses.items():
+                    if robot not in self._nav_continuous_positions:
+                        self._nav_continuous_positions[robot] = []
+                    self._nav_continuous_positions[robot].append(
+                        (t, pose.x, pose.y)
+                    )
+
+            # Capture grid snapshot (throttled to limit memory)
+            observed_grid = getattr(env, 'observed_grid', None)
+            if observed_grid is not None and (t - last_snapshot_time[0]) >= min_snapshot_interval:
+                self._nav_grid_snapshots.append((t, observed_grid.copy()))
+                last_snapshot_time[0] = t
+
+        return _callback
 
     def _do_update(
         self,
@@ -789,6 +819,22 @@ class PlannerDashboard(_PlottingMixin):
                 self.known_robots.add(robot_name)
 
         self._record_entity_positions(state)
+
+        # Capture navigation state (robot poses + grid) for plotting.
+        # The act callback captures intermediate states; this captures
+        # the initial state (from __enter__) and post-action states.
+        robot_poses = getattr(self._env, 'robot_poses', None)
+        if robot_poses is not None:
+            for robot, pose in robot_poses.items():
+                if robot not in self._nav_continuous_positions:
+                    self._nav_continuous_positions[robot] = []
+                self._nav_continuous_positions[robot].append(
+                    (state.time, pose.x, pose.y)
+                )
+
+        observed_grid = getattr(self._env, 'observed_grid', None)
+        if observed_grid is not None:
+            self._nav_grid_snapshots.append((state.time, observed_grid.copy()))
 
         # Use best branch progress for OR goals
         achieved, total, label = self._get_best_branch_progress(state)

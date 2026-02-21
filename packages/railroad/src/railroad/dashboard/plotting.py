@@ -72,39 +72,29 @@ class _PlottingMixin:
     ) -> tuple[
         dict[str, tuple[list[tuple[float, float]], list[float]]],  # entity -> (waypoints, times)
         dict[str, tuple[float, float]],  # resolved env_coords
-        Any,  # grid (for plot_grid background)
     ]:
         """Build resolved and expanded entity trajectories.
 
         Handles: environment coordinate lookup, ``location_coords`` conflict
         check, missing-coordinate generation, robot/object separation, and
-        scene ``get_trajectory`` expansion.
+        environment ``compute_move_path`` expansion when available.
 
         Args:
             location_coords: Optional explicit location->(x,y) mapping.
-                Raises ValueError if any stored positions already have
-                coordinates from the environment.
+                Overrides environment-provided coords for matching keys;
+                per-position stored coordinates still take priority.
             include_objects: If True, also include non-robot entities.
 
         Returns:
-            (trajectories, env_coords, grid) where *trajectories* maps entity
-            names to (waypoints, times) lists with scene-expanded paths.
+            (trajectories, env_coords) where *trajectories* maps entity
+            names to (waypoints, times) lists with path-expanded routes.
         """
-        # Get environment coordinates + grid
-        env_coords, grid, _graph = self._get_location_coords()
+        # Get environment coordinates
+        env_coords = self._get_location_coords()
 
-        # Handle explicit location_coords
+        # Handle explicit location_coords — overrides environment coords.
+        # Per-position stored_coords still take priority at usage time.
         if location_coords is not None:
-            for entity, positions in self._entity_positions.items():
-                for _, loc_name, stored_coords in positions:
-                    if stored_coords is not None:
-                        raise ValueError(
-                            f"Cannot pass location_coords when positions already "
-                            f"have coordinates from the environment "
-                            f"(entity={entity!r}, location={loc_name!r}). "
-                            f"Use location_coords only when the environment does "
-                            f"not provide coordinates."
-                        )
             env_coords.update(location_coords)
 
         # Generate coordinates for locations that still lack them
@@ -125,37 +115,87 @@ class _PlottingMixin:
             else:
                 object_entities[entity] = positions
 
-        # Scene-aware trajectory expansion
-        scene = getattr(self._env, "scene", None)
-        get_trajectory_fn = getattr(scene, "get_trajectory", None)
+        # Environment-aware trajectory expansion
+        compute_path_between_points_fn = getattr(self._env, "compute_path_between_points", None)
+        compute_move_path_fn = getattr(self._env, "compute_move_path", None)
 
         trajectories: dict[str, tuple[list[tuple[float, float]], list[float]]] = {}
 
         # Build robot trajectories (with scene expansion)
         for entity, positions in sorted(robot_entities.items()):
-            waypoints: list[tuple[float, float]] = []
-            times: list[float] = []
+            # Prefer continuous navigation positions (already obstacle-respecting)
+            nav_pos = self._nav_continuous_positions.get(entity)
+            if nav_pos:
+                waypoints = [(x, y) for _, x, y in nav_pos]
+                times = [t for t, _, _ in nav_pos]
+                # Append any finalized positions after the last continuous sample
+                # (handles upcoming-effect extrapolation at goal time)
+                last_t = times[-1] if times else -1.0
+                for t, loc_name, stored_coords in positions:
+                    if t > last_t:
+                        coord = stored_coords if stored_coords is not None else env_coords.get(loc_name)
+                        if coord is not None:
+                            waypoints.append(coord)
+                            times.append(t)
+                trajectories[entity] = (waypoints, times)
+                continue
+
+            waypoints = []
+            times = []
+            waypoint_locs: list[str] = []
             for t, loc_name, stored_coords in positions:
                 if stored_coords is not None:
                     waypoints.append(stored_coords)
                     times.append(t)
+                    waypoint_locs.append(loc_name)
                 elif loc_name in env_coords:
                     waypoints.append(env_coords[loc_name])
                     times.append(t)
+                    waypoint_locs.append(loc_name)
 
             if len(waypoints) < 2:
                 trajectories[entity] = (waypoints, times)
                 continue
 
-            # Expand through scene trajectory if available
-            if get_trajectory_fn is not None:
+            # Expand through environment pathing if available.
+            if callable(compute_path_between_points_fn) or callable(compute_move_path_fn):
                 import numpy as np
                 expanded_wps: list[tuple[float, float]] = []
                 expanded_ts: list[float] = []
                 for seg_i in range(len(waypoints) - 1):
-                    path = get_trajectory_fn([waypoints[seg_i], waypoints[seg_i + 1]])
+                    seg_start = waypoints[seg_i]
+                    seg_end = waypoints[seg_i + 1]
+                    seg_loc_from = waypoint_locs[seg_i]
+                    seg_loc_to = waypoint_locs[seg_i + 1]
+
+                    path: list[tuple[float, float]] | None = None
+
+                    # Prefer coordinate-based pathing (uses dashboard's stored coords)
+                    if callable(compute_path_between_points_fn):
+                        try:
+                            path_arr = compute_path_between_points_fn(seg_start, seg_end)
+                            if getattr(path_arr, "size", 0) != 0 and path_arr.shape[0] == 2:
+                                path = [
+                                    (float(path_arr[0, j]), float(path_arr[1, j]))
+                                    for j in range(path_arr.shape[1])
+                                ]
+                        except Exception:
+                            path = None
+
+                    # Fall back to name-based pathing
+                    if (not path or len(path) < 2) and callable(compute_move_path_fn):
+                        try:
+                            path_arr = compute_move_path_fn(seg_loc_from, seg_loc_to)
+                            if getattr(path_arr, "size", 0) != 0 and path_arr.shape[0] == 2:
+                                path = [
+                                    (float(path_arr[0, j]), float(path_arr[1, j]))
+                                    for j in range(path_arr.shape[1])
+                                ]
+                        except Exception:
+                            path = None
+
                     if not path or len(path) < 2:
-                        path = [waypoints[seg_i], waypoints[seg_i + 1]]
+                        path = [seg_start, seg_end]
                     pts = np.array(path)
                     cum_dist = np.concatenate(([0], np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))))
                     t0, t1 = times[seg_i], times[seg_i + 1]
@@ -182,7 +222,66 @@ class _PlottingMixin:
                         times.append(t)
                 trajectories[entity] = (waypoints, times)
 
-        return trajectories, env_coords, grid
+        return trajectories, env_coords
+
+    def _compute_trail_arrays(
+        self: PlannerDashboard,
+        trajectories: dict[str, tuple[list[tuple[float, float]], list[float]]],
+        t_end: float,
+        *,
+        n_points: int = 2000,
+    ) -> tuple[Any, Any, Any, Any] | None:
+        """Compute dense scatter-trail arrays for all robots, sorted by time.
+
+        Returns ``(xy, sizes, colors, times)`` or ``None`` if empty.
+        """
+        import numpy as np
+
+        dense_times = np.linspace(0.0, t_end, n_points) if t_end > 0 else np.array([0.0])
+        n_pts = len(dense_times)
+        sizes = np.linspace(self._TRAIL_SIZE_START, self._TRAIL_SIZE_END, n_pts)
+        norm_t = dense_times / t_end if t_end > 0 else np.zeros_like(dense_times)
+
+        all_xy: list[Any] = []
+        all_sizes: list[Any] = []
+        all_colors: list[Any] = []
+        all_times: list[Any] = []
+
+        robot_id = 0
+        for entity in sorted(self.known_robots & set(trajectories.keys())):
+            waypoints, times = trajectories[entity]
+            if len(waypoints) < 2:
+                continue
+            cmap = self._get_cmap(robot_id)
+            robot_id += 1
+
+            # Interpolate positions from trajectory waypoints
+            wp_arr = np.array(waypoints)
+            t_arr = np.array(times)
+            x_interp = np.interp(dense_times, t_arr, wp_arr[:, 0])
+            y_interp = np.interp(dense_times, t_arr, wp_arr[:, 1])
+            pts = np.column_stack([x_interp, y_interp])
+
+            rgba = cmap(norm_t)
+            all_xy.append(pts)
+            all_sizes.append(sizes)
+            all_colors.append(rgba)
+            all_times.append(dense_times)
+
+        if not all_xy:
+            return None
+
+        combined_xy = np.concatenate(all_xy)
+        combined_sizes = np.concatenate(all_sizes)
+        combined_colors = np.concatenate(all_colors)
+        combined_times = np.concatenate(all_times)
+        order = np.argsort(combined_times)
+        return (
+            combined_xy[order],
+            combined_sizes[order],
+            combined_colors[order],
+            combined_times[order],
+        )
 
     def plot_trajectories(
         self: PlannerDashboard,
@@ -222,21 +321,18 @@ class _PlottingMixin:
             _, ax = plt.subplots(1, 1, figsize=(10, 8))
 
         # Build trajectories using shared helper
-        trajectories, env_coords, grid = self._build_entity_trajectories(
+        trajectories, env_coords = self._build_entity_trajectories(
             location_coords=location_coords,
             include_objects=show_objects,
         )
 
-        # Plot grid background if available (ProcTHOR tier)
-        if grid is not None:
-            try:
-                from railroad.environment.procthor.plotting import plot_grid
-                plot_grid(ax, grid)
-            except ImportError:
-                pass
+        # Plot grid background if available
+        occupancy_grid = getattr(self._env, 'occupancy_grid', None)
+        if occupancy_grid is not None:
+            from railroad.navigation.plotting import plot_grid_background
+            true_grid = getattr(self._env, 'true_grid', None)
+            plot_grid_background(ax, occupancy_grid, true_grid)
 
-        # Dense interpolation for smooth scatter trails
-        import numpy as np
         if self._goal_time is not None:
             t_end = self._goal_time
         else:
@@ -244,27 +340,13 @@ class _PlottingMixin:
             for _entity, (_wps, traj_times) in trajectories.items():
                 if traj_times:
                     t_end = max(t_end, max(traj_times))
-        dense_times = np.linspace(0.0, t_end, 2000) if t_end > 0 else np.array([0.0])
-        dense_positions = self.get_entity_positions_at_times(
-            dense_times, location_coords=location_coords,
-        )
+        trail = self._compute_trail_arrays(trajectories, t_end)
 
-        # Plot robot trajectories as a single combined scatter sorted by time.
-        # Earlier points are drawn first (lowest array index) and are larger,
-        # so later (smaller) points overlay them — making double-back paths visible.
-        all_xy: list[Any] = []
-        all_sizes: list[Any] = []
-        all_colors: list[Any] = []
-        all_times: list[Any] = []
-
-        robot_id = 0
+        # Plot robot location markers and labels
         for entity in sorted(self.known_robots & set(trajectories.keys())):
-            waypoints, times = trajectories[entity]
+            waypoints, _times = trajectories[entity]
             if len(waypoints) < 2:
                 continue
-
-            cmap = self._get_cmap(robot_id)
-            robot_id += 1
 
             # Get original positions for location markers/labels
             positions = self._entity_positions[entity]
@@ -275,20 +357,6 @@ class _PlottingMixin:
                 elif loc_name in env_coords:
                     location_waypoints.append(env_coords[loc_name])
 
-            if entity in dense_positions:
-                pts = dense_positions[entity]
-                n_pts = len(dense_times)
-                # Per-point sizes: linearly decay from large (early) to small (late)
-                sizes = np.linspace(self._TRAIL_SIZE_START, self._TRAIL_SIZE_END, n_pts)
-                # Per-point RGBA colors from this robot's colormap
-                norm_t = dense_times / t_end if t_end > 0 else np.zeros_like(dense_times)
-                rgba = cmap(norm_t)
-                all_xy.append(pts)
-                all_sizes.append(sizes)
-                all_colors.append(rgba)
-                all_times.append(dense_times)
-
-            # Plot location markers and labels
             wx = [p[0] for p in location_waypoints]
             wy = [p[1] for p in location_waypoints]
             ax.scatter(wx, wy, s=20, zorder=6, color="black")
@@ -307,15 +375,11 @@ class _PlottingMixin:
                     )
 
         # Draw one combined scatter for all robot trails, sorted by time
-        if all_xy:
-            combined_xy = np.concatenate(all_xy)
-            combined_sizes = np.concatenate(all_sizes)
-            combined_colors = np.concatenate(all_colors)
-            combined_times = np.concatenate(all_times)
-            order = np.argsort(combined_times)
+        if trail is not None:
+            combined_xy, combined_sizes, combined_colors, _combined_times = trail
             ax.scatter(
-                combined_xy[order, 0], combined_xy[order, 1],
-                s=combined_sizes[order], c=combined_colors[order],
+                combined_xy[:, 0], combined_xy[:, 1],
+                s=combined_sizes, c=combined_colors,
                 zorder=5, alpha=0.7,
             )
 
@@ -336,7 +400,7 @@ class _PlottingMixin:
                 ax.legend(fontsize=6)
 
         # Auto-scale for non-grid plots
-        if grid is None:
+        if occupancy_grid is None:
             ax.autoscale()
             ax.set_aspect("equal", adjustable="datalim")
 
@@ -367,7 +431,7 @@ class _PlottingMixin:
         import numpy as np
 
         query_times = np.asarray(times, dtype=float)
-        trajectories, _env_coords, _grid = self._build_entity_trajectories(
+        trajectories, _env_coords = self._build_entity_trajectories(
             location_coords=location_coords,
             include_objects=include_objects,
         )
@@ -540,16 +604,16 @@ class _PlottingMixin:
         figsize: tuple[float, float],
         *,
         location_coords: dict[str, tuple[float, float]] | None = None,
-    ) -> tuple[Any, Any, Any, Any, Any, Any, float] | None:
+    ) -> tuple[Any, Any, Any, Any, Any, float] | None:
         """Create a GridSpec figure with main + sidebar + optional overhead axes.
 
-        Returns (fig, main_ax, sidebar_ax, trajectories, env_coords, grid, t_end),
+        Returns (fig, main_ax, sidebar_ax, trajectories, env_coords, t_end),
         or None if there are no trajectories to display.
         """
         import matplotlib.pyplot as plt
         from matplotlib.gridspec import GridSpec
 
-        trajectories, env_coords, grid = self._build_entity_trajectories(
+        trajectories, env_coords = self._build_entity_trajectories(
             location_coords=location_coords,
             include_objects=False,
         )
@@ -581,15 +645,7 @@ class _PlottingMixin:
             sidebar_ax = fig.add_subplot(gs[0, 1])
         sidebar_ax.set_axis_off()
 
-        # Plot grid background if available
-        if grid is not None:
-            try:
-                from railroad.environment.procthor.plotting import plot_grid
-                plot_grid(main_ax, grid)
-            except ImportError:
-                pass
-
-        return fig, main_ax, sidebar_ax, trajectories, env_coords, grid, t_end
+        return fig, main_ax, sidebar_ax, trajectories, env_coords, t_end
 
     def save_video(
         self: PlannerDashboard,
@@ -619,7 +675,47 @@ class _PlottingMixin:
         result = self._create_trajectory_figure(figsize, location_coords=location_coords)
         if result is None:
             return
-        fig, ax, sidebar_ax, trajectories, env_coords, grid, t_end = result
+        fig, ax, sidebar_ax, trajectories, env_coords, t_end = result
+
+        # Animated navigation grid background
+        from railroad.navigation.plotting import make_plotting_grid, make_plotting_grid_rgba, _BACKGROUND_GRAY
+
+        nav_grid_artist = None
+        nav_grid_frames: list[tuple[float, Any]] = []
+        occupancy_grid = getattr(self._env, 'occupancy_grid', None)
+        _nav_has_true_underlay = False
+        if occupancy_grid is not None:
+            true_grid = getattr(self._env, "true_grid", None)
+            has_unknown = bool(np.any(occupancy_grid == -1.0))
+            _nav_has_true_underlay = true_grid is not None and has_unknown
+
+            if _nav_has_true_underlay:
+                assert true_grid is not None
+                # Pre-compute true grid underlay blended onto gray base
+                base = np.full(3, _BACKGROUND_GRAY)
+                true_rgb = make_plotting_grid(true_grid.T)
+                underlay = base * (1 - 0.35) + true_rgb * 0.35
+
+                def _composite_frame(obs_grid: np.ndarray) -> np.ndarray:
+                    obs_rgba = make_plotting_grid_rgba(obs_grid.T)
+                    obs_alpha = obs_rgba[:, :, 3:4]
+                    return underlay * (1 - obs_alpha) + obs_rgba[:, :, :3] * obs_alpha
+            else:
+                def _composite_frame(obs_grid: np.ndarray) -> np.ndarray:
+                    return make_plotting_grid(obs_grid.T)
+
+            if self._nav_grid_snapshots:
+                nav_grid_frames = [
+                    (t, _composite_frame(g))
+                    for t, g in self._nav_grid_snapshots
+                ]
+                nav_grid_artist = ax.imshow(
+                    nav_grid_frames[0][1], origin="upper", zorder=0,
+                )
+            else:
+                nav_grid_artist = ax.imshow(
+                    _composite_frame(occupancy_grid), origin="upper", zorder=0,
+                )
 
         n_frames = int(fps * duration)
         animation_times = np.linspace(0.0, t_end, n_frames)
@@ -628,12 +724,22 @@ class _PlottingMixin:
         frame_times = np.concatenate(([t_end], animation_times))
         n_frames += 1
 
-        # Pre-compute dense trail positions (same resolution as static plot)
-        dense_trail_times = np.linspace(0.0, t_end, 2000)
-        dense_positions = self.get_entity_positions_at_times(
-            dense_trail_times, location_coords=location_coords,
+        # Pre-compute trail arrays (dense scatter data for all robots)
+        trail = self._compute_trail_arrays(trajectories, t_end)
+        if trail is not None:
+            combined_xy, combined_sizes, combined_colors, combined_times = trail
+        else:
+            combined_xy = np.empty((0, 2))
+            combined_sizes = np.empty(0)
+            combined_colors = np.empty((0, 4))
+            combined_times = np.empty(0)
+
+        # Derive entity names from trajectories (robots with >= 2 waypoints)
+        entity_names = sorted(
+            e for e in (self.known_robots & set(trajectories.keys()))
+            if len(trajectories[e][0]) >= 2
         )
-        if not dense_positions:
+        if not entity_names:
             plt.close(fig)
             return
 
@@ -641,7 +747,6 @@ class _PlottingMixin:
         marker_positions = self.get_entity_positions_at_times(
             frame_times, location_coords=location_coords,
         )
-        entity_names = sorted(dense_positions.keys())
 
         # Static background: location markers + labels
         plotted_locs: set[str] = set()
@@ -671,17 +776,6 @@ class _PlottingMixin:
         for entry in self.history:
             goal_snapshots.append((entry["time"], entry["goals"]))
 
-        # --- Pre-compute per-point sizes and RGBA colors for all robots ---
-        n_dense = len(dense_trail_times)
-        per_point_sizes = np.linspace(self._TRAIL_SIZE_START, self._TRAIL_SIZE_END, n_dense)
-        norm_t = dense_trail_times / t_end if t_end > 0 else np.zeros(n_dense)
-
-        # Build combined arrays for all robots
-        all_dense_xy: list[Any] = []
-        all_dense_sizes: list[Any] = []
-        all_dense_colors: list[Any] = []
-        all_dense_times: list[Any] = []
-
         # --- Main plot: entity artists (markers + labels only) ---
         markers = []
         labels = []
@@ -702,31 +796,6 @@ class _PlottingMixin:
             markers.append(marker)
             labels.append(label)
 
-            if entity in dense_positions:
-                cmap = self._get_cmap(idx)
-                rgba = cmap(norm_t)
-                all_dense_xy.append(dense_positions[entity])
-                all_dense_sizes.append(per_point_sizes)
-                all_dense_colors.append(rgba)
-                all_dense_times.append(dense_trail_times)
-
-        # Concatenate and sort by time for correct draw order
-        if all_dense_xy:
-            combined_xy = np.concatenate(all_dense_xy)
-            combined_sizes = np.concatenate(all_dense_sizes)
-            combined_colors = np.concatenate(all_dense_colors)
-            combined_times = np.concatenate(all_dense_times)
-            sort_order = np.argsort(combined_times)
-            combined_xy = combined_xy[sort_order]
-            combined_sizes = combined_sizes[sort_order]
-            combined_colors = combined_colors[sort_order]
-            combined_times = combined_times[sort_order]
-        else:
-            combined_xy = np.empty((0, 2))
-            combined_sizes = np.empty(0)
-            combined_colors = np.empty((0, 4))
-            combined_times = np.empty(0)
-
         # Single shared trail scatter artist
         trail_scatter = ax.scatter([], [], s=[], zorder=5, alpha=1.0)
 
@@ -738,7 +807,7 @@ class _PlottingMixin:
             fontfamily="monospace", fontsize=10,
         )
 
-        if grid is None:
+        if occupancy_grid is None:
             ax.autoscale()
             ax.set_aspect("equal", adjustable="datalim")
 
@@ -751,6 +820,15 @@ class _PlottingMixin:
             title_artist.set_text(
                 f"Entity Trajectories  (cost = {current_time:>{t_width}.1f} / {t_end:.1f})"
             )
+            # Update animated navigation grid
+            if nav_grid_artist is not None and nav_grid_frames:
+                latest_rgb = nav_grid_frames[0][1]
+                for snap_time, rgb in nav_grid_frames:
+                    if snap_time <= current_time:
+                        latest_rgb = rgb
+                    else:
+                        break
+                nav_grid_artist.set_data(latest_rgb)
             for idx, entity in enumerate(entity_names):
                 # Update current position marker
                 pos = marker_positions[entity]
@@ -776,9 +854,12 @@ class _PlottingMixin:
                 if literal_str is not None:
                     satisfied = current_goals.get(literal_str, False)
                     txt.set_color("green" if satisfied else "red")
-            return (markers + labels + [trail_scatter, title_artist]
-                    + [txt for txt, _ in action_texts]
-                    + [txt for txt, _ in goal_text_artists])
+            artists = markers + labels + [trail_scatter, title_artist]
+            if nav_grid_artist is not None:
+                artists.append(nav_grid_artist)
+            artists += [txt for txt, _ in action_texts]
+            artists += [txt for txt, _ in goal_text_artists]
+            return artists
 
         anim = FuncAnimation(fig, _update, frames=n_frames, blit=False, interval=1000 / fps)
 
@@ -814,6 +895,32 @@ class _PlottingMixin:
         else:
             self._try_embed_video_in_notebook(path)
 
+    def _render_static_plot(
+        self: PlannerDashboard,
+        figsize: tuple[float, float],
+        *,
+        location_coords: dict[str, tuple[float, float]] | None = None,
+    ) -> Any | None:
+        """Create a complete static trajectory figure with sidebar, or ``None``."""
+        result = self._create_trajectory_figure(figsize, location_coords=location_coords)
+        if result is None:
+            return None
+        fig, main_ax, sidebar_ax, trajectories, env_coords, t_end = result
+
+        self.plot_trajectories(ax=main_ax, location_coords=location_coords)
+
+        goal_snapshots_at_end: dict[str, bool] = {}
+        if self.history:
+            goal_snapshots_at_end = self.history[-1].get("goals", {})
+
+        self._render_sidebar(
+            sidebar_ax, t_end,
+            goal_snapshots_at_end=goal_snapshots_at_end,
+            show_actions=True,
+        )
+
+        return fig
+
     def get_plot_image(
         self: PlannerDashboard,
         *,
@@ -840,22 +947,9 @@ class _PlottingMixin:
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        result = self._create_trajectory_figure(figsize, location_coords=location_coords)
-        if result is None:
+        fig = self._render_static_plot(figsize, location_coords=location_coords)
+        if fig is None:
             return None
-        fig, main_ax, sidebar_ax, _trajs, _env_coords, _grid, t_end = result
-
-        self.plot_trajectories(ax=main_ax, location_coords=location_coords)
-
-        goal_snapshots_at_end: dict[str, bool] = {}
-        if self.history:
-            goal_snapshots_at_end = self.history[-1].get("goals", {})
-
-        self._render_sidebar(
-            sidebar_ax, t_end,
-            goal_snapshots_at_end=goal_snapshots_at_end,
-            show_actions=True,
-        )
 
         buf = io.BytesIO()
         fig.savefig(buf, format="jpeg", dpi=dpi,
@@ -891,26 +985,10 @@ class _PlottingMixin:
         if save_plot or show_plot:
             import matplotlib.pyplot as plt
 
-            result = self._create_trajectory_figure(
+            fig = self._render_static_plot(
                 (12.8, 7.2), location_coords=location_coords,
             )
-            if result is not None:
-                fig, main_ax, sidebar_ax, _trajs, _env_coords, _grid, t_end = result
-
-                # Draw trajectories on the main axes
-                self.plot_trajectories(ax=main_ax, location_coords=location_coords)
-
-                # Get final goal snapshot from history
-                goal_snapshots_at_end: dict[str, bool] = {}
-                if self.history:
-                    goal_snapshots_at_end = self.history[-1].get("goals", {})
-
-                self._render_sidebar(
-                    sidebar_ax, t_end,
-                    goal_snapshots_at_end=goal_snapshots_at_end,
-                    show_actions=True,
-                )
-
+            if fig is not None:
                 if save_plot:
                     fig.savefig(save_plot, dpi=300, bbox_inches='tight')
                     self.console.print(f"Saved plot to [yellow]{save_plot}[/yellow]")

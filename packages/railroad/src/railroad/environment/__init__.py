@@ -16,12 +16,14 @@ Legacy classes have been moved to railroad.experimental.environment:
         AbstractEnvironment, BaseEnvironment, SimpleEnvironment,
         EnvironmentInterface, OngoingAction, SkillStatus, SimulatedRobot, Pose,
     )
+
+Unknown-space frontier search lives in railroad.experimental.unknown_search.
 """
 
-from .environment import Environment
-from .skill import ActiveSkill
+from .environment import ActiveSkill, Environment
+from .skill import InterruptibleNavigationMoveSkill, MotionSkill, NavigationMoveSkill
+from .types import Pose, PoseLike
 from .symbolic import (
-    InterruptableMoveSymbolicSkill,
     LocationRegistry,
     SymbolicEnvironment,
     SymbolicSkill,
@@ -31,8 +33,12 @@ __all__ = [
     # Core classes
     "ActiveSkill",
     "Environment",
-    "InterruptableMoveSymbolicSkill",
+    "InterruptibleNavigationMoveSkill",
     "LocationRegistry",
+    "MotionSkill",
+    "NavigationMoveSkill",
+    "Pose",
+    "PoseLike",
     "SymbolicEnvironment",
     "SymbolicSkill",
 ]

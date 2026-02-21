@@ -7,7 +7,38 @@ import rich_click as click
 from railroad.examples import ExampleInfo
 
 
-@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+class _HelpfulCommand(click.RichCommand):
+    """RichCommand that shows full help on usage errors."""
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        try:
+            return super().parse_args(ctx, args)
+        except click.UsageError as e:
+            print(ctx.get_help(), end="")
+            e.ctx = None  # suppress duplicate Usage line in error output
+            raise
+
+
+class _HelpfulGroup(click.RichGroup):
+    """RichGroup that shows full help on usage errors.
+
+    Sets ``command_class`` and ``group_class`` so that all subcommands and
+    subgroups created under this group inherit the same behaviour.
+    """
+
+    command_class = _HelpfulCommand
+    group_class = type  # sentinel: subgroups reuse this class
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        try:
+            return super().parse_args(ctx, args)
+        except click.UsageError as e:
+            print(ctx.get_help(), end="")
+            e.ctx = None  # suppress duplicate Usage line in error output
+            raise
+
+
+@click.group(cls=_HelpfulGroup, context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(package_name="railroad")
 def main() -> None:
     """Railroad: Multi-Robot Probabilistic Planning."""

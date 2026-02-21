@@ -13,6 +13,8 @@ dependencies = [
     "rich",
     "matplotlib",
     "pyqt5",
+    "scipy",
+    "scikit-image",
 ]
 
 [project.optional-dependencies]
@@ -34,6 +36,7 @@ procthor = [
     "prior>=1.0.3",
     "shapely",
     "networkx",
+    "scipy",
     "scikit-image",
     "shapely>=2.1.2",
 ]

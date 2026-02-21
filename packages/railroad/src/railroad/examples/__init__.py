@@ -72,6 +72,38 @@ EXAMPLES: Dict[str, ExampleInfo] = {
             },
         ],
     },
+    "frontier-search": {
+        "main": _lazy_import("frontier_search"),
+        "description": "Explore unknown space and search discovered sites for objects",
+        "options": [
+            {
+                "name": "--seed",
+                "type": int,
+                "default": None,
+                "help": "ProcTHOR scene seed (requires --procthor)",
+                "param_name": "seed",
+            },
+            {
+                "name": "--num-objects",
+                "default": 2,
+                "help": "Number of objects to search for",
+                "param_name": "num_objects",
+            },
+            {
+                "name": "--num-robots",
+                "default": 1,
+                "help": "Number of robots",
+                "param_name": "num_robots",
+            },
+            {
+                "name": "--allow-move-interruptions",
+                "is_flag": True,
+                "default": False,
+                "help": "Allow interruption of move skills",
+                "param_name": "allow_move_interruptions",
+            },
+        ],
+    },
 }
 
 # Only show procthor example if dependencies are installed

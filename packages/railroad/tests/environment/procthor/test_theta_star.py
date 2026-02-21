@@ -3,15 +3,14 @@
 import numpy as np
 import pytest
 
-from railroad.environment.procthor.utils import (
-    OBSTACLE_THRESHOLD,
+from railroad.navigation.constants import OBSTACLE_THRESHOLD
+from railroad.navigation.pathing import (
     _line_of_sight,
     _supercover_line,
     _theta_star,
     build_traversal_costs,
     get_cost_and_path,
     get_cost_and_path_theta,
-    get_trajectory,
 )
 
 
@@ -226,19 +225,3 @@ class TestGetCostAndPathDelegation:
         assert np.isfinite(cost)
         assert path.shape[0] == 2
         assert path.shape[1] >= 2
-
-
-# ---------------------------------------------------------------------------
-# get_trajectory integration
-# ---------------------------------------------------------------------------
-
-
-class TestGetTrajectoryIntegration:
-    def test_multiple_waypoints(self, empty_grid: np.ndarray) -> None:
-        waypoints = [(0.0, 0.0), (5.0, 5.0), (9.0, 9.0)]
-        traj = get_trajectory(empty_grid, waypoints)
-        assert len(traj) >= 3
-        for pt in traj:
-            assert len(pt) == 2
-            assert isinstance(pt[0], float)
-            assert isinstance(pt[1], float)
