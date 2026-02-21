@@ -39,14 +39,18 @@ def main(
     from railroad._bindings import State
     from railroad.core import Fluent as F, get_action_by_name
     from railroad.dashboard import PlannerDashboard
-    from railroad.environment.unknown_space import NavigationConfig, Pose, UnknownSpaceEnvironment
-    from railroad.navigation.constants import FREE_VAL, OBSTACLE_THRESHOLD
-    from railroad.environment.symbolic import LocationRegistry
-    from railroad.environment.unknown_space.operators import (
+    from railroad.experimental.unknown_search import (
+        NavigationConfig,
+        Pose,
+        UnknownSpaceEnvironment,
+    )
+    from railroad.experimental.unknown_search.operators import (
         construct_move_navigable_operator,
         construct_search_at_site_operator,
         construct_search_frontier_operator,
     )
+    from railroad.navigation.constants import FREE_VAL, OBSTACLE_THRESHOLD
+    from railroad.environment.symbolic import LocationRegistry
     from railroad.operators import construct_no_op_operator
     from railroad.planner import MCTSPlanner
 

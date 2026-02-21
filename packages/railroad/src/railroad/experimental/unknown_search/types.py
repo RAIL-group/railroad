@@ -8,8 +8,8 @@ from typing import NamedTuple
 
 import numpy as np
 
-from ..types import Pose as _Pose
-from ..types import PoseLike as _PoseLike
+from railroad.environment.types import Pose as _Pose
+from railroad.environment.types import PoseLike as _PoseLike
 
 # Backward-compatible re-exports.
 Pose = _Pose

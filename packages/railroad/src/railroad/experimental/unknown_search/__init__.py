@@ -1,4 +1,4 @@
-"""UnknownSpaceEnvironment and helpers for frontier-based exploration."""
+"""Experimental unknown-space search environment and helper operators."""
 
 from .environment import UnknownSpaceEnvironment
 from .operators import (
@@ -7,7 +7,7 @@ from .operators import (
     construct_search_frontier_operator,
 )
 from .types import Frontier, NavigationConfig
-from ..types import Pose
+from railroad.environment.types import Pose
 
 __all__ = [
     "Frontier",
