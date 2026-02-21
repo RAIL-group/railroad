@@ -172,6 +172,7 @@ uv run railroad example <name>
 - **`find-and-move-couch`** -- Cooperative task requiring two robots (demonstrates wait operators)
 - **`heterogeneous-robots`** -- Drone, rover, and crawler with different speeds and capabilities
   - Add `--interruptible-moves` to allow rerouting robots mid-transit
+- **`frontier-search`** -- Explore unknown space and search discovered sites for objects (requires `railroad[procthor]`)
 
 ## Key Concepts
 
@@ -218,11 +219,13 @@ packages/railroad/
     core.py              # Fluent, State, Action, Operator, Effect, Goal
     planner.py           # MCTSPlanner (wraps C++ MCTS with automatic preprocessing)
     operators/           # Helper constructors for move, search, pick, place, wait
+    navigation/          # Reusable grid navigation (theta* pathing, occupancy grid mixin)
     environment/
-      environment.py     # Abstract Environment base class
+      environment.py     # Abstract Environment base class (subclass & override define_operators())
       symbolic.py        # SymbolicEnvironment for simulation and testing
-      skill.py           # ActiveSkill protocol
+      skill/             # Skill protocols + navigation skill implementations
       procthor/          # Optional AI2-THOR/ProcTHOR 3D simulator integration
+    experimental/        # Frontier-based unknown-space exploration
     examples/            # Built-in runnable examples
     bench/               # Benchmarking framework with MLflow + Plotly Dash
 ```
