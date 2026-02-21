@@ -5,13 +5,13 @@ Uses PhysicalEnvironment for clean integration with ROS-based hardware.
 Follows the Scene/Environment separation pattern.
 """
 
-import itertools
 import roslibpy
 from typing import Any, Callable, Dict, List, Set, Optional, Type
 from railroad.core import Fluent as F, State, Operator
 from railroad.environment import PhysicalEnvironment, PhysicalScene, SkillStatus, ActiveSkill
 from railroad.planner import MCTSPlanner
 from railroad.operators import construct_move_visited_operator
+import argparse
 
 
 STATUS_MAP = {
@@ -19,6 +19,8 @@ STATUS_MAP = {
     'reached': SkillStatus.DONE,
     'stopped': SkillStatus.IDLE
 }
+
+ROBOTS = ['v4w1', 'drone1']
 
 
 class ROSRealScene(PhysicalScene):
@@ -29,26 +31,30 @@ class ROSRealScene(PhysicalScene):
         self._get_distance_service = roslibpy.Service(client, '/get_distance', 'planner_msgs/GetDistance')
 
         self._location_names = self._get_locations()
-        self._objects = set() # Would be populated from perception
-        self._object_locations = {} # Would be populated from perception
+        self._objects = set()
+        self._object_locations = {}
 
     def _get_locations(self) -> List[str]:
-        try:
-            request = roslibpy.ServiceRequest()
-            result = self._get_locations_service.call(request)
-            return result['locations']
-        except Exception:
-            return ["kitchen", "bedroom", "r1_loc", "r2_loc"]
+        request = roslibpy.ServiceRequest()
+        result = self._get_locations_service.call(request, timeout=10)
+        return result['locations']
 
     def _get_distance(self, location1: str, location2: str) -> float:
-        try:
-            request = roslibpy.ServiceRequest({'to_name': location1, 'from_name': location2})
-            result = self._get_distance_service.call(request)
-            if result['ok']:
-                return result['distance']
-        except Exception:
-            pass
-        return 10.0 # Default
+        if location2.endswith('_loc'):
+            location1, location2 = location2, location1
+            if location1.endswith('_loc'):
+                return float('inf')
+        request = roslibpy.ServiceRequest({'to_name': location2, 'from_name': location1})
+        result = self._get_distance_service.call(request, timeout=10)
+        if result['ok']:
+            return result['distance']
+        else:
+            raise ValueError(result['message'])
+
+    def get_skills_time_fn(self, skill_name: str):
+        if skill_name == "move":
+            return self.get_move_cost_fn()
+        raise NotImplementedError(f"Skill '{skill_name}' time function not implemented in ROSRealScene.")
 
     @property
     def locations(self) -> Dict[str, Any]:
@@ -92,76 +98,89 @@ class ROSRealEnvironment(PhysicalEnvironment):
             skill_overrides=skill_overrides
         )
 
-    # --- PhysicalEnvironment implementation ---
-
-    def execute_skill(self, robot_name: str, skill_name: str, *args: Any, **kwargs: Any) -> None:
+    def execute_skill(self, robot_name: str, skill_name: str, *args, **kwargs) -> None:
         if skill_name == "move":
-            location = args[0]
-            request = roslibpy.ServiceRequest({'robot_id': robot_name, 'target': location})
-            self._move_robot_service.call(request)
+            result = self.move_robot(robot_name, args[1])
+            return result
+        raise NotImplementedError(f"Skill '{skill_name}' not implemented in ROSRealEnvironment.")
+
+    def move_robot(self, robot_name, location):
+        request = roslibpy.ServiceRequest({'robot_id': robot_name, 'target': location})
+        result = self._move_robot_service.call(request, timeout=10)
+        if result['accepted']:
+            return True
+        else:
+            raise ValueError(result['message'])
 
     def get_executed_skill_status(self, robot_name: str, skill_name: str) -> SkillStatus:
         if skill_name == "move":
-            try:
-                request = roslibpy.ServiceRequest({'robot_id': robot_name})
-                result = self._move_status_service.call(request)
-                return STATUS_MAP.get(result['status'], SkillStatus.IDLE)
-            except Exception:
-                return SkillStatus.DONE
-        return SkillStatus.DONE
+            return self._get_move_status(robot_name)
+        raise NotImplementedError(f"Skill '{skill_name}' status retrieval not implemented in ROSRealEnvironment.")
+
+    def _get_move_status(self, robot_name):
+        request = roslibpy.ServiceRequest({'robot_id': robot_name})
+        result = self._move_status_service.call(request, timeout=10)
+        return STATUS_MAP.get(result['status'], SkillStatus.IDLE)
 
     def stop_robot(self, robot_name: str) -> None:
         request = roslibpy.ServiceRequest({'robot_id': robot_name})
-        self._stop_robot_service.call(request)
+        self._stop_robot_service.call(request, timeout=10)
 
 
 if __name__ == '__main__':
-    # Initialize ROS client
-    host = 'localhost'
-    client = roslibpy.Ros(host=host, port=9090)
+    parser = argparse.ArgumentParser(description='Real-world robot planning demonstration.')
+    parser.add_argument('--host', type=str, default='0.0.0.0', help='ROS bridge host')
+    parser.add_argument('--port', type=int, default=9090, help='ROS bridge port')
+    args = parser.parse_args()
+
+    print(f"Connecting to ROS bridge at {args.host}:{args.port}...")
+    client = roslibpy.Ros(host=args.host, port=args.port)
     client.run()
 
-    # 1. Initialize Scene
     scene = ROSRealScene(client)
 
-    # 2. Define initial state
     initial_state = State(
         time=0.0,
         fluents={
-            F("at", "r1", "r1_loc"), F("at", "r2", "r2_loc"),
-            F("free", "r1"), F("free", "r2"),
+            F("at", f"{ROBOTS[0]}", f"{ROBOTS[0]}_loc"), F("at", f"{ROBOTS[1]}", f"{ROBOTS[1]}_loc"),
+            F("free", f"{ROBOTS[0]}"), F("free", f"{ROBOTS[1]}"),
         },
     )
 
-    # 3. Create operators using scene info
     move_op = construct_move_visited_operator(move_time=scene.get_move_cost_fn())
     operators = [move_op]
 
-    # 4. Define objects by type
     objects_by_type = {
-        "robot": {"r1", "r2"},
+        "robot": set(ROBOTS),
         "location": set(scene.locations.keys()),
     }
 
-    # 5. Initialize Environment
     env = ROSRealEnvironment(scene, client, initial_state, objects_by_type, operators)
 
-    # Goal: Visit some locations
-    goal = F("visited", "kitchen") & F("visited", "bedroom")
+    goal = F("visited", "roomB") & F("visited", "roomD")
 
-    # Planning and execution loop
     all_actions = env.get_actions()
     planner = MCTSPlanner(all_actions)
 
-    while not env.is_goal_reached(goal.fluents if hasattr(goal, "fluents") else [goal]):
-        action_name = planner(env.state, goal, max_iterations=1000)
+    print("\nStarting planning loop...")
+    for i in range(20):
+        if goal.evaluate(env.state.fluents):
+            print("\nGoal reached!")
+            break
+
+        print(f"\n--- Iteration {i} ---")
+        print(f"Time: {env.state.time:.2f}s")
+        print(f"Active Fluents: {[str(f) for f in env.state.fluents if not f.negated]}")
+
+        action_name = planner(env.state, goal, max_iterations=10000)
         if action_name == "NONE":
-            print("No plan found!")
+            print("No action")
             break
 
         from railroad.core import get_action_by_name
         action = get_action_by_name(all_actions, action_name)
-        print(f"Executing: {action_name}")
-        env.act(action)
+        print(f"Dispatching: {action_name}")
+
+        env.act(action, do_interrupt=False)
 
     client.terminate()
