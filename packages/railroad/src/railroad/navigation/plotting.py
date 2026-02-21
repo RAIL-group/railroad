@@ -1,28 +1,17 @@
 """Plotting utilities for occupancy grids."""
 
 from typing import Any
-
 import numpy as np
-
-from .constants import COLLISION_VAL, FREE_VAL
-
-try:
-    from skimage.morphology import erosion
-    HAS_PLOTTING_DEPS = True
-except ImportError:
-    HAS_PLOTTING_DEPS = False
-
-FOOT_PRINT = np.array([[1, 1, 1], [1, 1, 1], [1, 1, 1]])
+from .constants import FREE_VAL
+from skimage.morphology import erosion
 
 
 def make_plotting_grid(grid_map: np.ndarray) -> np.ndarray:
     """Convert occupancy grid to RGB plotting grid."""
-    if not HAS_PLOTTING_DEPS:
-        raise ImportError("Plotting requires scikit-image: pip install scikit-image")
 
     grid = np.ones([grid_map.shape[0], grid_map.shape[1], 3]) * 0.75
     collision = grid_map >= 0.5
-    thinned = erosion(collision, footprint=FOOT_PRINT)
+    thinned = erosion(collision, footprint=np.ones((3, 3)))
     boundary = np.logical_xor(collision, thinned)
     free = np.logical_and(grid_map < 0.5, grid_map >= FREE_VAL)
 
