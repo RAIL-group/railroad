@@ -7,7 +7,7 @@ from railroad.navigation.constants import (
     FREE_VAL,
     UNOBSERVED_VAL,
 )
-from railroad.environment.unknown_space.frontiers import (
+from railroad.experimental.unknown_search.frontiers import (
     extract_frontiers,
     filter_reachable_frontiers,
 )

@@ -7,12 +7,12 @@ from railroad.navigation.constants import (
     FREE_VAL,
     UNOBSERVED_VAL,
 )
-from railroad.environment.unknown_space.laser import (
+from railroad.experimental.unknown_search.laser import (
     get_laser_scanner_directions,
     simulate_sensor_measurement,
 )
-from railroad.environment.unknown_space.mapping import insert_scan
-from railroad.environment.unknown_space.types import Pose
+from railroad.experimental.unknown_search.mapping import insert_scan
+from railroad.experimental.unknown_search.types import Pose
 
 
 def _make_corridor_grid(size: int = 30) -> np.ndarray:

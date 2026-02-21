@@ -19,7 +19,8 @@ Available operators:
 - Place: construct_place_operator, construct_place_operator_blocking
 - Wait: construct_wait_operator, construct_no_op_operator
 
-Navigation/frontier operators are in ``railroad.environment.unknown_space.operators``.
+Navigation/frontier operators are in
+``railroad.experimental.unknown_search.operators``.
 """
 
 from .core import (
