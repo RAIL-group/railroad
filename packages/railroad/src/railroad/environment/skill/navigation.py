@@ -142,7 +142,11 @@ class NavigationMoveSkill(SymbolicSkill, MotionSkill):
         # Keep continuous pose state in sync at the interrupt instant.
         env.set_robot_pose(self._robot, pose)
 
-        # Collect and rewrite fluents from remaining effects
+        # Collect fluents from remaining effects, retargeting only
+        # positive ``at`` fluents to the intermediate location.  All
+        # other fluents keep their original args so they correctly undo
+        # state set with the original destination (e.g. ``not claimed
+        # ?to`` removes the ``claimed`` set at time-0).
         new_fluents: set[Fluent] = set()
         for _, eff in self._upcoming_effects:
             if eff.is_probabilistic:
@@ -151,13 +155,16 @@ class NavigationMoveSkill(SymbolicSkill, MotionSkill):
             for fluent in eff.resulting_fluents:
                 if (~fluent) in new_fluents:
                     new_fluents.remove(~fluent)
-                new_args = [
-                    arg if arg != old_target else new_target
-                    for arg in fluent.args
-                ]
-                new_fluents.add(
-                    Fluent(" ".join([fluent.name] + new_args), negated=fluent.negated)
-                )
+                if not fluent.negated and fluent.name == "at":
+                    new_args = [
+                        arg if arg != old_target else new_target
+                        for arg in fluent.args
+                    ]
+                    new_fluents.add(
+                        Fluent(" ".join(["at"] + new_args), negated=False)
+                    )
+                else:
+                    new_fluents.add(fluent)
 
         # Apply rewritten fluents to environment
         for fluent in new_fluents:
