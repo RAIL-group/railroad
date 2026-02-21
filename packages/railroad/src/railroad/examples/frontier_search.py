@@ -23,7 +23,7 @@ def main(
     seed: int | None = None,
     num_objects: int = 2,
     num_robots: int = 1,
-    disable_move_interruptions: bool = False,
+    allow_move_interruptions: bool = True,
     save_plot: str | None = None,
     show_plot: bool = False,
     save_video: str | None = None,
@@ -61,14 +61,14 @@ def main(
     if num_robots < 1:
         raise ValueError("num_robots must be >= 1")
 
-    scene, true_grid, hidden_sites, true_object_locations, start_coords_list, target_objects = (
+    scene, true_grid, hidden_sites, true_object_locations, start_coord, target_objects = (
         _setup_procthor(seed=seed, num_objects=num_objects, num_robots=num_robots)
     )
 
     print(f"Grid: {true_grid.shape[0]}x{true_grid.shape[1]}")
     print(f"Hidden sites: {list(hidden_sites.keys())}")
     print(f"Target objects: {target_objects}")
-    print(f"Starts: {start_coords_list}")
+    print(f"Start: {start_coord}")
 
     # ------------------------------------------------------------------
     # Operators
@@ -144,46 +144,48 @@ def main(
 
     config = NavigationConfig(
         sensor_range=120.0,
-        move_execution_interruptible=not disable_move_interruptions,
         max_move_action_time=10_000.0,
         interrupt_min_new_cells=30000,
         interrupt_min_dt=30000.0,
     )
 
     robots = [f"robot{i + 1}" for i in range(num_robots)]
-    start_names = ["start" if i == 0 else f"start{i + 1}" for i in range(num_robots)]
+    start_name = "start_loc"
 
-    location_registry = LocationRegistry(
-        {
-            start_name: np.array(start_coords_list[i], dtype=float)
-            for i, start_name in enumerate(start_names)
-        }
-    )
+    location_registry = LocationRegistry({
+        start_name: np.array(start_coord, dtype=float)
+    })
 
     fluents: set = set()
     robot_initial_poses: dict[str, Pose] = {}
     for i, robot in enumerate(robots):
-        start_name = start_names[i]
-        start_coords = start_coords_list[i]
         fluents |= {
             F(f"at {robot} {start_name}"),
             F(f"free {robot}"),
             F(f"revealed {start_name}"),
         }
         robot_initial_poses[robot] = Pose(
-            float(start_coords[0]), float(start_coords[1]), 0.0
+            float(start_coord[0]), float(start_coord[1]), 0.0
         )
+
+    if allow_move_interruptions:
+        from railroad.environment.skill import NavigationMoveSkill
+        move_skill = NavigationMoveSkill
+    else:
+        from railroad.environment.skill import InterruptibleNavigationMoveSkill
+        move_skill = InterruptibleNavigationMoveSkill
 
     env = UnknownSpaceEnvironment(
         state=State(0.0, fluents, []),
         objects_by_type={
             "robot": set(robots),
-            "location": set(start_names),
+            "location": {start_name},
             "container": set(),
             "frontier": set(),
             "object": set(target_objects),
         },
         operators=operators,
+        skill_overrides={'move': move_skill},
         true_grid=true_grid,
         robot_initial_poses=robot_initial_poses,
         location_registry=location_registry,
@@ -267,7 +269,7 @@ def _setup_procthor(
     "np.ndarray",
     dict[str, tuple[int, int]],
     dict[str, set[str]],
-    list[tuple[int, int]],
+    tuple[int, int],
     list[str],
 ]:
     """Load a ProcTHOR scene and extract grid, sites, and objects."""
@@ -305,18 +307,13 @@ def _setup_procthor(
 
     # Shared start position for all robots
     start_loc = scene.locations.get("start_loc")
-    if start_loc is not None:
-        shared_start = (int(start_loc[0]), int(start_loc[1]))
-    else:
-        # Fallback to grid center
-        shared_start = (true_grid.shape[0] // 2, true_grid.shape[1] // 2)
 
     return (
         scene,
         true_grid,
         hidden_sites,
         true_object_locations,
-        [shared_start] * num_robots,
+        start_loc,
         target_objects,
     )
 

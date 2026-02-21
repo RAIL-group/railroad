@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Set, Tuple
+from typing import Dict, Iterable, List, Set, Tuple, Type
 
 import numpy as np
 import scipy.ndimage
@@ -11,7 +11,6 @@ from railroad._bindings import Action, Fluent, State
 from railroad.core import Operator
 from railroad.environment.skill import (
     ActiveSkill,
-    InterruptibleNavigationMoveSkill,
     MotionSkill,
     NavigationMoveSkill,
 )
@@ -44,11 +43,27 @@ class UnknownSpaceEnvironment(OccupancyGridPathingMixin, SymbolicEnvironment):
         true_grid: np.ndarray,
         robot_initial_poses: Dict[str, Pose],
         location_registry: LocationRegistry,
+        skill_overrides: Dict[str, Type[ActiveSkill]] | None = None,
         hidden_sites: Dict[str, Tuple[int, int]] | None = None,
         true_object_locations: Dict[str, Set[str]] | None = None,
         config: NavigationConfig | None = None,
+        validate_move_skill: bool = True,
     ) -> None:
         self._config = config or NavigationConfig()
+
+        if validate_move_skill:
+            has_nav_skill = any(
+                issubclass(cls, NavigationMoveSkill)
+                for cls in (skill_overrides or {}).values()
+            )
+            if not has_nav_skill:
+                raise TypeError(
+                    "UnknownSpaceEnvironment requires a NavigationMoveSkill (or "
+                    "subclass such as InterruptibleNavigationMoveSkill) in "
+                    "skill_overrides. Pass validate_move_skill=False to "
+                    "suppress this check."
+                )
+
         self._true_grid = true_grid
         self._observed_grid = UNOBSERVED_VAL * np.ones_like(true_grid)
         self._robot_poses: Dict[str, Pose] = dict(robot_initial_poses)
@@ -80,6 +95,7 @@ class UnknownSpaceEnvironment(OccupancyGridPathingMixin, SymbolicEnvironment):
             objects_by_type=objects_by_type,
             operators=operators,
             true_object_locations=true_object_locations,
+            skill_overrides=skill_overrides,
             location_registry=location_registry,
         )
 
@@ -440,19 +456,6 @@ class UnknownSpaceEnvironment(OccupancyGridPathingMixin, SymbolicEnvironment):
                     return False
 
         return True
-
-    def create_skill(self, action: Action, time: float) -> ActiveSkill:
-        """Create skill; use navigation move skill variants for move actions."""
-        parts = action.name.split()
-        if parts[0] == "move":
-            if self._config.move_execution_interruptible:
-                return InterruptibleNavigationMoveSkill(
-                    action=action,
-                    start_time=time,
-                    env=self,
-                )
-            return NavigationMoveSkill(action=action, start_time=time, env=self)
-        return super().create_skill(action, time)
 
     # ------------------------------------------------------------------
     # Override act to sync dynamic targets after each action
