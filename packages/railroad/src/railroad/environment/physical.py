@@ -336,19 +336,16 @@ class PhysicalEnvironment(Environment, ABC):
         return SymbolicSkill(action=action, start_time=start_time)
 
     def create_skill(self, action: Action, time: float) -> ActiveSkill:
-        parts = action.name.split()
-        action_type = parts[0] if parts else "unknown"
-        skill_args = tuple(parts[1:])
-        robot_name = parts[1] if len(parts) > 1 else "unknown"
+        skill_name, robot_name, *skill_args = action.name.split()
 
         # Record execution
         self._skill_history.append((time, action))
 
         # Trigger physical execution immediately
-        self.execute_skill(robot_name, action_type, *skill_args)
+        self.execute_skill(robot_name, skill_name, *skill_args)
 
-        if action_type in self._skill_overrides:
-            skill_class = self._skill_overrides[action_type]
+        if skill_name in self._skill_overrides:
+            skill_class = self._skill_overrides[skill_name]
             return skill_class(action=action, start_time=time)
 
         return PhysicalSkill(
