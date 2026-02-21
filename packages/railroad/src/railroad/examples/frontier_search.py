@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import numpy as np
+    from railroad.environment.procthor import ProcTHORScene
 
 
 def main(
@@ -56,7 +57,7 @@ def main(
     if num_robots < 1:
         raise ValueError("num_robots must be >= 1")
 
-    true_grid, hidden_sites, true_object_locations, start_coords_list, target_objects = (
+    scene, true_grid, hidden_sites, true_object_locations, start_coords_list, target_objects = (
         _setup_procthor(seed=seed, num_objects=num_objects, num_robots=num_robots)
     )
 
@@ -191,6 +192,7 @@ def main(
         true_object_locations=true_object_locations,
         config=config,
     )
+    env.scene = scene  # type: ignore[attr-defined]  # expose to dashboard for overhead map
     env_ref[0] = env
 
     def sync_known_hidden_sites() -> None:
@@ -262,6 +264,7 @@ def _setup_procthor(
     num_objects: int = 2,
     num_robots: int = 1,
 ) -> tuple[
+    "ProcTHORScene",
     "np.ndarray",
     dict[str, tuple[int, int]],
     dict[str, set[str]],
@@ -310,6 +313,7 @@ def _setup_procthor(
         shared_start = (true_grid.shape[0] // 2, true_grid.shape[1] // 2)
 
     return (
+        scene,
         true_grid,
         hidden_sites,
         true_object_locations,

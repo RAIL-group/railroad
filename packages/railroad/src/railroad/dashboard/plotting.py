@@ -10,46 +10,6 @@ if TYPE_CHECKING:
     from .dashboard import PlannerDashboard
 
 
-def _nav_grid_to_rgb(grid):
-    """Convert a navigation occupancy grid to an RGB image array.
-
-    Transposes the grid (rows -> x-axis) to match ProcTHOR's plot_grid convention.
-    """
-    import numpy as np
-
-    g = grid.T
-    rgb = np.zeros((*g.shape, 3))
-    rgb[g == -1.0] = [0.18, 0.22, 0.30]  # unobserved
-    rgb[(g >= 0.0) & (g < 0.5)] = [0.96, 0.94, 0.88]  # free
-    rgb[g >= 0.5] = [0.40, 0.18, 0.14]  # occupied
-    return rgb
-
-
-def _nav_observed_overlay_rgba(observed_grid):
-    """Convert observed navigation grid to RGBA with transparent unknown cells."""
-    import numpy as np
-
-    g = observed_grid.T
-    rgba = np.zeros((*g.shape, 4))
-    rgba[(g >= 0.0) & (g < 0.5), :3] = [0.96, 0.94, 0.88]  # free
-    rgba[g >= 0.5, :3] = [0.40, 0.18, 0.14]  # occupied
-    rgba[g != -1.0, 3] = 0.96
-    rgba[g == -1.0, 3] = 0.0
-    return rgba
-
-
-def _render_navigation_background(ax, observed_grid, true_grid=None):
-    """Render navigation map with optional faded full-map underlay."""
-    import numpy as np
-
-    has_unknown = bool(np.any(observed_grid == -1.0))
-    if true_grid is not None and has_unknown:
-        ax.imshow(_nav_grid_to_rgb(true_grid), origin="upper", zorder=0, alpha=0.18)
-        ax.imshow(_nav_observed_overlay_rgba(observed_grid), origin="upper", zorder=1)
-    else:
-        ax.imshow(_nav_grid_to_rgb(observed_grid), origin="upper", zorder=0)
-
-
 class _PlottingMixin:
     """Mixin containing all matplotlib plotting methods for PlannerDashboard."""
 
@@ -112,7 +72,6 @@ class _PlottingMixin:
     ) -> tuple[
         dict[str, tuple[list[tuple[float, float]], list[float]]],  # entity -> (waypoints, times)
         dict[str, tuple[float, float]],  # resolved env_coords
-        Any,  # grid (for plot_grid background)
     ]:
         """Build resolved and expanded entity trajectories.
 
@@ -127,11 +86,11 @@ class _PlottingMixin:
             include_objects: If True, also include non-robot entities.
 
         Returns:
-            (trajectories, env_coords, grid) where *trajectories* maps entity
+            (trajectories, env_coords) where *trajectories* maps entity
             names to (waypoints, times) lists with path-expanded routes.
         """
-        # Get environment coordinates + grid
-        env_coords, grid, _graph = self._get_location_coords()
+        # Get environment coordinates
+        env_coords = self._get_location_coords()
 
         # Handle explicit location_coords — overrides environment coords.
         # Per-position stored_coords still take priority at usage time.
@@ -263,7 +222,7 @@ class _PlottingMixin:
                         times.append(t)
                 trajectories[entity] = (waypoints, times)
 
-        return trajectories, env_coords, grid
+        return trajectories, env_coords
 
     def plot_trajectories(
         self: PlannerDashboard,
@@ -303,24 +262,17 @@ class _PlottingMixin:
             _, ax = plt.subplots(1, 1, figsize=(10, 8))
 
         # Build trajectories using shared helper
-        trajectories, env_coords, grid = self._build_entity_trajectories(
+        trajectories, env_coords = self._build_entity_trajectories(
             location_coords=location_coords,
             include_objects=show_objects,
         )
 
-        # Plot grid background if available (ProcTHOR tier)
-        if grid is not None:
-            try:
-                from railroad.navigation.plotting import plot_grid
-                plot_grid(ax, grid)
-            except ImportError:
-                pass
-        elif hasattr(self._env, 'observed_grid'):
-            _render_navigation_background(
-                ax,
-                self._env.observed_grid,
-                getattr(self._env, "true_grid", None),
-            )
+        # Plot grid background if available
+        occupancy_grid = getattr(self._env, 'occupancy_grid', None)
+        if occupancy_grid is not None:
+            from railroad.navigation.plotting import plot_grid_background
+            true_grid = getattr(self._env, 'true_grid', None)
+            plot_grid_background(ax, occupancy_grid, true_grid)
 
         # Dense interpolation for smooth scatter trails
         import numpy as np
@@ -423,7 +375,7 @@ class _PlottingMixin:
                 ax.legend(fontsize=6)
 
         # Auto-scale for non-grid plots
-        if grid is None and not hasattr(self._env, 'observed_grid'):
+        if occupancy_grid is None:
             ax.autoscale()
             ax.set_aspect("equal", adjustable="datalim")
 
@@ -454,7 +406,7 @@ class _PlottingMixin:
         import numpy as np
 
         query_times = np.asarray(times, dtype=float)
-        trajectories, _env_coords, _grid = self._build_entity_trajectories(
+        trajectories, _env_coords = self._build_entity_trajectories(
             location_coords=location_coords,
             include_objects=include_objects,
         )
@@ -627,16 +579,16 @@ class _PlottingMixin:
         figsize: tuple[float, float],
         *,
         location_coords: dict[str, tuple[float, float]] | None = None,
-    ) -> tuple[Any, Any, Any, Any, Any, Any, float] | None:
+    ) -> tuple[Any, Any, Any, Any, Any, float] | None:
         """Create a GridSpec figure with main + sidebar + optional overhead axes.
 
-        Returns (fig, main_ax, sidebar_ax, trajectories, env_coords, grid, t_end),
+        Returns (fig, main_ax, sidebar_ax, trajectories, env_coords, t_end),
         or None if there are no trajectories to display.
         """
         import matplotlib.pyplot as plt
         from matplotlib.gridspec import GridSpec
 
-        trajectories, env_coords, grid = self._build_entity_trajectories(
+        trajectories, env_coords = self._build_entity_trajectories(
             location_coords=location_coords,
             include_objects=False,
         )
@@ -668,15 +620,7 @@ class _PlottingMixin:
             sidebar_ax = fig.add_subplot(gs[0, 1])
         sidebar_ax.set_axis_off()
 
-        # Plot grid background if available
-        if grid is not None:
-            try:
-                from railroad.navigation.plotting import plot_grid
-                plot_grid(main_ax, grid)
-            except ImportError:
-                pass
-
-        return fig, main_ax, sidebar_ax, trajectories, env_coords, grid, t_end
+        return fig, main_ax, sidebar_ax, trajectories, env_coords, t_end
 
     def save_video(
         self: PlannerDashboard,
@@ -706,46 +650,46 @@ class _PlottingMixin:
         result = self._create_trajectory_figure(figsize, location_coords=location_coords)
         if result is None:
             return
-        fig, ax, sidebar_ax, trajectories, env_coords, grid, t_end = result
+        fig, ax, sidebar_ax, trajectories, env_coords, t_end = result
 
         # Animated navigation grid background
-        nav_true_artist = None
+        from railroad.navigation.plotting import make_plotting_grid, make_plotting_grid_rgba, _BACKGROUND_GRAY
+
         nav_grid_artist = None
         nav_grid_frames: list[tuple[float, Any]] = []
-        if grid is None and hasattr(self._env, "observed_grid"):
-            observed_grid = self._env.observed_grid
+        occupancy_grid = getattr(self._env, 'occupancy_grid', None)
+        _nav_has_true_underlay = False
+        if occupancy_grid is not None:
             true_grid = getattr(self._env, "true_grid", None)
-            has_unknown = bool(np.any(observed_grid == -1.0))
-            if true_grid is not None and has_unknown:
-                nav_true_artist = ax.imshow(
-                    _nav_grid_to_rgb(true_grid), origin="upper", zorder=0, alpha=0.18,
-                )
+            has_unknown = bool(np.any(occupancy_grid == -1.0))
+            _nav_has_true_underlay = true_grid is not None and has_unknown
+
+            if _nav_has_true_underlay:
+                assert true_grid is not None
+                # Pre-compute true grid underlay blended onto gray base
+                base = np.full(3, _BACKGROUND_GRAY)
+                true_rgb = make_plotting_grid(true_grid.T)
+                underlay = base * (1 - 0.35) + true_rgb * 0.35
+
+                def _composite_frame(obs_grid: np.ndarray) -> np.ndarray:
+                    obs_rgba = make_plotting_grid_rgba(obs_grid.T)
+                    obs_alpha = obs_rgba[:, :, 3:4]
+                    return underlay * (1 - obs_alpha) + obs_rgba[:, :, :3] * obs_alpha
+            else:
+                def _composite_frame(obs_grid: np.ndarray) -> np.ndarray:
+                    return make_plotting_grid(obs_grid.T)
 
             if self._nav_grid_snapshots:
-                if nav_true_artist is not None:
-                    nav_grid_frames = [
-                        (t, _nav_observed_overlay_rgba(g))
-                        for t, g in self._nav_grid_snapshots
-                    ]
-                else:
-                    nav_grid_frames = [
-                        (t, _nav_grid_to_rgb(g)) for t, g in self._nav_grid_snapshots
-                    ]
+                nav_grid_frames = [
+                    (t, _composite_frame(g))
+                    for t, g in self._nav_grid_snapshots
+                ]
                 nav_grid_artist = ax.imshow(
-                    nav_grid_frames[0][1],
-                    origin="upper",
-                    zorder=1 if nav_true_artist is not None else 0,
+                    nav_grid_frames[0][1], origin="upper", zorder=0,
                 )
             else:
-                initial = (
-                    _nav_observed_overlay_rgba(observed_grid)
-                    if nav_true_artist is not None
-                    else _nav_grid_to_rgb(observed_grid)
-                )
                 nav_grid_artist = ax.imshow(
-                    initial,
-                    origin="upper",
-                    zorder=1 if nav_true_artist is not None else 0,
+                    _composite_frame(occupancy_grid), origin="upper", zorder=0,
                 )
 
         n_frames = int(fps * duration)
@@ -865,7 +809,7 @@ class _PlottingMixin:
             fontfamily="monospace", fontsize=10,
         )
 
-        if grid is None and nav_grid_artist is None:
+        if occupancy_grid is None:
             ax.autoscale()
             ax.set_aspect("equal", adjustable="datalim")
 
@@ -913,8 +857,6 @@ class _PlottingMixin:
                     satisfied = current_goals.get(literal_str, False)
                     txt.set_color("green" if satisfied else "red")
             artists = markers + labels + [trail_scatter, title_artist]
-            if nav_true_artist is not None:
-                artists.append(nav_true_artist)
             if nav_grid_artist is not None:
                 artists.append(nav_grid_artist)
             artists += [txt for txt, _ in action_texts]
@@ -984,7 +926,7 @@ class _PlottingMixin:
         result = self._create_trajectory_figure(figsize, location_coords=location_coords)
         if result is None:
             return None
-        fig, main_ax, sidebar_ax, _trajs, _env_coords, _grid, t_end = result
+        fig, main_ax, sidebar_ax, _trajs, _env_coords, t_end = result
 
         self.plot_trajectories(ax=main_ax, location_coords=location_coords)
 
@@ -1036,7 +978,7 @@ class _PlottingMixin:
                 (12.8, 7.2), location_coords=location_coords,
             )
             if result is not None:
-                fig, main_ax, sidebar_ax, _trajs, _env_coords, _grid, t_end = result
+                fig, main_ax, sidebar_ax, _trajs, _env_coords, t_end = result
 
                 # Draw trajectories on the main axes
                 self.plot_trajectories(ax=main_ax, location_coords=location_coords)
