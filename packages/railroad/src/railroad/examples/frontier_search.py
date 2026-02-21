@@ -23,7 +23,7 @@ def main(
     seed: int | None = None,
     num_objects: int = 2,
     num_robots: int = 1,
-    allow_move_interruptions: bool = True,
+    allow_move_interruptions: bool = False,
     save_plot: str | None = None,
     show_plot: bool = False,
     save_video: str | None = None,
@@ -169,11 +169,11 @@ def main(
         )
 
     if allow_move_interruptions:
-        from railroad.environment.skill import NavigationMoveSkill
-        move_skill = NavigationMoveSkill
-    else:
         from railroad.environment.skill import InterruptibleNavigationMoveSkill
         move_skill = InterruptibleNavigationMoveSkill
+    else:
+        from railroad.environment.skill import NavigationMoveSkill
+        move_skill = NavigationMoveSkill
 
     env = UnknownSpaceEnvironment(
         state=State(0.0, fluents, []),

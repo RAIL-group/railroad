@@ -99,7 +99,7 @@ EXAMPLES: Dict[str, ExampleInfo] = {
                 "name": "--allow-move-interruptions",
                 "is_flag": True,
                 "default": False,
-                "help": "Allow more frequent interruption of move skills",
+                "help": "Allow interruption of move skills",
                 "param_name": "allow_move_interruptions",
             },
         ],
