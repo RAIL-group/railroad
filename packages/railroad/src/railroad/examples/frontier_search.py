@@ -2,16 +2,12 @@
 
 Demonstrates end-to-end planning: one or more robots explore unknown space by
 moving to frontiers, then searching for target objects from those frontiers
-with symbolic ``(at object frontier)`` assignments used for planning.
-
-Two modes:
-- **Synthetic** (default): built-in 80x80 corridor grid with hidden sites.
-- **ProcTHOR** (``--procthor``): loads a ProcTHOR scene for the grid and sites.
+with symbolic ``(at object frontier)`` assignments used for planning. Loads a ProcTHOR scene for the grid and sites.
 
 Usage:
     uv run railroad example frontier-search
     uv run railroad example frontier-search --num-robots 2
-    uv run railroad example frontier-search --procthor --seed 4001
+    uv run railroad example frontier-search --seed 4001
 """
 
 from __future__ import annotations
@@ -23,7 +19,6 @@ if TYPE_CHECKING:
 
 
 def main(
-    procthor: bool = False,
     seed: int | None = None,
     num_objects: int = 2,
     num_robots: int = 1,
@@ -61,14 +56,9 @@ def main(
     if num_robots < 1:
         raise ValueError("num_robots must be >= 1")
 
-    if procthor:
-        true_grid, hidden_sites, true_object_locations, start_coords_list, target_objects = (
-            _setup_procthor(seed=seed, num_objects=num_objects, num_robots=num_robots)
-        )
-    else:
-        true_grid, hidden_sites, true_object_locations, start_coords_list, target_objects = (
-            _setup_synthetic(num_robots=num_robots)
-        )
+    true_grid, hidden_sites, true_object_locations, start_coords_list, target_objects = (
+        _setup_procthor(seed=seed, num_objects=num_objects, num_robots=num_robots)
+    )
 
     print(f"Grid: {true_grid.shape[0]}x{true_grid.shape[1]}")
     print(f"Hidden sites: {list(hidden_sites.keys())}")
@@ -124,20 +114,6 @@ def main(
 
     def search_frontier_prob_fn(robot: str, frontier: str, obj: str) -> float:
         return 0.5
-        # del robot
-        # if env_ref[0] is None or not hidden_sites:
-        #     return 0.10
-        # registry = env_ref[0].location_registry
-        # if registry is None:
-        #     return 0.10
-        # frontier_xy = registry.get(frontier)
-        # if frontier_xy is None:
-        #     return 0.10
-        # best_site = min(
-        #     hidden_sites.items(),
-        #     key=lambda kv: float(np.linalg.norm(frontier_xy - np.asarray(kv[1], dtype=float))),
-        # )[0]
-        # return 0.85 if obj in true_object_locations.get(best_site, set()) else 0.25
 
     def search_container_prob_fn(robot: str, location: str, obj: str) -> float:
         del robot
