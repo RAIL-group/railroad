@@ -15,11 +15,12 @@ from railroad.planner import MCTSPlanner
 from railroad import operators
 
 # Constants from vertiwheeler_delivery.py
-MONITOR_TIME = 15.0
+MONITOR_TIME = 10.0
 SKILLS_TIME = {
     "v4w1": {"pick": 2.0, "place": 2.0, "search": 5.0},
-    "drone1": {"monitor": MONITOR_TIME, "search": 5.0},
+    "drone": {"monitor": MONITOR_TIME, "search": 5.0},
 }
+DRONE_SPEED_MULTIPLIER = 3.0
 
 STATUS_MAP = {
     'moving': SkillStatus.RUNNING,
@@ -27,7 +28,7 @@ STATUS_MAP = {
     'stopped': SkillStatus.IDLE
 }
 
-ROBOTS = ['v4w1', 'drone1']
+ROBOTS = ['v4w1', 'drone']
 
 
 class ROSRealScene(PhysicalScene):
@@ -44,7 +45,8 @@ class ROSRealScene(PhysicalScene):
 
         self._objects = {"supplies"}
         # Ground truth for simulation logic (supplies are at roomB)
-        self._object_locations = {"roomB": {"supplies"}}
+        # self._object_locations = {"roomB": {"supplies"}}
+        self._object_locations = {"t2": {"supplies"}}
 
     def _get_distance(self, location1: str, location2: str) -> float:
         if location2.endswith('_loc'):
@@ -81,7 +83,7 @@ class ROSRealScene(PhysicalScene):
     def get_move_cost_fn(self) -> Callable[[str, str, str], float]:
         def get_move_time(robot: str, loc_from: str, loc_to: str) -> float:
             # Assume drones move faster
-            multiplier = 3.0 if "drone" in robot else 1.0
+            multiplier = DRONE_SPEED_MULTIPLIER if "drone" in robot else 1.0
             return self._get_distance(loc_from, loc_to) / multiplier
         return get_move_time
 
@@ -137,11 +139,12 @@ class ROSRealEnvironment(PhysicalEnvironment):
         # Check virtual skill status based on duration
         if robot_name in self._virtual_skills_start:
             start_time = self._virtual_skills_start[robot_name]
-            duration = SKILLS_TIME.get(robot_name, {}).get(skill_name, 1.0)
+            duration = SKILLS_TIME[robot_name][skill_name]
             if time_module.time() - start_time >= duration:
-                # print(f"[{robot_name}] Virtual skill {skill_name} DONE")
+                print(f"[{robot_name}] Virtual skill {skill_name} DONE")
                 del self._virtual_skills_start[robot_name]
                 return SkillStatus.DONE
+            # print(f"[{robot_name}] Virtual skill {skill_name} RUNNING")
             return SkillStatus.RUNNING
 
         return SkillStatus.IDLE
@@ -183,25 +186,25 @@ if __name__ == '__main__':
 
     # Initial setup
     initial_fluents = {
-        F("at", "drone1", "drone1_loc"),
+        F("at", "drone", "drone_loc"),
         F("at", "v4w1", "v4w1_loc"),
-        F("free", "drone1"),
+        F("free", "drone"),
         F("free", "v4w1"),
-        F("is_drone", "drone1"),
+        F("is_drone", "drone"),
         F("is_vertiwheeler", "v4w1"),
-        F("revealed", "drone1_loc"),
+        F("revealed", "drone_loc"),
         F("revealed", "v4w1_loc"),
     }
 
     # Delivery Target: roomD. Must be monitored by drone while v4w1 places supplies.
     goal = (
-        F("at", "supplies", "roomD")
+        F("at", "supplies", "t3")
         & F("found", "supplies")
-        & F("monitoring", "roomD")
+        & F("monitoring", "t3")
     )
 
     objects_by_type = {
-        "robot": {"drone1", "v4w1"},
+        "robot": {"drone", "v4w1"},
         "location": set(scene.locations.keys()),
         "object": {"supplies"},
     }
@@ -227,7 +230,14 @@ if __name__ == '__main__':
 
     # Search probability logic
     def object_find_prob(robot: str, loc: str, obj: str) -> float:
-        return 0.9 if loc == "roomB" else 0.1
+        likelihoods = {
+            "t1": 0.5,
+            "t2": 0.9,
+            "t3": 0.1,
+            "v4w1_loc": 0.0,
+            "drone_loc": 0.0,
+        }
+        return likelihoods[loc]
 
     search_op = operators.construct_search_operator(
         object_find_prob, scene.get_skills_time_fn("search")
@@ -261,7 +271,7 @@ if __name__ == '__main__':
     all_actions = env.get_actions()
     planner = MCTSPlanner(all_actions)
 
-    print("\nStarting delivery planning loop...")
+    input("Press enter to start planning...")
     for i in range(50):
         current_fluents = env.state.fluents
         if goal.evaluate(current_fluents):
@@ -271,10 +281,14 @@ if __name__ == '__main__':
         print(f"\n--- Iteration {i} ---")
         print(f"Time: {env.state.time:.2f}s")
         # Filter fluents for readability
-        important = [str(f) for f in current_fluents if not f.negated and any(k in f.name for k in ["at", "holding", "found", "monitoring", "free"])]
+        important = [
+            str(f)
+            for f in current_fluents
+            if not f.negated and any(k in f.name for k in ["at", "holding", "found", "monitoring", "free"])
+        ]
         print(f"Active Fluents: {important}")
 
-        action_name = planner(env.state, goal, max_iterations=20000, c=500, max_depth=60)
+        action_name = planner(env.state, goal, max_iterations=40000, c=300, max_depth=60)
         if action_name == "NONE":
             print("No action found")
             time_module.sleep(1)
@@ -283,7 +297,6 @@ if __name__ == '__main__':
         from railroad.core import get_action_by_name
         action = get_action_by_name(all_actions, action_name)
         print(f"Dispatching: {action_name}")
-
         env.act(action, do_interrupt=False)
 
     client.terminate()
