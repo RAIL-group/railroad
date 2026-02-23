@@ -138,3 +138,34 @@ def ensure_all_resources(
     ensure_procthor_10k(base_dir=base_dir, force=force)
     ensure_sbert_model(base_dir=base_dir, force=force)
     ensure_ai2thor_simulator(base_dir=base_dir, force=force)
+
+
+def _cache_scene_worker(seed: int) -> None:
+    from .scene import ProcTHORScene
+    ProcTHORScene(seed=seed)
+
+
+def cache_procthor_scene(start_seed: int, end_seed: Optional[int] = None) -> None:
+    """
+    Helper function to cache a ProcTHOR scene for a given seed.
+    This runs the caching logic in a separate, blocking process to ensure
+    that the AI2-THOR controller is properly isolated and cleaned up,
+    which is crucial when caching multiple scenes in a loop.
+    """
+    import multiprocessing
+    from rich.progress import Progress
+    ctx = multiprocessing.get_context("spawn")
+    end_seed = start_seed if end_seed is None else end_seed
+    with Progress() as progress:
+        task = progress.add_task("[cyan]Caching scene", total=(end_seed - start_seed + 1))
+        for seed in range(start_seed, end_seed + 1):
+            scene_cache_path = get_procthor_10k_dir() / f"cache/scene_{seed}.pkl"
+            if scene_cache_path.exists():
+                progress.update(task, advance=1, description=f"[cyan]Cache exists [{seed}/{end_seed}]")
+                continue
+            process = ctx.Process(target=_cache_scene_worker, args=(seed,))
+            process.start()
+            process.join()  # Block until the caching process is complete
+            process.close()
+            progress.update(task, advance=1, description=f"[cyan]Caching scene [{seed}/{end_seed}]")
+        progress.update(task, advance=1, description="[cyan]Caching complete!")
