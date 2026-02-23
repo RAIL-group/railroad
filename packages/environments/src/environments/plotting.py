@@ -59,8 +59,7 @@ def plot_multi_robot_trajectories(ax, grid, robots_data, graph):
     plot_grid(ax, grid)
 
     # Predefined colormaps for different robots to be distinct
-    # Viridis-like (perceptually uniform sequential) colormaps
-    colormaps = ['viridis', 'plasma', 'inferno', 'magma', 'cividis', 'spring', 'summer', 'autumn', 'winter', 'cool']
+    colormaps = ['Reds', 'Blues', 'Greens', 'Purples', 'Oranges', 'Greys', 'YlOrBr', 'YlGnBu', 'PuRd', 'BuPu']
 
     for i, (robot_name, (poses, trajectory)) in enumerate(robots_data.items()):
         cmap = colormaps[i % len(colormaps)]
