@@ -137,10 +137,10 @@ def bench_procthor_learning_base(case: BenchmarkCase, do_plot: bool = False):
         # Plan next action
         mcts = MCTSPlanner(all_actions)
         action_name = mcts(env.state, goal,
-                           max_iterations=case.mcts.iterations,
-                           c=case.mcts.c,
+                           max_iterations=10000,
+                           c=300,
                            max_depth=20,
-                           heuristic_multiplier=case.mcts.h_mult)
+                           heuristic_multiplier=2.0)
 
         if action_name == 'NONE':
             dashboard.console.print("No more actions available. Goal may not be achievable.")
@@ -185,19 +185,13 @@ def bench_procthor_learning(case: BenchmarkCase):
 
 bench_procthor_learning.add_cases([
     {
-        "mcts.iterations": iterations,
-        "mcts.c": c,
-        "mcts.h_mult": h_mult,
-        "num_robots": num_robots,
         "seed": seed,
+        "num_robots": num_robots,
         "use_learning": use_learning,
     }
-    for c, num_robots, h_mult, iterations, use_learning, seed in itertools.product(
-        [300],                      # mcts.c
-        [1, 2],                     # num_robots
-        [2],                        # mcts.h_mult
-        [10000],                    # mcts.iterations
-        [True, False],              # use_learning
-        list(range(*SEED_RANGE))    # seed
+    for seed, num_robots, use_learning in itertools.product(
+        list(range(*SEED_RANGE)),  # seed
+        [1, 2],  # num_robots
+        [True, False],  # use_learning
     )
 ])
