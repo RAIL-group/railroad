@@ -5,7 +5,7 @@ import logging
 
 from railroad.core import Fluent as F, State, get_action_by_name
 from railroad.environment.pyrobosim import (
-    DecoupledPyRoboSimEnvironment,
+    PyRoboSimEnvironment,
     PyRoboSimScene,
     get_default_pyrobosim_world_file_path
 )
@@ -21,21 +21,22 @@ def test_pyrobosim_concurrency():
     logging.disable(logging.INFO)
 
     world_file = get_default_pyrobosim_world_file_path()
-    scene = PyRoboSimScene(world_file)
-    # Use standard move operator
-    move_op = operators.construct_move_operator_blocking(scene.get_move_cost_fn())
 
-    def get_env(robots, record=False):
+    # Use standard move operator
+    scene1 = PyRoboSimScene(world_file, show_plot=False, record_plots=True)
+    move_op = operators.construct_move_operator_blocking(scene1.get_move_cost_fn())
+
+    def get_env(scene, robots):
         initial_fluents = {F("at", r, f"{r}_loc") for r in robots} | {F("free", r) for r in robots}
         state = State(0.0, initial_fluents)
-        return DecoupledPyRoboSimEnvironment(
+        return PyRoboSimEnvironment(
             scene=scene, state=state,
             objects_by_type={"robot": set(robots), "location": set(scene.locations.keys()), "object": set()},
-            operators=[move_op], show_plot=False, record_plots=record
+            operators=[move_op],
         )
 
     # PHASE 1: Single Robot Move (robot2 to counter0)
-    env1 = get_env(["robot2"], record=True)
+    env1 = get_env(scene1, ["robot2"])
     try:
         all_actions = env1.get_actions()
         m = next(a for a in all_actions if a.name == "move robot2 robot2_loc counter0")
@@ -55,13 +56,13 @@ def test_pyrobosim_concurrency():
         output_path1.parent.mkdir(parents=True, exist_ok=True)
         env1.save_animation(filepath=output_path1)
     finally:
-        if hasattr(env1, "_client"):
-            env1._client.stop()
+        scene1.close()
 
     time.sleep(2.0) # Grace period between phases
 
     # PHASE 2: Concurrent Two-Robot Move (Both to counter0)
-    env2 = get_env(["robot1", "robot2"], record=True)
+    scene2 = PyRoboSimScene(world_file, show_plot=False, record_plots=True)
+    env2 = get_env(scene2, ["robot1", "robot2"])
     try:
         all_actions = env2.get_actions()
         m1 = next(a for a in all_actions if a.name == "move robot1 robot1_loc counter0")
@@ -85,8 +86,7 @@ def test_pyrobosim_concurrency():
         assert duration_concurrent < duration_single * 1.3, f"Concurrency failed: Single={duration_single:.2f}s, Concurrent={duration_concurrent:.2f}s"
 
     finally:
-        if hasattr(env2, "_client"):
-            env2._client.stop()
+        scene2.close()
 
 if __name__ == "__main__":
     test_pyrobosim_concurrency()

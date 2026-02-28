@@ -7,7 +7,7 @@ from railroad._bindings import State, Fluent
 from railroad.core import Fluent as F
 from railroad.environment import SkillStatus
 from railroad.environment.pyrobosim import (
-    DecoupledPyRoboSimEnvironment,
+    PyRoboSimEnvironment,
     PyRoboSimScene,
     get_default_pyrobosim_world_file_path
 )
@@ -15,30 +15,26 @@ from railroad.environment.pyrobosim import (
 @pytest.fixture
 def mock_env():
     world_file = get_default_pyrobosim_world_file_path()
+
+    # Mock scene with a mock client
     scene = MagicMock(spec=PyRoboSimScene)
     scene.world_file = world_file
     scene.locations = {"table0": (1, 1), "my_desk": (2, 2), "robot1_loc": (0, 0)}
-    scene.robots = [MagicMock(name="robot1")]
-    scene.robots[0].name = "robot1"
-    scene.world = MagicMock()
-    scene.world.rooms = []
+
+    mock_client = MagicMock()
+    mock_client.get_robot_status.return_value = {"current_task_id": -1, "last_completed_id": -1}
+    scene.client = mock_client
 
     initial_fluents = {F("at", "robot1", "robot1_loc"), F("free", "robot1")}
     initial_state = State(0.0, initial_fluents)
 
-    # Patch PyRoboSimClient so it doesn't start a real process
-    with patch("railroad.environment.pyrobosim.pyrobosim.PyRoboSimClient") as MockClient:
-        mock_client = MockClient.return_value
-        mock_client.get_robot_status.return_value = {}
-
-        env = DecoupledPyRoboSimEnvironment(
-            scene=scene,
-            state=initial_state,
-            objects_by_type={"robot": {"robot1"}, "location": {"table0", "my_desk", "robot1_loc"}, "object": {"banana0"}},
-            operators=[],
-            show_plot=False
-        )
-        return env
+    env = PyRoboSimEnvironment(
+        scene=scene,
+        state=initial_state,
+        objects_by_type={"robot": {"robot1"}, "location": {"table0", "my_desk", "robot1_loc"}, "object": {"banana0"}},
+        operators=[],
+    )
+    return env
 
 def test_execute_skill_dispatches_with_id(mock_env):
     """Test that execute_skill calls client with incrementing IDs."""

@@ -7,7 +7,7 @@ F = Fluent
 
 def test_pyrobosim_execution():
     world_file = get_default_pyrobosim_world_file_path()
-    scene = PyRoboSimScene(world_file)
+    scene = PyRoboSimScene(world_file, show_plot=False)
 
     move_cost_fn = scene.get_move_cost_fn()
 
@@ -34,38 +34,40 @@ def test_pyrobosim_execution():
             "object": scene.objects,
         },
         operators=ops,
-        show_plot=False
     )
 
-    # We'll use banana0 which is at table0, and move it to my_desk
-    planner = MCTSPlanner(actions=env.get_actions())
-    goal = F("at banana0 my_desk")
+    try:
+        # We'll use banana0 which is at table0, and move it to my_desk
+        planner = MCTSPlanner(actions=env.get_actions())
+        goal = F("at banana0 my_desk")
 
-    print("Initial state:", env.state)
+        print("Initial state:", env.state)
 
-    # In test_world.yaml, banana0 is at table0. Let's make sure it's known.
-    env.apply_effect(GroundedEffect(0, {F("found banana0"), F("at banana0 table0")}))
+        # In test_world.yaml, banana0 is at table0. Let's make sure it's known.
+        env.apply_effect(GroundedEffect(0, {F("found banana0"), F("at banana0 table0")}))
 
-    for i in range(15):
-        if env.is_goal_reached([goal]):
-            print("Goal reached!")
-            break
+        for i in range(15):
+            if env.is_goal_reached([goal]):
+                print("Goal reached!")
+                break
 
-        print(f"Iteration {i}, State: {env.state}")
-        current_actions = env.get_actions()
-        action_name = planner(env.state, goal, max_iterations=10000, c=300, max_depth=20, heuristic_multiplier=3)
-        if not action_name or action_name == "NONE":
-            print("No plan found!")
-            break
+            print(f"Iteration {i}, State: {env.state}")
+            current_actions = env.get_actions()
+            action_name = planner(env.state, goal, max_iterations=10000, c=300, max_depth=20, heuristic_multiplier=3)
+            if not action_name or action_name == "NONE":
+                print("No plan found!")
+                break
 
-        # Find the Action object for the selected action name
-        from railroad.core import get_action_by_name
-        action = get_action_by_name(current_actions, action_name)
+            # Find the Action object for the selected action name
+            from railroad.core import get_action_by_name
+            action = get_action_by_name(current_actions, action_name)
 
-        print(f"Executing: {action.name}")
-        env.act(action, loop_callback_fn=env.canvas.update if env.canvas else None)
+            print(f"Executing: {action.name}")
+            env.act(action)
 
-    assert env.is_goal_reached([goal])
+        assert env.is_goal_reached([goal])
+    finally:
+        scene.close()
 
 if __name__ == "__main__":
     test_pyrobosim_execution()

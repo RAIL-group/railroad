@@ -94,11 +94,11 @@ class SamplePhysicalEnvironment(PhysicalEnvironment):
         self.execution_log.append(f"execute {skill_name} on {robot_name} with {args}")
 
         if skill_name == "move":
-            loc_from = args[1]
-            loc_to = args[2]
+            loc_from = args[0]
+            loc_to = args[1]
             self._move(robot_name, loc_from, loc_to)
         elif skill_name == "pick":
-            obj_name = args[2] if len(args) > 2 else args[1]
+            obj_name = args[1] if len(args) > 1 else args[0]
             self._pick(robot_name, obj_name)
         elif skill_name == "place":
             self._place(robot_name)

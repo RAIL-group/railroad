@@ -6,7 +6,7 @@ from railroad._bindings import State, Fluent
 from railroad.core import Fluent as F
 from railroad.environment.pyrobosim import (
     PyRoboSimScene,
-    DecoupledPyRoboSimEnvironment,
+    PyRoboSimEnvironment,
     get_default_pyrobosim_world_file_path
 )
 from railroad.operators import (
@@ -17,9 +17,9 @@ from railroad.operators import (
 )
 
 def test_pyrobosim_decoupled_execution():
-    """Test that the decoupled environment can execute actions and sync state."""
+    """Test that the environment can execute actions and sync state."""
     world_file = get_default_pyrobosim_world_file_path()
-    scene = PyRoboSimScene(world_file)
+    scene = PyRoboSimScene(world_file, show_plot=False)
 
     # Define operators
     move_op = construct_move_operator_blocking(scene.get_move_cost_fn())
@@ -41,12 +41,11 @@ def test_pyrobosim_decoupled_execution():
         "object": {"banana0", "apple0"}
     }
 
-    env = DecoupledPyRoboSimEnvironment(
+    env = PyRoboSimEnvironment(
         scene=scene,
         state=initial_state,
         objects_by_type=objects_by_type,
         operators=[move_op, pick_op, place_op],
-        show_plot=False # GUI off for CI
     )
 
     try:
@@ -84,15 +83,13 @@ def test_pyrobosim_decoupled_execution():
         assert F("free", "robot1") in env.fluents
 
     finally:
-        # Ensure process is cleaned up
-        if hasattr(env, "_client"):
-            env._client.stop()
+        scene.close()
 
 
 def test_pyrobosim_decoupled_concurrency():
-    """Test that multiple robots can act concurrently in decoupled mode using no_op."""
+    """Test that multiple robots can act concurrently using no_op."""
     world_file = get_default_pyrobosim_world_file_path()
-    scene = PyRoboSimScene(world_file)
+    scene = PyRoboSimScene(world_file, show_plot=False)
     noop_op = construct_no_op_operator(1.0) # 1 second duration
 
     initial_fluents = {
@@ -103,7 +100,7 @@ def test_pyrobosim_decoupled_concurrency():
     }
     initial_state = State(0.0, initial_fluents)
 
-    env = DecoupledPyRoboSimEnvironment(
+    env = PyRoboSimEnvironment(
         scene=scene,
         state=initial_state,
         objects_by_type={
@@ -112,7 +109,6 @@ def test_pyrobosim_decoupled_concurrency():
             "object": set()
         },
         operators=[noop_op],
-        show_plot=False
     )
 
     try:
@@ -147,5 +143,4 @@ def test_pyrobosim_decoupled_concurrency():
         assert F("free", "robot2") in env.fluents
 
     finally:
-        if hasattr(env, "_client"):
-            env._client.stop()
+        scene.close()
