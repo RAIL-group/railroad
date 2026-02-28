@@ -5,22 +5,15 @@ for robot environments used in planning and simulation.
 """
 
 from abc import ABC, abstractmethod
-from enum import IntEnum
 from typing import Callable, Dict, List, Set, Any, Optional, Tuple, Union
 
 import numpy as np
 from numpy.typing import NDArray
 
+from railroad.environment import SkillStatus
+
 # Pose can be an ndarray or a tuple of coordinates
 Pose = Union[NDArray[np.floating[Any]], Tuple[float, ...]]
-
-
-class SkillStatus(IntEnum):
-    """Status of a robot skill execution."""
-
-    IDLE = -1
-    RUNNING = 0
-    DONE = 1
 
 
 class AbstractEnvironment(ABC):
