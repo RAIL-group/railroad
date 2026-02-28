@@ -15,6 +15,7 @@ class SkillStatus(IntEnum):
     IDLE = -1
     RUNNING = 0
     DONE = 1
+    FAILED = 2
 
 
 @runtime_checkable

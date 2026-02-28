@@ -300,6 +300,10 @@ class PhysicalEnvironment(Environment, ABC):
         objs = self.scene.object_locations.get(location, set())
         return {"object": objs}
 
+    def _on_act_loop_iteration(self, dt: float) -> None:
+        """Sleep briefly to avoid busy-waiting when polling physical status."""
+        time_module.sleep(0.01)
+
     def _on_skill_completed(self, skill: ActiveSkill) -> None:
         """Handle physical completion side-effects (e.g., updating world state)."""
         if not isinstance(skill, PhysicalSkill):
@@ -309,17 +313,14 @@ class PhysicalEnvironment(Environment, ABC):
         self.stop_robot(skill.robot)
 
         # Update perception/world state for manipulation actions
+        # skill_args is (robot, arg1, arg2, ...) from action name "skill robot arg1 arg2"
         name = skill.skill_name
         args = skill.skill_args
-        if name == "pick" and len(args) >= 2:
-            # (pick robot loc obj) or (pick loc obj)
-            obj = args[2] if len(args) >= 3 else args[1]
-            loc = args[1] if len(args) >= 3 else args[0]
+        if name == "pick" and len(args) >= 3:
+            _robot, loc, obj = args[0], args[1], args[2]
             self.remove_object_from_location(obj, loc)
-        elif name == "place" and len(args) >= 2:
-            # (place robot loc obj) or (place loc obj)
-            obj = args[2] if len(args) >= 3 else args[1]
-            loc = args[1] if len(args) >= 3 else args[0]
+        elif name == "place" and len(args) >= 3:
+            _robot, loc, obj = args[0], args[1], args[2]
             self.add_object_at_location(obj, loc)
 
     def _create_initial_effects_skill(

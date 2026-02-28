@@ -324,11 +324,6 @@ class Environment(ABC):
             if loop_callback_fn is not None:
                 loop_callback_fn()
 
-            # Avoid tight busy-wait loop when polling.
-            # This is particularly important for physical environments.
-            import time
-            time.sleep(0.01)
-
         # Interrupt interruptible skills if requested
         if do_interrupt:
             for skill in self._active_skills:
