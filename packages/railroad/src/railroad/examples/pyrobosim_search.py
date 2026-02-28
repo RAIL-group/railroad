@@ -46,7 +46,11 @@ def main(
         world_file = str(get_default_pyrobosim_world_file_path())
 
     print(f"Loading PyRoboSim scene: {world_file}")
-    scene = PyRoboSimScene(world_file)
+    scene = PyRoboSimScene(
+        world_file,
+        show_plot=show_plot,
+        record_plots=save_video is not None,
+    )
 
     if seed is None:
         target_objects = ["apple0", "banana0"]
@@ -54,7 +58,7 @@ def main(
     else:
         target_objects, target_location = sample_objects_and_location(scene, num_objects=num_objects, seed=seed)
 
-    robot_names = [r.name for r in scene.world.robots][:num_robots]
+    robot_names = scene.robot_names[:num_robots]
     if len(robot_names) < num_robots:
         num_robots = len(robot_names)
 
@@ -62,7 +66,6 @@ def main(
     move_cost_fn = scene.get_move_cost_fn()
 
     def object_find_prob_fn(robot: str, location: str, obj: str) -> float:
-        # Simple probability based on ground truth
         objs_at_loc = scene.object_locations.get(location, set())
         return 0.8 if obj in objs_at_loc else 0.1
 
@@ -79,65 +82,52 @@ def main(
         initial_fluents.add(F(f"at {robot} {robot_loc}"))
         initial_fluents.add(F(f"free {robot}"))
         initial_fluents.add(F(f"revealed {robot_loc}"))
-    initial_state = State(0.0, initial_fluents, [])
 
-    # 4. Define goal: place target objects at target location
+    # 4. Define goal
     goal = reduce(and_, [F(f"at {obj} {target_location}") & F(f"found {obj}")
                          for obj in target_objects])
 
-    # 5. Create environment
+    # 5. Planning loop
     env = PyRoboSimEnvironment(
         scene=scene,
-        state=initial_state,
+        state=State(0.0, initial_fluents, []),
         objects_by_type={
             "robot": set(robot_names),
             "location": set(scene.locations.keys()),
             "object": set(target_objects),
         },
         operators=[no_op, pick_op, place_op, move_op, search_op],
-        show_plot=show_plot,
-        record_plots=save_video is not None,
     )
-
-    # 6. Planning loop
-    max_iterations = 60
 
     def fluent_filter(f):
         return any(kw in f.name for kw in ["at", "holding", "found", "searched"])
 
-    with PlannerDashboard(goal, env, fluent_filter=fluent_filter) as dashboard:
-        for iteration in range(max_iterations):
-            if goal.evaluate(env.state.fluents):
-                dashboard.console.print("[green]Goal reached![/green]")
-                break
+    dashboard = PlannerDashboard(goal, env, fluent_filter=fluent_filter)
 
-            all_actions = env.get_actions()
-            mcts = MCTSPlanner(all_actions)
-            action_name = mcts(
-                env.state,
-                goal,
-                max_iterations=10000,
-                c=300,
-                max_depth=20,
-                heuristic_multiplier=2,
-            )
+    for iteration in range(60):
+        if goal.evaluate(env.state.fluents):
+            dashboard.console.print("[green]Goal reached![/green]")
+            break
 
-            if action_name == "NONE":
-                dashboard.console.print("No more actions available.")
-                break
+        all_actions = env.get_actions()
+        mcts = MCTSPlanner(all_actions)
+        action_name = mcts(
+            env.state, goal,
+            max_iterations=10000, c=300, max_depth=20, heuristic_multiplier=2,
+        )
 
-            action = get_action_by_name(all_actions, action_name)
-            env.act(action)
-            dashboard.update(mcts, action_name)
+        if action_name == "NONE":
+            dashboard.console.print("No more actions available.")
+            break
 
-    # 7. Post-execution (Saving video/plots)
-    if save_video and env.canvas:
+        action = get_action_by_name(all_actions, action_name)
+        env.act(action)
+        dashboard.update(mcts, action_name)
+
+    if save_video:
         save_path = Path(save_video)
         save_path.parent.mkdir(parents=True, exist_ok=True)
-        env.canvas.save_animation(filepath=str(save_path))
-
-    if env.canvas:
-        env.canvas.wait_for_close()
+        env.save_animation(filepath=str(save_path))
 
 
 if __name__ == "__main__":

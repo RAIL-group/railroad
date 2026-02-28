@@ -1,5 +1,5 @@
 from railroad.environment.pyrobosim import (
-    DecoupledPyRoboSimEnvironment,
+    PyRoboSimEnvironment,
     PyRoboSimScene,
     get_default_pyrobosim_world_file_path,
 )
@@ -19,21 +19,18 @@ PLACE_TIME = 1.0
 
 
 def main(args):
-    # Goal: move apple and banana to counter
     goal = F("at apple0 counter0") & F("at banana0 counter0")
 
-    # 1. Initialize Scene
-    scene = PyRoboSimScene(args.world_file)
+    scene = PyRoboSimScene(
+        args.world_file,
+        show_plot=args.show_plot,
+        record_plots=not args.no_video,
+    )
 
-    # 2. Create operators using scene info
-    def get_move_cost_fn():
-        # Override scene's move cost to make it slower for better concurrency visibility
-        scene_fn = scene.get_move_cost_fn()
-        def slower_move_time(r, f, t):
-            return scene_fn(r, f, t) * 2.0 # Half speed
-        return slower_move_time
-
-    move_time_fn = get_move_cost_fn()
+    # Override scene's move cost to make it slower for better concurrency visibility
+    scene_fn = scene.get_move_cost_fn()
+    def move_time_fn(r, f, t):
+        return scene_fn(r, f, t) * 2.0
 
     def object_find_prob(r, loc, o):
         return 0.8 if loc == "my_desk" and o == "apple0" else 0.2
@@ -45,7 +42,6 @@ def main(args):
     no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
     ops = [no_op, pick_op, place_op, move_op, search_op]
 
-    # 3. Create the initial state fluents
     robot_names = ["robot1", "robot2"]
     initial_fluents = set()
     for robot in robot_names:
@@ -53,144 +49,77 @@ def main(args):
         initial_fluents.add(F("at", robot, robot_loc))
         initial_fluents.add(F("free", robot))
         initial_fluents.add(F("revealed", robot_loc))
-    state = State(0.0, initial_fluents)
 
-    # 4. Create the DECOUPLED PyRoboSim environment
-    # This will spawn the simulator in a separate process
-    env = DecoupledPyRoboSimEnvironment(
+    env = PyRoboSimEnvironment(
         scene=scene,
-        state=state,
+        state=State(0.0, initial_fluents),
         objects_by_type={
             "robot": set(robot_names),
             "location": set(scene.locations.keys()),
             "object": scene.objects,
         },
         operators=ops,
-        show_plot=args.show_plot,
-        record_plots=not args.no_video,
     )
 
-    # Planning loop
-    max_iterations = 60  # Limit iterations to avoid infinite loops
-
     def fluent_filter(f):
-        return any(
-            keyword in f.name for keyword in ["at", "holding", "found", "searched"]
+        return any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
+
+    dashboard = PlannerDashboard(goal, env, fluent_filter=fluent_filter)
+
+    for iteration in range(60):
+        if goal.evaluate(env.state.fluents):
+            dashboard.console.print("[bold green]Goal reached![/bold green]")
+            break
+
+        all_actions = env.get_actions()
+        busy_robots = [r for r in robot_names if F("free", r) not in env.fluents]
+        if busy_robots:
+            dashboard.console.print(f"Busy robots: {', '.join(busy_robots)}")
+
+        mcts = MCTSPlanner(all_actions)
+        action_name = mcts(
+            env.state, goal,
+            max_iterations=20000, c=300, max_depth=20, heuristic_multiplier=2,
         )
 
-    try:
-        with PlannerDashboard(goal, env, fluent_filter=fluent_filter) as dashboard:
-            for iteration in range(max_iterations):
-                # Check if goal is reached
-                if goal.evaluate(env.state.fluents):
-                    dashboard.console.print(
-                        "[bold green]Goal reached symbolically! Finalizing physical actions...[/bold green]"
-                    )
-                    break
+        if action_name == "NONE":
+            if busy_robots:
+                time.sleep(0.5)
+                continue
+            dashboard.console.print("No more actions available.")
+            break
 
-                # Get available actions
-                all_actions = env.get_actions()
+        action = get_action_by_name(all_actions, action_name)
+        env.act(action, do_interrupt=False)
+        dashboard.update(mcts, action_name)
 
-                # Diagnostic: show which robots are busy
-                busy_robots = [r for r in robot_names if F("free", r) not in env.fluents]
-                if busy_robots:
-                    dashboard.console.print(f"Busy robots: {', '.join(busy_robots)}")
+    # Wait for all robots to finish
+    dashboard.console.print("[bold yellow]Waiting for all robots to become idle...[/bold yellow]")
+    start_wait = time.time()
+    while any(F("free", r) not in env.fluents for r in robot_names) and time.time() - start_wait < 30.0:
+        _ = env.state
+        time.sleep(0.1)
 
-                # Plan next action
-                mcts = MCTSPlanner(all_actions)
-                # In decoupled mode, the planner runs concurrently with simulator
-                t_plan_start = time.time()
-                action_name = mcts(
-                    env.state,
-                    goal,
-                    max_iterations=20000,
-                    c=300,
-                    max_depth=20,
-                    heuristic_multiplier=2,
-                )
-                t_plan_end = time.time()
-                dashboard.console.print(f"Planning took {t_plan_end - t_plan_start:.3f}s")
+    if goal.evaluate(env.state.fluents):
+        dashboard.console.print("[bold green]Mission Complete![/bold green]")
+    else:
+        dashboard.console.print("[bold red]Failed to reach goal within max iterations.[/bold red]")
 
-                if action_name == "NONE":
-                    # If no robot is free, wait a bit for actions to finish
-                    if busy_robots:
-                        time.sleep(0.5)
-                        continue
-                    else:
-                        dashboard.console.print(
-                            "No more actions available and all robots idle. Goal may not be achievable."
-                        )
-                        break
-
-                # Execute action
-                # act() will return immediately if there's another free robot!
-                action = get_action_by_name(all_actions, action_name)
-
-                # Keep dashboard responsive during physical execution
-                last_dash_update = [0.0] # Use a list for nonlocal-like behavior in lambda
-                def dash_callback():
-                    now = time.time()
-                    if now - last_dash_update[0] > 0.1: # 10Hz update
-                        dashboard.refresh()
-                        last_dash_update[0] = now
-
-                env.act(action, loop_callback_fn=dash_callback, do_interrupt=False)
-                dashboard.update(mcts, action_name)
-
-            # Final Wait: Ensure all robots are idle before closing
-            dashboard.console.print("[bold yellow]Waiting for all robots to become idle...[/bold yellow]")
-            start_final_wait = time.time()
-            while any(F("free", r) not in env.fluents for r in robot_names) and time.time() - start_final_wait < 30.0:
-                # Accessing env.state triggers symbolic update from physical status
-                _ = env.state
-                dashboard.refresh()
-                time.sleep(0.1)
-
-            if goal.evaluate(env.state.fluents):
-                dashboard.console.print("[bold green]Mission Complete![/bold green]")
-            else:
-                dashboard.console.print(
-                    "[bold red]Failed to reach goal within max iterations.[/bold red]"
-                )
-
-            # Keep dashboard visible for a moment
-            # time.sleep(2.0)
-
-        if not args.no_video:
-            from pathlib import Path
-
-            Path("./data").mkdir(parents=True, exist_ok=True)
-            output_path = "./data/pyrobosim_decoupled_demo.mp4"
-            print(f"Saving animation to {output_path}...")
-            env.save_animation(filepath=output_path)
-
-    finally:
-        # Cleanup
-        if hasattr(env, "_client"):
-            env._client.stop()
+    if not args.no_video:
+        from pathlib import Path
+        Path("./data").mkdir(parents=True, exist_ok=True)
+        output_path = "./data/pyrobosim_decoupled_demo.mp4"
+        print(f"Saving animation to {output_path}...")
+        env.save_animation(filepath=output_path)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-        description="Demo of planning with Decoupled PyRoboSim Environment."
-    )
-    parser.add_argument(
-        "--world-file",
-        type=str,
-        default=str(get_default_pyrobosim_world_file_path()),
-        help="Path to the world YAML file.",
-    )
-    parser.add_argument(
-        "--show-plot", action="store_true", help="Whether to show the plot window."
-    )
-    parser.add_argument(
-        "--no-video",
-        action="store_true",
-        help="Whether to disable generating video of the simulation.",
-    )
+    parser = argparse.ArgumentParser(description="Demo of planning with PyRoboSim Environment.")
+    parser.add_argument("--world-file", type=str, default=str(get_default_pyrobosim_world_file_path()),
+                        help="Path to the world YAML file.")
+    parser.add_argument("--show-plot", action="store_true", help="Whether to show the plot window.")
+    parser.add_argument("--no-video", action="store_true", help="Whether to disable generating video of the simulation.")
     args = parser.parse_args()
 
-    # Turn off all logging of level INFO and below (to suppress pyrobosim logs)
     logging.disable(logging.INFO)
-
     main(args)
