@@ -53,7 +53,7 @@ def main(
     robot_names = ["robot1"]
     
     # We fix the seed just to ensure reproducibility if none is provided
-    scene_seed = seed if seed is not None else 7020
+    scene_seed = seed if seed is not None else 5050
     print(f"Loading ProcTHOR scene (seed={scene_seed})...")
     scene = ProcTHORScene(seed=scene_seed)
 
@@ -94,6 +94,8 @@ def main(
     # Goal: swap locations and both must be found
     goal = (
         F(f"at {obj1} {loc2}") & F(f"at {obj2} {loc1}")
+        # & F(f"found {obj1}")
+        # & F(f"found {obj2}")
     )
 
     # Create environment
@@ -119,7 +121,7 @@ def main(
     def fluent_filter(f):
         return any(kw in f.name for kw in ["at", "holding", "found", "searched"])
         
-    with PlannerDashboard(goal, env, fluent_filter=fluent_filter, print_on_exit=False) as dashboard:
+    with PlannerDashboard(goal, env, fluent_filter=fluent_filter) as dashboard:
         for step in range(max_steps):
             if goal.evaluate(env.state.fluents):
                 dashboard.console.print("[green]Swap Goal reached![/green]")
@@ -129,7 +131,7 @@ def main(
             mcts = MCTSPlanner(all_actions)
             
             start_time = time.perf_counter()
-            max_mcts_iters = 10000
+            max_mcts_iters = 1000
             
             action_name = mcts(
                 env.state,
