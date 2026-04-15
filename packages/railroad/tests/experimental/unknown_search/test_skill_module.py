@@ -121,7 +121,7 @@ def test_navigation_skill_constructor_has_runtime_guard_for_missing_compute_move
         pass
 
     with pytest.raises(TypeError, match="requires env.compute_move_path"):
-        NavigationMoveSkill(action=_move_action(), start_time=0.0, env=_MissingPathEnv())  # type: ignore[arg-type]
+        NavigationMoveSkill(action=_move_action(), start_time=0.0, env=_MissingPathEnv())  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
 
 def test_navigation_skill_import_paths_remain_backward_compatible():

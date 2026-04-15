@@ -82,7 +82,7 @@ def build_content_layout(
     Returns:
         List of Dash components
     """
-    children = [
+    children: list = [
         dcc.Link("← Back to Experiment List", href="/", className="link", style={
             "marginBottom": "10px",
             "display": "block",

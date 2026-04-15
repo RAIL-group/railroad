@@ -69,7 +69,7 @@ def create_violin_trace(
         Configured go.Violin trace
     """
     # Default parameters for success traces
-    config = {
+    config: dict[str, object] = {
         "fillcolor": VIOLIN_FILL,
         "line_color": VIOLIN_LINE,
         "line_width": VIOLIN_LINE_WIDTH,

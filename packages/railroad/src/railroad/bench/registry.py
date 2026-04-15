@@ -223,7 +223,7 @@ def benchmark(
         # Get the file name where the benchmark is defined
         # Use the function's code object to get its file location
         if hasattr(fn, '__code__') and hasattr(fn.__code__, 'co_filename'):
-            caller_file: str = fn.__code__.co_filename  # type: ignore[assignment]
+            caller_file = str(fn.__code__.co_filename)
             file_name = Path(caller_file).stem
             # Format name as "file_name::benchmark_name" (pytest style)
             full_name = f"{file_name}::{name}"

@@ -114,10 +114,10 @@ class PyRoboSimEnv(BaseEnvironment):
             from_pose = self._get_feasible_pose_from_location_for_robot(self.robots[robot], loc_from)
             to_pose = self._get_feasible_pose_from_location_for_robot(self.robots[robot], loc_to)
 
-            plan = self.robots[robot].path_planner.plan(from_pose, to_pose)  # type: ignore[union-attr]
+            plan = self.robots[robot].path_planner.plan(from_pose, to_pose)  # type: ignore[union-attr]  # ty: ignore[unresolved-attribute]
 
             # Clear the latest path to avoid showing in the plot
-            self.robots[robot].path_planner.latest_path = None  # type: ignore[union-attr]
+            self.robots[robot].path_planner.latest_path = None  # type: ignore[union-attr]  # ty: ignore[invalid-assignment]
 
             if plan is None:
                 return float('inf')
@@ -197,10 +197,10 @@ class MatplotlibWorldCanvas(WorldCanvas):
 
         # Hijack the signals BEFORE calling any methods like show()
         # This prevents the "Signal source has been deleted" error
-        self.draw_signal = self.MockSignal(self.draw_signal_callback)
+        self.draw_signal = self.MockSignal(self.draw_signal_callback)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
         # Add other signals as needed to prevent attribute errors
-        self.show_robots_signal = self.MockSignal(self.show_robots)
-        self.show_planner_and_path_signal = self.MockSignal(self._show_all_paths)
+        self.show_robots_signal = self.MockSignal(self.show_robots)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
+        self.show_planner_and_path_signal = self.MockSignal(self._show_all_paths)  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 
         # Manually initialize the artist lists from WorldCanvas since we do not call its __init__
         self.path_artists_storage = {}
@@ -324,7 +324,7 @@ class MatplotlibWorldCanvas(WorldCanvas):
 
         writer = imageio.get_writer(
             filepath,
-            format="ffmpeg",  # type: ignore[arg-type]  # imageio accepts string format names
+            format="ffmpeg",  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]  # imageio accepts string format names
             mode="I",
             fps=fps,
             codec="libx264",

@@ -120,7 +120,7 @@ class ProcTHORScene:
             if obj_name not in cache:
                 node_features_dict = learning.utils.prepare_fcnn_input(
                     object_free_scene_graph, containers, [obj_name])
-                datum = {'node_feats': node_features_dict[obj_name]}
+                datum: dict = {'node_feats': node_features_dict[obj_name]}
                 cache[obj_name] = obj_prob_net(datum, containers)
             return cache[obj_name]
 

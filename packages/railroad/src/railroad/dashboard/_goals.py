@@ -50,7 +50,7 @@ def format_goal(goal: Goal, indent: int = 0, compact: bool = False) -> str:
             child_strs = [str(c.fluent()) for c in children if isinstance(c, LiteralGoal)]
             return f"{prefix}AND({', '.join(child_strs)})"
         else:
-            lines = [f"{prefix}AND("]
+            lines: list[str] = [f"{prefix}AND("]
             for child in children:
                 lines.append(format_goal(child, indent + 1, compact))
             lines.append(f"{prefix})")
@@ -64,7 +64,7 @@ def format_goal(goal: Goal, indent: int = 0, compact: bool = False) -> str:
             child_strs = [str(c.fluent()) for c in children if isinstance(c, LiteralGoal)]
             return f"{prefix}OR({', '.join(child_strs)})"
         else:
-            lines = [f"{prefix}OR("]
+            lines: list[str] = [f"{prefix}OR("]
             for child in children:
                 lines.append(format_goal(child, indent + 1, compact))
             lines.append(f"{prefix})")

@@ -187,10 +187,10 @@ class ParallelExecutor:
         old_handler = signal.signal(signal.SIGINT, signal_handler)
 
         # Get MLflow URI from tracker
-        mlflow_uri = self.tracker.tracking_uri if hasattr(self.tracker, 'tracking_uri') else None
+        mlflow_uri: str | None = getattr(self.tracker, 'tracking_uri', None)
 
         # Get include_files from plan metadata for worker processes
-        include_files = plan.metadata.get("include_files")
+        include_files: list[str] | None = plan.metadata.get("include_files")  # type: ignore[assignment]
 
         try:
             with ProcessPoolExecutor(max_workers=self.num_workers) as executor:

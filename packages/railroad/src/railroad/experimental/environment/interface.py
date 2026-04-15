@@ -7,6 +7,7 @@ with environment execution, and OngoingAction classes that track action executio
 import itertools
 import math
 from copy import copy
+from collections.abc import Mapping
 from typing import (
     Callable,
     Collection,
@@ -36,7 +37,7 @@ class EnvironmentInterface:
     def __init__(
         self,
         initial_state: State,
-        objects_by_type: Dict[str, Collection[str]],
+        objects_by_type: Mapping[str, Collection[str]],
         operators: List[Operator],
         environment: AbstractEnvironment,
     ) -> None:

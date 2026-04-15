@@ -1,13 +1,14 @@
 """Entry-point based benchmark discovery."""
 import importlib.metadata
 import importlib.util
+from collections.abc import Sequence
 from pathlib import Path
 from .registry import get_all_benchmarks
 
 ENTRY_POINT_GROUP = "railroad.benchmarks"
 
 
-def load_benchmark_files(paths: list[str | Path]) -> None:
+def load_benchmark_files(paths: Sequence[str | Path]) -> None:
     """Import Python files to trigger @benchmark decorator registration.
 
     Args:
@@ -31,7 +32,7 @@ def load_benchmark_files(paths: list[str | Path]) -> None:
         spec.loader.exec_module(module)
 
 
-def discover_benchmarks(include_files: list[str | Path] | None = None):
+def discover_benchmarks(include_files: Sequence[str | Path] | None = None):
     """Load all benchmarks registered via entry points and included files.
 
     Scans all installed packages for entry points in the "railroad.benchmarks"
