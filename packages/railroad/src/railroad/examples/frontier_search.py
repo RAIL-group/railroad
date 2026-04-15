@@ -193,7 +193,7 @@ def main(
         true_object_locations=true_object_locations,
         config=config,
     )
-    env.scene = scene  # type: ignore[attr-defined]  # expose to dashboard for overhead map
+    env.scene = scene  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]  # expose to dashboard for overhead map
     env_ref[0] = env
 
     def sync_known_hidden_sites() -> None:

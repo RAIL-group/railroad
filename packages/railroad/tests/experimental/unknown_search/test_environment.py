@@ -257,7 +257,7 @@ def test_environment_manages_sensing_cadence_during_motion():
             robot, pose, time, allow_interrupt=allow_interrupt
         )
 
-    env.observe_from_pose = wrapped_observe_from_pose  # type: ignore[assignment]
+    env.observe_from_pose = wrapped_observe_from_pose  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
     env.act(action)
 
     assert len(observed_times) > 1, "Expected repeated sensing while moving"
@@ -398,7 +398,7 @@ def test_robot_pose_updates_without_continuous_robot_loc_registry_writes():
         registered_keys.append(key)
         original_register(key, coords)
 
-    registry.register = wrapped_register  # type: ignore[assignment]
+    registry.register = wrapped_register  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
 
     sensed_positions: list[tuple[float, float]] = []
     original_observe_from_pose = env.observe_from_pose
@@ -414,7 +414,7 @@ def test_robot_pose_updates_without_continuous_robot_loc_registry_writes():
             robot, pose, time, allow_interrupt=allow_interrupt
         )
 
-    env.observe_from_pose = wrapped_observe_from_pose  # type: ignore[assignment]
+    env.observe_from_pose = wrapped_observe_from_pose  # type: ignore[assignment]  # ty: ignore[invalid-assignment]
     env.act(action)
 
     assert len({(round(x, 3), round(y, 3)) for x, y in sensed_positions}) > 1

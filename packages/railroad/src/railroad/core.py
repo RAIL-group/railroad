@@ -171,7 +171,7 @@ def get_next_actions(state: State, all_actions: List[Action]) -> List[Action]:
     # Step 2: Check each robot individually
     for free_pred in free_robot_fluents:
         # Create a restricted version of the state
-        combined_fluents: Set[Fluent] = cast(Set[Fluent], neg_state.fluents | {free_pred})
+        combined_fluents: Set[Fluent] = neg_state.fluents | {free_pred}
         temp_state = State(
             time=state.time,
             fluents=combined_fluents,

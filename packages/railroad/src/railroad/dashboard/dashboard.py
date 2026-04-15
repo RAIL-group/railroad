@@ -366,7 +366,7 @@ class PlannerDashboard(_PlottingMixin):
             t = Text(text)
             highlighter = self.console.highlighter
             if highlighter is not None and hasattr(highlighter, "highlight"):
-                highlighter.highlight(t)  # type: ignore[union-attr]
+                highlighter.highlight(t)  # type: ignore[union-attr]  # ty: ignore[call-non-callable]
             return t
         content = Group(
             highlighted(str(sim_state)),
@@ -781,7 +781,7 @@ class PlannerDashboard(_PlottingMixin):
 
         def _callback() -> None:
             env = self._env
-            t = env.time  # type: ignore[union-attr]
+            t = env.time  # type: ignore[union-attr]  # ty: ignore[unresolved-attribute]
 
             # Capture robot poses (cheap — just a few tuples per call)
             robot_poses = getattr(env, 'robot_poses', None)
