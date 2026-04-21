@@ -269,6 +269,7 @@ class PlannerDashboard(_PlottingMixin):
         relevant_fluents,
         step_index: int | None,
         last_action_name: str | None,
+        pruning_stats: tuple[int, int] | None = None,
     ) -> Panel:
         # Top metadata table (step, time, last action)
         meta = Table.grid(padding=(0, 1))
@@ -280,6 +281,13 @@ class PlannerDashboard(_PlottingMixin):
             meta.add_row("Step", str(step_index))
         if last_action_name is not None:
             meta.add_row("Last action", f"[bold]{last_action_name}[/]")
+        if pruning_stats is not None:
+            original, kept = pruning_stats
+            dropped = original - kept
+            meta.add_row(
+                "Action pruning",
+                f"{kept}/{original} kept ([red]-{dropped}[/])" if dropped else f"{kept}/{original} kept",
+            )
 
         # Active fluents
         active_table = Table(
@@ -739,6 +747,9 @@ class PlannerDashboard(_PlottingMixin):
         step_index = self._step_index
         self._step_index += 1
 
+        stats_fn = getattr(mcts, "get_last_pruning_stats", None)
+        pruning_stats = stats_fn() if callable(stats_fn) else None
+
         self._do_update(
             state=state,
             relevant_fluents=relevant_fluents,
@@ -746,6 +757,7 @@ class PlannerDashboard(_PlottingMixin):
             step_index=step_index,
             last_action_name=action_name,
             heuristic_value=heuristic_value,
+            pruning_stats=pruning_stats,
         )
 
     def _record_entity_positions(self, state: State) -> None:
@@ -809,6 +821,7 @@ class PlannerDashboard(_PlottingMixin):
         step_index: int | None = None,
         last_action_name: str | None = None,
         heuristic_value: float | None = None,
+        pruning_stats: tuple[int, int] | None = None,
     ):
         """Internal update implementation shared by update() and __enter__."""
         # Extract robots from (free NAME) fluents
@@ -865,6 +878,7 @@ class PlannerDashboard(_PlottingMixin):
                     relevant_fluents=relevant_fluents,
                     step_index=step_index,
                     last_action_name=last_action_name,
+                    pruning_stats=pruning_stats,
                 )
             )
             if tree_trace:
