@@ -15,6 +15,7 @@ from railroad.core import (
     convert_state_to_positive_preconditions,
     convert_goal_to_positive_preconditions,
 )
+from railroad._action_pruning import prune_probabilistic_achievers
 
 
 def _normalize_goal(goal: Union[Goal, Fluent]) -> Goal:
@@ -53,14 +54,25 @@ class MCTSPlanner:
         action_name = mcts(state, goal, max_iterations=1000, c=1.414)
     """
 
-    def __init__(self, actions: List[Action]):
+    def __init__(
+        self,
+        actions: List[Action],
+        enable_action_pruning: bool = True,
+        pruning_top_k: int = 3,
+    ):
         """Initialize MCTSPlanner with automatic preprocessing.
 
         Args:
             actions: List of Action objects to use for planning
+            enable_action_pruning: If True, prune redundant probabilistic
+                achievers before each planning call (keeps top-k by
+                probability and top-k by time-to-reach per goal fluent).
+            pruning_top_k: Number of achievers to keep per ranking criterion.
         """
         # Store original actions for later re-conversion if needed
         self._original_actions = actions
+        self._enable_action_pruning = enable_action_pruning
+        self._pruning_top_k = pruning_top_k
 
         # Extract negative preconditions from actions (base mapping)
         self._base_negative_fluents: Set[Fluent] = extract_negative_preconditions(actions)
@@ -74,6 +86,11 @@ class MCTSPlanner:
         self._current_mapping = self._base_mapping
         self._converted_actions = self._convert_actions(actions, self._current_mapping)
         self._cpp_planner = _MCTSPlannerCpp(self._converted_actions)
+        # Tracks the C++ planner that actually ran MCTS on the last call
+        # (may be a transient pruned-action-set planner). Used by
+        # get_trace_from_last_mcts_tree so traces reflect the real search.
+        self._last_cpp_planner = self._cpp_planner
+        self._last_pruning_stats = (0, 0)
 
     def _convert_actions(
         self, actions: List[Action], mapping: Dict[Fluent, Fluent]
@@ -165,17 +182,38 @@ class MCTSPlanner:
             goal, self._current_mapping
         )
 
-        if debug_heuristic:
-            print(self._cpp_planner.debug_heuristic(converted_state, converted_goal))
+        cpp_planner = self._cpp_planner
+        original_count = len(self._converted_actions)
+        pruned_count = original_count
+        if self._enable_action_pruning:
+            pruned_actions = prune_probabilistic_achievers(
+                converted_state,
+                converted_goal,
+                self._converted_actions,
+                top_k=self._pruning_top_k,
+            )
+            pruned_count = len(pruned_actions)
+            if pruned_count < original_count:
+                cpp_planner = _MCTSPlannerCpp(pruned_actions)
 
-        return self._cpp_planner(
+        self._last_cpp_planner = cpp_planner
+        self._last_pruning_stats = (original_count, pruned_count)
+
+        if debug_heuristic:
+            print(cpp_planner.debug_heuristic(converted_state, converted_goal))
+
+        return cpp_planner(
             converted_state, converted_goal, max_iterations, max_depth, c,
             heuristic_multiplier
         )
 
     def get_trace_from_last_mcts_tree(self):
         """Get trace from the last MCTS tree (delegates to C++ planner)."""
-        return self._cpp_planner.get_trace_from_last_mcts_tree()
+        return self._last_cpp_planner.get_trace_from_last_mcts_tree()
+
+    def get_last_pruning_stats(self) -> tuple[int, int]:
+        """Return ``(original_action_count, action_count_after_pruning)`` from the last call."""
+        return self._last_pruning_stats
 
     def heuristic(self, state: State, goal: Union[Goal, Fluent]) -> float:
         """Compute FF heuristic using converted state/goal/actions.
@@ -235,7 +273,18 @@ class MCTSPlanner:
             goal, self._current_mapping
         )
 
-        return self._cpp_planner.debug_heuristic(converted_state, converted_goal)
+        cpp_planner = self._cpp_planner
+        if self._enable_action_pruning:
+            pruned_actions = prune_probabilistic_achievers(
+                converted_state,
+                converted_goal,
+                self._converted_actions,
+                top_k=self._pruning_top_k,
+            )
+            if len(pruned_actions) < len(self._converted_actions):
+                cpp_planner = _MCTSPlannerCpp(pruned_actions)
+
+        return cpp_planner.debug_heuristic(converted_state, converted_goal)
 
 
 def reconstruct_path(came_from, current):
