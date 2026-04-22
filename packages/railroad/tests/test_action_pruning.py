@@ -177,3 +177,37 @@ def test_mcts_planner_flag_disables_pruning():
     name_on = planner_on(_initial_state(), goal, max_iterations=10)
     assert isinstance(name_off, str)
     assert isinstance(name_on, str)
+
+
+def test_at_goal_expands_to_found_landmark_for_pruning():
+    """Goals of the form `at <obj> <loc>` should add `found <obj>` as a pruning
+    target, so probabilistic search actions get pruned even when the direct
+    goal achievers are all deterministic place actions.
+    """
+    # 6 search achievers of found X, only 2 to keep (one hi-prob, one lo-time).
+    search_actions = [
+        make_search_action("search_hi", "X", find_prob=0.9, search_cost=100.0),
+        make_search_action("search_mi", "X", find_prob=0.5, search_cost=50.0),
+        make_search_action("search_lo", "X", find_prob=0.05, search_cost=1000.0),
+        make_search_action("search_q1", "X", find_prob=0.1, search_cost=1.0),
+        make_search_action("search_q2", "X", find_prob=0.1, search_cost=2.0),
+        make_search_action("search_q3", "X", find_prob=0.1, search_cost=3.0),
+    ]
+    # A deterministic `place r1 loc X` achieving `at X loc`, requiring `found X`
+    # as a precondition so the action chain ties the two together.
+    place = Action(
+        {F("found X"), F("free r1")},
+        [GroundedEffect(time=5.0, resulting_fluents={F("at X loc"), F("free r1")})],
+        name="place r1 loc X",
+    )
+    actions = search_actions + [place]
+    goal = LiteralGoal(F("at X loc"))
+
+    pruned = prune_probabilistic_achievers(_initial_state(), goal, actions, top_k=1)
+    names = {a.name for a in pruned}
+
+    # Place is not an achiever of `found X`, so it survives.
+    assert "place r1 loc X" in names
+    # Low-quality searches are dropped.
+    assert "search_lo" not in names
+    assert len([n for n in names if n.startswith("search_")]) < len(search_actions)

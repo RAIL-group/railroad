@@ -21,10 +21,26 @@ _FF_TOLERANCE = 1e-9
 
 
 def _collect_goal_fluents(goal: Goal) -> Set[Fluent]:
-    """Union of fluents across all DNF branches."""
+    """Union of fluents across all DNF branches, plus `found <obj>` landmarks.
+
+    For any `at <obj> <loc>` fluent in the goal we also add `found <obj>` as a
+    candidate pruning target. This mirrors the auto-landmark logic in the C++
+    `build_backward_extraction` (at-implies-found): the probabilistic
+    branching in these domains comes from search actions that achieve
+    `found <obj>`, not from the deterministic place actions that achieve
+    `at <obj> <loc>`. Without this, goals of the form `at <obj> <loc>` would
+    never trigger pruning because their direct achievers are all deterministic.
+    """
     fluents: Set[Fluent] = set()
     for branch in goal.get_dnf_branches():
         fluents.update(branch)
+
+    # `at <obj> <loc>` -> also prune around `found <obj>`.
+    extra: Set[Fluent] = set()
+    for f in fluents:
+        if f.name == "at" and len(f.args) >= 2:
+            extra.add(Fluent(f"found {f.args[0]}"))
+    fluents.update(extra)
     return fluents
 
 
