@@ -392,6 +392,13 @@ PYBIND11_MODULE(_bindings, m) {
         py::arg("input_state"), py::arg("fluent"), py::arg("all_actions"),
         "Get achievers for a fluent as list of (action_name, wait_cost, exec_cost, probability)");
 
+  m.def("get_effective_goal_fluents",
+        [](const State &input_state, const GoalPtr &goal, const std::vector<Action> &all_actions) {
+          return get_effective_goal_fluents(input_state, goal.get(), all_actions);
+        },
+        py::arg("input_state"), py::arg("goal"), py::arg("all_actions"),
+        "Union of effective goals across DNF branches, including auto-added `found <obj>` landmarks");
+
   m.def("debug_ff_heuristic",
         [](const State &input_state, const GoalPtr &goal, const std::vector<Action> &all_actions) {
           return ff_heuristic_debug_report(input_state, goal.get(), all_actions, nullptr);

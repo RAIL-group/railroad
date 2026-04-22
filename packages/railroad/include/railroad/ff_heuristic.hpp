@@ -814,6 +814,37 @@ inline const std::vector<std::unordered_set<Fluent>>& extract_or_branches(const 
   return goal->get_dnf_branches();
 }
 
+// Return the union of `effective_goals` across all DNF branches of the given
+// goal. Effective goals = the branch's raw fluents plus any auto-added
+// `found <obj>` landmarks produced by `build_backward_extraction`. Exposing
+// this lets callers that need to enumerate "what does this goal really
+// depend on" (e.g. Python-side action pruning) reuse the exact landmark
+// logic used by the heuristic, without re-implementing at-implies-found.
+inline std::unordered_set<Fluent> get_effective_goal_fluents(
+    const State& input_state,
+    const GoalBase* goal,
+    const std::vector<Action>& all_actions) {
+  std::unordered_set<Fluent> out;
+  if (!goal) return out;
+
+  auto relaxed_result = transition(input_state, nullptr, true);
+  if (relaxed_result.empty()) return out;
+  State relaxed = relaxed_result[0].first;
+  std::unordered_set<Fluent> initial_fluents(
+      relaxed.fluents().begin(), relaxed.fluents().end());
+
+  auto forward = ff_forward_phase(initial_fluents, all_actions);
+  compute_expected_costs(forward);
+
+  for (const auto& branch : extract_or_branches(goal)) {
+    FFBackwardExtractionResult extraction =
+        build_backward_extraction(forward, branch);
+    out.insert(extraction.effective_goals.begin(),
+               extraction.effective_goals.end());
+  }
+  return out;
+}
+
 inline std::string fluent_to_debug_string(const Fluent& f) {
   std::ostringstream out;
   if (f.is_negated()) out << "not ";
