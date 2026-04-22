@@ -15,33 +15,25 @@ from railroad._bindings import (
     Goal,
     State,
     get_achievers_for_fluent,
+    get_effective_goal_fluents,
 )
 
 _FF_TOLERANCE = 1e-9
 
 
-def _collect_goal_fluents(goal: Goal) -> Set[Fluent]:
-    """Union of fluents across all DNF branches, plus `found <obj>` landmarks.
+def _collect_goal_fluents(
+    state: State, goal: Goal, actions: List[Action]
+) -> Set[Fluent]:
+    """Return the set of fluents the pruner should consider as pruning targets.
 
-    For any `at <obj> <loc>` fluent in the goal we also add `found <obj>` as a
-    candidate pruning target. This mirrors the auto-landmark logic in the C++
-    `build_backward_extraction` (at-implies-found): the probabilistic
-    branching in these domains comes from search actions that achieve
-    `found <obj>`, not from the deterministic place actions that achieve
-    `at <obj> <loc>`. Without this, goals of the form `at <obj> <loc>` would
-    never trigger pruning because their direct achievers are all deterministic.
+    Delegates to the C++ `get_effective_goal_fluents`, which runs the same
+    forward + per-branch `build_backward_extraction` pipeline used by the
+    heuristic. The result is the union of effective goals across DNF
+    branches, including the at-implies-found auto-landmarks (so `at <obj>
+    <loc>` in the goal also pulls in `found <obj>`). Keeping this logic in
+    one place (C++) avoids drift with the heuristic.
     """
-    fluents: Set[Fluent] = set()
-    for branch in goal.get_dnf_branches():
-        fluents.update(branch)
-
-    # `at <obj> <loc>` -> also prune around `found <obj>`.
-    extra: Set[Fluent] = set()
-    for f in fluents:
-        if f.name == "at" and len(f.args) >= 2:
-            extra.add(Fluent(f"found {f.args[0]}"))
-    fluents.update(extra)
-    return fluents
+    return set(get_effective_goal_fluents(state, goal, actions))
 
 
 def prune_probabilistic_achievers(
@@ -63,7 +55,7 @@ def prune_probabilistic_achievers(
     preprocess; if it becomes a hotspot, add a companion C++ binding that
     returns all achievers from a single forward pass.
     """
-    goal_fluents = _collect_goal_fluents(goal)
+    goal_fluents = _collect_goal_fluents(state, goal, actions)
     if not goal_fluents:
         return list(actions)
 
