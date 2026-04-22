@@ -126,7 +126,7 @@ def main(
     from operator import and_
 
     goal = reduce(and_, [
-        F(f"at {obj} {target_location}") & F(f"found {obj}")
+        F(f"at {obj} {target_location}") # & F(f"found {obj}")
         for obj in target_objects
     ])
 
