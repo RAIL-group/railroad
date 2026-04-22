@@ -1,13 +1,19 @@
 """Action-set pruning for probabilistic achievers.
 
-For each probabilistic fluent appearing in the goal, keep only the top-K
-achievers by success probability and the top-K by time-to-reach (deduplicated),
-discarding the rest. Non-probabilistic actions and achievers of purely
-deterministic goal fluents pass through untouched.
+For each probabilistic fluent appearing in the goal, and for each robot
+that can achieve it, keep only the top-K achievers by success probability
+and the top-K by time-to-reach (deduplicated), discarding the rest.
+Non-probabilistic actions and achievers of purely deterministic goal
+fluents pass through untouched.
+
+Per-robot grouping matters because a single robot can otherwise dominate
+both ranking lists, leaving another robot with no surviving options for
+the same fluent --- which would force the planner to route all
+probabilistic attempts through one robot.
 """
 from __future__ import annotations
 
-from typing import List, Set
+from typing import Dict, List, Set, Tuple
 
 from railroad._bindings import (
     Action,
@@ -19,6 +25,25 @@ from railroad._bindings import (
 )
 
 _FF_TOLERANCE = 1e-9
+
+
+def _robot_key(action: Action) -> Tuple[str, ...]:
+    """Identify the robot(s) this action is executed by, for per-robot pruning.
+
+    Uses the `free <robot>` precondition pattern. Every robot-executing
+    operator in this codebase has `free ?r` as a precondition; after
+    grounding, the arg is the concrete robot id. Actions bound to multiple
+    robots (e.g. wait) return a sorted tuple of all of them. Actions with
+    no free-robot precondition fall back to a single shared key so they
+    don't inadvertently split into a group of one.
+    """
+    robots: List[str] = []
+    for f in action.preconditions:
+        if f.name == "free" and not f.negated:
+            robots.extend(f.args)
+    if not robots:
+        return ("__no_robot__",)
+    return tuple(sorted(robots))
 
 
 def _collect_goal_fluents(
@@ -59,32 +84,49 @@ def prune_probabilistic_achievers(
     if not goal_fluents:
         return list(actions)
 
+    # Name-to-action map, used to group achievers by robot during pruning.
+    actions_by_name: Dict[str, Action] = {a.name: a for a in actions}
+
     prunable: Set[str] = set()
     keepers: Set[str] = set()
 
     for fluent in goal_fluents:
         achievers = get_achievers_for_fluent(state, fluent, actions)
-        if len(achievers) <= top_k:
+        if not achievers:
             continue
         if all(prob >= 1.0 - _FF_TOLERANCE for _, _, _, prob in achievers):
             continue
 
-        for name, _, _, _ in achievers:
-            prunable.add(name)
+        # Group achievers by robot. A robot group with <= top_k candidates is
+        # small enough that pruning within it is a no-op for that robot, but
+        # we still need to register its actions as "achievers of this fluent"
+        # so other robots' pruning doesn't accidentally sweep them into the
+        # prunable-but-not-kept bucket.
+        by_robot: Dict[Tuple[str, ...], List] = {}
+        for ach in achievers:
+            name = ach[0]
+            a = actions_by_name.get(name)
+            key = _robot_key(a) if a is not None else ("__no_robot__",)
+            by_robot.setdefault(key, []).append(ach)
 
-        by_prob = sorted(
-            achievers,
-            key=lambda a: (-a[3], a[1] + a[2]),
-        )[:top_k]
-        by_time = sorted(
-            achievers,
-            key=lambda a: (a[1] + a[2], -a[3]),
-        )[:top_k]
+        for robot_key, group in by_robot.items():
+            # Record all group members as candidates (so the global keeper set
+            # must contain them for them to survive).
+            for name, _, _, _ in group:
+                prunable.add(name)
 
-        for name, _, _, _ in by_prob:
-            keepers.add(name)
-        for name, _, _, _ in by_time:
-            keepers.add(name)
+            if len(group) <= top_k:
+                # Too few to prune; keep them all.
+                for name, _, _, _ in group:
+                    keepers.add(name)
+                continue
+
+            by_prob = sorted(group, key=lambda a: (-a[3], a[1] + a[2]))[:top_k]
+            by_time = sorted(group, key=lambda a: (a[1] + a[2], -a[3]))[:top_k]
+            for name, _, _, _ in by_prob:
+                keepers.add(name)
+            for name, _, _, _ in by_time:
+                keepers.add(name)
 
     if not prunable:
         return list(actions)
