@@ -16,9 +16,11 @@ from railroad.planner import MCTSPlanner
 F = Fluent
 
 
-def make_search_action(name: str, obj: str, find_prob: float, search_cost: float) -> Action:
+def make_search_action(
+    name: str, obj: str, find_prob: float, search_cost: float, robot: str = "r1"
+) -> Action:
     """Single-effect probabilistic search action that achieves ``found <obj>``."""
-    preconditions = {F("free r1")}
+    preconditions = {F(f"free {robot}")}
     effects = [
         GroundedEffect(
             time=search_cost,
@@ -177,6 +179,44 @@ def test_mcts_planner_flag_disables_pruning():
     name_on = planner_on(_initial_state(), goal, max_iterations=10)
     assert isinstance(name_off, str)
     assert isinstance(name_on, str)
+
+
+def test_pruning_is_per_robot():
+    """Each robot keeps its own top-k; one robot can't monopolize the keepers."""
+    # Robot r1's achievers are uniformly better (higher prob, lower cost) than
+    # r2's. Under global (non-per-robot) pruning, all keepers would be r1 and
+    # r2's achievers would all be dropped. Per-robot pruning must retain a
+    # fair share on each side.
+    actions = [
+        # r1: 6 achievers of (found X), all strong.
+        make_search_action("s_r1_a", "X", 0.9, 100.0, robot="r1"),
+        make_search_action("s_r1_b", "X", 0.8, 100.0, robot="r1"),
+        make_search_action("s_r1_c", "X", 0.7, 100.0, robot="r1"),
+        make_search_action("s_r1_d", "X", 0.6, 10.0, robot="r1"),
+        make_search_action("s_r1_e", "X", 0.5, 20.0, robot="r1"),
+        make_search_action("s_r1_f", "X", 0.4, 30.0, robot="r1"),
+        # r2: 5 achievers, weaker but should still be kept per-robot.
+        make_search_action("s_r2_a", "X", 0.3, 200.0, robot="r2"),
+        make_search_action("s_r2_b", "X", 0.2, 200.0, robot="r2"),
+        make_search_action("s_r2_c", "X", 0.1, 500.0, robot="r2"),
+        make_search_action("s_r2_d", "X", 0.05, 40.0, robot="r2"),
+        make_search_action("s_r2_e", "X", 0.05, 50.0, robot="r2"),
+    ]
+    # Need r2's free fluent in the state so forward phase reaches r2's actions.
+    state = State(time=0, fluents={F("free r1"), F("free r2")})
+    goal = LiteralGoal(F("found X"))
+
+    pruned = prune_probabilistic_achievers(state, goal, actions, top_k=2)
+    names = {a.name for a in pruned}
+
+    r1_kept = [n for n in names if n.startswith("s_r1_")]
+    r2_kept = [n for n in names if n.startswith("s_r2_")]
+
+    # Each robot's group must retain at least one survivor (not monopolized).
+    assert len(r1_kept) >= 1, f"r1 swept entirely; got {names}"
+    assert len(r2_kept) >= 1, f"r2 swept entirely; got {names}"
+    # Some per-robot pruning did happen on r1 (6 -> at most 4 via top-2 x 2).
+    assert len(r1_kept) < 6, f"expected r1 to be pruned, kept {r1_kept}"
 
 
 def test_at_goal_expands_to_found_landmark_for_pruning():
