@@ -845,6 +845,70 @@ inline std::unordered_set<Fluent> get_effective_goal_fluents(
   return out;
 }
 
+// Return the names of actions that lie in the backward closure from the
+// effective goal fluents (goal literals + auto-added landmarks) through
+// positive preconditions. An action enters the closure if it adds a fluent
+// already in the closure; its positive preconditions then join the closure.
+// Iterates to fixpoint, so the result is the static set of actions that can
+// possibly contribute to achieving the goal given the current relaxed
+// reachability. Actions never reachable backward from the goal --- e.g.
+// moves whose destination is useless for any surviving achiever --- are
+// excluded.
+inline std::unordered_set<std::string> get_goal_helpful_action_names(
+    const State& input_state,
+    const GoalBase* goal,
+    const std::vector<Action>& all_actions) {
+  std::unordered_set<std::string> relevant_names;
+  if (!goal) return relevant_names;
+
+  auto effective = get_effective_goal_fluents(input_state, goal, all_actions);
+  if (effective.empty()) {
+    // No closure anchor: fall back to preserving all actions so callers never
+    // over-prune on a degenerate goal.
+    for (const auto& a : all_actions) relevant_names.insert(a.name());
+    return relevant_names;
+  }
+
+  std::unordered_set<Fluent> relevant_fluents(effective.begin(), effective.end());
+
+  std::unordered_map<const Action*, std::unordered_set<Fluent>> adds_map;
+  adds_map.reserve(all_actions.size());
+  for (const auto& action : all_actions) {
+    const Action* a = &action;
+    std::unordered_set<Fluent> adds;
+    const auto& succs = a->get_relaxed_successors();
+    for (const auto& [succ_state, succ_prob] : succs) {
+      if (succ_prob <= 0.0) continue;
+      for (const auto& f : succ_state.fluents()) adds.insert(f);
+    }
+    adds_map[a] = std::move(adds);
+  }
+
+  std::unordered_set<const Action*> relevant_actions;
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (const auto& action : all_actions) {
+      const Action* a = &action;
+      if (relevant_actions.count(a)) continue;
+      bool hits = false;
+      for (const auto& f : adds_map[a]) {
+        if (relevant_fluents.count(f)) { hits = true; break; }
+      }
+      if (!hits) continue;
+      relevant_actions.insert(a);
+      relevant_names.insert(a->name());
+      changed = true;
+      for (const auto& p : a->pos_preconditions()) {
+        if (!relevant_fluents.count(p)) {
+          relevant_fluents.insert(p);
+        }
+      }
+    }
+  }
+  return relevant_names;
+}
+
 inline std::string fluent_to_debug_string(const Fluent& f) {
   std::ostringstream out;
   if (f.is_negated()) out << "not ";
