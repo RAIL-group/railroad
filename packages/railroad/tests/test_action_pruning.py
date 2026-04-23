@@ -109,7 +109,36 @@ def test_deterministic_goal_is_not_pruned():
 
 
 def test_non_achiever_actions_pass_through():
-    """Actions that do not achieve any candidate goal fluent are preserved."""
+    """Actions that do not achieve any candidate goal fluent are preserved
+    when the helpful-action filter is disabled. (With it enabled, a move
+    whose effect is not backward-reachable from the goal is correctly dropped
+    --- see ``test_helpful_action_filter_drops_unreachable_move``.)
+    """
+    search_actions = [
+        make_search_action(f"search_{i}", "X", find_prob=0.1 * (i + 1), search_cost=5.0)
+        for i in range(5)
+    ]
+    move_action = make_deterministic_action("move r1 a b", F("at r1 b"), cost=3.0)
+    actions = search_actions + [move_action]
+    goal = LiteralGoal(F("found X"))
+
+    pruned = prune_probabilistic_achievers(
+        _initial_state(), goal, actions, top_k=3,
+        enable_helpful_action_filter=False,
+    )
+    names = {a.name for a in pruned}
+
+    assert "move r1 a b" in names
+    # Some searches should have been dropped (5 achievers, top_k=3 → at most 6 kept,
+    # but prob and time rankings overlap here so we expect fewer).
+    assert len([a for a in pruned if a.name.startswith("search_")]) < 5
+
+
+def test_helpful_action_filter_drops_unreachable_move():
+    """With the helpful-action filter enabled, a move whose effect is not
+    backward-reachable from the goal (searches here only require `free r1`,
+    not any `at` fluent) is correctly dropped alongside the pruned achievers.
+    """
     search_actions = [
         make_search_action(f"search_{i}", "X", find_prob=0.1 * (i + 1), search_cost=5.0)
         for i in range(5)
@@ -121,10 +150,44 @@ def test_non_achiever_actions_pass_through():
     pruned = prune_probabilistic_achievers(_initial_state(), goal, actions, top_k=3)
     names = {a.name for a in pruned}
 
-    assert "move r1 a b" in names
-    # Some searches should have been dropped (5 achievers, top_k=3 → at most 6 kept,
-    # but prob and time rankings overlap here so we expect fewer).
-    assert len([a for a in pruned if a.name.startswith("search_")]) < 5
+    assert "move r1 a b" not in names
+    assert any(n.startswith("search_") for n in names)
+
+
+def test_helpful_action_filter_keeps_backward_reachable_move():
+    """A move whose destination is a precondition of a surviving achiever
+    should be kept by the helpful-action filter."""
+    # Search for X requires being at location `loc` (so at r1 loc is a
+    # precondition of a kept achiever, making move-to-loc backward-reachable).
+    def search_at_loc(name, find_prob, cost, loc="loc"):
+        preconditions = {F("free r1"), F(f"at r1 {loc}")}
+        effects = [
+            GroundedEffect(
+                time=cost,
+                resulting_fluents=set(),
+                prob_effects=[
+                    (find_prob, [GroundedEffect(time=0, resulting_fluents={F("found X")})]),
+                    (1.0 - find_prob, []),
+                ],
+            ),
+        ]
+        return Action(preconditions, effects, name=name)
+
+    search = search_at_loc("search_loc", 0.8, 5.0)
+    move_action = Action(
+        {F("at r1 start"), F("free r1")},
+        [GroundedEffect(time=3.0, resulting_fluents={F("at r1 loc"), F("free r1")})],
+        name="move r1 start loc",
+    )
+    actions = [search, move_action]
+    goal = LiteralGoal(F("found X"))
+    state = State(time=0, fluents={F("free r1"), F("at r1 start")})
+
+    pruned = prune_probabilistic_achievers(state, goal, actions, top_k=3)
+    names = {a.name for a in pruned}
+
+    assert "move r1 start loc" in names
+    assert "search_loc" in names
 
 
 def test_dnf_goal_considers_all_branches():

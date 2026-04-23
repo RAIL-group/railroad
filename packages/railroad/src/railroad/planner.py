@@ -59,6 +59,7 @@ class MCTSPlanner:
         actions: List[Action],
         enable_action_pruning: bool = True,
         pruning_top_k: int = 3,
+        enable_helpful_action_filter: bool = True,
     ):
         """Initialize MCTSPlanner with automatic preprocessing.
 
@@ -68,11 +69,16 @@ class MCTSPlanner:
                 achievers before each planning call (keeps top-k by
                 probability and top-k by time-to-reach per goal fluent).
             pruning_top_k: Number of achievers to keep per ranking criterion.
+            enable_helpful_action_filter: If True, after probabilistic pruning
+                also drop actions outside the backward closure from goal
+                literals (+ landmarks) through positive preconditions. Only
+                takes effect when ``enable_action_pruning`` is True.
         """
         # Store original actions for later re-conversion if needed
         self._original_actions = actions
         self._enable_action_pruning = enable_action_pruning
         self._pruning_top_k = pruning_top_k
+        self._enable_helpful_action_filter = enable_helpful_action_filter
 
         # Extract negative preconditions from actions (base mapping)
         self._base_negative_fluents: Set[Fluent] = extract_negative_preconditions(actions)
@@ -191,6 +197,7 @@ class MCTSPlanner:
                 converted_goal,
                 self._converted_actions,
                 top_k=self._pruning_top_k,
+                enable_helpful_action_filter=self._enable_helpful_action_filter,
             )
             pruned_count = len(pruned_actions)
             if pruned_count < original_count:
@@ -280,6 +287,7 @@ class MCTSPlanner:
                 converted_goal,
                 self._converted_actions,
                 top_k=self._pruning_top_k,
+                enable_helpful_action_filter=self._enable_helpful_action_filter,
             )
             if len(pruned_actions) < len(self._converted_actions):
                 cpp_planner = _MCTSPlannerCpp(pruned_actions)

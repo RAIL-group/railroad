@@ -399,6 +399,42 @@ PYBIND11_MODULE(_bindings, m) {
         py::arg("input_state"), py::arg("goal"), py::arg("all_actions"),
         "Union of effective goals across DNF branches, including auto-added `found <obj>` landmarks");
 
+  m.def("get_goal_relevant_next_actions",
+        [](const State &input_state, const std::vector<Action> &all_actions,
+           const GoalPtr &goal, int relevance_depth) {
+          std::unordered_map<const Action *, std::unordered_set<Fluent>> action_adds_map;
+          action_adds_map.reserve(all_actions.size());
+          for (const auto &action : all_actions) {
+            const Action *a = &action;
+            std::unordered_set<Fluent> adds;
+            const auto &succs = a->get_relaxed_successors();
+            for (const auto &[succ_state, succ_prob] : succs) {
+              if (succ_prob <= 0.0) continue;
+              for (const auto &f : succ_state.fluents()) adds.insert(f);
+            }
+            action_adds_map[a] = std::move(adds);
+          }
+          auto landmarks = get_effective_goal_fluents(input_state, goal.get(), all_actions);
+          auto ptrs = get_goal_relevant_next_actions(
+              input_state, all_actions, goal.get(), action_adds_map,
+              landmarks, relevance_depth);
+          std::vector<Action> result;
+          result.reserve(ptrs.size());
+          for (const Action *a : ptrs) result.push_back(*a);
+          return result;
+        },
+        py::arg("input_state"), py::arg("all_actions"), py::arg("goal"),
+        py::arg("relevance_depth") = 2,
+        "Apply the MCTS-time helpful-action relevance filter and return the filtered action list.");
+
+  m.def("get_goal_helpful_action_names",
+        [](const State &input_state, const GoalPtr &goal,
+           const std::vector<Action> &all_actions) {
+          return get_goal_helpful_action_names(input_state, goal.get(), all_actions);
+        },
+        py::arg("input_state"), py::arg("goal"), py::arg("all_actions"),
+        "Return action names in the backward closure from goal literals (+ landmarks) through positive preconditions.");
+
   m.def("debug_ff_heuristic",
         [](const State &input_state, const GoalPtr &goal, const std::vector<Action> &all_actions) {
           return ff_heuristic_debug_report(input_state, goal.get(), all_actions, nullptr);

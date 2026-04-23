@@ -144,6 +144,7 @@ inline std::vector<const Action *> get_goal_relevant_next_actions(
     const std::vector<Action> &all_actions,
     const GoalBase *goal,
     const std::unordered_map<const Action *, std::unordered_set<Fluent>> &action_adds_map,
+    const std::unordered_set<Fluent> &goal_landmarks,
     int relevance_depth = 2) {
   auto applicable = get_next_actions(state, all_actions);
   if (applicable.empty() || !goal) {
@@ -154,6 +155,22 @@ inline std::vector<const Action *> get_goal_relevant_next_actions(
   if (relevant_fluents.empty()) {
     return applicable;
   }
+  // Augment with auto-added landmark fluents (e.g. at-implies-found) so
+  // achievers of landmarks participate in the relevance chain. Without this,
+  // searches never become relevant at MCTS expansion time when the top-level
+  // goal only mentions `at obj loc`, and the filter over-prunes.
+  // Landmarks are goal-structural; the caller computes them once per planning
+  // call and passes them in here so we don't pay for a full FF forward phase
+  // on every MCTS expansion.
+  {
+    const auto &state_fluents = state.fluents();
+    for (const auto &f : goal_landmarks) {
+      if (!state_fluents.count(f)) {
+        relevant_fluents.insert(f);
+      }
+    }
+  }
+  const auto &state_fluents_for_skip = state.fluents();
   std::unordered_map<Fluent, int> fluent_relevance_level;
   fluent_relevance_level.reserve(relevant_fluents.size() * 2 + 8);
   for (const auto &f : relevant_fluents) {
@@ -174,7 +191,12 @@ inline std::vector<const Action *> get_goal_relevant_next_actions(
 
       bool adds_relevant = false;
       for (const auto &f : add_it->second) {
-        if (relevant_fluents.count(f)) {
+        // An effect only counts as "relevant" if it is in the relevance chain
+        // AND not already true in the current state. Matching a fluent that
+        // is already true (e.g. `free r` when r is idle) produces spurious
+        // relevance through every action that re-asserts it, which swamps the
+        // filter with actions whose real contribution to the goal is zero.
+        if (relevant_fluents.count(f) && !state_fluents_for_skip.count(f)) {
           adds_relevant = true;
           break;
         }
@@ -185,6 +207,11 @@ inline std::vector<const Action *> get_goal_relevant_next_actions(
 
       relevant_actions.insert(a);
       for (const auto &p : a->pos_preconditions()) {
+        // Preconditions already true in the current state are not a goal of
+        // backward regression; do not feed them into the chain.
+        if (state_fluents_for_skip.count(p)) {
+          continue;
+        }
         if (!relevant_fluents.count(p)) {
           next_relevant_fluents.insert(p);
           fluent_relevance_level.emplace(p, depth + 1);
@@ -552,11 +579,15 @@ inline std::string mcts(const State &root_state,
     action_adds_map[a] = std::move(adds);
   }
 
+  // Landmarks are goal-structural; compute once and reuse across every MCTS
+  // expansion rather than re-running the FF forward phase per node.
+  auto goal_landmarks = get_effective_goal_fluents(root_state, goal, all_actions);
+
   // Root node
   auto root = std::make_unique<MCTSDecisionNode>(root_state.copy_and_zero_out_time());
   set_goal_progress_fields(*root, goal, 0);
   root->untried_actions =
-      get_goal_relevant_next_actions(root_state, all_actions, goal, action_adds_map);
+      get_goal_relevant_next_actions(root_state, all_actions, goal, action_adds_map, goal_landmarks);
 
   HeuristicFn heuristic_fn = [goal, all_actions, ff_memory](const State& s) -> double {
     return ff_heuristic(s, goal, all_actions, ff_memory);
@@ -634,7 +665,7 @@ inline std::string mcts(const State &root_state,
               std::make_unique<MCTSDecisionNode>(succ, chance_raw);
           set_goal_progress_fields(*child_decision, goal, node->path_best_goal_count);
           child_decision->untried_actions =
-              get_goal_relevant_next_actions(child_decision->state, all_actions, goal, action_adds_map);
+              get_goal_relevant_next_actions(child_decision->state, all_actions, goal, action_adds_map, goal_landmarks);
           chance_raw->outcome_weights.push_back(prob);
           chance_raw->children.push_back(std::move(child_decision));
         }

@@ -22,6 +22,7 @@ from railroad._bindings import (
     State,
     get_achievers_for_fluent,
     get_effective_goal_fluents,
+    get_goal_helpful_action_names,
 )
 
 _FF_TOLERANCE = 1e-9
@@ -66,6 +67,7 @@ def prune_probabilistic_achievers(
     goal: Goal,
     actions: List[Action],
     top_k: int = 3,
+    enable_helpful_action_filter: bool = True,
 ) -> List[Action]:
     """Return a pruned copy of ``actions`` with redundant probabilistic achievers removed.
 
@@ -74,6 +76,15 @@ def prune_probabilistic_achievers(
     (wait_cost + exec_cost), takes their union, and discards the remaining
     achievers of ``f``. Actions that are not achievers of any pruned fluent are
     preserved unchanged.
+
+    If ``enable_helpful_action_filter`` is set, runs a second pass that drops
+    any action not in the backward closure from goal literals (+ auto-added
+    landmarks) through positive preconditions. This catches moves / picks /
+    places whose only contribution was to enable an achiever that the first
+    pass already discarded. The filter only removes actions provably unable to
+    contribute to the goal under relaxed reachability, so it is safe by
+    construction --- though in densely-connected domains (many goal objects,
+    searchable everywhere) the closure may cover every action and prune nothing.
 
     Note: issues one `get_achievers_for_fluent` call per candidate fluent, each
     of which reruns the relaxed forward phase. Acceptable as a once-per-call
@@ -128,7 +139,15 @@ def prune_probabilistic_achievers(
             for name, _, _, _ in by_time:
                 keepers.add(name)
 
-    if not prunable:
-        return list(actions)
+    if prunable:
+        after_prob = [a for a in actions if a.name not in prunable or a.name in keepers]
+    else:
+        after_prob = list(actions)
 
-    return [a for a in actions if a.name not in prunable or a.name in keepers]
+    if not enable_helpful_action_filter:
+        return after_prob
+
+    helpful_names = get_goal_helpful_action_names(state, goal, after_prob)
+    if not helpful_names:
+        return after_prob
+    return [a for a in after_prob if a.name in helpful_names]
