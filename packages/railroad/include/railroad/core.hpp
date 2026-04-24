@@ -280,6 +280,8 @@ public:
         pos_precond_.insert(f);
       }
     }
+    is_no_op_ = name_.compare(0, 5, "no_op") == 0 &&
+                (name_.size() == 5 || name_[5] == ' ');
   }
 
   // Keep defaults
@@ -295,6 +297,7 @@ public:
   }
   const std::string &name() const { return name_; }
   double extra_cost() const { return extra_cost_; }
+  bool is_no_op() const { return is_no_op_; }
   const std::unordered_set<Fluent> &pos_preconditions() const {
     return pos_precond_;
   }
@@ -368,6 +371,7 @@ private:
   double extra_cost_;
   std::unordered_set<Fluent> pos_precond_;
   std::unordered_set<Fluent> neg_precond_flipped_;
+  bool is_no_op_ = false;
 
   // Cache for lazily computed relaxed successors
   mutable std::optional<std::vector<std::pair<State, double>>> relaxed_successors_cache_;
