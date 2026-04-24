@@ -80,6 +80,21 @@ get_next_actions(const State &state, const std::vector<Action> &all_actions) {
     }
   }
 
+  // Ban no_op actions unless they are the only applicable option. A free robot
+  // can always no_op, which means every non-terminal node has a trivial child
+  // that just advances time; without filtering, MCTS burns rollouts on these
+  // do-nothing actions instead of exploring real progress.
+  std::vector<const Action *> non_no_op;
+  non_no_op.reserve(fallback.size());
+  for (const Action *a : fallback) {
+    if (!a->is_no_op()) {
+      non_no_op.push_back(a);
+    }
+  }
+  if (!non_no_op.empty()) {
+    return non_no_op;
+  }
+
   return fallback;
 }
 

@@ -392,7 +392,7 @@ inline double get_or_compute_delta(const FFForwardResult& forward, const Fluent&
   if (delta < FF_TOLERANCE) {
     delta = 0.0;
   }
-  delta = min_E_attempt;
+  // delta = min_E_attempt;
 
   // Cache and return
   forward.probabilistic_delta[f] = delta;
