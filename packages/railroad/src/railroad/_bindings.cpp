@@ -404,6 +404,7 @@ PYBIND11_MODULE(_bindings, m) {
            const GoalPtr &goal, int relevance_depth) {
           std::unordered_map<const Action *, std::unordered_set<Fluent>> action_adds_map;
           action_adds_map.reserve(all_actions.size());
+          std::unordered_map<Fluent, std::vector<const Action *>> fluent_to_achievers;
           for (const auto &action : all_actions) {
             const Action *a = &action;
             std::unordered_set<Fluent> adds;
@@ -412,12 +413,13 @@ PYBIND11_MODULE(_bindings, m) {
               if (succ_prob <= 0.0) continue;
               for (const auto &f : succ_state.fluents()) adds.insert(f);
             }
+            for (const auto &f : adds) fluent_to_achievers[f].push_back(a);
             action_adds_map[a] = std::move(adds);
           }
           auto landmarks = get_effective_goal_fluents(input_state, goal.get(), all_actions);
           auto ptrs = get_goal_relevant_next_actions(
               input_state, all_actions, goal.get(), action_adds_map,
-              landmarks, relevance_depth);
+              fluent_to_achievers, landmarks, relevance_depth);
           std::vector<Action> result;
           result.reserve(ptrs.size());
           for (const Action *a : ptrs) result.push_back(*a);
