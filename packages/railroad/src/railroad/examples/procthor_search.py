@@ -146,7 +146,7 @@ def main(
             action_name = mcts(
                 env.state,
                 goal,
-                max_iterations=20000,
+                max_iterations=4000,
                 c=1000,
                 max_depth=10,
                 heuristic_multiplier=4.0,
