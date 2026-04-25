@@ -77,6 +77,9 @@ class MLflowTracker:
             else:
                 # Convert metadata to string tags (MLflow only supports string tags)
                 tags = {k: str(v) for k, v in metadata.items()}
+                # Marker tag so we can identify railroad-managed experiments
+                # regardless of their (possibly user-supplied) name.
+                tags["railroad_bench"] = "1"
                 self.experiment_id = mlflow.create_experiment(  # type: ignore[possibly-missing-attribute]
                     name=name,
                     tags=tags,

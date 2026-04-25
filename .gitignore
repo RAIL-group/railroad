@@ -26,3 +26,4 @@ data/
 mlruns
 mlflow.db
 .worktrees/
+.benchmark_cache/

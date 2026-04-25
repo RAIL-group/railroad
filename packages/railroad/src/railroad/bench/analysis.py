@@ -38,6 +38,13 @@ class BenchmarkAnalyzer:
         """
         experiments = mlflow.search_experiments()  # type: ignore[possibly-missing-attribute]
 
+        def _is_railroad_exp(exp) -> bool:
+            tags = exp.tags or {}
+            if tags.get("railroad_bench") == "1":
+                return True
+            # Backward compatibility: legacy experiments lacked the marker tag
+            return exp.name.startswith("railroad_bench_")
+
         df = pd.DataFrame([
             {
                 "name": exp.name,
@@ -46,7 +53,7 @@ class BenchmarkAnalyzer:
                 "tags": exp.tags if exp.tags else {},
             }
             for exp in experiments
-            if exp.name.startswith("railroad_bench_")
+            if _is_railroad_exp(exp)
         ])
 
         if not df.empty:
@@ -84,12 +91,17 @@ class BenchmarkAnalyzer:
 
         return metadata
 
-    def get_experiment_summary(self, experiment_name: str) -> dict:
+    def get_experiment_summary(
+        self,
+        experiment_name: str,
+        df: Optional[pd.DataFrame] = None,
+    ) -> dict:
         """
         Get summary statistics for an experiment.
 
         Args:
             experiment_name: Name of the experiment
+            df: Optional pre-loaded runs DataFrame to avoid a redundant load
 
         Returns:
             Dictionary with summary statistics including:
@@ -102,7 +114,8 @@ class BenchmarkAnalyzer:
         Raises:
             ValueError: If experiment not found
         """
-        df = self.load_experiment(experiment_name)
+        if df is None:
+            df = self.load_experiment(experiment_name)
 
         summary = {
             "total_runs": len(df),

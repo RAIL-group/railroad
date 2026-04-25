@@ -8,10 +8,11 @@ from dash import Output, Input, State, ALL, callback_context, html
 from flask import send_file
 import mlflow
 
-from railroad.bench.analysis import BenchmarkAnalyzer
+from railroad.bench import compact
 from .data import (
     load_all_experiments_with_summaries,
     load_experiment_by_name,
+    load_experiment_summary,
     _artifact_cache,
 )
 from .figures import create_violin_plots_by_benchmark
@@ -92,14 +93,28 @@ def register_callbacks(app):
                 try:
                     df, experiment_name, metadata = load_experiment_by_name(experiment_name)
 
-                    # Get experiment summary
-                    analyzer = BenchmarkAnalyzer()
-                    summary = analyzer.get_experiment_summary(experiment_name)
+                    # Summary comes from the compaction cache when fresh; otherwise
+                    # it's computed from the already-loaded df.
+                    summary = load_experiment_summary(experiment_name, df=df)
 
-                    figures = create_violin_plots_by_benchmark(df)
-
-                    # Generate sweep plots
-                    sweep_plots_by_benchmark = create_all_sweep_plots(df)
+                    # Figures cache: avoids re-running plot generation on every
+                    # page load when nothing about the experiment has changed.
+                    cached_figs = compact.load_figures(experiment_name)
+                    if cached_figs is not None:
+                        figures = cached_figs.get("violin", [])
+                        sweep_plots_by_benchmark = cached_figs.get("sweep", {})
+                        print(f"Loaded figures for '{experiment_name}' from cache")
+                    else:
+                        figures = create_violin_plots_by_benchmark(df)
+                        sweep_plots_by_benchmark = create_all_sweep_plots(df)
+                        try:
+                            if compact.save_figures(
+                                experiment_name,
+                                {"violin": figures, "sweep": sweep_plots_by_benchmark},
+                            ):
+                                print(f"Cached figures for '{experiment_name}'")
+                        except Exception as e:
+                            print(f"  ✗ Failed to cache figures: {e}")
 
                     content = build_content_layout(
                         experiment_name, figures, df, metadata, summary,
