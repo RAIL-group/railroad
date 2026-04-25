@@ -424,17 +424,11 @@ void print_best_path(std::ostream& os, const MCTSDecisionNode* node, HeuristicFn
     // Indent for readability
     for (int i = 0; i < current_depth; ++i) os << " ";
 
-    // Count how many already-expanded children correspond to FF-helpful
-    // actions and how many helpful actions remain unexpanded in untried.
-    int helpful_children = 0;
-    for (const auto &kv : node->children) {
-      if (node->helpful_actions.count(kv.first)) ++helpful_children;
-    }
+    // Count how many helpful actions remain unexpanded in untried.
     int helpful_untried = 0;
     for (const Action *a : node->untried_actions) {
       if (node->helpful_actions.count(a)) ++helpful_untried;
     }
-    const int total_helpful = static_cast<int>(node->helpful_actions.size());
     const int total_applicable =
         static_cast<int>(node->children.size() + node->untried_actions.size());
 
@@ -444,10 +438,9 @@ void print_best_path(std::ostream& os, const MCTSDecisionNode* node, HeuristicFn
        << "g=" << time_cost << ", "
        << "h=" << h_value << ", "
        << "g+h=" << time_cost + h_value << ", "
-       << "#A=" << node->children.size() << "/" << total_applicable << ", "
-       << "helpful=" << helpful_children << "/" << total_helpful
-       << " (untried " << helpful_untried << "/" << node->untried_actions.size()
-       << ")"
+       << "#A=" << node->children.size() << "/" << total_applicable
+       << " (helpful " << helpful_untried << "/"
+       << node->untried_actions.size() << ")"
        << std::endl;
 
     if (node->children.empty()) {
