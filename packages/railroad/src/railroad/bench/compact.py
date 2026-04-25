@@ -154,18 +154,25 @@ def _source_fingerprint(exp_name: str) -> dict:
         fp["db_mtime"] = db.stat().st_mtime
     art = _artifact_root(exp_name)
     if art is not None:
+        # Use the directory's own mtime rather than walking the tree: artifact
+        # writes update the containing run dir's mtime, and that's enough to
+        # detect new/changed runs without an O(n) scan on every load.
         try:
-            mtimes = [f.stat().st_mtime for f in art.rglob("*") if f.is_file()]
+            run_dirs = [p for p in art.iterdir() if p.is_dir()]
+            mtimes = [art.stat().st_mtime] + [d.stat().st_mtime for d in run_dirs]
             fp["artifact_mtime"] = max(mtimes) if mtimes else 0.0
         except Exception:
             pass
     return fp
 
 
+_TERMINAL_STATUSES = {"FINISHED", "FAILED", "KILLED"}
+
+
 def _has_in_progress_runs(df: pd.DataFrame) -> bool:
     if df.empty or "status" not in df.columns:
         return False
-    return df["status"].isin(["RUNNING", "SCHEDULED"]).any()
+    return (~df["status"].isin(_TERMINAL_STATUSES)).any()
 
 
 def load(exp_name: str) -> Optional[tuple[pd.DataFrame, dict, dict]]:
@@ -236,16 +243,16 @@ def save(
     with open(meta_path, "w") as f:
         json.dump(payload, f, default=str)
     if figures is not None:
-        _write_figures(figures_path, figures)
+        _write_figures(exp_name, figures_path, figures)
     return True
 
 
-def _write_figures(figures_path: Path, figures: dict) -> None:
+def _write_figures(exp_name: str, figures_path: Path, figures: dict) -> None:
     figures_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         # Embed an independent fingerprint so figures stay correctly
         # invalidated even when runs/meta can't be refreshed.
-        "fingerprint": _source_fingerprint(figures_path.parent.name),
+        "fingerprint": _source_fingerprint(exp_name),
         "cached_at": datetime.now().isoformat(),
         "figures": _serialize_figures(figures),
     }
@@ -262,7 +269,7 @@ def save_figures(exp_name: str, figures: dict) -> bool:
     underlying experiment data changes.
     """
     _runs_path, _meta_path, figures_path = _cache_paths(exp_name)
-    _write_figures(figures_path, figures)
+    _write_figures(exp_name, figures_path, figures)
     return True
 
 
