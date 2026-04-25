@@ -180,6 +180,33 @@ def build_experiment_summary_block(exp_name: str, summary: dict, metadata: dict,
             className="pre-text text-base text-dimmed"
         ))
 
+    # Run name (if provided and not the sentinel "None")
+    run_name = metadata.get("run_name")
+    if run_name and run_name != "None":
+        children.append(html.Pre(
+            f"  Run name: {run_name}",
+            className="pre-text text-base text-dimmed"
+        ))
+
+    # Git provenance (branch + commit hash)
+    git_branch = metadata.get("git_branch")
+    git_hash = metadata.get("git_hash")
+    git_dirty = metadata.get("git_dirty")
+    if git_branch or git_hash:
+        parts = []
+        if git_branch and git_branch != "unknown":
+            parts.append(f"branch={git_branch}")
+        if git_hash and git_hash != "unknown":
+            short_hash = git_hash[:8] if len(git_hash) > 8 else git_hash
+            parts.append(f"commit={short_hash}")
+        if git_dirty in (True, "True", "true"):
+            parts.append("(dirty)")
+        if parts:
+            children.append(html.Pre(
+                "  Git: " + " ".join(parts),
+                className="pre-text text-base text-dimmed"
+            ))
+
     # Total runs and success rate
     success_rate_class = "status-success" if summary['success_rate'] > 0.8 else ("status-error" if summary['success_rate'] > 0.5 else "status-failure")
     children.append(html.Pre([
