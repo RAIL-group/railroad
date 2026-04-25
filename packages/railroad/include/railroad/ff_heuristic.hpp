@@ -555,6 +555,18 @@ inline FFBackwardExtractionResult build_backward_extraction(
     result.level_1_goals.insert(fluent);
   }
 
+  // Expand the helpful-action filter set with sibling probabilistic achievers:
+  // for any relaxed-plan fluent that is achieved probabilistically, add the
+  // fluent itself to level_1_goals so that *every* applicable achiever passes
+  // the filter, not only the one the relaxed plan picked. MCTS is precisely
+  // the place to search across these alternatives.
+  for (const auto& [fluent, action] : result.extracted_achiever) {
+    if (!action) continue;
+    if (forward.has_probabilistic_achiever.count(fluent)) {
+      result.level_1_goals.insert(fluent);
+    }
+  }
+
   return result;
 }
 
