@@ -16,7 +16,20 @@
 namespace railroad {
 
 using HeuristicFn = std::function<double(const State &)>;
-using FFMemory = std::unordered_map<std::size_t, double>;
+
+// Shared FF cache entry. `h` is the relaxed-plan branch cost (without dtime
+// addend); `level_1_goals` is the set of immediate subgoals from the chosen
+// branch's extracted plan, used by `get_helpful_actions`. Populated lazily:
+// `has_h` and `has_level_1_goals` track which fields have been computed for
+// this state. Sharing the cache lets `ff_heuristic` and `get_helpful_actions`
+// avoid running the FF forward+backward pipeline twice per state.
+struct FFMemoEntry {
+  double h = std::numeric_limits<double>::infinity();
+  std::unordered_set<Fluent> level_1_goals;
+  bool has_h = false;
+  bool has_level_1_goals = false;
+};
+using FFMemory = std::unordered_map<std::size_t, FFMemoEntry>;
 constexpr double FF_TOLERANCE = 1e-9;
 
 // Information about an action that can achieve a fluent
@@ -1017,9 +1030,9 @@ inline std::string ff_heuristic_debug_report(
   double memo_value = std::numeric_limits<double>::infinity();
   if (ff_memory) {
     auto it = ff_memory->find(memo_key);
-    if (it != ff_memory->end()) {
+    if (it != ff_memory->end() && it->second.has_h) {
       memo_hit = true;
-      memo_value = it->second;
+      memo_value = it->second.h;
     }
   }
 
@@ -1170,7 +1183,9 @@ inline std::string ff_heuristic_debug_report(
         << ", dtime_addend=" << dtime
         << ", heuristic_total=" << (dtime + min_cost) << "\n";
     if (ff_memory) {
-      (*ff_memory)[memo_key] = min_cost;
+      auto& entry = (*ff_memory)[memo_key];
+      entry.h = min_cost;
+      entry.has_h = true;
     }
   } else {
     out << "\nNo reachable branch. heuristic=inf\n";
@@ -1196,7 +1211,8 @@ inline std::vector<const Action*> get_helpful_actions(
     const State& state,
     const std::vector<const Action*>& applicable,
     const GoalBase* goal,
-    const std::vector<Action>& all_actions) {
+    const std::vector<Action>& all_actions,
+    FFMemory* ff_memory = nullptr) {
   static thread_local std::size_t s_calls = 0;
   static thread_local std::size_t s_empty_fallback = 0;
   ++s_calls;
@@ -1209,35 +1225,80 @@ inline std::vector<const Action*> get_helpful_actions(
   auto relaxed_result = transition(state, nullptr, true);
   if (relaxed_result.empty()) return applicable;
   State relaxed = relaxed_result[0].first;
-  std::unordered_set<Fluent> initial_fluents(
-      relaxed.fluents().begin(), relaxed.fluents().end());
+  relaxed.set_time(0);
+  const std::size_t memo_key = relaxed.hash();
 
-  FFForwardResult forward = ff_forward_phase(initial_fluents, all_actions);
-  compute_expected_costs(forward);
-
-  const auto& branches = extract_or_branches(goal);
-  if (branches.empty()) return applicable;
-
-  // Pick the branch the heuristic itself would pick (lowest backward cost),
-  // so helpful-action selection is coherent with the heuristic's branch
-  // choice in MCTS scoring.
-  double best_cost = std::numeric_limits<double>::infinity();
-  const std::unordered_set<Fluent>* best_branch = nullptr;
-  for (const auto& branch : branches) {
-    double c = ff_backward_cost(forward, branch);
-    if (c < best_cost) {
-      best_cost = c;
-      best_branch = &branch;
+  // Cache hit path: skip the entire FF pipeline. The heuristic call (or a
+  // prior helpful-actions call) already populated `level_1_goals` for this
+  // relaxed state, so we only need the applicable-set filter.
+  const std::unordered_set<Fluent>* level_1_goals = nullptr;
+  if (ff_memory) {
+    auto it = ff_memory->find(memo_key);
+    if (it != ff_memory->end() && it->second.has_level_1_goals) {
+      level_1_goals = &it->second.level_1_goals;
     }
   }
-  if (!best_branch ||
-      best_cost == std::numeric_limits<double>::infinity()) {
-    return applicable;
-  }
 
-  FFBackwardExtractionResult extraction =
-      build_backward_extraction(forward, *best_branch);
-  if (extraction.level_1_goals.empty()) return applicable;
+  // Cache miss: run the FF pipeline ourselves and populate the cache so that
+  // the matching `ff_heuristic` call (or any later helpful-actions call) on
+  // this state becomes O(filter).
+  std::unordered_set<Fluent> owned_level_1_goals;
+  double computed_h = std::numeric_limits<double>::infinity();
+  bool computed_h_valid = false;
+  if (!level_1_goals) {
+    std::unordered_set<Fluent> initial_fluents(
+        relaxed.fluents().begin(), relaxed.fluents().end());
+
+    FFForwardResult forward = ff_forward_phase(initial_fluents, all_actions);
+    compute_expected_costs(forward);
+
+    const auto& branches = extract_or_branches(goal);
+    if (branches.empty()) return applicable;
+
+    // Pick the branch the heuristic itself would pick (lowest backward cost),
+    // so helpful-action selection is coherent with the heuristic's branch
+    // choice in MCTS scoring.
+    double best_cost = std::numeric_limits<double>::infinity();
+    const std::unordered_set<Fluent>* best_branch = nullptr;
+    for (const auto& branch : branches) {
+      double c = ff_backward_cost(forward, branch);
+      if (c < best_cost) {
+        best_cost = c;
+        best_branch = &branch;
+      }
+    }
+    if (!best_branch ||
+        best_cost == std::numeric_limits<double>::infinity()) {
+      if (ff_memory && best_cost == std::numeric_limits<double>::infinity()) {
+        auto& entry = (*ff_memory)[memo_key];
+        entry.h = best_cost;
+        entry.has_h = true;
+      }
+      return applicable;
+    }
+    computed_h = best_cost;
+    computed_h_valid = true;
+
+    FFBackwardExtractionResult extraction =
+        build_backward_extraction(forward, *best_branch);
+    owned_level_1_goals = std::move(extraction.level_1_goals);
+    level_1_goals = &owned_level_1_goals;
+
+    if (ff_memory) {
+      auto& entry = (*ff_memory)[memo_key];
+      if (!entry.has_h) {
+        entry.h = computed_h;
+        entry.has_h = true;
+      }
+      if (!entry.has_level_1_goals) {
+        entry.level_1_goals = *level_1_goals;
+        entry.has_level_1_goals = true;
+      }
+    }
+  }
+  (void)computed_h_valid;
+
+  if (level_1_goals->empty()) return applicable;
 
   // Hoffmann's helpful-actions definition: applicable actions whose adds
   // intersect the level-1 goals of the extracted relaxed plan.
@@ -1249,7 +1310,7 @@ inline std::vector<const Action*> get_helpful_actions(
     for (const auto& [succ_state, succ_prob] : succs) {
       if (succ_prob <= 0.0) continue;
       for (const auto& f : succ_state.fluents()) {
-        if (extraction.level_1_goals.count(f)) {
+        if (level_1_goals->count(f)) {
           hits = true;
           break;
         }
@@ -1302,8 +1363,12 @@ inline double ff_heuristic(const State &input_state,
 
   // Memoization check: use hash of relaxed state (with time=0)
   relaxed.set_time(0);
-  if (ff_memory && ff_memory->count(relaxed.hash())) {
-    return dtime + ff_memory->at(relaxed.hash());
+  const std::size_t memo_key = relaxed.hash();
+  if (ff_memory) {
+    auto it = ff_memory->find(memo_key);
+    if (it != ff_memory->end() && it->second.has_h) {
+      return dtime + it->second.h;
+    }
   }
 
   // Get initial fluents from relaxed state
@@ -1322,19 +1387,34 @@ inline double ff_heuristic(const State &input_state,
     return std::numeric_limits<double>::infinity();  // FalseGoal case
   }
 
-  // Compute minimum cost across all branches
+  // Compute minimum cost across all branches; remember the chosen branch so
+  // we can extract its level-1 goals for the shared cache.
   double min_cost = std::numeric_limits<double>::infinity();
-
+  const std::unordered_set<Fluent>* best_branch = nullptr;
   for (const auto& branch_fluents : branches) {
     double backward_cost = ff_backward_cost(forward, branch_fluents);
-    if (backward_cost < std::numeric_limits<double>::infinity()) {
-      min_cost = std::min(min_cost, backward_cost);
+    if (backward_cost < min_cost) {
+      min_cost = backward_cost;
+      best_branch = &branch_fluents;
     }
   }
 
-  // Store in memory (memoize the cost AFTER relaxed transition)
   if (ff_memory) {
-    (*ff_memory)[relaxed.hash()] = min_cost;
+    auto& entry = (*ff_memory)[memo_key];
+    entry.h = min_cost;
+    entry.has_h = true;
+    if (best_branch &&
+        min_cost < std::numeric_limits<double>::infinity() &&
+        !entry.has_level_1_goals) {
+      // Re-extract the chosen branch to recover its level-1 goals. This is
+      // the same work `get_helpful_actions` would otherwise do on miss; doing
+      // it here primes the cache so helpful-actions becomes O(filter) for
+      // every subsequent call on this state.
+      FFBackwardExtractionResult extraction =
+          build_backward_extraction(forward, *best_branch);
+      entry.level_1_goals = std::move(extraction.level_1_goals);
+      entry.has_level_1_goals = true;
+    }
   }
 
   return dtime + min_cost;

@@ -516,10 +516,10 @@ inline std::string mcts(const State &root_state,
   // `untried_actions`, but record which are FF-helpful and order the vector so
   // helpful actions are at the back (popped first). UCB selection reads
   // `helpful_actions` to apply a decaying prior bonus.
-  auto populate_actions = [&all_actions, goal](MCTSDecisionNode &node) {
+  auto populate_actions = [&all_actions, goal, ff_memory](MCTSDecisionNode &node) {
     auto applicable = get_next_actions(node.state, all_actions);
     auto helpful_vec =
-        get_helpful_actions(node.state, applicable, goal, all_actions);
+        get_helpful_actions(node.state, applicable, goal, all_actions, ff_memory);
     node.helpful_actions = std::unordered_set<const Action *>(
         helpful_vec.begin(), helpful_vec.end());
     node.untried_actions.clear();
