@@ -178,12 +178,12 @@ bench_procthor_search.add_cases([
         "num_objects": num_objects,
         "scene_seed": scene_seed,
     }
-    for c, num_robots, h_mult, iterations, num_objects, scene_seed in itertools.product(
+    for scene_seed, c, num_robots, h_mult, iterations, num_objects in itertools.product(
+        list(range(8610, 8620)),  # scene_seed
         [400],               # mcts.c
         [1, 2, 3],           # num_robots
         [2, 4, 10],          # mcts.h_mult
         [4000, 10000],       # mcts.iterations
         [2],                 # num_objects
-        list(range(8610, 8620)),  # scene_seed
     )
 ])
