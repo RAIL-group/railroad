@@ -28,19 +28,6 @@
 
 namespace railroad {
 
-// Coordination fluents (free / not-free) are end-effects of essentially every
-// operator and preconditions of nearly every operator. Letting them chain in
-// the goal-relevance closure makes it saturate to all actions: any unsatisfied
-// goal seed reaches `free` in two hops, and `free`'s achievers are then every
-// action. We skip them from the BFS *frontier* so the closure doesn't follow
-// them, but we still record their level in `fluent_level` and keep them in
-// each action's adds set so the per-state scoring still rewards their
-// achievement (which keeps pick/move scoring balanced).
-inline bool is_relevance_coordination_fluent(const Fluent &f) {
-  const std::string &n = f.name();
-  return n == "free" || n == "not-free" || n == "not_free";
-}
-
 inline std::vector<const Action *>
 get_next_actions(const State &state, const std::vector<Action> &all_actions) {
   // Step 1: Extract all `free(...)` fluents (sorting as I go)
@@ -216,275 +203,6 @@ inline std::unordered_set<Fluent> unsatisfied_literals_from_branch(
     if (!literal_satisfied(lit)) unsatisfied.insert(lit);
   }
   return unsatisfied;
-}
-
-// State-independent per-branch goal relevance. Precomputed once per planning
-// call so per-node MCTS expansion skips the full backward-regression BFS and
-// instead does a cheap per-state filter against a static closure.
-struct BranchRelevance {
-  std::unordered_map<Fluent, int> fluent_level;      // min depth of each fluent
-  std::unordered_set<const Action *> relevant_actions;
-  std::unordered_set<Fluent> seed_fluents;           // branch literals (all, not just unsatisfied)
-  int depth = 0;                                     // relevance_depth used to build this
-};
-
-inline BranchRelevance build_branch_relevance(
-    const std::unordered_set<Fluent> &branch_literals,
-    const std::unordered_set<Fluent> &goal_landmarks,
-    const std::unordered_map<Fluent, std::vector<const Action *>> &fluent_to_achievers,
-    int relevance_depth) {
-  BranchRelevance br;
-  br.depth = relevance_depth;
-  br.seed_fluents = branch_literals;
-  br.seed_fluents.insert(goal_landmarks.begin(), goal_landmarks.end());
-
-  std::vector<Fluent> frontier(br.seed_fluents.begin(), br.seed_fluents.end());
-  for (const auto &f : br.seed_fluents) br.fluent_level[f] = 0;
-
-  for (int depth = 0; depth < relevance_depth; ++depth) {
-    if (frontier.empty()) break;
-    std::vector<Fluent> next_frontier;
-    next_frontier.reserve(frontier.size() * 2);
-    for (const auto &f : frontier) {
-      auto ach_it = fluent_to_achievers.find(f);
-      if (ach_it == fluent_to_achievers.end()) continue;
-      for (const Action *a : ach_it->second) {
-        if (!br.relevant_actions.insert(a).second) continue;
-        for (const auto &p : a->pos_preconditions()) {
-          if (is_relevance_coordination_fluent(p)) {
-            // Track for scoring weight, but do not chain: their achievers
-            // are universal and would saturate the closure.
-            br.fluent_level.emplace(p, depth + 1);
-            continue;
-          }
-          if (br.fluent_level.emplace(p, depth + 1).second) {
-            next_frontier.push_back(p);
-          }
-        }
-      }
-    }
-    frontier = std::move(next_frontier);
-  }
-  return br;
-}
-
-inline std::vector<const Action *> get_goal_relevant_next_actions(
-    const State &state,
-    const std::vector<Action> &all_actions,
-    const GoalBase *goal,
-    const std::unordered_map<const Action *, std::unordered_set<Fluent>> &action_adds_map,
-    const std::unordered_map<Fluent, std::vector<const Action *>> &fluent_to_achievers,
-    const std::unordered_set<Fluent> &goal_landmarks,
-    int relevance_depth = 2) {
-  auto applicable = get_next_actions(state, all_actions);
-  if (applicable.empty() || !goal) {
-    return applicable;
-  }
-
-  std::unordered_set<Fluent> relevant_fluents = get_unsatisfied_goal_literals(state, goal);
-  if (relevant_fluents.empty()) {
-    return applicable;
-  }
-  // Augment with auto-added landmark fluents (e.g. at-implies-found) so
-  // achievers of landmarks participate in the relevance chain. Without this,
-  // searches never become relevant at MCTS expansion time when the top-level
-  // goal only mentions `at obj loc`, and the filter over-prunes.
-  // Landmarks are goal-structural; the caller computes them once per planning
-  // call and passes them in here so we don't pay for a full FF forward phase
-  // on every MCTS expansion.
-  {
-    const auto &state_fluents = state.fluents();
-    for (const auto &f : goal_landmarks) {
-      if (!state_fluents.count(f)) {
-        relevant_fluents.insert(f);
-      }
-    }
-  }
-  const auto &state_fluents_for_skip = state.fluents();
-  std::unordered_map<Fluent, int> fluent_relevance_level;
-  fluent_relevance_level.reserve(relevant_fluents.size() * 2 + 8);
-  for (const auto &f : relevant_fluents) {
-    fluent_relevance_level[f] = 0;
-  }
-
-  // Frontier-based backward regression: at each depth, iterate the achievers
-  // of newly-added relevant fluents instead of scanning every action. The
-  // inverted index (fluent_to_achievers) is built once per planning call.
-  std::unordered_set<const Action *> relevant_actions;
-  std::vector<Fluent> frontier;
-  frontier.reserve(relevant_fluents.size());
-  for (const auto &f : relevant_fluents) {
-    if (!state_fluents_for_skip.count(f)) {
-      frontier.push_back(f);
-    }
-  }
-
-  for (int depth = 0; depth < relevance_depth; ++depth) {
-    if (frontier.empty()) break;
-    std::vector<Fluent> next_frontier;
-    next_frontier.reserve(frontier.size() * 2);
-
-    for (const auto &f : frontier) {
-      auto ach_it = fluent_to_achievers.find(f);
-      if (ach_it == fluent_to_achievers.end()) continue;
-      for (const Action *a : ach_it->second) {
-        if (!relevant_actions.insert(a).second) continue;
-        for (const auto &p : a->pos_preconditions()) {
-          // Preconditions already true in the current state are not a goal of
-          // backward regression; do not feed them into the chain.
-          if (state_fluents_for_skip.count(p)) continue;
-          if (relevant_fluents.insert(p).second) {
-            fluent_relevance_level.emplace(p, depth + 1);
-            next_frontier.push_back(p);
-          }
-        }
-      }
-    }
-
-    frontier = std::move(next_frontier);
-  }
-
-  if (relevant_actions.empty()) {
-    return applicable;
-  }
-
-  std::vector<const Action *> filtered;
-  filtered.reserve(applicable.size());
-  for (const Action *a : applicable) {
-    if (relevant_actions.count(a)) {
-      filtered.push_back(a);
-    }
-  }
-
-  if (filtered.empty()) {
-    filtered = applicable;
-  }
-
-  // Prefer actions that directly add currently-unsatisfied goal literals.
-  auto unsatisfied_goals = get_unsatisfied_goal_literals(state, goal);
-  std::unordered_map<const Action *, int> action_score;
-  action_score.reserve(filtered.size());
-  for (const Action *a : filtered) {
-    int adds_unsatisfied = 0;
-    int adds_relevant = 0;
-    auto add_it = action_adds_map.find(a);
-    if (add_it != action_adds_map.end()) {
-      for (const auto &f : add_it->second) {
-        auto rel_it = fluent_relevance_level.find(f);
-        if (rel_it != fluent_relevance_level.end()) {
-          int level = rel_it->second;
-          int weight = std::max(1, relevance_depth + 1 - level);
-          adds_relevant += weight;
-        }
-        if (unsatisfied_goals.count(f)) {
-          ++adds_unsatisfied;
-        }
-      }
-    }
-    action_score[a] = 100 * adds_unsatisfied + adds_relevant;
-  }
-
-  std::sort(filtered.begin(), filtered.end(),
-            [&action_score](const Action *lhs, const Action *rhs) {
-              auto ls = action_score.find(lhs);
-              auto rs = action_score.find(rhs);
-              int lval = (ls == action_score.end()) ? 0 : ls->second;
-              int rval = (rs == action_score.end()) ? 0 : rs->second;
-              if (lval != rval) {
-                return lval < rval;
-              }
-              return lhs->name() > rhs->name();
-            });
-  return filtered;
-}
-
-// Cached variant that uses per-branch backward-closure data precomputed once
-// per planning call. Skips the per-node backward BFS entirely; the only
-// per-state work is (1) applicable filter, (2) branch selection, (3) scoring.
-//
-// Semantic difference from the non-cached version: the cached closure is
-// built without state-true pruning (stopping a precondition chain when that
-// precondition is already satisfied). In practice this makes the filter
-// slightly more permissive at shallow `relevance_depth`, which is fine --
-// action-level "adds something relevant AND not state-true" pruning is still
-// applied per state below.
-inline std::vector<const Action *> get_goal_relevant_next_actions_cached(
-    const State &state,
-    const std::vector<Action> &all_actions,
-    const GoalBase *goal,
-    const std::unordered_map<const Action *, std::unordered_set<Fluent>> &action_adds_map,
-    const std::vector<BranchRelevance> &branch_relevance) {
-  auto applicable = get_next_actions(state, all_actions);
-  if (applicable.empty() || !goal || branch_relevance.empty()) {
-    return applicable;
-  }
-
-  int branch_idx = select_best_branch_index(state, goal);
-  if (branch_idx < 0 ||
-      static_cast<std::size_t>(branch_idx) >= branch_relevance.size()) {
-    return applicable;
-  }
-  const BranchRelevance &br = branch_relevance[branch_idx];
-  if (br.relevant_actions.empty()) return applicable;
-
-  const auto &goal_branches = goal->get_dnf_branches();
-  const auto &branch = goal_branches[branch_idx];
-  std::unordered_set<Fluent> unsatisfied_goals =
-      unsatisfied_literals_from_branch(state, branch);
-  if (unsatisfied_goals.empty()) return applicable;
-
-  const auto &state_fluents = state.fluents();
-
-  // Filter applicable actions to those in the static closure AND that add a
-  // relevant fluent which is not already true in this state.
-  std::vector<const Action *> filtered;
-  filtered.reserve(applicable.size());
-  for (const Action *a : applicable) {
-    if (!br.relevant_actions.count(a)) continue;
-    auto add_it = action_adds_map.find(a);
-    if (add_it == action_adds_map.end()) continue;
-    bool adds_non_stale_relevant = false;
-    for (const auto &f : add_it->second) {
-      if (br.fluent_level.count(f) && !state_fluents.count(f)) {
-        adds_non_stale_relevant = true;
-        break;
-      }
-    }
-    if (adds_non_stale_relevant) filtered.push_back(a);
-  }
-  if (filtered.empty()) filtered = applicable;
-
-  // Score: prefer direct goal-literal achievers, then weight by (depth + 1 - level).
-  const int relevance_depth = br.depth;
-  std::unordered_map<const Action *, int> action_score;
-  action_score.reserve(filtered.size());
-  for (const Action *a : filtered) {
-    int adds_unsatisfied = 0;
-    int adds_relevant = 0;
-    auto add_it = action_adds_map.find(a);
-    if (add_it != action_adds_map.end()) {
-      for (const auto &f : add_it->second) {
-        auto rel_it = br.fluent_level.find(f);
-        if (rel_it != br.fluent_level.end()) {
-          int level = rel_it->second;
-          int weight = std::max(1, relevance_depth + 1 - level);
-          adds_relevant += weight;
-        }
-        if (unsatisfied_goals.count(f)) ++adds_unsatisfied;
-      }
-    }
-    action_score[a] = 100 * adds_unsatisfied + adds_relevant;
-  }
-  std::sort(filtered.begin(), filtered.end(),
-            [&action_score](const Action *lhs, const Action *rhs) {
-              auto ls = action_score.find(lhs);
-              auto rs = action_score.find(rhs);
-              int lval = (ls == action_score.end()) ? 0 : ls->second;
-              int rval = (rs == action_score.end()) ? 0 : rs->second;
-              if (lval != rval) return lval < rval;
-              return lhs->name() > rhs->name();
-            });
-  return filtered;
 }
 
 using HeuristicFn = std::function<double(const State &)>;
@@ -769,59 +487,14 @@ inline std::string mcts(const State &root_state,
 
   auto all_actions = get_usable_actions(root_state, all_actions_base);
 
-  std::unordered_map<const Action *, std::unordered_set<Fluent>> action_adds_map;
-  action_adds_map.reserve(all_actions.size());
-  // Inverted index fluent -> achievers, built once per planning call so the
-  // per-node backward regression in get_goal_relevant_next_actions doesn't
-  // have to scan every action searching for relevance hits.
-  std::unordered_map<Fluent, std::vector<const Action *>> fluent_to_achievers;
-  for (const auto &action : all_actions) {
-    const Action *a = &action;
-    std::unordered_set<Fluent> adds;
-    const auto &succs = a->get_relaxed_successors();
-    for (const auto &[succ_state, succ_prob] : succs) {
-      if (succ_prob <= 0.0) {
-        continue;
-      }
-      for (const auto &f : succ_state.fluents()) {
-        adds.insert(f);
-      }
-    }
-    for (const auto &f : adds) {
-      // Skip indexing coordination fluents as targets in the achievers map:
-      // every action would land in the bucket and the relevance BFS would
-      // saturate. (We still keep them in `adds` so the per-state scoring
-      // rewards actions that achieve them, mirroring the previous behavior.)
-      if (is_relevance_coordination_fluent(f)) continue;
-      fluent_to_achievers[f].push_back(a);
-    }
-    action_adds_map[a] = std::move(adds);
-  }
-
-  // Landmarks are goal-structural; compute once and reuse across every MCTS
-  // expansion rather than re-running the FF forward phase per node.
-  auto goal_landmarks = get_effective_goal_fluents(root_state, goal, all_actions);
-
-  // Precompute per-branch backward closures once, so per-node expansion in
-  // `get_goal_relevant_next_actions_cached` avoids the BFS entirely.
-  constexpr int kRelevanceDepth = 2;
-  std::vector<BranchRelevance> branch_relevance;
-  if (goal) {
-    const auto &branches = goal->get_dnf_branches();
-    branch_relevance.reserve(branches.size());
-    for (const auto &branch : branches) {
-      branch_relevance.push_back(
-          build_branch_relevance(branch, goal_landmarks, fluent_to_achievers,
-                                 kRelevanceDepth));
-    }
-  }
-
   // Root node
   auto root = std::make_unique<MCTSDecisionNode>(root_state.copy_and_zero_out_time());
   set_goal_progress_fields(*root, goal, 0);
-  root->untried_actions =
-      get_goal_relevant_next_actions_cached(root_state, all_actions, goal,
-                                            action_adds_map, branch_relevance);
+  {
+    auto applicable = get_next_actions(root_state, all_actions);
+    root->untried_actions =
+        get_helpful_actions(root_state, applicable, goal, all_actions);
+  }
 
   HeuristicFn heuristic_fn = [goal, all_actions, ff_memory](const State& s) -> double {
     return ff_heuristic(s, goal, all_actions, ff_memory);
@@ -898,9 +571,11 @@ inline std::string mcts(const State &root_state,
           auto child_decision =
               std::make_unique<MCTSDecisionNode>(succ, chance_raw);
           set_goal_progress_fields(*child_decision, goal, node->path_best_goal_count);
-          child_decision->untried_actions =
-              get_goal_relevant_next_actions_cached(child_decision->state, all_actions,
-                                                    goal, action_adds_map, branch_relevance);
+          {
+            auto applicable = get_next_actions(child_decision->state, all_actions);
+            child_decision->untried_actions =
+                get_helpful_actions(child_decision->state, applicable, goal, all_actions);
+          }
           chance_raw->outcome_weights.push_back(prob);
           chance_raw->children.push_back(std::move(child_decision));
         }
