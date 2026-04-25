@@ -28,6 +28,19 @@
 
 namespace railroad {
 
+// Coordination fluents (free / not-free) are end-effects of essentially every
+// operator and preconditions of nearly every operator. Letting them chain in
+// the goal-relevance closure makes it saturate to all actions: any unsatisfied
+// goal seed reaches `free` in two hops, and `free`'s achievers are then every
+// action. We skip them from the BFS *frontier* so the closure doesn't follow
+// them, but we still record their level in `fluent_level` and keep them in
+// each action's adds set so the per-state scoring still rewards their
+// achievement (which keeps pick/move scoring balanced).
+inline bool is_relevance_coordination_fluent(const Fluent &f) {
+  const std::string &n = f.name();
+  return n == "free" || n == "not-free" || n == "not_free";
+}
+
 inline std::vector<const Action *>
 get_next_actions(const State &state, const std::vector<Action> &all_actions) {
   // Step 1: Extract all `free(...)` fluents (sorting as I go)
@@ -238,6 +251,12 @@ inline BranchRelevance build_branch_relevance(
       for (const Action *a : ach_it->second) {
         if (!br.relevant_actions.insert(a).second) continue;
         for (const auto &p : a->pos_preconditions()) {
+          if (is_relevance_coordination_fluent(p)) {
+            // Track for scoring weight, but do not chain: their achievers
+            // are universal and would saturate the closure.
+            br.fluent_level.emplace(p, depth + 1);
+            continue;
+          }
           if (br.fluent_level.emplace(p, depth + 1).second) {
             next_frontier.push_back(p);
           }
@@ -769,6 +788,11 @@ inline std::string mcts(const State &root_state,
       }
     }
     for (const auto &f : adds) {
+      // Skip indexing coordination fluents as targets in the achievers map:
+      // every action would land in the bucket and the relevance BFS would
+      // saturate. (We still keep them in `adds` so the per-state scoring
+      // rewards actions that achieve them, mirroring the previous behavior.)
+      if (is_relevance_coordination_fluent(f)) continue;
       fluent_to_achievers[f].push_back(a);
     }
     action_adds_map[a] = std::move(adds);
