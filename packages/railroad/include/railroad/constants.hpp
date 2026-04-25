@@ -26,4 +26,10 @@ const double GOAL_REGRESSION_PENALTY = 500.0;
 // Multiplier for probabilistic backward-extraction delta in FF heuristic.
 const double PROBABILISTIC_DELTA_MULTIPLIER = 8.0;
 
+// UCB prior bonus added to children whose action is in the FF helpful-action
+// set for the parent state. Decays as 1/(1+visits) so it only steers early
+// exploration; once a child has been visited many times, its empirical Q
+// dominates.
+const double HELPFUL_ACTION_PRIOR = 100.0;
+
 }

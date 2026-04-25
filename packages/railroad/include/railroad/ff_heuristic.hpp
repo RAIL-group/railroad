@@ -491,8 +491,10 @@ inline FFBackwardExtractionResult build_backward_extraction(
       };
 
   constexpr std::size_t MAX_FOUND_AUGMENT_ITERS = 8;
+  bool needs_final_recompute = true;
   for (std::size_t iter = 0; iter < MAX_FOUND_AUGMENT_ITERS; ++iter) {
     recompute_extraction(result.effective_goals, result.on_path, result.extracted_achiever);
+    needs_final_recompute = false;
 
     std::unordered_set<std::string> object_candidates;
     for (const auto& f : result.effective_goals) {
@@ -514,11 +516,14 @@ inline FFBackwardExtractionResult build_backward_extraction(
       added_any = true;
     }
     if (!added_any) {
-      return result;
+      break;
     }
+    needs_final_recompute = true;
   }
 
-  recompute_extraction(result.effective_goals, result.on_path, result.extracted_achiever);
+  if (needs_final_recompute) {
+    recompute_extraction(result.effective_goals, result.on_path, result.extracted_achiever);
+  }
 
   // Identify level-1 actions: those in the extracted plan whose every positive
   // precondition is already in the initial fluents (so they could fire now).
@@ -1234,6 +1239,8 @@ inline std::vector<const Action*> get_helpful_actions(
       build_backward_extraction(forward, *best_branch);
   if (extraction.level_1_goals.empty()) return applicable;
 
+  // Hoffmann's helpful-actions definition: applicable actions whose adds
+  // intersect the level-1 goals of the extracted relaxed plan.
   std::vector<const Action*> helpful;
   helpful.reserve(applicable.size());
   for (const Action* a : applicable) {

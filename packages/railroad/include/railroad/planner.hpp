@@ -294,6 +294,7 @@ struct MCTSDecisionNode {
   MCTSChanceNode *parent = nullptr; // non-owning
   std::unordered_map<const Action *, std::unique_ptr<MCTSChanceNode>> children;
   std::vector<const Action *> untried_actions;
+  std::unordered_set<const Action *> helpful_actions; // FF helpful set for this state
   int goal_count = 0;
   int path_best_goal_count = 0;
 
@@ -366,14 +367,21 @@ struct MCTSResult {
 // ---------------------- helpers ----------------------
 
 inline double ucb_score(int parent_visits, const MCTSChanceNode &child,
-                        double c = std::sqrt(2.0)) {
+                        double c = std::sqrt(2.0), bool is_helpful = false) {
   if (child.visits == 0)
     return std::numeric_limits<double>::infinity();
   const double exploitation = child.value / static_cast<double>(child.visits);
   const double exploration =
       c * std::sqrt(std::log(static_cast<double>(parent_visits)) /
                     static_cast<double>(child.visits));
-  return exploitation + exploration;
+  // Preferred-actions prior: small bonus for FF-helpful actions that decays
+  // as the child accumulates visits. Steers early exploration without ever
+  // hard-pruning the unhelpful set.
+  const double prior = is_helpful
+                           ? HELPFUL_ACTION_PRIOR /
+                                 (1.0 + static_cast<double>(child.visits))
+                           : 0.0;
+  return exploitation + exploration + prior;
 }
 
 inline std::size_t sample_index(const std::vector<double> &weights,
@@ -416,13 +424,30 @@ void print_best_path(std::ostream& os, const MCTSDecisionNode* node, HeuristicFn
     // Indent for readability
     for (int i = 0; i < current_depth; ++i) os << " ";
 
+    // Count how many already-expanded children correspond to FF-helpful
+    // actions and how many helpful actions remain unexpanded in untried.
+    int helpful_children = 0;
+    for (const auto &kv : node->children) {
+      if (node->helpful_actions.count(kv.first)) ++helpful_children;
+    }
+    int helpful_untried = 0;
+    for (const Action *a : node->untried_actions) {
+      if (node->helpful_actions.count(a)) ++helpful_untried;
+    }
+    const int total_helpful = static_cast<int>(node->helpful_actions.size());
+    const int total_applicable =
+        static_cast<int>(node->children.size() + node->untried_actions.size());
+
     os << "D:" << current_depth << "|="
        << "visits=" << node->visits << ", "
        << "Q=" << q_value << ", "
        << "g=" << time_cost << ", "
        << "h=" << h_value << ", "
        << "g+h=" << time_cost + h_value << ", "
-       << "#A=" << node->children.size()
+       << "#A=" << node->children.size() << "/" << total_applicable << ", "
+       << "helpful=" << helpful_children << "/" << total_helpful
+       << " (untried " << helpful_untried << "/" << node->untried_actions.size()
+       << ")"
        << std::endl;
 
     if (node->children.empty()) {
@@ -487,14 +512,31 @@ inline std::string mcts(const State &root_state,
 
   auto all_actions = get_usable_actions(root_state, all_actions_base);
 
+  // Build per-decision-node action lists: keep all applicable actions in
+  // `untried_actions`, but record which are FF-helpful and order the vector so
+  // helpful actions are at the back (popped first). UCB selection reads
+  // `helpful_actions` to apply a decaying prior bonus.
+  auto populate_actions = [&all_actions, goal](MCTSDecisionNode &node) {
+    auto applicable = get_next_actions(node.state, all_actions);
+    auto helpful_vec =
+        get_helpful_actions(node.state, applicable, goal, all_actions);
+    node.helpful_actions = std::unordered_set<const Action *>(
+        helpful_vec.begin(), helpful_vec.end());
+    node.untried_actions.clear();
+    node.untried_actions.reserve(applicable.size());
+    // Non-helpful first, helpful last so pop_back yields helpful first.
+    for (const Action *a : applicable) {
+      if (!node.helpful_actions.count(a)) node.untried_actions.push_back(a);
+    }
+    for (const Action *a : applicable) {
+      if (node.helpful_actions.count(a)) node.untried_actions.push_back(a);
+    }
+  };
+
   // Root node
   auto root = std::make_unique<MCTSDecisionNode>(root_state.copy_and_zero_out_time());
   set_goal_progress_fields(*root, goal, 0);
-  {
-    auto applicable = get_next_actions(root_state, all_actions);
-    root->untried_actions =
-        get_helpful_actions(root_state, applicable, goal, all_actions);
-  }
+  populate_actions(*root);
 
   HeuristicFn heuristic_fn = [goal, all_actions, ff_memory](const State& s) -> double {
     return ff_heuristic(s, goal, all_actions, ff_memory);
@@ -531,7 +573,8 @@ inline std::string mcts(const State &root_state,
 
       for (auto &kv : node->children) {
         MCTSChanceNode *cn = kv.second.get();
-        double score = ucb_score(node->visits, *cn, c);
+        bool is_helpful = node->helpful_actions.count(kv.first) > 0;
+        double score = ucb_score(node->visits, *cn, c, is_helpful);
         if (score > best_score) {
           best_score = score;
           best_chance = cn;
@@ -571,11 +614,7 @@ inline std::string mcts(const State &root_state,
           auto child_decision =
               std::make_unique<MCTSDecisionNode>(succ, chance_raw);
           set_goal_progress_fields(*child_decision, goal, node->path_best_goal_count);
-          {
-            auto applicable = get_next_actions(child_decision->state, all_actions);
-            child_decision->untried_actions =
-                get_helpful_actions(child_decision->state, applicable, goal, all_actions);
-          }
+          populate_actions(*child_decision);
           chance_raw->outcome_weights.push_back(prob);
           chance_raw->children.push_back(std::move(child_decision));
         }
