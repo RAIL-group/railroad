@@ -85,6 +85,8 @@ def benchmarks() -> None:
               help="MLflow tracking URI (default: sqlite:///mlflow.db)")
 @click.option("--include", "-i", multiple=True, type=click.Path(exists=True),
               help="Include benchmark file(s) in addition to entry points (can be repeated)")
+@click.option("--run-name", default=None,
+              help="Human-readable name for this benchmark run (used in MLflow experiment name)")
 def benchmarks_run(
     case_filter: str | None,
     repeat_max: int | None,
@@ -93,6 +95,7 @@ def benchmarks_run(
     dry_run: bool,
     mlflow_uri: str | None,
     include: tuple[str, ...],
+    run_name: str | None,
 ) -> None:
     """Run PDDL planning benchmarks."""
     import sys
@@ -119,6 +122,7 @@ def benchmarks_run(
         tags=tags_list,
         case_filter=case_filter,
         include_files=include_files,
+        run_name=run_name,
     )
 
     # Create plan

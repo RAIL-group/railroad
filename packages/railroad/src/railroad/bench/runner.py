@@ -40,6 +40,7 @@ class BenchmarkRunner:
         tags: Optional[List[str]] = None,
         case_filter: Optional[str] = None,
         include_files: Optional[List[str]] = None,
+        run_name: Optional[str] = None,
     ):
         """
         Initialize benchmark runner.
@@ -52,6 +53,7 @@ class BenchmarkRunner:
             tags: Filter benchmarks by tags (default: None, run all)
             case_filter: Filter cases by matching against benchmark name and parameters (default: None)
             include_files: List of additional benchmark files to load (default: None)
+            run_name: Human-readable name for this benchmark run (default: None, auto-generated from timestamp)
         """
         self.benchmarks = benchmarks
         self.repeat_max = repeat_max
@@ -62,6 +64,7 @@ class BenchmarkRunner:
         self.filter_tags = tags
         self.case_filter = case_filter
         self.include_files = include_files
+        self.run_name = run_name
 
     def create_plan(self) -> ExecutionPlan:
         """
@@ -218,12 +221,24 @@ class BenchmarkRunner:
         except Exception:
             git_dirty = True
 
+        try:
+            git_branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                cwd=Path(__file__).parent.parent.parent,
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        except Exception:
+            git_branch = "unknown"
+
         return {
             "timestamp": time.time(),
             "hostname": socket.gethostname(),
             "user": getpass.getuser(),
             "git_hash": git_hash,
+            "git_branch": git_branch,
             "git_dirty": git_dirty,
+            "run_name": self.run_name if self.run_name is not None else "None",
             "repeat_max": self.repeat_max if self.repeat_max is not None else "None",
             "parallel_workers": self.parallel,
             "num_benchmarks": len(self.benchmarks),
@@ -250,8 +265,12 @@ class BenchmarkRunner:
         Returns:
             Completed execution plan with results
         """
-        # Create MLflow experiment with timestamp
-        experiment_name = f"railroad_bench_{int(time.time())}"
+        # Create MLflow experiment, named by user if provided else timestamped
+        timestamp = int(time.time())
+        if self.run_name:
+            experiment_name = f"{self.run_name}_{timestamp}"
+        else:
+            experiment_name = f"railroad_bench_{timestamp}"
         self.tracker.create_experiment(experiment_name, plan.metadata)
 
         # Start progress display
