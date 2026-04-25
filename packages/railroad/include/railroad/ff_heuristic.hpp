@@ -113,6 +113,13 @@ struct FFForwardResult {
   // Used to skip delta computation for purely deterministic fluents
   std::unordered_set<Fluent> has_probabilistic_achiever;
 
+  // First layer at which each fluent appears in the relaxed planning graph.
+  // Initial fluents are at layer 0; an action whose every positive precondition
+  // is at some layer i first achieves its adds at layer i+1. Used by helpful-
+  // actions extraction to identify actions whose preconditions are all already
+  // true (i.e., applicable in the relaxation now).
+  std::unordered_map<Fluent, int> fact_layer;
+
   // Lazily computed delta(f) = E_attempt - D for probabilistic fluents
   // Mutable so it can be populated on-demand during const backward extraction
   mutable std::unordered_map<Fluent, double> probabilistic_delta;
@@ -135,11 +142,13 @@ FFForwardResult ff_forward_phase(
   result.initial_fluents = initial_fluents;
   result.known_fluents = initial_fluents;
 
-  // Initialize expected costs for initial fluents
+  // Initialize expected costs and layer 0 for initial fluents
   for (const auto& f : initial_fluents) {
     result.expected_cost[f] = 0.0;
+    result.fact_layer[f] = 0;
   }
 
+  int current_layer = 0;
   std::unordered_set<Fluent> newly_added = result.known_fluents;
   std::unordered_set<const Action *> visited_actions;
   std::unordered_set<const Action *> all_actions_set;
@@ -150,6 +159,7 @@ FFForwardResult ff_forward_phase(
 
   // Forward relaxed reachability loop
   while (!newly_added.empty()) {
+    ++current_layer;
     std::unordered_set<Fluent> next_new;
     State state_all_known(0.0, result.known_fluents);
 
@@ -194,6 +204,7 @@ FFForwardResult ff_forward_phase(
           next_new.insert(f);
           result.fact_to_action[f] = a;
           result.fact_to_probability[f] = achievement_probability;
+          result.fact_layer[f] = current_layer;
         } else {
           result.fact_to_probability[f] =
               std::max(result.fact_to_probability[f], achievement_probability);
@@ -404,6 +415,16 @@ struct FFBackwardExtractionResult {
   std::unordered_set<Fluent> on_path;
   std::unordered_map<Fluent, const Action*> extracted_achiever;
   std::unordered_set<Fluent> auto_added_found_landmarks;
+
+  // Actions in the extracted relaxed plan whose every positive precondition is
+  // already in the initial fluents -- i.e., applicable in the relaxation now.
+  // These are "level-1 actions" in FF helpful-actions terminology.
+  std::unordered_set<const Action*> level_1_actions;
+
+  // Fluents on the relaxed plan that are achieved by a level-1 action --
+  // i.e., the immediate subgoals the relaxed plan wants achieved next.
+  // FF helpful actions are the applicable actions whose adds intersect this set.
+  std::unordered_set<Fluent> level_1_goals;
 };
 
 inline const Action* pick_best_achiever_for_fluent(
@@ -498,6 +519,24 @@ inline FFBackwardExtractionResult build_backward_extraction(
   }
 
   recompute_extraction(result.effective_goals, result.on_path, result.extracted_achiever);
+
+  // Identify level-1 actions: those in the extracted plan whose every positive
+  // precondition is already in the initial fluents (so they could fire now).
+  // The fluent each one supports in the relaxed plan is a level-1 goal.
+  for (const auto& [fluent, action] : result.extracted_achiever) {
+    if (!action) continue;
+    bool all_preconds_initial = true;
+    for (const auto& p : action->pos_preconditions()) {
+      if (!forward.initial_fluents.count(p)) {
+        all_preconds_initial = false;
+        break;
+      }
+    }
+    if (!all_preconds_initial) continue;
+    result.level_1_actions.insert(action);
+    result.level_1_goals.insert(fluent);
+  }
+
   return result;
 }
 
@@ -1133,6 +1172,91 @@ inline std::string ff_heuristic_debug_report(
   }
 
   return out.str();
+}
+
+// FF helpful actions: applicable actions whose adds intersect the level-1
+// goals of the relaxed plan extracted from `state`. State-conditioned (the
+// relaxed planning graph is rebuilt per call), forward-progressing (level-1
+// goals come from a single extracted plan, not a symmetric closure), and has
+// no depth knob (the RPG runs to fixpoint).
+//
+// `applicable` is the caller's result of `get_next_actions(state, ...)`. The
+// caller passes it in to avoid an include cycle with planner.hpp.
+//
+// On any condition where helpful-actions cannot be computed (no goal, trivial
+// goal, unreachable goal, empty level-1 goals), or when the helpful set ends
+// up empty, returns `applicable` unchanged. This is a soft fallback -- the
+// caller should never see an empty helpful set degrading to an empty result.
+inline std::vector<const Action*> get_helpful_actions(
+    const State& state,
+    const std::vector<const Action*>& applicable,
+    const GoalBase* goal,
+    const std::vector<Action>& all_actions) {
+  static thread_local std::size_t s_calls = 0;
+  static thread_local std::size_t s_empty_fallback = 0;
+  ++s_calls;
+
+  if (!goal || applicable.empty()) return applicable;
+  GoalType type = goal->get_type();
+  if (type == GoalType::TRUE_GOAL) return applicable;
+  if (type == GoalType::FALSE_GOAL) return applicable;
+
+  auto relaxed_result = transition(state, nullptr, true);
+  if (relaxed_result.empty()) return applicable;
+  State relaxed = relaxed_result[0].first;
+  std::unordered_set<Fluent> initial_fluents(
+      relaxed.fluents().begin(), relaxed.fluents().end());
+
+  FFForwardResult forward = ff_forward_phase(initial_fluents, all_actions);
+  compute_expected_costs(forward);
+
+  const auto& branches = extract_or_branches(goal);
+  if (branches.empty()) return applicable;
+
+  // Pick the branch the heuristic itself would pick (lowest backward cost),
+  // so helpful-action selection is coherent with the heuristic's branch
+  // choice in MCTS scoring.
+  double best_cost = std::numeric_limits<double>::infinity();
+  const std::unordered_set<Fluent>* best_branch = nullptr;
+  for (const auto& branch : branches) {
+    double c = ff_backward_cost(forward, branch);
+    if (c < best_cost) {
+      best_cost = c;
+      best_branch = &branch;
+    }
+  }
+  if (!best_branch ||
+      best_cost == std::numeric_limits<double>::infinity()) {
+    return applicable;
+  }
+
+  FFBackwardExtractionResult extraction =
+      build_backward_extraction(forward, *best_branch);
+  if (extraction.level_1_goals.empty()) return applicable;
+
+  std::vector<const Action*> helpful;
+  helpful.reserve(applicable.size());
+  for (const Action* a : applicable) {
+    bool hits = false;
+    const auto& succs = a->get_relaxed_successors();
+    for (const auto& [succ_state, succ_prob] : succs) {
+      if (succ_prob <= 0.0) continue;
+      for (const auto& f : succ_state.fluents()) {
+        if (extraction.level_1_goals.count(f)) {
+          hits = true;
+          break;
+        }
+      }
+      if (hits) break;
+    }
+    if (hits) helpful.push_back(a);
+  }
+
+  if (helpful.empty()) {
+    ++s_empty_fallback;
+    return applicable;
+  }
+  return helpful;
 }
 
 // FF heuristic for complex goals with OR branches
