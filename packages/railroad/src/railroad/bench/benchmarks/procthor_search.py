@@ -146,16 +146,27 @@ def bench_procthor_search(case: BenchmarkCase):
     dashboard.print_history()
     html_output = recording_console.export_html(inline_styles=True)
 
-    return {
+    result = {
         "success": goal.evaluate(env.state.fluents),
         "wall_time": time.perf_counter() - start_time,
         "plan_cost": float(env.state.time),
         "actions_count": len(actions_taken),
         "actions": actions_taken,
-        "target_location": target_location,
-        "target_objects": target_objects,
         "log_html": html_output,
     }
+
+    try:
+        location_coords = {
+            name: (float(coord[0]), float(coord[1]))
+            for name, coord in env.scene.locations.items()
+        }
+        plot_image = dashboard.get_plot_image(location_coords=location_coords)
+        if plot_image is not None:
+            result["log_plot"] = plot_image
+    except Exception as e:
+        print(f"Failed to render trajectory plot: {e}")
+
+    return result
 
 
 bench_procthor_search.add_cases([
@@ -173,6 +184,6 @@ bench_procthor_search.add_cases([
         [2, 4, 10],          # mcts.h_mult
         [4000, 10000],       # mcts.iterations
         [2],                 # num_objects
-        list(8610, 8620),    # scene_seed
+        list(range(8610, 8620)),  # scene_seed
     )
 ])

@@ -145,6 +145,72 @@ def benchmarks_dashboard() -> None:
     run_dashboard()
 
 
+@benchmarks.command("compact")
+@click.option("--experiment", default=None,
+              help="Compact a single experiment by name (default: compact all eligible)")
+@click.option("--force", is_flag=True, default=False,
+              help="Invalidate existing caches before recomputing")
+@click.option("--mlflow-uri", default=None,
+              help="MLflow tracking URI (default: sqlite:///mlflow.db)")
+def benchmarks_compact(experiment: str | None, force: bool, mlflow_uri: str | None) -> None:
+    """Materialize the compaction cache for finished experiments."""
+    from railroad.bench.analysis import BenchmarkAnalyzer
+    from railroad.bench import compact
+
+    analyzer = BenchmarkAnalyzer(tracking_uri=mlflow_uri)
+
+    if experiment:
+        names = [experiment]
+    else:
+        exps = analyzer.list_experiments()
+        if exps.empty:
+            click.echo("No experiments found.")
+            return
+        names = exps["name"].tolist()
+
+    from railroad.bench.dashboard.figures import create_violin_plots_by_benchmark
+    from railroad.bench.dashboard.sweeps import create_all_sweep_plots
+
+    cached = 0
+    skipped = 0
+    failed = 0
+    for name in names:
+        if force:
+            compact.invalidate(name)
+        try:
+            df = analyzer.load_experiment(name)
+            metadata = analyzer.get_experiment_metadata(name)
+            summary = analyzer.get_experiment_summary(name, df=df)
+            figures = {
+                "violin": create_violin_plots_by_benchmark(df),
+                "sweep": create_all_sweep_plots(df),
+            }
+            if compact.save(name, df, metadata, summary, figures=figures):
+                click.echo(f"  ✓ {name} ({summary['total_runs']} runs, figures cached)")
+                cached += 1
+            else:
+                click.echo(f"  ⏭  {name} (in-progress, skipped)")
+                skipped += 1
+        except Exception as e:
+            click.echo(f"  ✗ {name}: {e}")
+            failed += 1
+    click.echo(f"\nCompacted {cached} experiment(s), skipped {skipped}, failed {failed}.")
+
+
+@benchmarks.command("cache-clear")
+@click.option("--experiment", default=None,
+              help="Clear cache for a single experiment by name (default: clear all)")
+def benchmarks_cache_clear(experiment: str | None) -> None:
+    """Remove compacted cache files."""
+    from railroad.bench import compact
+    if experiment:
+        compact.invalidate(experiment)
+        click.echo(f"Cleared cache for '{experiment}'.")
+    else:
+        compact.invalidate_all()
+        click.echo("Cleared all benchmark caches.")
+
+
 def _make_example_command(name: str, info: ExampleInfo) -> None:
     """Create and register a click command for an example."""
     description = info["description"]
