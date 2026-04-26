@@ -223,7 +223,12 @@ def compute_sweep_correlation(groups: list[SweepGroup]) -> tuple:
         # Non-numeric parameter - can't compute correlation
         return None, None, None
 
-    y_arr = np.array(all_y)
+    y_arr = np.array(all_y, dtype=float)
+
+    finite_mask = np.isfinite(x_arr) & np.isfinite(y_arr)
+    x_arr, y_arr = x_arr[finite_mask], y_arr[finite_mask]
+    if len(x_arr) < 2 or np.ptp(x_arr) == 0:
+        return None, None, None
 
     # Compute Pearson correlation
     correlation = np.corrcoef(x_arr, y_arr)[0, 1]

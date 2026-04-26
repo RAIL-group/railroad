@@ -131,7 +131,7 @@ def register_callbacks(app):
                     return content, store_data
                 except ValueError as e:
                     return [html.Pre(
-                        f"Experiment not found: {e}",
+                        f"Error loading experiment: {e}",
                         className="pre-text status-failure"
                     )], {}
 
