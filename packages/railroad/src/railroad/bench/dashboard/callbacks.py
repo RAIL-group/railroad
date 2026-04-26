@@ -4,6 +4,7 @@ Dash callback functions and Flask routes.
 
 import time
 import json
+from urllib.parse import unquote
 from dash import Output, Input, State, ALL, callback_context, html
 from flask import send_file
 import mlflow
@@ -88,7 +89,7 @@ def register_callbacks(app):
 
             elif pathname.startswith("/experiment/"):
                 # Show specific experiment
-                experiment_name = pathname.replace("/experiment/", "")
+                experiment_name = unquote(pathname.replace("/experiment/", ""))
 
                 try:
                     df, experiment_name, metadata = load_experiment_by_name(experiment_name)
