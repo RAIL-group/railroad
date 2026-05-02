@@ -177,6 +177,7 @@ def construct_search_operator(
             F("not searched ?loc ?obj"),
             F("not found ?obj"),
             F("not lock-search ?loc"),
+            ~F("blocking-access ?loc")
         ],
         effects=[
             Effect(time=0, resulting_fluents={F("not free ?r"), F("lock-search ?loc")}),
@@ -325,6 +326,7 @@ def construct_pick_operator_blocking(pick_time: OptNumeric) -> Operator:
             F("at ?obj ?loc"),
             ~F("hand-full ?r"),
             ~F("just-placed ?r ?obj"),
+            ~F("blocking-access ?loc")
         ],
         effects=[
             Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?obj ?loc")}),
@@ -397,6 +399,7 @@ def construct_place_operator_blocking(place_time: OptNumeric) -> Operator:
             F("holding ?r ?obj"),
             F("hand-full ?r"),
             ~F("just-picked ?r ?obj"),
+            ~F("blocking-access ?loc")
         ],
         effects=[
             Effect(time=0, resulting_fluents={F("not free ?r"), F("not holding ?r ?obj")}),
