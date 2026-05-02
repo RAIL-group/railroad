@@ -24,6 +24,7 @@ mkdir railroad-env && cd railroad-env && uv init
 uv add "railroad @ git+https://github.com/RAIL-group/railroad.git#subdirectory=packages/railroad"
 uv run railroad example multi-object-search
 ```
+*Note:* Linux systems require `python3.12-dev` and `build-essential`.
 
 Use the optional benchmark suite
 ```bash
