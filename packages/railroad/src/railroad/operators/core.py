@@ -465,3 +465,39 @@ def construct_no_op_operator(no_op_time: OptNumeric, extra_cost: float = 0.0) ->
         ],
         extra_cost=extra_cost,
     )
+
+
+# =============================================================================
+# Open container door Operators
+# =============================================================================
+
+def construct_open_container_door_operator_blocking(open_time: OptNumeric) -> Operator:
+    open_time_fn = _to_numeric(open_time)
+    return Operator(
+        name="open_container",
+        parameters=[("?r", "robot"), ("?container-door", "container-door"), ("?loc", "location")],
+        preconditions=[
+            F("at ?r ?loc"), 
+            F("free ?r"), 
+            ~F("hand-full ?r"),
+            F("has-door ?loc ?container-door"),
+            F("closed ?container-door"),
+            ~F("just-opened ?r ?container-door")
+        ],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free ?r")}),
+            Effect(
+                time=(open_time_fn, ["?r", "?loc", "?container-door"]),
+                resulting_fluents={
+                    F("free ?r"),
+                    ~F("closed ?container-door"),
+                    ~F("blocking-access ?loc"),
+                    F("just-opened ?r ?container-door")
+                }
+            ),
+            Effect(
+                time=(open_time_fn + 0.1, ["?r", "?loc", "?container-door"]),
+                resulting_fluents={~F("just-opened ?r ?container-door")}
+            )
+        ],
+    )
