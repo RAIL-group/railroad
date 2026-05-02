@@ -33,6 +33,7 @@ ROBOT_VELOCITY = 1.0
 # SEARCH_TIME = 5.0
 PICK_TIME = 5.0
 PLACE_TIME = 5.0
+OPEN_TIME = 3.0
 
 
 def main(
@@ -54,10 +55,15 @@ def main(
         F("at Cereal pantry"),
         F("at Pillow bed"),
         F("at Mug cabinet"),
+        # cabinet door blocking access inside
+        F("has-door cabinet cabinet_door"),
+        F("closed cabinet_door"),
+        F("blocking-access cabinet"),
     }
 
     # Define goal: all items at their proper locations
     goal = (
+        # F("at Mug table") & ~F("closed cabinet_door")
         F("at Mug table")
     )
 
@@ -66,6 +72,7 @@ def main(
         "robot": {"robot1", "robot2"},
         "location": set(LOCATIONS.keys()),
         "object": set(objects_of_interest),
+        "container-door": {"cabinet_door"}
     }
 
     # Distance-based move time function
@@ -79,13 +86,14 @@ def main(
     pick_op = operators.construct_pick_operator_blocking(PICK_TIME)
     place_op = operators.construct_place_operator_blocking(PLACE_TIME)
     no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
+    open_op = operators.construct_open_container_door_operator_blocking(OPEN_TIME)
 
     # Initialize symbolic environment with initial state
     initial_state = State(0.0, initial_fluents, [])
     env = SymbolicEnvironment(
         state=initial_state,
         objects_by_type=objects_by_type,
-        operators=[no_op, move_op, pick_op, place_op],
+        operators=[no_op, move_op, pick_op, place_op, open_op],
         true_object_locations=OBJECTS_AT_LOCATIONS,
     )
 
@@ -106,7 +114,7 @@ def main(
             mcts = MCTSPlanner(all_actions)
 
             start_time = time.perf_counter()
-            max_mcts_iters = 100
+            max_mcts_iters = 10
 
             action_name = mcts(env.state, goal, max_iterations=max_mcts_iters, c=300, max_depth=20)
 
@@ -118,7 +126,6 @@ def main(
             try:
                 tree_trace = mcts.get_trace_from_last_mcts_tree()
                 
-                expanded_nodes = 0
                 iterations = max_mcts_iters 
                 
                 # The repository's MCTS implementation returns a string trace
