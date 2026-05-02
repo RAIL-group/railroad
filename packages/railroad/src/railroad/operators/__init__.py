@@ -41,6 +41,8 @@ from .core import (
     # Wait operators
     construct_wait_operator,
     construct_no_op_operator,
+    # Open container door operator
+    construct_open_container_door_operator_blocking,
 )
 
 from ._utils import (
@@ -69,6 +71,8 @@ __all__ = [
     # Wait operators
     "construct_wait_operator",
     "construct_no_op_operator",
+    # Open container door operator
+    "construct_open_container_door_operator_blocking",
     # Utilities
     "Numeric",
     "numeric",
