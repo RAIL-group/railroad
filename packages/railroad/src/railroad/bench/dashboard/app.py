@@ -56,7 +56,7 @@ def main():
     """Entry point for benchmarks-dashboard command."""
     print("\nStarting Dash server...")
     print("Open http://127.0.0.1:8050/ in your browser")
-    app.run(debug=True, dev_tools_ui=False)
+    app.run(debug=True, dev_tools_ui=False, host="0.0.0.0")
 
 
 if __name__ == "__main__":
