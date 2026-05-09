@@ -10,7 +10,14 @@ __all__ = ["transition"]  # re-exported from _bindings
 from railroad._bindings import ff_heuristic as _ff_heuristic_cpp
 
 
-def ff_heuristic(state: State, goal: Union[Goal, Fluent], all_actions: List[Action]) -> float:
+def ff_heuristic(
+    state: State,
+    goal: Union[Goal, Fluent],
+    all_actions: List[Action],
+    lambda_add: float = 0.5,
+    lambda_max: float = 0.0,
+    lambda_ff: float = 0.5,
+) -> float:
     """Compute FF heuristic value for a state (probabilistic version).
 
     Args:
@@ -19,14 +26,21 @@ def ff_heuristic(state: State, goal: Union[Goal, Fluent], all_actions: List[Acti
             - A Goal object: F("a") & F("b"), AndGoal([...]), etc.
             - A single Fluent: F("visited a") (auto-wrapped to LiteralGoal)
         all_actions: List of all available actions
+        lambda_add: weight on the additive component (sum optimistic_cost over goal fluents)
+        lambda_max: weight on the max component (max optimistic_cost over goal fluents)
+        lambda_ff: weight on the relaxed-plan-cost component (sum action_duration over unique actions)
 
     Returns:
-        Heuristic value (estimated cost to reach goal)
+        Heuristic value (estimated cost to reach goal). Defaults are an even
+        split between h_add and h_ff (0.5, 0.0, 0.5).
     """
     # Normalize goal (wrap Fluent in LiteralGoal if needed)
     if isinstance(goal, Fluent):
         goal = LiteralGoal(goal)
-    return _ff_heuristic_cpp(state, goal, all_actions)
+    return _ff_heuristic_cpp(
+        state, goal, all_actions,
+        lambda_add=lambda_add, lambda_max=lambda_max, lambda_ff=lambda_ff,
+    )
 
 
 Num = Union[float, int]

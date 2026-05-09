@@ -580,8 +580,15 @@ PYBIND11_MODULE(_bindings, m) {
 
 
   py::class_<MCTSPlanner>(m, "MCTSPlanner")
-      .def(py::init<std::vector<Action>>(),
-           py::arg("all_actions"))
+      .def(py::init<std::vector<Action>, double, double, double>(),
+           py::arg("all_actions"),
+           py::arg("lambda_add") = 0.5,
+           py::arg("lambda_max") = 0.0,
+           py::arg("lambda_ff")  = 0.5,
+           "Construct an MCTSPlanner. The lambda_* weights mix the additive "
+           "(h_add), max (h_max), and relaxed-plan-cost (h_ff) heuristic "
+           "components used during search; defaults are an even split between "
+           "h_add and h_ff (0.5, 0.0, 0.5).")
       .def(
           "__call__",
           [](MCTSPlanner &self, const State &s,
@@ -593,15 +600,26 @@ PYBIND11_MODULE(_bindings, m) {
           py::arg("max_iterations") = 1000, py::arg("max_depth") = 20,
           py::arg("c") = 1.414, py::arg("heuristic_multiplier") = 5.0,
           "Plan with a Goal object (supports complex AND/OR goals)")
+      .def_property_readonly("lambda_add", &MCTSPlanner::lambda_add)
+      .def_property_readonly("lambda_max", &MCTSPlanner::lambda_max)
+      .def_property_readonly("lambda_ff",  &MCTSPlanner::lambda_ff)
       .def("get_trace_from_last_mcts_tree", &MCTSPlanner::get_trace_from_last_mcts_tree,
            "Get the tree trace from the most recent MCTS planning call");
 
   // ff_heuristic with Goal object
   m.def("ff_heuristic",
         [](const State &state, const GoalPtr &goal,
-           const std::vector<Action> &all_actions) {
-          return ff_heuristic(state, goal.get(), all_actions);
+           const std::vector<Action> &all_actions,
+           double lambda_add, double lambda_max, double lambda_ff) {
+          return ff_heuristic(state, goal.get(), all_actions, nullptr,
+                              lambda_add, lambda_max, lambda_ff);
         },
-        "Compute FF heuristic value for a state with a Goal object",
-        py::arg("state"), py::arg("goal"), py::arg("all_actions"));
+        "Compute FF heuristic value for a state with a Goal object. "
+        "lambda_add/lambda_max/lambda_ff mix the additive (h_add), max (h_max), "
+        "and relaxed-plan-cost (h_ff) components; defaults are an even split "
+        "between h_add and h_ff (0.5, 0.0, 0.5).",
+        py::arg("state"), py::arg("goal"), py::arg("all_actions"),
+        py::arg("lambda_add") = 0.5,
+        py::arg("lambda_max") = 0.0,
+        py::arg("lambda_ff")  = 0.5);
 }

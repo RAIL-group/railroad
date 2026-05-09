@@ -317,7 +317,10 @@ inline std::string mcts(const State &root_state,
                         int max_iterations = 1000, int max_depth = 20,
                         double c = std::sqrt(2.0),
                         double heuristic_multiplier = HEURISTIC_MULTIPLIER,
-                        std::string* out_tree_trace = nullptr) {
+                        std::string* out_tree_trace = nullptr,
+                        double lambda_add = 0.5,
+                        double lambda_max = 0.0,
+                        double lambda_ff  = 0.5) {
   // RNG
   static thread_local std::mt19937 rng{std::random_device{}()};
 
@@ -327,8 +330,10 @@ inline std::string mcts(const State &root_state,
   auto root = std::make_unique<MCTSDecisionNode>(root_state.copy_and_zero_out_time());
   root->untried_actions = get_next_actions(root_state, all_actions);
 
-  HeuristicFn heuristic_fn = [goal, all_actions, ff_memory](const State& s) -> double {
-    return ff_heuristic(s, goal, all_actions, ff_memory);
+  HeuristicFn heuristic_fn = [goal, all_actions, ff_memory,
+                              lambda_add, lambda_max, lambda_ff](const State& s) -> double {
+    return ff_heuristic(s, goal, all_actions, ff_memory,
+                        lambda_add, lambda_max, lambda_ff);
   };
 
   for (int it = 0; it < max_iterations; ++it) {
@@ -471,8 +476,14 @@ inline std::string mcts(const State &root_state,
 
 class MCTSPlanner {
 public:
-  explicit MCTSPlanner(std::vector<Action> all_actions)
-      : all_actions_(std::move(all_actions)) {}
+  explicit MCTSPlanner(std::vector<Action> all_actions,
+                       double lambda_add = 0.5,
+                       double lambda_max = 0.0,
+                       double lambda_ff  = 0.5)
+      : all_actions_(std::move(all_actions)),
+        lambda_add_(lambda_add),
+        lambda_max_(lambda_max),
+        lambda_ff_(lambda_ff) {}
 
   // Call operator: planner(initial_state, goal) → string
   std::string operator()(const State &root_state,
@@ -483,11 +494,16 @@ public:
                          double heuristic_multiplier = HEURISTIC_MULTIPLIER) {
     return mcts(root_state, all_actions_, goal.get(), &ff_memory_,
                 max_iterations, max_depth, c, heuristic_multiplier,
-                &last_mcts_tree_trace_);
+                &last_mcts_tree_trace_,
+                lambda_add_, lambda_max_, lambda_ff_);
   }
 
   void clear_cache() { ff_memory_.clear(); }
   std::size_t cache_size() const { return ff_memory_.size(); }
+
+  double lambda_add() const { return lambda_add_; }
+  double lambda_max() const { return lambda_max_; }
+  double lambda_ff()  const { return lambda_ff_; }
 
   // Get the tree trace from the most recent MCTS planning call
   const std::string& get_trace_from_last_mcts_tree() const {
@@ -498,6 +514,9 @@ private:
   std::vector<Action> all_actions_;
   FFMemory ff_memory_;
   std::string last_mcts_tree_trace_;
+  double lambda_add_;
+  double lambda_max_;
+  double lambda_ff_;
 };
 
 } // namespace railroad

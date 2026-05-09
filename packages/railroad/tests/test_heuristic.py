@@ -761,3 +761,91 @@ def test_goal_goal_count():
     }
     assert goal.goal_count(active_fluents_4) == 3
     assert goal.evaluate(active_fluents_4)
+
+
+# ============================================================================
+# Tests for h_add / h_max / h_ff component mixing
+# ============================================================================
+
+
+def _make_move_pick_fixture():
+    """Build the canonical move(5.0) + pick(2.0) fixture used across mixing tests."""
+    move_op = construct_move_operator(move_cost=5.0)
+    pick_op = construct_pick_operator(pick_cost=2.0)
+    objects_by_type = {
+        "robot": ["r1"],
+        "location": ["start", "target"],
+        "object": ["box"],
+    }
+    all_actions = []
+    all_actions.extend(move_op.instantiate(objects_by_type))
+    all_actions.extend(pick_op.instantiate(objects_by_type))
+    initial_state = State(
+        time=0,
+        fluents={F("at r1 start"), F("free r1"), F("at box target")},
+    )
+    return initial_state, all_actions
+
+
+def test_ff_heuristic_default_lambdas_split_add_and_ff():
+    """Default lambdas are 0.5 h_add + 0.5 h_ff."""
+    initial_state, all_actions = _make_move_pick_fixture()
+    goal = F("at r1 target") & F("holding r1 box")
+
+    default = ff_heuristic(initial_state, goal, all_actions)
+    # h_add = 12.0 (5 + 7), h_ff = 7.0 (move + pick durations)
+    assert default == pytest.approx(0.5 * 12.0 + 0.5 * 7.0)
+
+
+def test_ff_heuristic_h_max_takes_max_over_goal_fluents():
+    """h_max returns the largest per-fluent optimistic cost, not the sum."""
+    initial_state, all_actions = _make_move_pick_fixture()
+    # optimistic_cost[at r1 target]   = move(5.0)
+    # optimistic_cost[holding r1 box] = move(5.0) + pick(2.0)
+    goal = F("at r1 target") & F("holding r1 box")
+
+    h = ff_heuristic(
+        initial_state, goal, all_actions,
+        lambda_add=0.0, lambda_max=1.0, lambda_ff=0.0,
+    )
+    assert h == 7.0
+
+
+def test_ff_heuristic_h_ff_sums_unique_action_durations():
+    """h_ff sums action_duration over the *unique* actions on the relaxed plan."""
+    initial_state, all_actions = _make_move_pick_fixture()
+    # Relaxed plan visits move (dur 5.0) and pick (dur 2.0); the AND goal does
+    # not double-count move even though it's the cheapest achiever for one
+    # goal fluent and a precondition for the other.
+    goal = F("at r1 target") & F("holding r1 box")
+
+    h = ff_heuristic(
+        initial_state, goal, all_actions,
+        lambda_add=0.0, lambda_max=0.0, lambda_ff=1.0,
+    )
+    assert h == 7.0
+
+
+def test_ff_heuristic_lambda_mixing_is_linear():
+    """Mixed value equals the linear combination of the three components."""
+    initial_state, all_actions = _make_move_pick_fixture()
+    goal = F("at r1 target") & F("holding r1 box")
+
+    h_add = ff_heuristic(
+        initial_state, goal, all_actions,
+        lambda_add=1.0, lambda_max=0.0, lambda_ff=0.0,
+    )
+    h_max = ff_heuristic(
+        initial_state, goal, all_actions,
+        lambda_add=0.0, lambda_max=1.0, lambda_ff=0.0,
+    )
+    h_ff = ff_heuristic(
+        initial_state, goal, all_actions,
+        lambda_add=0.0, lambda_max=0.0, lambda_ff=1.0,
+    )
+
+    mixed = ff_heuristic(
+        initial_state, goal, all_actions,
+        lambda_add=0.25, lambda_max=0.25, lambda_ff=0.5,
+    )
+    assert mixed == pytest.approx(0.25 * h_add + 0.25 * h_max + 0.5 * h_ff)
