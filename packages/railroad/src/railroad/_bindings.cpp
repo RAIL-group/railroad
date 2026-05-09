@@ -371,19 +371,19 @@ PYBIND11_MODULE(_bindings, m) {
         py::arg("input_state"), py::arg("all_actions"),
         "Get actions usable from the given state via forward reachability");
 
-  m.def("get_relaxed_expected_costs",
+  m.def("get_relaxed_optimistic_costs",
         [](const State &input_state, const std::vector<Action> &all_actions) {
-          return get_relaxed_expected_costs(input_state, all_actions);
+          return get_relaxed_optimistic_costs(input_state, all_actions);
         },
         py::arg("input_state"), py::arg("all_actions"),
-        "Get relaxed expected costs for all reachable fluents from the given state");
+        "Optimistic relaxed-plan costs for all reachable fluents from the given state");
 
-  m.def("get_relaxed_expected_cost",
+  m.def("get_relaxed_optimistic_cost",
         [](const State &input_state, const Fluent &fluent, const std::vector<Action> &all_actions) {
-          return get_relaxed_expected_cost(input_state, fluent, all_actions);
+          return get_relaxed_optimistic_cost(input_state, fluent, all_actions);
         },
         py::arg("input_state"), py::arg("fluent"), py::arg("all_actions"),
-        "Get relaxed expected cost for a single fluent from the given state");
+        "Optimistic relaxed-plan cost for a single fluent from the given state");
 
   m.def("astar", &astar, py::arg("start_state"), py::arg("all_actions"),
         py::arg("goal"), py::arg("heuristic_fn") = nullptr,
