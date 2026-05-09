@@ -178,3 +178,43 @@ def test_basic_planning():
     # Verify we got a valid result (either an action name or "NONE")
     assert isinstance(action_name, str)
     assert len(action_name) > 0
+
+
+def test_mcts_planner_lambdas_propagate_to_heuristic():
+    """Lambdas set on MCTSPlanner construction should drive both the search
+    heuristic and the .heuristic() helper. We verify by configuring three
+    planners (h_add-only, h_max-only, h_ff-only) over the same problem and
+    asserting the helper returns the expected mixed values."""
+    objects_by_type = {
+        "robot": ["r1"],
+        "location": ["start", "target"],
+    }
+    move_op = construct_move_visited_operator(lambda *args: 5.0)
+    all_actions = move_op.instantiate(objects_by_type)
+
+    initial_state = State(
+        time=0,
+        fluents={F("at r1 start"), F("free r1"), F("visited start")},
+    )
+    # AND goal with two fluents whose optimistic costs differ:
+    #   visited target  -> needs move(start->target), optimistic_cost = 5
+    #   at r1 target    -> same move, optimistic_cost = 5
+    goal = F("visited target") & F("at r1 target")
+
+    mcts_add = MCTSPlanner(all_actions, lambda_add=1.0, lambda_max=0.0, lambda_ff=0.0)
+    mcts_max = MCTSPlanner(all_actions, lambda_add=0.0, lambda_max=1.0, lambda_ff=0.0)
+    mcts_ff  = MCTSPlanner(all_actions, lambda_add=0.0, lambda_max=0.0, lambda_ff=1.0)
+
+    h_add = mcts_add.heuristic(initial_state, goal)
+    h_max = mcts_max.heuristic(initial_state, goal)
+    h_ff  = mcts_ff.heuristic(initial_state, goal)
+
+    # Both fluents share the single move action: optimistic_cost = 5 each.
+    # h_add sums them (10), h_max maxes (5), h_ff sums unique action durations (5).
+    assert h_add == 10.0
+    assert h_max == 5.0
+    assert h_ff == 5.0
+
+    # Read-back of stored weights via the C++ binding.
+    assert mcts_max._cpp_planner.lambda_max == 1.0
+    assert mcts_ff._cpp_planner.lambda_ff == 1.0

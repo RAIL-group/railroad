@@ -236,29 +236,38 @@ inline void compute_optimistic_costs(FFForwardResult& result) {
 }
 
 // Result of the optimistic backward extraction.
+// All three values are infinite when any goal fluent is unreachable.
 struct FFBackwardResult {
-  double cost;                          // sum of optimistic_cost over goal_fluents
+  double h_add;                         // sum of optimistic_cost over goal_fluents
+  double h_max;                         // max of optimistic_cost over goal_fluents
+  double h_ff;                          // sum of action_duration over unique actions on relaxed plan
   std::unordered_set<Fluent> on_path;   // every fluent visited while walking back
 };
 
-// Walk back from `goal_fluents` via cheapest_achiever, summing the optimistic
-// cost of each goal fluent and recording every fluent on the relaxed plan.
-// Returns +inf cost if any goal fluent is unreachable.
+// Walk back from `goal_fluents` via cheapest_achiever, computing three
+// relaxed-plan estimates in a single BFS:
+//   h_add: Σ optimistic_cost[gf] over goal fluents (classic additive)
+//   h_max: max optimistic_cost[gf] over goal fluents
+//   h_ff:  Σ action_duration[a] over unique actions visited via cheapest_achiever
+// `on_path` is the set of fluents the BFS visited (used by caller for
+// probabilistic-delta retries). Returns +inf for all three values if any goal
+// fluent is unreachable.
 inline FFBackwardResult ff_backward_optimistic(
     const FFForwardResult &forward,
     const std::unordered_set<Fluent> &goal_fluents) {
 
-  if (goal_fluents.empty()) {
-    return {0.0, {}};
-  }
+  FFBackwardResult result{0.0, 0.0, 0.0, {}};
+  if (goal_fluents.empty()) return result;
 
   for (const auto& gf : goal_fluents) {
     if (!forward.known_fluents.count(gf)) {
-      return {std::numeric_limits<double>::infinity(), {}};
+      double inf = std::numeric_limits<double>::infinity();
+      return {inf, inf, inf, {}};
     }
   }
 
-  std::unordered_set<Fluent> on_path;
+  std::unordered_set<Fluent>& on_path = result.on_path;
+  std::unordered_set<const Action*> actions_on_path;
   std::unordered_set<Fluent> frontier = goal_fluents;
   while (!frontier.empty()) {
     std::unordered_set<Fluent> next_frontier;
@@ -268,6 +277,7 @@ inline FFBackwardResult ff_backward_optimistic(
 
       auto it = forward.cheapest_achiever.find(f);
       if (it != forward.cheapest_achiever.end()) {
+        actions_on_path.insert(it->second);
         for (const auto& prec : it->second->pos_preconditions()) {
           next_frontier.insert(prec);
         }
@@ -276,16 +286,21 @@ inline FFBackwardResult ff_backward_optimistic(
     frontier = std::move(next_frontier);
   }
 
-  double total = 0.0;
   for (const auto& gf : goal_fluents) {
     if (forward.initial_fluents.count(gf)) continue;
     auto it = forward.optimistic_cost.find(gf);
-    if (it != forward.optimistic_cost.end()) {
-      total += it->second;
+    if (it == forward.optimistic_cost.end()) continue;
+    result.h_add += it->second;
+    result.h_max = std::max(result.h_max, it->second);
+  }
+  for (const Action* a : actions_on_path) {
+    auto it = forward.action_duration.find(a);
+    if (it != forward.action_duration.end()) {
+      result.h_ff += it->second;
     }
   }
 
-  return {total, std::move(on_path)};
+  return result;
 }
 
 // Get usable actions via forward relaxed reachability.
@@ -422,18 +437,30 @@ inline const std::vector<std::unordered_set<Fluent>>& extract_or_branches(const 
 
 // Main FF heuristic.
 //
+// The relaxed-plan extraction produces three component values:
+//   h_add: Σ optimistic_cost over goal fluents (classic additive)
+//   h_max: max optimistic_cost over goal fluents
+//   h_ff:  Σ action_duration over unique actions on the relaxed plan
+// These are mixed via the lambda_* weights (free-form, not normalized).
+// The probabilistic-retry delta is added once per branch *after* mixing.
+// Defaults are an even split between h_add and h_ff (0.5, 0.0, 0.5).
+//
 // Layout:
 //   1. Relaxed transition for fluents (union over outcomes).
 //   2. Non-relaxed transition just to read out the time of the next robot
 //      completion — gives a tighter dtime lower bound than the relaxed step.
 //   3. Forward reachability + optimistic costs.
-//   4. For each DNF branch of the goal: optimistic backward cost, then add
-//      probabilistic-delta retries for any fluents on the relaxed plan that
-//      have probabilistic achievers. Take the minimum across branches.
+//   4. For each DNF branch of the goal: backward extraction of all three
+//      component values, mix with lambdas, add probabilistic-delta retries
+//      for fluents on the relaxed plan that have probabilistic achievers.
+//      Take the minimum across branches.
 inline double ff_heuristic(const State &input_state,
                            const GoalBase *goal,
                            const std::vector<Action> &all_actions,
-                           FFMemory *ff_memory = nullptr) {
+                           FFMemory *ff_memory = nullptr,
+                           double lambda_add = 0.5,
+                           double lambda_max = 0.0,
+                           double lambda_ff  = 0.5) {
   if (!goal) return 0.0;
 
   GoalType type = goal->get_type();
@@ -456,7 +483,10 @@ inline double ff_heuristic(const State &input_state,
     dtime = nonrelaxed_result[0].first.time() - t0;
   }
 
-  // Memoization key: relaxed-state fluents at time 0.
+  // Memoization key: relaxed-state fluents at time 0. The cached value is the
+  // already-mixed branch minimum, so reusing the same FFMemory across calls
+  // with different lambdas would be incorrect; planners create the cache per
+  // run and pass fixed lambdas, so this is safe in practice.
   relaxed.set_time(0);
   if (ff_memory && ff_memory->count(relaxed.hash())) {
     return dtime + ff_memory->at(relaxed.hash());
@@ -476,7 +506,7 @@ inline double ff_heuristic(const State &input_state,
   double min_cost = std::numeric_limits<double>::infinity();
   for (const auto& branch : branches) {
     auto opt = ff_backward_optimistic(forward, branch);
-    if (opt.cost == std::numeric_limits<double>::infinity()) continue;
+    if (opt.h_add == std::numeric_limits<double>::infinity()) continue;  // unreachable branch
 
     double delta_total = 0.0;
     for (const auto& f : opt.on_path) {
@@ -484,7 +514,10 @@ inline double ff_heuristic(const State &input_state,
         delta_total += get_or_compute_delta(forward, f);
       }
     }
-    min_cost = std::min(min_cost, opt.cost + delta_total);
+    double mixed = lambda_add * opt.h_add
+                 + lambda_max * opt.h_max
+                 + lambda_ff  * opt.h_ff;
+    min_cost = std::min(min_cost, mixed + delta_total);
   }
 
   if (ff_memory) {

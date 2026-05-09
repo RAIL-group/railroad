@@ -53,14 +53,33 @@ class MCTSPlanner:
         action_name = mcts(state, goal, max_iterations=1000, c=1.414)
     """
 
-    def __init__(self, actions: List[Action]):
+    def __init__(
+        self,
+        actions: List[Action],
+        lambda_add: SupportsFloat = 0.5,
+        lambda_max: SupportsFloat = 0.0,
+        lambda_ff: SupportsFloat = 0.5,
+    ):
         """Initialize MCTSPlanner with automatic preprocessing.
 
         Args:
             actions: List of Action objects to use for planning
+            lambda_add: weight on the additive (h_add) heuristic component
+            lambda_max: weight on the max (h_max) heuristic component
+            lambda_ff: weight on the relaxed-plan-cost (h_ff) heuristic component
+
+        Defaults are an even split between h_add and h_ff (0.5, 0.0, 0.5).
+        Weights are free-form (not normalized); the heuristic used during MCTS
+        search is `lambda_add * h_add + lambda_max * h_max + lambda_ff * h_ff`
+        plus the probabilistic-retry delta.
         """
         # Store original actions for later re-conversion if needed
         self._original_actions = actions
+
+        # Heuristic mixing weights
+        self._lambda_add = float(lambda_add)
+        self._lambda_max = float(lambda_max)
+        self._lambda_ff = float(lambda_ff)
 
         # Extract negative preconditions from actions (base mapping)
         self._base_negative_fluents: Set[Fluent] = extract_negative_preconditions(actions)
@@ -73,7 +92,12 @@ class MCTSPlanner:
         # Convert actions with base mapping and create initial C++ planner
         self._current_mapping = self._base_mapping
         self._converted_actions = self._convert_actions(actions, self._current_mapping)
-        self._cpp_planner = _MCTSPlannerCpp(self._converted_actions)
+        self._cpp_planner = _MCTSPlannerCpp(
+            self._converted_actions,
+            lambda_add=self._lambda_add,
+            lambda_max=self._lambda_max,
+            lambda_ff=self._lambda_ff,
+        )
 
     def _convert_actions(
         self, actions: List[Action], mapping: Dict[Fluent, Fluent]
@@ -121,7 +145,12 @@ class MCTSPlanner:
             )
 
             # Create new C++ planner with re-converted actions
-            self._cpp_planner = _MCTSPlannerCpp(self._converted_actions)
+            self._cpp_planner = _MCTSPlannerCpp(
+                self._converted_actions,
+                lambda_add=self._lambda_add,
+                lambda_max=self._lambda_max,
+                lambda_ff=self._lambda_ff,
+            )
 
     def __call__(
         self,
@@ -207,7 +236,10 @@ class MCTSPlanner:
         )
 
         return _ff_heuristic_cpp(
-            converted_state, converted_goal, self._converted_actions
+            converted_state, converted_goal, self._converted_actions,
+            lambda_add=self._lambda_add,
+            lambda_max=self._lambda_max,
+            lambda_ff=self._lambda_ff,
         )
 
 
