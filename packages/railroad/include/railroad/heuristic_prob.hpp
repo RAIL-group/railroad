@@ -5,15 +5,16 @@
 // This header is included by ff_heuristic.hpp *after* FFForwardResult and
 // Achiever are defined; it must not include ff_heuristic.hpp itself.
 //
-// The optimistic cost computed in ff_heuristic.hpp assumes each chosen
-// achiever succeeds on the first try. For probabilistic achievers (p < 1)
-// that ignores the expected retry overhead. The delta added here is:
+// The optimistic base cost in ff_heuristic.hpp assumes the cheapest single
+// achiever attempt succeeds first try. When probabilistic achievers are
+// involved, that under-counts the expected time. The delta added here is:
 //
-//   delta(f) = E[time to first success across all probabilistic achievers
-//                of f, executed in some order] - min single-attempt cost
+//   delta(f) = E[time to first success across all achievers of f, executed
+//                in some order] - min single-attempt cost across achievers
 //
-// In other words, delta(f) is the extra expected time spent retrying when
-// no deterministic achiever for f is available.
+// All achievers participate — deterministic ones (p == 1) act as a
+// guaranteed fallback in the ordering, so a cheap-but-flaky probabilistic
+// attempt followed by a slower deterministic one is naturally modeled.
 
 #include <algorithm>
 #include <limits>
@@ -22,9 +23,9 @@
 namespace railroad {
 
 // Lazily compute (and cache) the probabilistic delta for fluent f.
-// Returns 0 for initial fluents and for fluents with no probabilistic
-// achievers. The cache lives on the (mutable) FFForwardResult so the
-// same forward result can be reused across goal branches.
+// Returns 0 for initial fluents and for fluents with no achievers. The
+// cache lives on the (mutable) FFForwardResult so the same forward
+// result can be reused across goal branches.
 inline double get_or_compute_delta(const FFForwardResult& forward, const Fluent& f) {
   const double TOLERANCE = 1e-9;
 
@@ -34,22 +35,26 @@ inline double get_or_compute_delta(const FFForwardResult& forward, const Fluent&
   }
 
   if (forward.initial_fluents.count(f)) {
+    forward.probabilistic_delta[f] = 0.0;
     return 0.0;
   }
 
   auto achievers_it = forward.achievers_by_fluent.find(f);
   if (achievers_it == forward.achievers_by_fluent.end()) {
+    forward.probabilistic_delta[f] = 0.0;
     return 0.0;
   }
 
-  // Keep only strictly probabilistic achievers (0 < p < 1).
-  std::vector<Achiever> prob_achievers;
+  // Keep every achiever with non-zero success probability. Deterministic
+  // achievers (p == 1) are retained so they can act as a guaranteed fallback
+  // when a cheaper probabilistic attempt may fail.
+  std::vector<Achiever> achievers;
   for (const auto& a : achievers_it->second) {
-    if (a.probability > TOLERANCE && a.probability < 1.0 - TOLERANCE) {
-      prob_achievers.push_back(a);
+    if (a.probability > TOLERANCE) {
+      achievers.push_back(a);
     }
   }
-  if (prob_achievers.empty()) {
+  if (achievers.empty()) {
     forward.probabilistic_delta[f] = 0.0;
     return 0.0;
   }
@@ -75,22 +80,23 @@ inline double get_or_compute_delta(const FFForwardResult& forward, const Fluent&
   // problem-dependent; these three cover the common cases.
   double best_E = std::numeric_limits<double>::infinity();
 
-  std::sort(prob_achievers.begin(), prob_achievers.end(),
+  std::sort(achievers.begin(), achievers.end(),
       [](const Achiever& a, const Achiever& b) { return a.efficiency() > b.efficiency(); });
-  best_E = std::min(best_E, expected_time_to_success(prob_achievers));
+  best_E = std::min(best_E, expected_time_to_success(achievers));
 
-  std::sort(prob_achievers.begin(), prob_achievers.end(),
+  std::sort(achievers.begin(), achievers.end(),
       [](const Achiever& a, const Achiever& b) { return a.probability > b.probability; });
-  best_E = std::min(best_E, expected_time_to_success(prob_achievers));
+  best_E = std::min(best_E, expected_time_to_success(achievers));
 
-  std::sort(prob_achievers.begin(), prob_achievers.end(),
+  std::sort(achievers.begin(), achievers.end(),
       [](const Achiever& a, const Achiever& b) { return a.attempt_cost() < b.attempt_cost(); });
-  best_E = std::min(best_E, expected_time_to_success(prob_achievers));
+  best_E = std::min(best_E, expected_time_to_success(achievers));
 
-  // Cheapest single-attempt cost across the probabilistic achievers; this is
-  // what the optimistic estimate already accounts for, so subtract it out.
+  // Optimistic base cost: the cheapest single attempt across all achievers,
+  // assuming it succeeds. Subtracting it leaves only the expected retry /
+  // fallback overhead introduced by probabilistic outcomes.
   double min_attempt = std::numeric_limits<double>::infinity();
-  for (const auto& a : prob_achievers) {
+  for (const auto& a : achievers) {
     min_attempt = std::min(min_attempt, a.attempt_cost());
   }
 
