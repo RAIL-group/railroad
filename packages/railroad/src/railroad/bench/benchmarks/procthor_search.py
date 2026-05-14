@@ -182,8 +182,8 @@ bench_procthor_search.add_cases([
         list(range(8610, 8620)),  # scene_seed
         [400],               # mcts.c
         [1, 2, 3],           # num_robots
-        [2, 4, 10],          # mcts.h_mult
-        [4000, 10000],       # mcts.iterations
+        [4],                 # mcts.h_mult
+        [4000],              # mcts.iterations
         [2],                 # num_objects
     )
 ])
