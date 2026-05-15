@@ -1,6 +1,6 @@
 #define RAILROAD_USE_PYBIND
 #include "railroad/core.hpp"
-#include "railroad/ff_heuristic.hpp"
+#include "railroad/heuristic.hpp"
 #include "railroad/goal.hpp"
 #include "railroad/planner.hpp"
 #include "railroad/state.hpp"

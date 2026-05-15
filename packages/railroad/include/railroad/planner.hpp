@@ -6,7 +6,7 @@
 #endif
 
 #include "railroad/core.hpp"
-#include "railroad/ff_heuristic.hpp"
+#include "railroad/heuristic.hpp"
 #include "railroad/goal.hpp"
 #include "railroad/state.hpp"
 #include "railroad/constants.hpp"

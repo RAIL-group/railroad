@@ -12,8 +12,16 @@
 
 namespace railroad {
 
+// ============================================================================
+//  Aliases
+// ============================================================================
+
 using HeuristicFn = std::function<double(const State &)>;
 using FFMemory = std::unordered_map<std::size_t, double>;
+
+// ============================================================================
+//  Core data types
+// ============================================================================
 
 // An action that can produce a target fluent in the delete-relaxation.
 //   wait_cost: earliest time all positive preconditions are achievable
@@ -70,6 +78,10 @@ struct FFForwardResult {
   // across goal branches that share the same forward result.
   mutable std::unordered_map<Fluent, double> probabilistic_delta;
 };
+
+// ============================================================================
+//  Forward relaxed reachability
+// ============================================================================
 
 // Forward relaxed reachability: discover every fluent reachable from
 // `initial_fluents` (the post-relaxed-transition state) and record every
@@ -151,6 +163,10 @@ inline FFForwardResult ff_forward_phase(
 
   return result;
 }
+
+// ============================================================================
+//  Optimistic cost fixed point
+// ============================================================================
 
 // Fixed-point iteration that fills in result.optimistic_cost.
 //
@@ -235,6 +251,23 @@ inline void compute_optimistic_costs(FFForwardResult& result) {
   }
 }
 
+}  // namespace railroad
+
+// ============================================================================
+//  Probabilistic extension
+// ============================================================================
+// Pulled in here rather than at the top of the file: it depends on `Achiever`
+// and `FFForwardResult` defined above, and it provides augment_at_with_found(),
+// used by the backward extraction immediately below. It must not include this
+// header back.
+#include "railroad/heuristic_prob.hpp"
+
+namespace railroad {
+
+// ============================================================================
+//  Backward relaxed-plan extraction
+// ============================================================================
+
 // Result of the optimistic backward extraction.
 // All three values are infinite when any goal fluent is unreachable.
 struct FFBackwardResult {
@@ -243,27 +276,6 @@ struct FFBackwardResult {
   double h_ff;                          // sum of action_duration over unique actions on relaxed plan
   std::unordered_set<Fluent> on_path;   // every fluent visited while walking back
 };
-
-// "at implies found": for each positive `at <entity> <loc>` fluent in
-// `fluents`, also require `found <entity>` -- but only when `found <entity>`
-// is reachable in the relaxed planning graph. An entity whose `found` fluent
-// is unreachable (e.g. a robot, which no operator can `found`) is silently
-// skipped, so this never introduces an unreachable subgoal.
-inline void augment_at_with_found(std::unordered_set<Fluent>& fluents,
-                                  const FFForwardResult& forward) {
-  std::vector<Fluent> to_add;
-  for (const auto& f : fluents) {
-    if (f.is_negated()) continue;
-    if (f.name() != "at") continue;
-    const auto& args = f.args();
-    if (args.empty()) continue;
-    Fluent found("found", {args[0]});
-    if (forward.known_fluents.count(found)) {
-      to_add.push_back(std::move(found));
-    }
-  }
-  for (auto& f : to_add) fluents.insert(std::move(f));
-}
 
 // Walk back from `goal_fluents` via cheapest_achiever, computing three
 // relaxed-plan estimates in a single BFS:
@@ -334,6 +346,10 @@ inline FFBackwardResult ff_backward_optimistic(
 
   return result;
 }
+
+// ============================================================================
+//  Python / introspection query helpers
+// ============================================================================
 
 // Get usable actions via forward relaxed reachability.
 inline const std::vector<Action> get_usable_actions(const State &input_state,
@@ -448,16 +464,16 @@ inline double get_relaxed_optimistic_cost(
 
 } // namespace railroad
 
-// Probabilistic delta extension. Included here (not at top) because it
-// depends on FFForwardResult and Achiever defined above.
-#include "railroad/heuristic_prob.hpp"
-
 // Goal definitions are pulled in after the heuristic primitives so that
 // `ff_heuristic` can dispatch on goal type. (Goal API has a circular
 // dependency on Fluent/State that we side-step by including it last.)
 #include "railroad/goal.hpp"
 
 namespace railroad {
+
+// ============================================================================
+//  Goal API + main entry point
+// ============================================================================
 
 // Pull the cached DNF branches off a goal. Distribution of OR over AND
 // (e.g., AND(A, OR(B,C)) -> [{A,B}, {A,C}]) is handled by the goal itself.
@@ -541,12 +557,7 @@ inline double ff_heuristic(const State &input_state,
     auto opt = ff_backward_optimistic(forward, branch, at_implies_found);
     if (opt.h_add == std::numeric_limits<double>::infinity()) continue;  // unreachable branch
 
-    double delta_total = 0.0;
-    for (const auto& f : opt.on_path) {
-      if (forward.has_probabilistic_achiever.count(f)) {
-        delta_total += get_or_compute_delta(forward, f);
-      }
-    }
+    double delta_total = relaxed_plan_prob_delta(forward, opt.on_path);
     double mixed = lambda_add * opt.h_add
                  + lambda_max * opt.h_max
                  + lambda_ff  * opt.h_ff;
