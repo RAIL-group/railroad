@@ -117,8 +117,10 @@ def main(
         initial_fluents.add(F("free", robot))
     initial_fluents.add(F("revealed", "start"))
 
-    # Goal: find supplies and bring them to the start location
-    goal = F("found supplies") & F("at supplies start")
+    # Goal: bring supplies to the start location. `found supplies` is left
+    # implicit -- the FF heuristic's "at implies found" augmentation infers
+    # that the supplies' location can only be established by finding them.
+    goal = F("at supplies start")
 
     # Objects by type
     objects_by_type = {

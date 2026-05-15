@@ -610,16 +610,21 @@ PYBIND11_MODULE(_bindings, m) {
   m.def("ff_heuristic",
         [](const State &state, const GoalPtr &goal,
            const std::vector<Action> &all_actions,
-           double lambda_add, double lambda_max, double lambda_ff) {
+           double lambda_add, double lambda_max, double lambda_ff,
+           bool at_implies_found) {
           return ff_heuristic(state, goal.get(), all_actions, nullptr,
-                              lambda_add, lambda_max, lambda_ff);
+                              lambda_add, lambda_max, lambda_ff,
+                              at_implies_found);
         },
         "Compute FF heuristic value for a state with a Goal object. "
         "lambda_add/lambda_max/lambda_ff mix the additive (h_add), max (h_max), "
         "and relaxed-plan-cost (h_ff) components; defaults are an even split "
-        "between h_add and h_ff (0.5, 0.0, 0.5).",
+        "between h_add and h_ff (0.5, 0.0, 0.5). When at_implies_found is true "
+        "(default), any required `at <entity> <loc>` also requires a reachable "
+        "`found <entity>`, so search goals need not be spelled out.",
         py::arg("state"), py::arg("goal"), py::arg("all_actions"),
         py::arg("lambda_add") = 0.5,
         py::arg("lambda_max") = 0.0,
-        py::arg("lambda_ff")  = 0.5);
+        py::arg("lambda_ff")  = 0.5,
+        py::arg("at_implies_found") = true);
 }
