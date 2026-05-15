@@ -101,8 +101,11 @@ def bench_procthor_search(case: BenchmarkCase):
     )
     env.set_target_objects(target_objects)
 
+    # `found {obj}` is intentionally left implicit: the FF heuristic's
+    # "at implies found" augmentation infers that an object's location can
+    # only be established by finding it.
     goal = reduce(and_, [
-        F(f"at {obj} {target_location}") & F(f"found {obj}")
+        F(f"at {obj} {target_location}")
         for obj in target_objects
     ])
 
