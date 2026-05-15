@@ -849,3 +849,138 @@ def test_ff_heuristic_lambda_mixing_is_linear():
         lambda_add=0.25, lambda_max=0.25, lambda_ff=0.5,
     )
     assert mixed == pytest.approx(0.25 * h_add + 0.25 * h_max + 0.5 * h_ff)
+
+
+# ============================================================================
+# "at implies found" heuristic augmentation
+# ============================================================================
+#
+# These fixtures are deliberately single-robot / single-object with exactly
+# one searchable location (start is pre-`revealed`, so search may only happen
+# at `shelf`) and find_prob=1.0. This gives a single deterministic relaxed
+# plan, so heuristic values are stable and comparable across calls.
+
+
+def _make_search_fixture(find_prob: float = 1.0, with_pick: bool = False):
+    """Move(5) + search(10) [+ pick(2)] over a single searchable location.
+
+    Returns (initial_state, all_actions). Object `box` location is unknown;
+    the only way to establish `at box shelf` / `found box` is to move to
+    `shelf` and search there (`start` is revealed, so unsearchable).
+    """
+    move_op = construct_move_operator(move_cost=5.0)
+    search_op = construct_search_operator(find_prob=find_prob, search_cost=10.0)
+    objects_by_type = {
+        "robot": ["r1"],
+        "location": ["start", "shelf"],
+        "object": ["box"],
+    }
+    all_actions = []
+    all_actions.extend(move_op.instantiate(objects_by_type))
+    all_actions.extend(search_op.instantiate(objects_by_type))
+    if with_pick:
+        all_actions.extend(
+            construct_pick_operator(pick_cost=2.0).instantiate(objects_by_type)
+        )
+    initial_state = State(
+        time=0,
+        fluents={F("at r1 start"), F("free r1"), F("revealed start")},
+    )
+    return initial_state, all_actions
+
+
+def test_at_implies_found_makes_implicit_goal_equivalent_to_explicit():
+    """`at box shelf` alone == `at box shelf` & `found box` (explicit).
+
+    The augmentation auto-adds the reachable `found box` subgoal, so a goal
+    that leaves `found` implicit produces exactly the same heuristic as one
+    that spells it out -- and matches the explicit goal with the flag off.
+    """
+    state, actions = _make_search_fixture()
+    implicit = F("at box shelf")
+    explicit = F("at box shelf") & F("found box")
+
+    h_implicit = ff_heuristic(state, implicit, actions)
+    h_explicit = ff_heuristic(state, explicit, actions)
+    h_explicit_off = ff_heuristic(
+        state, explicit, actions, at_implies_found=False
+    )
+
+    assert h_implicit == h_explicit
+    assert h_implicit == h_explicit_off
+    assert 0.0 < h_implicit < float("inf")
+
+
+def test_at_implies_found_excludes_robots():
+    """`found <robot>` is unreachable, so `at r1 target` is unaffected."""
+    move_op = construct_move_operator(move_cost=5.0)
+    objects_by_type = {"robot": ["r1"], "location": ["start", "target"]}
+    actions = move_op.instantiate(objects_by_type)
+    state = State(time=0, fluents={F("at r1 start"), F("free r1")})
+    goal = F("at r1 target")
+
+    h_on = ff_heuristic(state, goal, actions, at_implies_found=True)
+    h_off = ff_heuristic(state, goal, actions, at_implies_found=False)
+
+    assert h_on == h_off
+    assert h_on != float("inf")
+
+
+def test_at_implies_found_no_op_when_object_unsearchable():
+    """If nothing produces `found box`, the augmentation is a no-op."""
+    move_op = construct_move_operator(move_cost=5.0)
+    pick_op = construct_pick_operator(pick_cost=2.0)
+    place_op = construct_place_operator(place_cost=3.0)
+    objects_by_type = {
+        "robot": ["r1"],
+        "location": ["start", "dropoff"],
+        "object": ["box"],
+    }
+    actions = []
+    actions.extend(move_op.instantiate(objects_by_type))
+    actions.extend(pick_op.instantiate(objects_by_type))
+    actions.extend(place_op.instantiate(objects_by_type))
+    state = State(
+        time=0,
+        fluents={F("at r1 start"), F("free r1"), F("at box start")},
+    )
+    goal = F("at box dropoff")
+
+    h_on = ff_heuristic(state, goal, actions, at_implies_found=True)
+    h_off = ff_heuristic(state, goal, actions, at_implies_found=False)
+
+    assert h_on == h_off
+    assert 0.0 < h_on < float("inf")
+
+
+def test_at_implies_found_flag_actually_gates_behavior():
+    """With the object only implied, the flag changes the heuristic.
+
+    `at box shelf` requires a search to establish, but `found box` is not in
+    the goal set. With the flag on it is added (search cost now also charged
+    via h_add), so the heuristic is strictly larger than with it off.
+    """
+    state, actions = _make_search_fixture()
+    goal = F("at box shelf")
+
+    h_on = ff_heuristic(state, goal, actions, at_implies_found=True)
+    h_off = ff_heuristic(state, goal, actions, at_implies_found=False)
+
+    assert h_off < h_on < float("inf")
+
+
+def test_at_implies_found_applies_to_action_preconditions():
+    """Object reached only via a precondition still implies `found`.
+
+    Goal `holding r1 box` never mentions `at`, but `pick` requires
+    `at box <loc>`. With probabilistic search, augmenting that precondition
+    pulls `found box` onto the relaxed plan, adding its probabilistic-retry
+    delta -- so the flag-on heuristic is strictly larger.
+    """
+    state, actions = _make_search_fixture(find_prob=0.5, with_pick=True)
+    goal = F("holding r1 box")
+
+    h_on = ff_heuristic(state, goal, actions, at_implies_found=True)
+    h_off = ff_heuristic(state, goal, actions, at_implies_found=False)
+
+    assert h_off < h_on < float("inf")

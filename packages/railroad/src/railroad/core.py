@@ -17,6 +17,7 @@ def ff_heuristic(
     lambda_add: float = 0.5,
     lambda_max: float = 0.0,
     lambda_ff: float = 0.5,
+    at_implies_found: bool = True,
 ) -> float:
     """Compute FF heuristic value for a state (probabilistic version).
 
@@ -29,6 +30,9 @@ def ff_heuristic(
         lambda_add: weight on the additive component (sum optimistic_cost over goal fluents)
         lambda_max: weight on the max component (max optimistic_cost over goal fluents)
         lambda_ff: weight on the relaxed-plan-cost component (sum action_duration over unique actions)
+        at_implies_found: when True (default), any required ``at <entity> <loc>``
+            also requires a reachable ``found <entity>``; lets search goals be
+            left implicit. Unreachable ``found`` (e.g. for robots) is skipped.
 
     Returns:
         Heuristic value (estimated cost to reach goal). Defaults are an even
@@ -40,6 +44,7 @@ def ff_heuristic(
     return _ff_heuristic_cpp(
         state, goal, all_actions,
         lambda_add=lambda_add, lambda_max=lambda_max, lambda_ff=lambda_ff,
+        at_implies_found=at_implies_found,
     )
 
 

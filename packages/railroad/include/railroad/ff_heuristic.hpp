@@ -244,6 +244,27 @@ struct FFBackwardResult {
   std::unordered_set<Fluent> on_path;   // every fluent visited while walking back
 };
 
+// "at implies found": for each positive `at <entity> <loc>` fluent in
+// `fluents`, also require `found <entity>` -- but only when `found <entity>`
+// is reachable in the relaxed planning graph. An entity whose `found` fluent
+// is unreachable (e.g. a robot, which no operator can `found`) is silently
+// skipped, so this never introduces an unreachable subgoal.
+inline void augment_at_with_found(std::unordered_set<Fluent>& fluents,
+                                  const FFForwardResult& forward) {
+  std::vector<Fluent> to_add;
+  for (const auto& f : fluents) {
+    if (f.is_negated()) continue;
+    if (f.name() != "at") continue;
+    const auto& args = f.args();
+    if (args.empty()) continue;
+    Fluent found("found", {args[0]});
+    if (forward.known_fluents.count(found)) {
+      to_add.push_back(std::move(found));
+    }
+  }
+  for (auto& f : to_add) fluents.insert(std::move(f));
+}
+
 // Walk back from `goal_fluents` via cheapest_achiever, computing three
 // relaxed-plan estimates in a single BFS:
 //   h_add: Σ optimistic_cost[gf] over goal fluents (classic additive)
@@ -254,12 +275,19 @@ struct FFBackwardResult {
 // fluent is unreachable.
 inline FFBackwardResult ff_backward_optimistic(
     const FFForwardResult &forward,
-    const std::unordered_set<Fluent> &goal_fluents) {
+    const std::unordered_set<Fluent> &goal_fluents,
+    bool at_implies_found = true) {
 
   FFBackwardResult result{0.0, 0.0, 0.0, {}};
   if (goal_fluents.empty()) return result;
 
-  for (const auto& gf : goal_fluents) {
+  // Local, possibly-augmented copy of the goal branch. augment_at_with_found
+  // only adds reachable fluents, so the unreachability check below stays
+  // correct and h_add/h_max/h_ff all see the added `found` subgoal(s).
+  std::unordered_set<Fluent> goals = goal_fluents;
+  if (at_implies_found) augment_at_with_found(goals, forward);
+
+  for (const auto& gf : goals) {
     if (!forward.known_fluents.count(gf)) {
       double inf = std::numeric_limits<double>::infinity();
       return {inf, inf, inf, {}};
@@ -268,7 +296,7 @@ inline FFBackwardResult ff_backward_optimistic(
 
   std::unordered_set<Fluent>& on_path = result.on_path;
   std::unordered_set<const Action*> actions_on_path;
-  std::unordered_set<Fluent> frontier = goal_fluents;
+  std::unordered_set<Fluent> frontier = goals;
   while (!frontier.empty()) {
     std::unordered_set<Fluent> next_frontier;
     for (const auto& f : frontier) {
@@ -283,10 +311,14 @@ inline FFBackwardResult ff_backward_optimistic(
         }
       }
     }
+    // Objects that only appear via an action precondition still imply a
+    // `found` subgoal, so the search cost is reflected in h_ff / the
+    // probabilistic delta even when `found` is not an explicit goal.
+    if (at_implies_found) augment_at_with_found(next_frontier, forward);
     frontier = std::move(next_frontier);
   }
 
-  for (const auto& gf : goal_fluents) {
+  for (const auto& gf : goals) {
     if (forward.initial_fluents.count(gf)) continue;
     auto it = forward.optimistic_cost.find(gf);
     if (it == forward.optimistic_cost.end()) continue;
@@ -460,7 +492,8 @@ inline double ff_heuristic(const State &input_state,
                            FFMemory *ff_memory = nullptr,
                            double lambda_add = 0.5,
                            double lambda_max = 0.0,
-                           double lambda_ff  = 0.5) {
+                           double lambda_ff  = 0.5,
+                           bool at_implies_found = true) {
   if (!goal) return 0.0;
 
   GoalType type = goal->get_type();
@@ -505,7 +538,7 @@ inline double ff_heuristic(const State &input_state,
 
   double min_cost = std::numeric_limits<double>::infinity();
   for (const auto& branch : branches) {
-    auto opt = ff_backward_optimistic(forward, branch);
+    auto opt = ff_backward_optimistic(forward, branch, at_implies_found);
     if (opt.h_add == std::numeric_limits<double>::infinity()) continue;  // unreachable branch
 
     double delta_total = 0.0;
