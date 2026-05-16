@@ -1,22 +1,11 @@
 #pragma once
 
-// Probabilistic helpers + goal augmentation for the FF heuristic.
+// Probabilistic retry delta for the FF heuristic. Self-contained: depends
+// only on the shared data types (Achiever / FFForwardResult).
 //
-// This header is a fragment included by heuristic.hpp *after* FFForwardResult
-// and Achiever are defined, and *before* FFBackwardResult /
-// ff_backward_optimistic — because it also provides augment_at_with_found(),
-// which the backward extraction calls. It must not include heuristic.hpp back,
-// and it relies on the includer for Fluent / State / Action.
-//
-// Contents:
-//   - augment_at_with_found(): the "at implies found" goal augmentation
-//     (needs only FFForwardResult + Fluent, not Achiever).
-//   - get_or_compute_delta(): the probabilistic retry delta for one fluent.
-//   - relaxed_plan_prob_delta(): sum of that delta over a relaxed plan.
-//
-// The optimistic base cost in heuristic.hpp assumes the cheapest single
-// achiever attempt succeeds first try. When probabilistic achievers are
-// involved, that under-counts the expected time. The delta added here is:
+// The optimistic base cost (heuristic_forward.hpp) assumes the cheapest
+// single achiever attempt succeeds first try. When probabilistic achievers
+// are involved, that under-counts the expected time. The delta added here is:
 //
 //   delta(f) = E[time to first success across all achievers of f, executed
 //                in some order] - min single-attempt cost across achievers
@@ -24,6 +13,13 @@
 // All achievers participate — deterministic ones (p == 1) act as a
 // guaranteed fallback in the ordering, so a cheap-but-flaky probabilistic
 // attempt followed by a slower deterministic one is naturally modeled.
+//
+// Contents:
+//   - selected_optimistic_achiever(): the achiever the relaxed plan picked.
+//   - get_or_compute_delta(): the probabilistic retry delta for one fluent.
+//   - relaxed_plan_prob_delta(): sum of that delta over a relaxed plan.
+
+#include "railroad/heuristic_types.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -32,31 +28,6 @@
 #include <vector>
 
 namespace railroad {
-
-// ============================================================================
-//  Goal augmentation ("at implies found")
-// ============================================================================
-
-// "at implies found": for each positive `at <entity> <loc>` fluent in
-// `fluents`, also require `found <entity>` -- but only when `found <entity>`
-// is reachable in the relaxed planning graph. An entity whose `found` fluent
-// is unreachable (e.g. a robot, which no operator can `found`) is silently
-// skipped, so this never introduces an unreachable subgoal.
-inline void augment_at_with_found(std::unordered_set<Fluent>& fluents,
-                                  const FFForwardResult& forward) {
-  std::vector<Fluent> to_add;
-  for (const auto& f : fluents) {
-    if (f.is_negated()) continue;
-    if (f.name() != "at") continue;
-    const auto& args = f.args();
-    if (args.empty()) continue;
-    Fluent found("found", {args[0]});
-    if (forward.known_fluents.count(found)) {
-      to_add.push_back(std::move(found));
-    }
-  }
-  for (auto& f : to_add) fluents.insert(std::move(f));
-}
 
 // ============================================================================
 //  Probabilistic retry delta
