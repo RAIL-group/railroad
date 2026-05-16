@@ -385,6 +385,13 @@ PYBIND11_MODULE(_bindings, m) {
         py::arg("input_state"), py::arg("fluent"), py::arg("all_actions"),
         "Get relaxed expected cost for a single fluent from the given state");
 
+  m.def("get_achievers_for_fluent",
+        [](const State &input_state, const Fluent &fluent, const std::vector<Action> &all_actions) {
+          return get_achievers_for_fluent(input_state, fluent, all_actions);
+        },
+        py::arg("input_state"), py::arg("fluent"), py::arg("all_actions"),
+        "Get achievers for a single fluent from the given state");
+
   m.def("astar", &astar, py::arg("start_state"), py::arg("all_actions"),
         py::arg("goal"), py::arg("heuristic_fn") = nullptr,
         "Run A* search and return the action path");
