@@ -8,15 +8,21 @@ Probabilistic PDDL planning system.
 - **core.hpp**: Core types (Fluent, Action, GroundedEffect, etc.)
 - **state.hpp**: State representation and transition function
 - **goal.hpp**: Goal representation (LiteralGoal, AndGoal, OrGoal, etc.)
-- **heuristic.hpp**: FF heuristic — forward relaxed reachability, the
-  optimistic-cost fixed point, backward relaxed-plan extraction, the public
-  introspection helpers, and the top-level `ff_heuristic` orchestrator
-- **heuristic_prob.hpp**: probabilistic helpers + goal augmentation layered
-  on top of the optimistic core — the `augment_at_with_found` ("at implies
-  found") augmentation, the per-fluent probabilistic retry delta
-  (`get_or_compute_delta`), and its relaxed-plan sum
-  (`relaxed_plan_prob_delta`). Included by `heuristic.hpp` as a fragment
-  (see "File split" below).
+- **heuristic_types.hpp**: shared FF data types — `Achiever`,
+  `FFForwardResult`, `FFCacheKey`/`FFMemory`, and the `HeuristicFn` alias.
+  Root of the heuristic header DAG.
+- **heuristic_forward.hpp**: forward relaxed reachability
+  (`ff_forward_phase`) and the optimistic-cost fixed point
+  (`compute_optimistic_costs`).
+- **heuristic_prob.hpp**: the per-fluent probabilistic retry delta
+  (`get_or_compute_delta`) and its relaxed-plan sum
+  (`relaxed_plan_prob_delta`).
+- **heuristic_backward.hpp**: the `augment_at_with_found` ("at implies
+  found") goal augmentation and the backward relaxed-plan extraction
+  (`ff_backward_optimistic`).
+- **heuristic.hpp**: umbrella header — includes the four above plus
+  `goal.hpp`, and provides the public introspection helpers and the
+  top-level `ff_heuristic` orchestrator (see "Header split" below).
 - **planner.hpp**: MCTS planner implementation
 - **constants.hpp**: Global constants
 
@@ -68,9 +74,11 @@ h = ff_heuristic(state, goal, all_actions,
    (charging a single attempt).
 
 5. **Per goal branch** (DNF branches from `extract_or_branches`),
-   `ff_backward_optimistic` walks back from the goal via `cheapest_achiever`
-   and produces three component estimates plus the set of fluents on the
-   relaxed plan:
+   `ff_backward_optimistic` walks back from the goal via
+   `best_optimistic_achiever` (the achiever the optimistic-cost fixed point
+   selected, so `h_ff` follows the same relaxed plan as `h_add`/`h_max`) and
+   produces three component estimates plus the set of fluents on the relaxed
+   plan:
    - `h_add`: Σ `optimistic_cost` over goal fluents (classic additive)
    - `h_max`: max `optimistic_cost` over goal fluents
    - `h_ff`:  Σ `action_duration` over unique actions on the relaxed plan
@@ -191,13 +199,26 @@ weights are configurable on the planner wrapper
   transition (first robot to finish), a tighter and more admissible lower
   bound than relaxed time in multi-robot scenarios.
 
-### File split (`heuristic.hpp` / `heuristic_prob.hpp`)
+### Header split
 
-`heuristic_prob.hpp` is a **fragment**, not a standalone header. It is
-`#include`d by `heuristic.hpp` mid-file — *after* `Achiever` /
-`FFForwardResult` are defined (it needs them) and *before*
-`FFBackwardResult` / `ff_backward_optimistic` (which call
-`augment_at_with_found`). It must not include `heuristic.hpp` back and
-relies on the includer for `Fluent` / `State` / `Action`. The split keeps
-the optimistic delete-relaxation core in `heuristic.hpp` and the
-probabilistic corrections + goal augmentation in `heuristic_prob.hpp`.
+The heuristic is split across five self-contained headers along its
+dependency DAG. Each has `#pragma once` and its own `#include`s (no
+mid-file includes, one `namespace railroad` block per file):
+
+```
+heuristic_types.hpp      (core.hpp, state.hpp)
+  └─ heuristic_forward.hpp
+  └─ heuristic_prob.hpp
+  └─ heuristic_backward.hpp
+       └─ heuristic.hpp   (also includes the others + goal.hpp)
+```
+
+`heuristic_types.hpp` is the root: it owns `Achiever` / `FFForwardResult`,
+so the forward, prob, and backward headers depend only on it (and on each
+other not at all). `heuristic.hpp` is a thin umbrella that includes the
+four plus `goal.hpp` — `goal.hpp` is only needed by `ff_heuristic` /
+`extract_or_branches`, so including it at the top of the umbrella keeps it
+out of the lower-level headers and removes the old circular-dependency
+workaround. `augment_at_with_found` lives in `heuristic_backward.hpp` next
+to its sole caller, `ff_backward_optimistic`. Consumers
+(`planner.hpp`, `_bindings.cpp`) include only `heuristic.hpp`.
