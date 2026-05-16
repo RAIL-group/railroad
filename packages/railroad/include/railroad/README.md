@@ -122,6 +122,7 @@ struct FFForwardResult {
   std::unordered_set<Fluent> initial_fluents;   // t=0 seed fluents
   std::unordered_map<Fluent, std::vector<Achiever>> achievers_by_fluent;
   std::unordered_map<Fluent, const Action*> cheapest_achiever;   // smallest exec
+  std::unordered_map<Fluent, const Action*> best_optimistic_achiever;
   std::unordered_map<const Action*, double> action_duration;     // max succ. time
   std::unordered_map<Fluent, double> optimistic_cost;            // 0 for initial
   std::unordered_set<Fluent> has_probabilistic_achiever;         // p < 1.0
@@ -144,12 +145,12 @@ struct FFBackwardResult {
 
 ## Memoization
 
-The heuristic uses `FFMemory` (a hash map from state hash to cost). The key
-is the hash of the relaxed state with `time = 0`, so states that differ
-only in time but share the same fluents reuse cached values. The cached
-value is the **already-mixed branch minimum**, so a given `FFMemory` is
-only valid for a fixed set of `lambda_*` weights — planners create the
-cache per run and pass fixed lambdas, which is safe in practice.
+The heuristic uses `FFMemory` (a hash map from a composite key to cost). The
+key includes the relaxed-state hash with `time = 0`, the goal hash, action-set
+hash, `lambda_*` weights, and `at_implies_found` policy. States that differ
+only in time but share the same relaxed fluents still reuse cached values, but
+planner instances can safely be reused across different goals or filtered
+action sets.
 
 ## Usage in MCTS
 
@@ -176,10 +177,11 @@ weights are configurable on the planner wrapper
 
 - **Optimistic core + delta separation.** `D(f)` (optimistic) and the
   probabilistic delta are computed separately. The delta is computed
-  *lazily* per fluent, only for fluents on the extraction path, and cached
-  on the (mutable) `FFForwardResult` so OR branches that share a
-  prerequisite compute it once. `has_probabilistic_achiever` lets the sum
-  skip purely-deterministic fluents without iterating their achievers.
+  *lazily* per fluent, only for fluents on the extraction path whose selected
+  optimistic achiever is probabilistic, and cached on the (mutable)
+  `FFForwardResult` so OR branches that share a prerequisite compute it once.
+  `has_probabilistic_achiever` lets the sum skip purely-deterministic fluents
+  without iterating their achievers.
 
 - **Relaxed-plan extraction.** Summing `optimistic_cost(goal)` directly
   would double-count shared preconditions; the BFS extraction identifies
