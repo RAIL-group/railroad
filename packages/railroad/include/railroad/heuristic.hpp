@@ -17,7 +17,41 @@ namespace railroad {
 // ============================================================================
 
 using HeuristicFn = std::function<double(const State &)>;
-using FFMemory = std::unordered_map<std::size_t, double>;
+
+struct FFCacheKey {
+  std::size_t relaxed_state_hash;
+  std::size_t goal_hash;
+  std::size_t actions_hash;
+  std::size_t lambda_add_hash;
+  std::size_t lambda_max_hash;
+  std::size_t lambda_ff_hash;
+  bool at_implies_found;
+
+  bool operator==(const FFCacheKey& other) const {
+    return relaxed_state_hash == other.relaxed_state_hash &&
+           goal_hash == other.goal_hash &&
+           actions_hash == other.actions_hash &&
+           lambda_add_hash == other.lambda_add_hash &&
+           lambda_max_hash == other.lambda_max_hash &&
+           lambda_ff_hash == other.lambda_ff_hash &&
+           at_implies_found == other.at_implies_found;
+  }
+};
+
+struct FFCacheKeyHash {
+  std::size_t operator()(const FFCacheKey& key) const {
+    std::size_t h = key.relaxed_state_hash;
+    hash_combine(h, key.goal_hash);
+    hash_combine(h, key.actions_hash);
+    hash_combine(h, key.lambda_add_hash);
+    hash_combine(h, key.lambda_max_hash);
+    hash_combine(h, key.lambda_ff_hash);
+    hash_combine(h, std::hash<bool>{}(key.at_implies_found));
+    return h;
+  }
+};
+
+using FFMemory = std::unordered_map<FFCacheKey, double, FFCacheKeyHash>;
 
 // ============================================================================
 //  Core data types
@@ -58,9 +92,14 @@ struct FFForwardResult {
   // For each fluent: every action that could produce it (wait/exec/prob).
   std::unordered_map<Fluent, std::vector<Achiever>> achievers_by_fluent;
 
-  // For each fluent: the achiever with the smallest exec_cost. Used by the
-  // backward extraction to walk the relaxed plan one step at a time.
+  // For each fluent: the achiever with the smallest exec_cost. Filled during
+  // forward reachability and kept as a fallback/debug aid.
   std::unordered_map<Fluent, const Action*> cheapest_achiever;
+
+  // For each fluent: the achiever selected by compute_optimistic_costs().
+  // Backward extraction uses this so h_ff follows the same relaxed plan as
+  // h_add/h_max.
+  std::unordered_map<Fluent, const Action*> best_optimistic_achiever;
 
   // Per-action exec_cost, taken as the max successor time.
   std::unordered_map<const Action*, double> action_duration;
@@ -94,70 +133,95 @@ inline FFForwardResult ff_forward_phase(
   FFForwardResult result;
   result.initial_fluents = initial_fluents;
   result.known_fluents = initial_fluents;
+  result.achievers_by_fluent.reserve(initial_fluents.size() + all_actions.size());
+  result.cheapest_achiever.reserve(all_actions.size());
+  result.best_optimistic_achiever.reserve(all_actions.size());
+  result.action_duration.reserve(all_actions.size());
+  result.optimistic_cost.reserve(initial_fluents.size() + all_actions.size());
+  result.has_probabilistic_achiever.reserve(all_actions.size());
 
   for (const auto& f : initial_fluents) {
     result.optimistic_cost[f] = 0.0;
   }
 
-  std::unordered_set<Fluent> newly_added = result.known_fluents;
-  std::unordered_set<const Action *> visited_actions;
-  std::unordered_set<const Action *> all_actions_set;
+  std::unordered_map<Fluent, std::vector<const Action*>> actions_by_missing_precondition;
+  actions_by_missing_precondition.reserve(all_actions.size());
+  std::unordered_map<const Action*, std::size_t> unmet_preconditions;
+  unmet_preconditions.reserve(all_actions.size());
+  std::vector<const Action*> ready_actions;
+  ready_actions.reserve(all_actions.size());
+
   for (const auto &a : all_actions) {
-    all_actions_set.insert(&a);
-  }
-
-  while (!newly_added.empty()) {
-    std::unordered_set<Fluent> next_new;
-    State state_all_known(0.0, result.known_fluents);
-
-    for (const Action *a : all_actions_set) {
-      if (visited_actions.count(a)) continue;
-      if (!state_all_known.satisfies_precondition(*a, true)) continue;
-
-      const auto& succs = a->get_relaxed_successors();
-      visited_actions.insert(a);
-      if (succs.empty()) continue;
-
-      // Aggregate per-fluent achievement probability across this action's
-      // branches: branches are mutually exclusive, so the chance the action
-      // produces fluent f is the sum of branch probabilities that contain f.
-      // If that sum is ~1, the action is an effectively deterministic
-      // achiever of f even when every individual branch has prob < 1.
-      std::unordered_map<Fluent, double> fluent_prob;
-      double duration = 0;
-      for (const auto &[succ_state, succ_prob] : succs) {
-        duration = std::max(succ_state.time(), duration);
-        if (succ_prob <= 0.0) continue;
-        for (const auto &f : succ_state.fluents()) {
-          fluent_prob[f] += succ_prob;
-        }
-      }
-      result.action_duration[a] = duration;
-
-      for (const auto& [f, total_prob] : fluent_prob) {
-        // Clamp to 1.0 to absorb floating-point overshoot when branches sum to 1.
-        double prob = std::min(total_prob, 1.0);
-
-        // wait_cost set to 0 here; compute_optimistic_costs fills it in.
-        result.achievers_by_fluent[f].push_back({a, 0.0, duration, prob});
-
-        if (prob < 1.0 - 1e-9) {
-          result.has_probabilistic_achiever.insert(f);
-        }
-
-        if (!result.known_fluents.count(f)) {
-          result.known_fluents.insert(f);
-          next_new.insert(f);
-          result.cheapest_achiever[f] = a;
-        } else if (duration < result.action_duration[result.cheapest_achiever[f]]) {
-          result.cheapest_achiever[f] = a;
-        }
+    std::size_t unmet = 0;
+    for (const auto& prec : a.pos_preconditions()) {
+      if (!result.known_fluents.count(prec)) {
+        ++unmet;
+        actions_by_missing_precondition[prec].push_back(&a);
       }
     }
+    if (unmet == 0) {
+      ready_actions.push_back(&a);
+    } else {
+      unmet_preconditions[&a] = unmet;
+    }
+  }
 
-    newly_added = std::move(next_new);
-    for (const Action *a : visited_actions) {
-      all_actions_set.erase(a);
+  for (std::size_t ready_index = 0; ready_index < ready_actions.size(); ++ready_index) {
+    const Action *a = ready_actions[ready_index];
+    const auto& succs = a->get_relaxed_successors();
+    if (succs.empty()) continue;
+
+    // Aggregate per-fluent achievement probability across this action's
+    // branches: branches are mutually exclusive, so the chance the action
+    // produces fluent f is the sum of branch probabilities that contain f.
+    // If that sum is ~1, the action is an effectively deterministic
+    // achiever of f even when every individual branch has prob < 1.
+    std::unordered_map<Fluent, double> fluent_prob;
+    fluent_prob.reserve(succs.size() * 4);
+    double duration = 0;
+    for (const auto &[succ_state, succ_prob] : succs) {
+      duration = std::max(succ_state.time(), duration);
+      if (succ_prob <= 0.0) continue;
+      for (const auto &f : succ_state.fluents()) {
+        fluent_prob[f] += succ_prob;
+      }
+    }
+    result.action_duration[a] = duration;
+
+    for (const auto& [f, total_prob] : fluent_prob) {
+      // Clamp to 1.0 to absorb floating-point overshoot when branches sum to 1.
+      double prob = std::min(total_prob, 1.0);
+
+      // wait_cost set to 0 here; compute_optimistic_costs fills it in.
+      result.achievers_by_fluent[f].push_back({a, 0.0, duration, prob});
+
+      if (prob < 1.0 - 1e-9) {
+        result.has_probabilistic_achiever.insert(f);
+      }
+
+      auto insert_result = result.known_fluents.insert(f);
+      if (!result.initial_fluents.count(f)) {
+        auto cheapest_it = result.cheapest_achiever.find(f);
+        if (cheapest_it == result.cheapest_achiever.end() ||
+            duration < result.action_duration[cheapest_it->second]) {
+          result.cheapest_achiever[f] = a;
+        }
+      }
+
+      if (insert_result.second) {
+        auto waiting_it = actions_by_missing_precondition.find(f);
+        if (waiting_it == actions_by_missing_precondition.end()) continue;
+
+        for (const Action* waiting_action : waiting_it->second) {
+          auto unmet_it = unmet_preconditions.find(waiting_action);
+          if (unmet_it == unmet_preconditions.end()) continue;
+          --unmet_it->second;
+          if (unmet_it->second == 0) {
+            ready_actions.push_back(waiting_action);
+            unmet_preconditions.erase(unmet_it);
+          }
+        }
+      }
     }
   }
 
@@ -213,22 +277,32 @@ inline void compute_optimistic_costs(FFForwardResult& result) {
       double cost_det = std::numeric_limits<double>::infinity();
       double cost_prob = std::numeric_limits<double>::infinity();
       double best_prob = 0.0;
+      const Action* best_det_action = nullptr;
+      const Action* best_prob_action = nullptr;
 
       for (const auto& achiever : achievers) {
         double cost = achiever.attempt_cost();
         if (achiever.probability >= 1.0 - TOLERANCE) {
-          cost_det = std::min(cost_det, cost);
+          if (cost < cost_det) {
+            cost_det = cost;
+            best_det_action = achiever.action;
+          }
         } else if (achiever.probability > TOLERANCE) {
           if (achiever.probability > best_prob ||
               (achiever.probability >= best_prob - TOLERANCE && cost < cost_prob)) {
             cost_prob = cost;
             best_prob = achiever.probability;
+            best_prob_action = achiever.action;
           }
         }
       }
 
       bool use_det = cost_det < std::numeric_limits<double>::infinity();
       double new_cost = use_det ? cost_det : cost_prob;
+      const Action* selected_action = use_det ? best_det_action : best_prob_action;
+      if (selected_action) {
+        result.best_optimistic_achiever[f] = selected_action;
+      }
 
       if (use_det) {
         // First time this fluent has a deterministic achiever — adopt it
@@ -277,11 +351,11 @@ struct FFBackwardResult {
   std::unordered_set<Fluent> on_path;   // every fluent visited while walking back
 };
 
-// Walk back from `goal_fluents` via cheapest_achiever, computing three
+// Walk back from `goal_fluents` via best_optimistic_achiever, computing three
 // relaxed-plan estimates in a single BFS:
 //   h_add: Σ optimistic_cost[gf] over goal fluents (classic additive)
 //   h_max: max optimistic_cost[gf] over goal fluents
-//   h_ff:  Σ action_duration[a] over unique actions visited via cheapest_achiever
+//   h_ff:  Σ action_duration[a] over unique actions visited via best_optimistic_achiever
 // `on_path` is the set of fluents the BFS visited (used by caller for
 // probabilistic-delta retries). Returns +inf for all three values if any goal
 // fluent is unreachable.
@@ -315,8 +389,8 @@ inline FFBackwardResult ff_backward_optimistic(
       if (on_path.count(f) || forward.initial_fluents.count(f)) continue;
       on_path.insert(f);
 
-      auto it = forward.cheapest_achiever.find(f);
-      if (it != forward.cheapest_achiever.end()) {
+      auto it = forward.best_optimistic_achiever.find(f);
+      if (it != forward.best_optimistic_achiever.end()) {
         actions_on_path.insert(it->second);
         for (const auto& prec : it->second->pos_preconditions()) {
           next_frontier.insert(prec);
@@ -483,6 +557,41 @@ inline const std::vector<std::unordered_set<Fluent>>& extract_or_branches(const 
   return goal->get_dnf_branches();
 }
 
+inline std::size_t hash_action_set_for_heuristic(const std::vector<Action>& all_actions) {
+  std::size_t h = all_actions.size();
+  std::size_t xor_hash = 0;
+  std::size_t sum_hash = 0;
+
+  for (const auto& action : all_actions) {
+    std::size_t action_hash = action.hash();
+    hash_combine(action_hash, 0);
+    xor_hash ^= action_hash;
+    sum_hash += action_hash;
+  }
+
+  hash_combine(h, xor_hash);
+  hash_combine(h, sum_hash);
+  return h;
+}
+
+inline FFCacheKey make_ff_cache_key(const State& relaxed,
+                                    const GoalBase* goal,
+                                    const std::vector<Action>& all_actions,
+                                    double lambda_add,
+                                    double lambda_max,
+                                    double lambda_ff,
+                                    bool at_implies_found) {
+  return {
+      relaxed.hash(),
+      goal ? goal->hash() : 0,
+      hash_action_set_for_heuristic(all_actions),
+      std::hash<double>{}(lambda_add),
+      std::hash<double>{}(lambda_max),
+      std::hash<double>{}(lambda_ff),
+      at_implies_found,
+  };
+}
+
 // Main FF heuristic.
 //
 // The relaxed-plan extraction produces three component values:
@@ -533,12 +642,18 @@ inline double ff_heuristic(const State &input_state,
   }
 
   // Memoization key: relaxed-state fluents at time 0. The cached value is the
-  // already-mixed branch minimum, so reusing the same FFMemory across calls
-  // with different lambdas would be incorrect; planners create the cache per
-  // run and pass fixed lambdas, so this is safe in practice.
+  // already-mixed branch minimum. Include the goal, action universe, lambda
+  // weights, and augmentation policy because all of them affect that value.
   relaxed.set_time(0);
-  if (ff_memory && ff_memory->count(relaxed.hash())) {
-    return dtime + ff_memory->at(relaxed.hash());
+  std::optional<FFCacheKey> cache_key;
+  if (ff_memory) {
+    cache_key = make_ff_cache_key(relaxed, goal, all_actions,
+                                  lambda_add, lambda_max, lambda_ff,
+                                  at_implies_found);
+    auto cached_it = ff_memory->find(*cache_key);
+    if (cached_it != ff_memory->end()) {
+      return dtime + cached_it->second;
+    }
   }
 
   std::unordered_set<Fluent> initial_fluents(
@@ -564,8 +679,8 @@ inline double ff_heuristic(const State &input_state,
     min_cost = std::min(min_cost, mixed + delta_total);
   }
 
-  if (ff_memory) {
-    (*ff_memory)[relaxed.hash()] = min_cost;
+  if (ff_memory && cache_key) {
+    (*ff_memory)[*cache_key] = min_cost;
   }
 
   return dtime + min_cost;

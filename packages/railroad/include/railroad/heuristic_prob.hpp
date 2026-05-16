@@ -62,6 +62,22 @@ inline void augment_at_with_found(std::unordered_set<Fluent>& fluents,
 //  Probabilistic retry delta
 // ============================================================================
 
+inline const Achiever* selected_optimistic_achiever(const FFForwardResult& forward,
+                                                   const Fluent& f) {
+  auto selected_it = forward.best_optimistic_achiever.find(f);
+  if (selected_it == forward.best_optimistic_achiever.end()) return nullptr;
+
+  auto achievers_it = forward.achievers_by_fluent.find(f);
+  if (achievers_it == forward.achievers_by_fluent.end()) return nullptr;
+
+  for (const auto& achiever : achievers_it->second) {
+    if (achiever.action == selected_it->second) {
+      return &achiever;
+    }
+  }
+  return nullptr;
+}
+
 // Lazily compute (and cache) the probabilistic delta for fluent f.
 // Returns 0 for initial fluents and for fluents with no achievers. The
 // cache lives on the (mutable) FFForwardResult so the same forward
@@ -99,6 +115,12 @@ inline double get_or_compute_delta(const FFForwardResult& forward, const Fluent&
     return 0.0;
   }
 
+  const Achiever* selected = selected_optimistic_achiever(forward, f);
+  double selected_attempt = std::numeric_limits<double>::infinity();
+  if (selected) {
+    selected_attempt = selected->attempt_cost();
+  }
+
   // Expected time to first success when achievers are tried in the given order.
   // Each attempt contributes its cost weighted by the probability that all
   // earlier attempts failed; `time` accumulates so we don't double-count waits.
@@ -132,15 +154,16 @@ inline double get_or_compute_delta(const FFForwardResult& forward, const Fluent&
       [](const Achiever& a, const Achiever& b) { return a.attempt_cost() < b.attempt_cost(); });
   best_E = std::min(best_E, expected_time_to_success(achievers));
 
-  // Optimistic base cost: the cheapest single attempt across all achievers,
-  // assuming it succeeds. Subtracting it leaves only the expected retry /
-  // fallback overhead introduced by probabilistic outcomes.
-  double min_attempt = std::numeric_limits<double>::infinity();
-  for (const auto& a : achievers) {
-    min_attempt = std::min(min_attempt, a.attempt_cost());
+  // Optimistic base cost: the selected optimistic achiever attempt, assuming
+  // it succeeds. Subtracting the same selected cost keeps this correction
+  // aligned with the relaxed plan used by h_add/h_max/h_ff.
+  if (selected_attempt == std::numeric_limits<double>::infinity()) {
+    for (const auto& a : achievers) {
+      selected_attempt = std::min(selected_attempt, a.attempt_cost());
+    }
   }
 
-  double delta = best_E - min_attempt;
+  double delta = best_E - selected_attempt;
   if (delta < TOLERANCE) delta = 0.0;
 
   forward.probabilistic_delta[f] = delta;
@@ -155,7 +178,10 @@ inline double relaxed_plan_prob_delta(
     const std::unordered_set<Fluent>& on_path) {
   double delta_total = 0.0;
   for (const auto& f : on_path) {
-    if (forward.has_probabilistic_achiever.count(f)) {
+    if (!forward.has_probabilistic_achiever.count(f)) continue;
+
+    const Achiever* selected = selected_optimistic_achiever(forward, f);
+    if (selected && selected->probability < 1.0 - 1e-9) {
       delta_total += get_or_compute_delta(forward, f);
     }
   }
