@@ -55,18 +55,22 @@ app = create_app()
 
 
 def _reloader_scope() -> dict:
-    """Restrict the Werkzeug reloader to the ``dashboard/`` directory.
+    """Restrict the Werkzeug reloader to the ``bench/`` package.
 
     By default the reloader watches every imported module, so editing any file
-    in the (large) ``railroad`` package restarts the dashboard. We exclude the
-    rest of the package and watch only ``dashboard/`` so unrelated edits don't
-    trigger a restart.
+    in the (large) ``railroad`` package restarts the dashboard. Issue #18 only
+    wanted to stop edits to the heavy *planning core* from restarting it — but
+    everything that feeds the dashboard (``analysis.py``, ``compact.py``,
+    ``runner.py``, the ``dashboard/`` UI) lives in ``bench/``. Watching the
+    whole ``bench/`` package means a code change that affects cached output
+    (e.g. a ``CACHE_FORMAT_VERSION`` bump) auto-restarts the server and the
+    cache rebuilds itself, instead of a stale process serving old data.
 
     Werkzeug's ``exclude_patterns`` are fnmatch globs where ``*`` also matches
-    ``/``, so a single pattern can't say "railroad but not dashboard". Instead
-    we exclude each non-dashboard sibling path explicitly (their absolute paths
-    are never prefixes of the dashboard path, so dashboard files survive the
-    filter), and pass the dashboard ``.py`` files via ``extra_files``.
+    ``/``, so a single pattern can't say "railroad but not bench". Instead we
+    exclude each non-``bench`` sibling path explicitly (their absolute paths
+    are never prefixes of the bench path, so bench files survive the filter),
+    and pass the ``bench/`` ``.py`` files via ``extra_files``.
     """
     dashboard_dir = Path(__file__).resolve().parent
     bench_dir = dashboard_dir.parent
@@ -76,11 +80,8 @@ def _reloader_scope() -> dict:
     for child in railroad_pkg.iterdir():
         if child != bench_dir:
             exclude.append(f"{child}*")
-    for child in bench_dir.iterdir():
-        if child != dashboard_dir:
-            exclude.append(f"{child}*")
 
-    extra_files = [str(p) for p in dashboard_dir.rglob("*.py")]
+    extra_files = [str(p) for p in bench_dir.rglob("*.py")]
     return {"exclude_patterns": exclude, "extra_files": extra_files}
 
 
