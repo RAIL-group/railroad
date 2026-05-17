@@ -8,7 +8,10 @@ and per-section headers.
 import pandas as pd
 
 from railroad.bench.analysis import BenchmarkAnalyzer
-from railroad.bench.dashboard.helpers import build_benchmark_stat_spans
+from railroad.bench.dashboard.helpers import (
+    build_benchmark_stat_spans,
+    build_benchmark_stats_line,
+)
 
 
 def _spans_text(spans: list) -> str:
@@ -47,24 +50,38 @@ def test_summary_missing_metric_columns_yield_none():
     assert a["avg_plan_cost"] is None and a["avg_wall_time"] is None
 
 
-def test_stat_spans_render_cost_and_time_when_present():
+def test_stat_spans_carry_only_status_and_rate():
+    """Cost/time moved to their own line, not the status span."""
     text = _spans_text(build_benchmark_stat_spans({
         "success_rate": 0.5,
         "total_runs": 2,
         "avg_plan_cost": 15.0,
         "avg_wall_time": 2.0,
     }))
-    assert "cost 15.00" in text
-    assert "t 2.00s" in text
     assert "50.0%" in text
+    assert "cost" not in text and "time" not in text
 
 
-def test_stat_spans_omit_missing_stats():
-    text = _spans_text(build_benchmark_stat_spans({
-        "success_rate": 1.0,
-        "total_runs": 1,
-        "avg_plan_cost": None,
-        "avg_wall_time": None,
-    }))
-    assert "cost" not in text
-    assert "t " not in text
+def test_stats_line_renders_cost_and_time_on_its_own_line():
+    line = build_benchmark_stats_line({
+        "avg_plan_cost": 15.0,
+        "avg_wall_time": 2.0,
+    }, indent="  ")
+    assert line is not None
+    text = _spans_text(line.children)
+    assert line.children[0] == "  "
+    assert "Avg. Cost:" in text and "15.00" in text
+    assert "Avg. Time:" in text and "2.00s" in text
+    assert "|" in text
+
+
+def test_stats_line_single_stat_has_no_separator():
+    line = build_benchmark_stats_line({"avg_plan_cost": 7.0, "avg_wall_time": None})
+    text = _spans_text(line.children)
+    assert "Avg. Cost:" in text and "7.00" in text
+    assert "Avg. Time:" not in text and "|" not in text
+
+
+def test_stats_line_none_when_no_stats():
+    assert build_benchmark_stats_line({"avg_plan_cost": None, "avg_wall_time": None}) is None
+    assert build_benchmark_stats_line({}) is None
