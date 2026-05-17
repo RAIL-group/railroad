@@ -51,7 +51,7 @@ def main():
         F("blocking-access cabinet"),
     }
 
-    goal = F("at Mug table")
+    goal = F("at Mug table") # & F("at Cereal cabinet")
 
     objects_by_type = {
         "robot": {"robot1"},
@@ -105,7 +105,7 @@ def main():
         reranked_actions = llm_reranker.rerank(env.state, goal, all_actions, all_actions)
         
         # If we have a real LLM ranking them, restrict MCTS branching by taking the top 15
-        if llm_reranker.model:
+        if llm_reranker.client:
             reduced_actions = reranked_actions[:15]
         else:
             reduced_actions = reranked_actions
@@ -135,7 +135,7 @@ def main():
         except Exception:
             pass
 
-        print(f"Step {iteration}: Selected '{action_name}' | MCTS time: {mcts_time:.3f}s | LLM context build time: {llm_time:.3f}s")
+        print(f"Step {iteration}: Selected '{action_name}' | MCTS time: {mcts_time:.3f}s | LLM query time: {llm_time:.3f}s")
 
         if action_name == "NONE":
             print("\n[FAILED] No more actions available.")
