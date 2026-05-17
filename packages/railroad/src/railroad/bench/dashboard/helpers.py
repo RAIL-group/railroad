@@ -118,13 +118,12 @@ def build_benchmark_stat_spans(bench_stats: dict) -> list:
             (optionally) avg_plan_cost and avg_wall_time.
 
     Returns:
-        List of Dash children: status symbols, run count, success rate, and
-        average plan cost / wall time when available.
+        List of Dash children: status symbols, run count, and success rate.
+        Average plan cost / wall time go on their own line via
+        :func:`build_benchmark_stats_line`.
     """
     success_rate = bench_stats.get("success_rate", 0.0)
     total_runs = bench_stats.get("total_runs", 0)
-    avg_cost = bench_stats.get("avg_plan_cost")
-    avg_wall = bench_stats.get("avg_wall_time")
 
     n_success = int(success_rate * total_runs)
     n_total = total_runs
@@ -138,16 +137,45 @@ def build_benchmark_stat_spans(bench_stats: dict) -> list:
         status_parts.append(html.Span(f"{SYMBOL_FAILURE}{n_failure}", className="status-failure"))
         status_parts.append("/")
 
-    spans: list = [
+    return [
         *status_parts,
         f"{n_total} ",
         html.Span(f"({success_rate:.1%})", className="text-dimmed"),
     ]
+
+
+def build_benchmark_stats_line(bench_stats: dict, indent: str = "      "):
+    """
+    Build the avg-cost / avg-wall-time line shown under a benchmark's name.
+
+    Rendered on its own indented line (like the benchmark description) rather
+    than crammed onto the status line. Returns ``None`` when neither stat is
+    available so callers can simply skip appending it.
+
+    Args:
+        bench_stats: Per-benchmark dict with (optionally) avg_plan_cost and
+            avg_wall_time.
+        indent: Leading whitespace to align the line with its section.
+    """
+    avg_cost = bench_stats.get("avg_plan_cost")
+    avg_wall = bench_stats.get("avg_wall_time")
+
+    segments: list[tuple[str, str]] = []
     if avg_cost is not None:
-        spans.append(html.Span(f"  cost {avg_cost:.2f}", className="text-dimmed"))
+        segments.append(("Avg. Cost: ", f"{avg_cost:.2f}"))
     if avg_wall is not None:
-        spans.append(html.Span(f"  t {avg_wall:.2f}s", className="text-dimmed"))
-    return spans
+        segments.append(("Avg. Time: ", f"{avg_wall:.2f}s"))
+    if not segments:
+        return None
+
+    children: list = [indent]
+    for i, (label, value) in enumerate(segments):
+        if i > 0:
+            children.append(" | ")
+        children.append(label)
+        children.append(html.Span(value, style={"color": CATPPUCCIN_SAPPHIRE}))
+
+    return html.Pre(children, className="pre-text text-base")
 
 
 def build_benchmark_summary_line(bench_name: str, bench_stats: dict, description: str = "") -> html.Pre:
@@ -255,6 +283,11 @@ def build_experiment_summary_block(exp_name: str, summary: dict, metadata: dict,
 
             # Benchmark line
             children.append(build_benchmark_summary_line(bench_name, bench_stats, description))
+
+            # Avg cost / time on its own line (like the description)
+            stats_line = build_benchmark_stats_line(bench_stats)
+            if stats_line is not None:
+                children.append(stats_line)
 
             # Description if available
             if description:

@@ -13,7 +13,11 @@ from .styles import (
     CATPPUCCIN_SAPPHIRE,
     TEXT_COLOR,
 )
-from .helpers import build_experiment_summary_block, build_benchmark_stat_spans
+from .helpers import (
+    build_experiment_summary_block,
+    build_benchmark_stat_spans,
+    build_benchmark_stats_line,
+)
 
 
 def create_log_modal() -> dbc.Modal:
@@ -155,6 +159,11 @@ def build_content_layout(
                     *build_benchmark_stat_spans(bench_stats),
                 ], className="pre-text text-base"))
 
+                # Avg cost / time on its own line (like the description)
+                stats_line = build_benchmark_stats_line(bench_stats)
+                if stats_line is not None:
+                    summary_children.append(stats_line)
+
                 # Description if available
                 if description:
                     summary_children.append(html.Pre(
@@ -189,6 +198,10 @@ def build_content_layout(
                 " ",
                 *build_benchmark_stat_spans(bench_stats),
             ], className="pre-text text-base"))
+
+            stats_line = build_benchmark_stats_line(bench_stats, indent="   ")
+            if stats_line is not None:
+                children.append(stats_line)
 
             if description:
                 children.append(html.Pre(
