@@ -108,7 +108,8 @@ class BenchmarkAnalyzer:
             - total_runs: Total number of runs
             - benchmarks: List of benchmark names
             - success_rate: Overall success rate
-            - success_by_benchmark: Dict of success rates per benchmark
+            - success_by_benchmark: Per-benchmark dict of success_rate,
+              total_runs, avg_plan_cost, avg_wall_time
             - timeout_rate: Overall timeout rate
 
         Raises:
@@ -136,15 +137,25 @@ class BenchmarkAnalyzer:
         if "metrics.success" in df.columns:
             summary["success_rate"] = float(df["metrics.success"].mean())
 
-        # Success rate by benchmark
+        # Per-benchmark stats: success rate, run count, and (when present)
+        # average plan cost and wall time. Computed here so they land in the
+        # cached summary (meta.json) and the landing page never recomputes them.
         if "params.benchmark_name" in df.columns and "metrics.success" in df.columns:
-            success_by_bench = df.groupby("params.benchmark_name")["metrics.success"].agg(
-                ["mean", "count"]
-            )
+            grouped = df.groupby("params.benchmark_name")
+            success_by_bench = grouped["metrics.success"].agg(["mean", "count"])
+            has_cost = "metrics.plan_cost" in df.columns
+            has_wall = "metrics.wall_time" in df.columns
+
+            def _avg(bench: object, column: str) -> float | None:
+                vals = grouped.get_group(bench)[column].dropna()
+                return float(vals.mean()) if len(vals) > 0 else None
+
             summary["success_by_benchmark"] = {
                 bench: {
                     "success_rate": float(row["mean"]),
                     "total_runs": int(row["count"]),
+                    "avg_plan_cost": _avg(bench, "metrics.plan_cost") if has_cost else None,
+                    "avg_wall_time": _avg(bench, "metrics.wall_time") if has_wall else None,
                 }
                 for bench, row in success_by_bench.iterrows()
             }

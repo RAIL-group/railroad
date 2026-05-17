@@ -40,7 +40,8 @@ CACHE_DIR_NAME = ".benchmark_cache"
 # Bump whenever the on-disk cache layout (parquet columns, meta/figures JSON
 # shape, figure serialization) changes in a way that makes old caches
 # unreadable. A mismatch purges and rebuilds the cache transparently.
-CACHE_FORMAT_VERSION = 1
+# v2: summary.success_by_benchmark gained avg_plan_cost / avg_wall_time.
+CACHE_FORMAT_VERSION = 2
 
 # Per-experiment stamp file, written into the experiment's artifact directory.
 # Its contents change whenever the experiment's data changes, so a cache keyed

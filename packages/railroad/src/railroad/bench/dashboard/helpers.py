@@ -105,28 +105,32 @@ def format_case_params(params: dict) -> str:
     return ", ".join(parts)
 
 
-def build_benchmark_summary_line(bench_name: str, bench_stats: dict, description: str = "") -> html.Pre:
+def build_benchmark_stat_spans(bench_stats: dict) -> list:
     """
-    Build a single benchmark summary line with status symbols.
+    Build the inline stat fragment shown after a benchmark's name.
+
+    Shared by the landing-page TOC, the per-experiment TOC, and each
+    per-benchmark section header so all three render identically and read
+    straight from the cached summary (no recompute).
 
     Args:
-        bench_name: Name of the benchmark
-        bench_stats: Dict with success_rate and total_runs
-        description: Optional description of the benchmark
+        bench_stats: Per-benchmark dict with success_rate, total_runs, and
+            (optionally) avg_plan_cost and avg_wall_time.
 
     Returns:
-        html.Pre element with formatted benchmark line
+        List of Dash children: status symbols, run count, success rate, and
+        average plan cost / wall time when available.
     """
     success_rate = bench_stats.get("success_rate", 0.0)
     total_runs = bench_stats.get("total_runs", 0)
+    avg_cost = bench_stats.get("avg_plan_cost")
+    avg_wall = bench_stats.get("avg_wall_time")
 
-    # Format success count with colored symbols
     n_success = int(success_rate * total_runs)
     n_total = total_runs
     n_failure = n_total - n_success
 
-    # Build status string with colored symbols
-    status_parts = []
+    status_parts: list = []
     if n_success > 0:
         status_parts.append(html.Span(f"{SYMBOL_SUCCESS}{n_success}", className="status-success"))
         status_parts.append("/")
@@ -134,12 +138,34 @@ def build_benchmark_summary_line(bench_name: str, bench_stats: dict, description
         status_parts.append(html.Span(f"{SYMBOL_FAILURE}{n_failure}", className="status-failure"))
         status_parts.append("/")
 
-    # Benchmark line
-    return html.Pre([
-        f"  {bench_name}: ",
+    spans: list = [
         *status_parts,
         f"{n_total} ",
         html.Span(f"({success_rate:.1%})", className="text-dimmed"),
+    ]
+    if avg_cost is not None:
+        spans.append(html.Span(f"  cost {avg_cost:.2f}", className="text-dimmed"))
+    if avg_wall is not None:
+        spans.append(html.Span(f"  t {avg_wall:.2f}s", className="text-dimmed"))
+    return spans
+
+
+def build_benchmark_summary_line(bench_name: str, bench_stats: dict, description: str = "") -> html.Pre:
+    """
+    Build a single benchmark summary line with status symbols.
+
+    Args:
+        bench_name: Name of the benchmark
+        bench_stats: Dict with success_rate, total_runs, avg_plan_cost,
+            avg_wall_time
+        description: Optional description of the benchmark
+
+    Returns:
+        html.Pre element with formatted benchmark line
+    """
+    return html.Pre([
+        f"  {bench_name}: ",
+        *build_benchmark_stat_spans(bench_stats),
     ], className="pre-text text-base")
 
 
