@@ -12,6 +12,8 @@ dependencies = [
     "matplotlib",
     "pyqt5",
     "roslibpy",
+    "google-genai",
+    "python-dotenv",
     # Testing and formatting (monorepo-level)
     "pytest-html",
     "pytest-xdist>=3.8.0",
