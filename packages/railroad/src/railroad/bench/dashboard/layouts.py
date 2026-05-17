@@ -12,10 +12,8 @@ from .styles import (
     CATPPUCCIN_BASE,
     CATPPUCCIN_SAPPHIRE,
     TEXT_COLOR,
-    SYMBOL_SUCCESS,
-    SYMBOL_FAILURE,
 )
-from .helpers import build_experiment_summary_block
+from .helpers import build_experiment_summary_block, build_benchmark_stat_spans
 
 
 def create_log_modal() -> dbc.Modal:
@@ -148,31 +146,13 @@ def build_content_layout(
             for bench_name in summary["benchmarks"]:
                 bench_stats = summary["success_by_benchmark"].get(bench_name, {})
                 description = benchmark_descriptions.get(bench_name, "")
-                success_rate = bench_stats.get("success_rate", 0.0)
-                total_runs = bench_stats.get("total_runs", 0)
-
-                # Format success count with colored symbols
-                n_success = int(success_rate * total_runs)
-                n_total = total_runs
-                n_failure = n_total - n_success
-
-                # Build status string with colored symbols
-                status_parts = []
-                if n_success > 0:
-                    status_parts.append(html.Span(f"{SYMBOL_SUCCESS}{n_success}", className="status-success"))
-                    status_parts.append("/")
-                if n_failure > 0:
-                    status_parts.append(html.Span(f"{SYMBOL_FAILURE}{n_failure}", className="status-failure"))
-                    status_parts.append("/")
 
                 # Benchmark line with clickable link
                 summary_children.append(html.Pre([
                     "    ",
                     html.A(bench_name, href=f"#benchmark-{bench_name}", className="link"),
                     " ",
-                    *status_parts,
-                    f"{n_total} ",
-                    html.Span(f"({success_rate:.1%})", className="text-dimmed"),
+                    *build_benchmark_stat_spans(bench_stats),
                 ], className="pre-text text-base"))
 
                 # Description if available
@@ -202,29 +182,12 @@ def build_content_layout(
             benchmark_descriptions = metadata.get("benchmark_descriptions", {})
             description = benchmark_descriptions.get(bench_name, "")
 
-            success_rate = bench_stats.get("success_rate", 0.0)
-            total_runs = bench_stats.get("total_runs", 0)
-            n_success = int(success_rate * total_runs)
-            n_total = total_runs
-            n_failure = n_total - n_success
-
-            # Build status string
-            status_parts = []
-            if n_success > 0:
-                status_parts.append(html.Span(f"{SYMBOL_SUCCESS}{n_success}", className="status-success"))
-                status_parts.append("/")
-            if n_failure > 0:
-                status_parts.append(html.Span(f"{SYMBOL_FAILURE}{n_failure}", className="status-failure"))
-                status_parts.append("/")
-
-            # Benchmark header with anchor
+            # Benchmark header with anchor (repeats the TOC stats per section)
             children.append(html.Div(id=f"benchmark-{bench_name}"))
             children.append(html.Pre([
                 html.Span(f"## {bench_name}", className="text-bold text-underline"),
                 " ",
-                *status_parts,
-                f"{n_total} ",
-                html.Span(f"({success_rate:.1%})", className="text-dimmed"),
+                *build_benchmark_stat_spans(bench_stats),
             ], className="pre-text text-base"))
 
             if description:

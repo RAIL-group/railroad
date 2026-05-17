@@ -82,8 +82,9 @@ def register_callbacks(app):
         try:
             # Route to experiment list view or detail view
             if pathname == "/" or pathname is None:
-                # Show experiment list (limited to 10 most recent)
-                experiments = load_all_experiments_with_summaries(limit=10)
+                # Show experiment list (most recent; cheap now that per-run
+                # summaries are read from the on-disk cache)
+                experiments = load_all_experiments_with_summaries(limit=100)
                 content = build_experiment_list_layout(experiments)
                 return content, {}
 

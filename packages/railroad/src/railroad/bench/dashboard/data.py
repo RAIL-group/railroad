@@ -70,14 +70,14 @@ def load_experiment_summary(
 
 
 def load_all_experiments_with_summaries(
-    limit: int = 10,
+    limit: int = 100,
     use_cache: bool = True,
 ) -> list[dict]:
     """
     Load recent experiments with their summary statistics.
 
     Args:
-        limit: Maximum number of experiments to load (default: 10)
+        limit: Maximum number of experiments to load (default: 100)
         use_cache: If True, consult the compaction cache for each experiment
 
     Returns:
