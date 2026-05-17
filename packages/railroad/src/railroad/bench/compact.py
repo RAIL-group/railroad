@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -36,9 +37,55 @@ from plotly.graph_objects import Figure
 
 CACHE_DIR_NAME = ".benchmark_cache"
 
+# Bump whenever the on-disk cache layout (parquet columns, meta/figures JSON
+# shape, figure serialization) changes in a way that makes old caches
+# unreadable. A mismatch purges and rebuilds the cache transparently.
+CACHE_FORMAT_VERSION = 1
+
+# Per-experiment stamp file, written into the experiment's artifact directory.
+# Its contents change whenever the experiment's data changes, so a cache keyed
+# on it is invalidated only by *that* experiment — unlike the shared
+# ``mlflow.db`` mtime, which every run (for any experiment) bumps.
+STAMP_FILENAME = ".railroad_cache_stamp"
+
 
 def _cache_dir() -> Path:
     return Path(CACHE_DIR_NAME)
+
+
+def _stamp_path(exp_name: str) -> Optional[Path]:
+    """Path to the experiment's cache stamp file, if its artifact dir resolves."""
+    art = _artifact_root(exp_name)
+    if art is None:
+        return None
+    return art / STAMP_FILENAME
+
+
+def touch_stamp(exp_name: str) -> None:
+    """Best-effort: record that ``exp_name``'s data just changed.
+
+    Writes the current wall-clock time into the experiment's stamp file. Called
+    from the tracker whenever runs/metadata are written. Failures are swallowed:
+    a missing stamp simply falls back to the legacy mtime fingerprint.
+    """
+    try:
+        path = _stamp_path(exp_name)
+        if path is None:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(repr(time.time()))
+    except Exception:
+        pass
+
+
+def remove_stamp(exp_name: str) -> None:
+    """Remove the stamp file for ``exp_name`` if present (best-effort)."""
+    try:
+        path = _stamp_path(exp_name)
+        if path is not None and path.exists():
+            path.unlink()
+    except Exception:
+        pass
 
 
 def _cache_paths(exp_name: str) -> tuple[Path, Path, Path]:
@@ -147,8 +194,27 @@ def _artifact_root(exp_name: str) -> Optional[Path]:
 
 
 def _source_fingerprint(exp_name: str) -> dict:
-    """A cheap stamp that changes whenever the experiment data changes."""
-    fp: dict = {}
+    """A cheap stamp that changes whenever the experiment data changes.
+
+    Preferred: the per-experiment stamp file, which only changes when *this*
+    experiment is written. This keeps unrelated benchmark runs from
+    invalidating every experiment's cache (the shared ``mlflow.db`` mtime did).
+
+    Fallback (no stamp yet — e.g. an experiment last run before this code, or
+    an artifact dir that doesn't resolve to the filesystem): the legacy
+    ``mlflow.db`` + artifact-dir mtime fingerprint, so old caches keep working
+    until that experiment's next run writes a stamp.
+    """
+    fp: dict = {"cache_format": CACHE_FORMAT_VERSION}
+
+    stamp = _stamp_path(exp_name)
+    if stamp is not None and stamp.exists():
+        try:
+            fp["stamp"] = stamp.read_text()
+            return fp
+        except Exception:
+            pass
+
     db = Path("mlflow.db")
     if db.exists():
         fp["db_mtime"] = db.stat().st_mtime
@@ -190,6 +256,10 @@ def load(exp_name: str) -> Optional[tuple[pd.DataFrame, dict, dict]]:
         df = pd.read_parquet(runs_path)
         return df, cached["metadata"], cached["summary"]
     except Exception:
+        # Corrupt / unreadable cache (e.g. truncated parquet, schema change):
+        # purge it so this same load rebuilds it cleanly instead of failing
+        # on every future load.
+        invalidate(exp_name)
         return None
 
 
@@ -213,6 +283,9 @@ def load_figures(exp_name: str) -> Optional[dict]:
             return None
         return _deserialize_figures(payload.get("figures", {}))
     except Exception:
+        # Unreadable figures cache (e.g. a serialization-format change):
+        # purge the whole experiment cache so it is rebuilt cleanly.
+        invalidate(exp_name)
         return None
 
 
@@ -285,3 +358,19 @@ def invalidate_all() -> None:
     d = _cache_dir()
     if d.exists():
         shutil.rmtree(d)
+
+
+def remove_all_stamps() -> None:
+    """Remove the stamp file from every railroad experiment (best-effort).
+
+    Forces a clean fingerprint baseline so the next load fully rebuilds.
+    """
+    try:
+        experiments = mlflow.search_experiments()  # type: ignore[possibly-missing-attribute]
+    except Exception:
+        return
+    for exp in experiments:
+        try:
+            remove_stamp(exp.name)
+        except Exception:
+            pass
