@@ -21,6 +21,7 @@ eligible for compaction on the next load.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import time
 from datetime import datetime
@@ -50,6 +51,37 @@ CACHE_FORMAT_VERSION = 2
 STAMP_FILENAME = ".railroad_cache_stamp"
 
 
+# Set RAILROAD_CACHE_DEBUG=1 to print per-experiment cache hit/miss decisions
+# (and, on a miss, exactly which fingerprint component changed). This is the
+# fast way to confirm the per-experiment stamp keying is actually keeping
+# caches valid across unrelated runs.
+_CACHE_DEBUG = os.environ.get("RAILROAD_CACHE_DEBUG", "").lower() not in (
+    "",
+    "0",
+    "false",
+    "no",
+)
+
+
+def _log(exp_name: str, msg: str) -> None:
+    if _CACHE_DEBUG:
+        print(f"[cache] {exp_name}: {msg}")
+
+
+def _fingerprint_diff(cached: object, current: dict) -> str:
+    """Human-readable explanation of why two fingerprints differ."""
+    if not isinstance(cached, dict):
+        return f"cached fingerprint is not a dict ({type(cached).__name__})"
+    keys = sorted(set(cached) | set(current))
+    parts = []
+    for k in keys:
+        old = cached.get(k, "<absent>")
+        new = current.get(k, "<absent>")
+        if old != new:
+            parts.append(f"{k}: {old!r} -> {new!r}")
+    return "; ".join(parts) if parts else "(fingerprints equal?)"
+
+
 def _cache_dir() -> Path:
     return Path(CACHE_DIR_NAME)
 
@@ -75,8 +107,36 @@ def touch_stamp(exp_name: str) -> None:
             return
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(repr(time.time()))
-    except Exception:
-        pass
+        _log(exp_name, f"touched stamp {path}")
+    except Exception as e:
+        _log(exp_name, f"failed to touch stamp: {e}")
+
+
+def _ensure_stamp(exp_name: str) -> bool:
+    """Create a stamp for ``exp_name`` only if it has none yet (best-effort).
+
+    Experiments last run before the stamp existed never get one from the
+    tracker (``touch_stamp`` only fires on a new write). They are then stuck on
+    the legacy *shared* ``mlflow.db`` mtime fallback, so any run for any other
+    experiment invalidates their cache. Backfilling a stamp here — at cache
+    save time, when the experiment's data is stable — adopts them onto
+    per-experiment keying so unrelated runs stop reloading them.
+
+    Returns True if a stamp now exists (created or already present).
+    """
+    try:
+        path = _stamp_path(exp_name)
+        if path is None:
+            return False
+        if path.exists():
+            return True
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(repr(time.time()))
+        _log(exp_name, f"backfilled stamp {path} (was on legacy db_mtime keying)")
+        return True
+    except Exception as e:
+        _log(exp_name, f"failed to backfill stamp: {e}")
+        return False
 
 
 def remove_stamp(exp_name: str) -> None:
@@ -248,18 +308,32 @@ def load(exp_name: str) -> Optional[tuple[pd.DataFrame, dict, dict]]:
     """
     runs_path, meta_path, _figures_path = _cache_paths(exp_name)
     if not runs_path.exists() or not meta_path.exists():
+        _log(exp_name, "MISS (no cache files on disk yet)")
         return None
     try:
         with open(meta_path) as f:
             cached = json.load(f)
-        if cached.get("fingerprint") != _source_fingerprint(exp_name):
+        current_fp = _source_fingerprint(exp_name)
+        cached_fp = cached.get("fingerprint")
+        if cached_fp != current_fp:
+            keyed = "stamp" if "stamp" in current_fp else "legacy db/artifact mtime"
+            _log(
+                exp_name,
+                f"MISS (fingerprint changed, keyed on {keyed}) "
+                f"[{_fingerprint_diff(cached_fp, current_fp)}]",
+            )
             return None
         df = pd.read_parquet(runs_path)
+        _log(
+            exp_name,
+            f"HIT ({len(df)} runs, cached_at={cached.get('cached_at', '?')})",
+        )
         return df, cached["metadata"], cached["summary"]
-    except Exception:
+    except Exception as e:
         # Corrupt / unreadable cache (e.g. truncated parquet, schema change):
         # purge it so this same load rebuilds it cleanly instead of failing
         # on every future load.
+        _log(exp_name, f"MISS (corrupt cache, purging and rebuilding): {e}")
         invalidate(exp_name)
         return None
 
@@ -274,18 +348,29 @@ def load_figures(exp_name: str) -> Optional[dict]:
     """
     _runs_path, _meta_path, figures_path = _cache_paths(exp_name)
     if not figures_path.exists():
+        _log(exp_name, "figures MISS (no figures.json yet)")
         return None
     try:
         with open(figures_path) as f:
             payload = json.load(f)
         if not isinstance(payload, dict):
+            _log(exp_name, "figures MISS (payload not a dict)")
             return None
-        if payload.get("fingerprint") != _source_fingerprint(exp_name):
+        current_fp = _source_fingerprint(exp_name)
+        cached_fp = payload.get("fingerprint")
+        if cached_fp != current_fp:
+            _log(
+                exp_name,
+                "figures MISS (fingerprint changed) "
+                f"[{_fingerprint_diff(cached_fp, current_fp)}]",
+            )
             return None
+        _log(exp_name, f"figures HIT (cached_at={payload.get('cached_at', '?')})")
         return _deserialize_figures(payload.get("figures", {}))
-    except Exception:
+    except Exception as e:
         # Unreadable figures cache (e.g. a serialization-format change):
         # purge the whole experiment cache so it is rebuilt cleanly.
+        _log(exp_name, f"figures MISS (corrupt, purging): {e}")
         invalidate(exp_name)
         return None
 
@@ -304,10 +389,15 @@ def save(
     provided, it is serialized to ``figures.json``.
     """
     if _has_in_progress_runs(df):
+        _log(exp_name, "SAVE skipped (run still in progress)")
         return False
     runs_path, meta_path, figures_path = _cache_paths(exp_name)
     runs_path.parent.mkdir(parents=True, exist_ok=True)
     df.to_parquet(runs_path, index=False)
+    # Adopt this experiment onto per-experiment stamp keying *before* taking
+    # the fingerprint, so the cache we write here is immediately stamp-keyed
+    # and a later unrelated run can't invalidate it via the shared db mtime.
+    _ensure_stamp(exp_name)
     payload = {
         "metadata": metadata,
         "summary": summary,
@@ -318,11 +408,20 @@ def save(
         json.dump(payload, f, default=str)
     if figures is not None:
         _write_figures(exp_name, figures_path, figures)
+    keyed = "stamp" if "stamp" in payload["fingerprint"] else "legacy db/artifact mtime"
+    _log(
+        exp_name,
+        f"SAVED ({len(df)} runs, figures={'yes' if figures is not None else 'no'}, "
+        f"fingerprint keyed on {keyed})",
+    )
     return True
 
 
 def _write_figures(exp_name: str, figures_path: Path, figures: dict) -> None:
     figures_path.parent.mkdir(parents=True, exist_ok=True)
+    # Same rationale as save(): key the figures cache on the per-experiment
+    # stamp, not the shared db mtime, so unrelated runs don't reload figures.
+    _ensure_stamp(exp_name)
     payload = {
         # Embed an independent fingerprint so figures stay correctly
         # invalidated even when runs/meta can't be refreshed.
