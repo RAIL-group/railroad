@@ -211,6 +211,27 @@ def benchmarks_cache_clear(experiment: str | None) -> None:
         click.echo("Cleared all benchmark caches.")
 
 
+@benchmarks.command("cache-flush")
+@click.option("--experiment", default=None,
+              help="Flush cache for a single experiment by name (default: flush all)")
+def benchmarks_cache_flush(experiment: str | None) -> None:
+    """Fully reset benchmark caches.
+
+    Like ``cache-clear``, but also removes the per-experiment stamp files, so
+    the cache fingerprint baseline is rebuilt from scratch on the next load. A
+    running dashboard rebuilds lazily on its next request.
+    """
+    from railroad.bench import compact
+    if experiment:
+        compact.invalidate(experiment)
+        compact.remove_stamp(experiment)
+        click.echo(f"Flushed cache and stamp for '{experiment}'.")
+    else:
+        compact.invalidate_all()
+        compact.remove_all_stamps()
+        click.echo("Flushed all benchmark caches and stamps.")
+
+
 def _make_example_command(name: str, info: ExampleInfo) -> None:
     """Create and register a click command for an example."""
     description = info["description"]

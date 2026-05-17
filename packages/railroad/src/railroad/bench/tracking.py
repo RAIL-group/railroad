@@ -89,6 +89,24 @@ class MLflowTracker:
         finally:
             sys.stderr = _stderr
 
+        self._touch_cache_stamp()
+
+    def _touch_cache_stamp(self) -> None:
+        """Bump this experiment's compaction-cache stamp (best-effort).
+
+        Lazily imported to avoid pulling the dashboard/compact stack at module
+        import time. Keeps the per-experiment cache valid across unrelated runs
+        while still invalidating as soon as *this* experiment's data changes.
+        """
+        if not self.experiment_name:
+            return
+        try:
+            from railroad.bench import compact
+
+            compact.touch_stamp(self.experiment_name)
+        except Exception:
+            pass
+
     def log_task(self, task: Task):
         """
         Log a single task execution as an MLflow run.
@@ -185,6 +203,8 @@ class MLflowTracker:
             if task.error:
                 mlflow.log_param("error_message", task.error[:500])  # type: ignore[possibly-missing-attribute]
 
+        self._touch_cache_stamp()
+
     def log_summary(self, summary: Dict[str, Any]):
         """
         Log experiment-level summary as a special run.
@@ -196,3 +216,5 @@ class MLflowTracker:
             # Log all summary values as metrics
             metrics = {k: float(v) for k, v in summary.items() if isinstance(v, (int, float))}
             mlflow.log_metrics(metrics)  # type: ignore[possibly-missing-attribute]
+
+        self._touch_cache_stamp()
