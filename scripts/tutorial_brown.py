@@ -64,6 +64,7 @@ class Tutorial:
         self.repeat = repeat
         self.timeout = timeout
         self.cases: list[dict] = []
+        self._label = None  # set by --label
         self._no_media = False  # set by --no-media in single mode
         self.__doc__ = user_fn.__doc__
         self.__name__ = user_fn.__name__
@@ -84,7 +85,12 @@ class Tutorial:
         bench_mode = LABEL_ENV_VAR in os.environ
         recorder: dict = {}
 
-        def make_dashboard(goal, env, **kw):
+        def make_dashboard(goal, env, *, location_coords=None, **kw):
+            # location_coords is consumed here (PlannerDashboard.__init__ does
+            # not accept it) and applied at plot/video render time. It is
+            # required for SymbolicEnvironment, whose env-derived coords are
+            # empty, so without it the trajectory plot is mislocated.
+            recorder["location_coords"] = location_coords
             # print_on_exit=True so the dashboard's __exit__ (i.e. the
             # `with case.make_dashboard(...) as dashboard:` block in
             # tutorial_main) tears down the live screen and prints the final
@@ -111,6 +117,7 @@ class Tutorial:
             return result
 
         dashboard = recorder.get("dashboard")
+        location_coords = recorder.get("location_coords")
         if bench_mode:
             if "console" in recorder and "log_html" not in result:
                 result["log_html"] = recorder["console"].export_html(
@@ -118,32 +125,37 @@ class Tutorial:
                 )
             # Trajectory image (plot.jpg artifact); None when no trajectory.
             if dashboard is not None and "log_plot" not in result:
-                plot_image = dashboard.get_plot_image()
+                plot_image = dashboard.get_plot_image(
+                    location_coords=location_coords
+                )
                 if plot_image is not None:
                     result["log_plot"] = plot_image
         elif dashboard is not None and not self._no_media:
-            self._save_media(dashboard)
+            self._save_media(dashboard, location_coords)
         return result
 
-    def _save_media(self, dashboard) -> None:
-        """Single/TUI mode: write the trajectory plot + video to the shared
-        media dir so they're viewable remotely at the dashboard's /media/.
+    def _save_media(self, dashboard, location_coords) -> None:
+        """Single/TUI mode: write the trajectory plot + 720p30 video to the
+        shared media dir so they're viewable remotely at the dashboard's
+        /media/. Named after --label, overwriting any previous run.
         """
-        from datetime import datetime
+        import re
 
         from railroad.bench.tutorial_media import media_dir
 
         d = media_dir()
-        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        base = d / f"tutorial_{stamp}"
+        safe = re.sub(r"[^A-Za-z0-9._-]", "_", self._label or "tutorial")
+        base = d / safe
         try:
             dashboard.show_plots(
                 save_plot=f"{base}.jpg",
                 save_video=f"{base}.mp4",
                 video_fps=30,
+                video_dpi=100,  # 12.8x7.2in @ 100dpi = 1280x720 (720p)
+                location_coords=location_coords,
             )
             print(
-                f"\n[tutorial] saved plot/video to {d}\n"
+                f"\n[tutorial] saved {safe}.jpg / {safe}.mp4 (720p30) to {d}\n"
                 "  View remotely:  uv run railroad benchmarks dashboard\n"
                 "  then open  http://<host>:8050/media/"
             )
@@ -185,9 +197,10 @@ class Tutorial:
         )
         parser.add_argument(
             "--label",
-            default=None,
-            help="REQUIRED with --bench. Comparison group name (benchmark "
-            "'tutorial::<label>'). Same label = same group + more points.",
+            required=True,
+            help="REQUIRED. Names this run. In --bench it is the comparison "
+            "group (benchmark 'tutorial::<label>'); in single mode it names "
+            "the saved <label>.jpg/.mp4 (overwriting any previous run).",
         )
         parser.add_argument(
             "--repeat", type=int, default=None, help="Cap repeats per case."
@@ -211,6 +224,7 @@ class Tutorial:
         )
         args = parser.parse_args(argv)
 
+        self._label = args.label
         self._no_media = args.no_media
         if args.bench:
             self._run_bench(args)
@@ -236,14 +250,7 @@ class Tutorial:
         )
 
     def _run_bench(self, args) -> None:
-        if not args.label:
-            print(
-                "error: --label is required with --bench "
-                "(it names the comparison group, benchmark 'tutorial::<label>').",
-                file=sys.stderr,
-            )
-            raise SystemExit(2)
-
+        # --label is enforced by argparse (required=True).
         # Propagate the label to re-imported worker processes, and register.
         os.environ[LABEL_ENV_VAR] = args.label
         bench = self._register(args.label)
@@ -381,10 +388,18 @@ def tutorial_main(case: BenchmarkCase) -> dict:
             for kw in ["at", "holding", "found", "searched", "free"]
         )
 
+    # SymbolicEnvironment has no coords to give the plotter, so pass them
+    # explicitly or the trajectory plot/video is mislocated.
+    location_coords = {
+        name: (float(c[0]), float(c[1])) for name, c in locations.items()
+    }
+
     start_time = time.perf_counter()
     # `with` is essential: __enter__ starts the Rich Live view; without it
     # nothing renders. __exit__ tears it down and prints the final history.
-    with case.make_dashboard(goal, env, fluent_filter=fluent_filter) as dashboard:
+    with case.make_dashboard(
+        goal, env, fluent_filter=fluent_filter, location_coords=location_coords
+    ) as dashboard:
         for _ in range(60):
             if goal.evaluate(env.state.fluents):
                 break
