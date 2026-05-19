@@ -27,10 +27,12 @@ Comparison semantics:
     "tutorial_brown_university" experiment, so refreshing the page shows them.
 """
 
-import argparse
 import os
 import sys
 import time
+from types import SimpleNamespace
+
+import rich_click as click
 
 # Make the in-repo `railroad` package importable when run as a plain script.
 sys.path.insert(
@@ -189,47 +191,69 @@ class Tutorial:
 
     # -- CLI -------------------------------------------------------------
     def run_cli(self, argv=None) -> None:
-        parser = argparse.ArgumentParser(description="railroad tutorial runner")
-        parser.add_argument(
-            "--bench",
-            action="store_true",
-            help="Run the benchmark sweep (repeats + parameter sweep) via MLflow.",
+        """rich-click CLI, styled to match `railroad` (see cli.py)."""
+        tutorial = self
+
+        @click.command(
+            context_settings={"help_option_names": ["-h", "--help"]}
         )
-        parser.add_argument(
-            "--label",
-            required=True,
-            help="REQUIRED. Names this run. In --bench it is the comparison "
+        @click.option_panel("Run mode", options=["--bench", "--label"])
+        @click.option_panel(
+            "Benchmark options", options=["--repeat", "--parallel", "--filter"]
+        )
+        @click.option_panel(
+            "Single-run options", options=["--case", "--no-media", "--help"]
+        )
+        @click.option(
+            "--bench", is_flag=True, default=False,
+            help="Run the benchmark sweep (repeats + parameter sweep) via "
+            "MLflow instead of a single live run.",
+        )
+        @click.option(
+            "--label", required=True,
+            help="REQUIRED. Names this run. With --bench it is the comparison "
             "group (benchmark 'tutorial::<label>'); in single mode it names "
-            "the saved <label>.jpg/.mp4 (overwriting any previous run).",
+            "the saved <label>.jpg / <label>.mp4 (overwriting a prior run).",
         )
-        parser.add_argument(
-            "--repeat", type=int, default=None, help="Cap repeats per case."
+        @click.option(
+            "--repeat", type=int, default=None,
+            help="Cap repeats per case (benchmark mode).",
         )
-        parser.add_argument(
-            "--parallel", type=int, default=None, help="Worker processes."
+        @click.option(
+            "--parallel", type=int, default=None,
+            help="Number of worker processes (benchmark mode).",
         )
-        parser.add_argument(
-            "--filter", default=None, help="pytest-style case filter."
+        @click.option(
+            "--filter", "filter_", default=None,
+            help="pytest-style case filter (benchmark mode).",
         )
-        parser.add_argument(
-            "--case",
-            type=int,
-            default=0,
-            help="Single mode: which sweep case index to run (default 0).",
+        @click.option(
+            "--case", type=int, default=0, show_default=True,
+            help="Single mode: which sweep case index to run.",
         )
-        parser.add_argument(
-            "--no-media",
-            action="store_true",
+        @click.option(
+            "--no-media", is_flag=True, default=False,
             help="Single mode: skip saving the trajectory plot/video.",
         )
-        args = parser.parse_args(argv)
+        def _cli(bench, label, repeat, parallel, filter_, case, no_media):
+            """Railroad planner tutorial.
 
-        self._label = args.label
-        self._no_media = args.no_media
-        if args.bench:
-            self._run_bench(args)
-        else:
-            self._run_single(args)
+            Default: one live run with the interactive dashboard, saving a
+            720p plot/video to the media dir. With --bench: a benchmark sweep
+            accumulating into the persistent MLflow experiment.
+            """
+            args = SimpleNamespace(
+                bench=bench, label=label, repeat=repeat, parallel=parallel,
+                filter=filter_, case=case, no_media=no_media,
+            )
+            tutorial._label = label
+            tutorial._no_media = no_media
+            if bench:
+                tutorial._run_bench(args)
+            else:
+                tutorial._run_single(args)
+
+        _cli.main(args=argv, standalone_mode=True)
 
     def _run_single(self, args) -> None:
         params = self.cases[args.case] if self.cases else {}
@@ -250,7 +274,7 @@ class Tutorial:
         )
 
     def _run_bench(self, args) -> None:
-        # --label is enforced by argparse (required=True).
+        # --label is enforced by click (required=True).
         # Propagate the label to re-imported worker processes, and register.
         os.environ[LABEL_ENV_VAR] = args.label
         bench = self._register(args.label)
