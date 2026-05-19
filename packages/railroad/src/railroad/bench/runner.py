@@ -41,6 +41,7 @@ class BenchmarkRunner:
         case_filter: Optional[str] = None,
         include_files: Optional[List[str]] = None,
         run_name: Optional[str] = None,
+        experiment_name: Optional[str] = None,
     ):
         """
         Initialize benchmark runner.
@@ -54,6 +55,9 @@ class BenchmarkRunner:
             case_filter: Filter cases by matching against benchmark name and parameters (default: None)
             include_files: List of additional benchmark files to load (default: None)
             run_name: Human-readable name for this benchmark run (default: None, auto-generated from timestamp)
+            experiment_name: Fixed MLflow experiment name. When set, the timestamp
+                suffix is skipped so repeated invocations accumulate into one
+                persistent experiment (default: None, timestamped per invocation)
         """
         self.benchmarks = benchmarks
         self.repeat_max = repeat_max
@@ -65,6 +69,7 @@ class BenchmarkRunner:
         self.case_filter = case_filter
         self.include_files = include_files
         self.run_name = run_name
+        self.experiment_name = experiment_name
 
     def create_plan(self) -> ExecutionPlan:
         """
@@ -265,12 +270,17 @@ class BenchmarkRunner:
         Returns:
             Completed execution plan with results
         """
-        # Create MLflow experiment, named by user if provided else timestamped
-        timestamp = int(time.time())
-        if self.run_name:
-            experiment_name = f"{self.run_name}_{timestamp}"
+        # Create MLflow experiment. A fixed experiment_name (if provided) is used
+        # verbatim so repeated invocations accumulate into one persistent
+        # experiment; otherwise fall back to the timestamped-per-invocation name.
+        if self.experiment_name:
+            experiment_name = self.experiment_name
         else:
-            experiment_name = f"railroad_bench_{timestamp}"
+            timestamp = int(time.time())
+            if self.run_name:
+                experiment_name = f"{self.run_name}_{timestamp}"
+            else:
+                experiment_name = f"railroad_bench_{timestamp}"
         self.tracker.create_experiment(experiment_name, plan.metadata)
 
         # Start progress display
