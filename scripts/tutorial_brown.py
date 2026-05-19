@@ -87,21 +87,27 @@ class Tutorial:
             if bench_mode:
                 console = Console(record=True, force_terminal=True, width=120)
                 recorder["console"] = console
-                return PlannerDashboard(
+                dashboard = PlannerDashboard(
                     goal, env, console=console, print_on_exit=False, **kw
                 )
-            return PlannerDashboard(goal, env, **kw)
+            else:
+                dashboard = PlannerDashboard(goal, env, **kw)
+            recorder["dashboard"] = dashboard
+            return dashboard
 
         case.make_dashboard = make_dashboard
         result = self.user_fn(case)
 
-        if (
-            bench_mode
-            and "console" in recorder
-            and isinstance(result, dict)
-            and "log_html" not in result
-        ):
-            result["log_html"] = recorder["console"].export_html(inline_styles=True)
+        if bench_mode and isinstance(result, dict):
+            if "console" in recorder and "log_html" not in result:
+                result["log_html"] = recorder["console"].export_html(
+                    inline_styles=True
+                )
+            # Trajectory image (plot.jpg artifact); None when no trajectory.
+            if "dashboard" in recorder and "log_plot" not in result:
+                plot_image = recorder["dashboard"].get_plot_image()
+                if plot_image is not None:
+                    result["log_plot"] = plot_image
         return result
 
     # -- benchmark registration (idempotent by name) ---------------------
