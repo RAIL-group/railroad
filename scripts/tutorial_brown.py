@@ -91,6 +91,9 @@ class Tutorial:
                     goal, env, console=console, print_on_exit=False, **kw
                 )
             else:
+                # Single mode is for the live talk: force the interactive TUI
+                # so the panels render regardless of headless auto-detection.
+                kw.setdefault("force_interactive", True)
                 dashboard = PlannerDashboard(goal, env, **kw)
             recorder["dashboard"] = dashboard
             return dashboard
@@ -236,75 +239,120 @@ def tutorial(description: str = "", repeat: int = 8, timeout: float = 120.0):
 
 
 @tutorial(
-    description="Single robot navigates to a destination via move.",
+    description="Heterogeneous robots search for supplies and deliver to base.",
     repeat=8,
-    timeout=60.0,
+    timeout=120.0,
 )
 def tutorial_main(case: BenchmarkCase) -> dict:
     """
-    Single-robot navigation.
+    Heterogeneous multi-robot search-and-deliver.
 
-    The robot starts in the living room and must reach the furthest location.
+    Three robots with different capabilities (rover/crawler can pick & place,
+    drone can only search but moves twice as fast) must locate `supplies`
+    somewhere in the map and bring them back to `start`. This runs many
+    planning steps (search -> pick -> move -> place), so the live dashboard
+    has plenty to show.
+
     Parameters come from `case` (see add_cases below):
-      * case.num_locations   -- how many waypoints to lay out
       * case.mcts.iterations -- MCTS search budget per planning step
+      * case.mcts.c          -- UCT exploration constant
     """
     import numpy as np
 
     from railroad import operators
     from railroad.core import Fluent as F, State, get_action_by_name
-    from railroad.experimental.environment import (
-        EnvironmentInterface,
-        SimpleEnvironment,
-    )
+    from railroad.environment import SymbolicEnvironment
     from railroad.planner import MCTSPlanner
 
-    num_locations = case.num_locations
+    # --- Map: location -> (x, y) --------------------------------------
+    locations = {
+        "start": np.array([0, 0]),
+        "location1": np.array([10, 9]),
+        "location2": np.array([9, 0]),
+        "location3": np.array([1, 2]),
+        "location4": np.array([1, 10]),
+    }
+    # Ground truth: the supplies are actually at location2.
+    objects_at_locations = {loc: set() for loc in locations}
+    objects_at_locations["location2"] = {"supplies"}
 
-    # --- Build the environment ----------------------------------------
-    locations = {f"loc{i}": np.array([i * 2.0, 0.0]) for i in range(num_locations)}
-    locations["living_room"] = np.array([0.0, 0.0])  # required by SimpleEnvironment
-    locations["start"] = np.array([0.0, 0.0])
+    # --- Heterogeneous robot capabilities -----------------------------
+    skills_time = {
+        "rover": {"pick": 10.0, "place": 10.0, "search": 10.0},
+        "crawler": {"pick": 10.0, "place": 10.0, "search": 10.0},
+        "drone": {"search": 10.0},  # drone can only search (plus move)
+    }
+    speed_multiplier = {"rover": 1.0, "crawler": 1.0, "drone": 2.0}
+    robots = ["rover", "drone", "crawler"]
 
-    env = SimpleEnvironment(
-        locations=locations,
-        objects_at_locations={},
-        robot_locations={"robot1": "living_room"},
-    )
+    def skill_time(skill):
+        return lambda robot, *a, **k: skills_time.get(robot, {}).get(
+            skill, float("inf")
+        )
+
+    def move_time(robot, loc_from, loc_to):
+        if loc_from not in locations or loc_to not in locations:
+            return float("inf")
+        dist = float(np.linalg.norm(locations[loc_from] - locations[loc_to]))
+        return dist / speed_multiplier.get(robot, 1.0)
+
+    def find_prob(robot, loc, obj):
+        return 0.9 if obj in objects_at_locations.get(loc, set()) else 0.1
 
     # --- Initial state & goal -----------------------------------------
-    initial_state = State(
-        time=0,
-        fluents={F("at robot1 living_room"), F("free robot1")},
-    )
-    goal = F(f"at robot1 loc{num_locations - 1}")
+    initial_fluents = {F("revealed", "start")}
+    for robot in robots:
+        initial_fluents.add(F("at", robot, "start"))
+        initial_fluents.add(F("free", robot))
+    goal = F("at supplies start")
 
-    # --- Operators & simulator ----------------------------------------
-    move_op = operators.construct_move_operator_blocking(
-        env.get_skills_time_fn("move")
-    )
     objects_by_type = {
-        "robot": {"robot1"},
+        "robot": set(robots),
         "location": set(locations.keys()),
+        "object": {"supplies"},
     }
-    sim = EnvironmentInterface(
-        initial_state, objects_by_type, [move_op], env
+
+    # --- Operators & environment --------------------------------------
+    move_op = operators.construct_move_operator_blocking(move_time)
+    search_op = operators.construct_search_operator(
+        find_prob, skill_time("search")
+    )
+    pick_op = operators.construct_pick_operator_blocking(skill_time("pick"))
+    place_op = operators.construct_place_operator_blocking(skill_time("place"))
+    no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
+
+    env = SymbolicEnvironment(
+        state=State(0.0, initial_fluents, []),
+        objects_by_type=objects_by_type,
+        operators=[no_op, move_op, search_op, pick_op, place_op],
+        true_object_locations=objects_at_locations,
     )
 
     # --- Plan, with the dashboard the harness picked for this mode -----
-    start_time = time.perf_counter()
-    dashboard = case.make_dashboard(goal, sim)
-    planner = MCTSPlanner(sim.get_actions())
+    def fluent_filter(f):
+        return any(
+            kw in f.name
+            for kw in ["at", "holding", "found", "searched", "free"]
+        )
 
-    for _ in range(100):
-        if goal.evaluate(sim.state.fluents):
+    start_time = time.perf_counter()
+    dashboard = case.make_dashboard(goal, env, fluent_filter=fluent_filter)
+
+    for _ in range(60):
+        if goal.evaluate(env.state.fluents):
             break
+        all_actions = env.get_actions()
+        planner = MCTSPlanner(all_actions)
         action_name = planner(
-            sim.state, goal, max_iterations=case.mcts.iterations, c=100
+            env.state,
+            goal,
+            max_iterations=case.mcts.iterations,
+            c=case.mcts.c,
+            max_depth=20,
         )
         if action_name == "NONE":
             break
-        sim.advance(get_action_by_name(sim.get_actions(), action_name))
+        env.act(get_action_by_name(all_actions, action_name))
         dashboard.update(planner, action_name)
 
     wall_time = time.perf_counter() - start_time
@@ -312,20 +360,22 @@ def tutorial_main(case: BenchmarkCase) -> dict:
 
     actions_taken = [name for name, _ in dashboard.actions_taken]
     return {
-        "success": goal.evaluate(sim.state.fluents),
+        "success": goal.evaluate(env.state.fluents),
         "wall_time": wall_time,
-        "plan_cost": float(sim.state.time),
+        "plan_cost": float(env.state.time),
         "actions_count": len(actions_taken),
         "actions": actions_taken,
     }
 
 
 # Parameter sweep for --bench mode (single mode uses index --case, default 0).
+# Case 0 (the single-mode default) is the robust budget so the live demo
+# reliably solves; the rest sweep smaller/different budgets for comparison.
 tutorial_main.add_cases(
     [
-        {"num_locations": 3, "mcts.iterations": 100},
-        {"num_locations": 5, "mcts.iterations": 100},
-        {"num_locations": 5, "mcts.iterations": 400},
+        {"mcts.iterations": 10000, "mcts.c": 300},
+        {"mcts.iterations": 4000, "mcts.c": 300},
+        {"mcts.iterations": 10000, "mcts.c": 100},
     ]
 )
 
