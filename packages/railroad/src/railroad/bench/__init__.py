@@ -7,6 +7,14 @@ dry-run capabilities, and parallel execution support.
 Requires the 'bench' extra: pip install railroad[bench]
 """
 
+import os
+
+# Disable MLflow's anonymous SDK/UI usage telemetry before mlflow is imported
+# (it reads these at import time). setdefault so an explicit env override still
+# wins; this removes the need for every user/shell to set it themselves.
+os.environ.setdefault("MLFLOW_DISABLE_TELEMETRY", "true")
+os.environ.setdefault("DO_NOT_TRACK", "true")
+
 try:
     import mlflow  # noqa: F401
     import pandas  # noqa: F401
