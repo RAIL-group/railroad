@@ -6,10 +6,12 @@ import time
 import json
 from urllib.parse import unquote
 from dash import Output, Input, State, ALL, callback_context, html
-from flask import send_file
+from flask import send_file, send_from_directory
+from markupsafe import escape
 import mlflow
 
 from railroad.bench import compact
+from railroad.bench.tutorial_media import media_dir
 from .data import (
     load_all_experiments_with_summaries,
     load_experiment_by_name,
@@ -71,6 +73,58 @@ def register_callbacks(app):
             return response
 
         return send_file(local_path)
+
+    # Flask routes to serve tutorial media (plots/videos written by the
+    # single/TUI run of scripts/tutorial_brown.py) on the dashboard's port.
+    @app.server.route("/media/")
+    def media_index():
+        """Directory listing of tutorial plots/videos (newest first)."""
+        d = media_dir()
+        files = sorted(
+            (p for p in d.iterdir() if p.is_file()),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        items = []
+        for p in files:
+            name = escape(p.name)
+            suffix = p.suffix.lower()
+            if suffix in (".mp4", ".webm", ".mov"):
+                preview = (
+                    f'<video src="/media/{name}" controls '
+                    f'style="max-width:640px;display:block;margin:4px 0"></video>'
+                )
+            elif suffix in (".jpg", ".jpeg", ".png", ".gif"):
+                preview = (
+                    f'<img src="/media/{name}" '
+                    f'style="max-width:640px;display:block;margin:4px 0">'
+                )
+            else:
+                preview = ""
+            items.append(
+                f'<li><a href="/media/{name}">{name}</a>{preview}</li>'
+            )
+        body = (
+            "<p>No tutorial media yet. Run "
+            "<code>uv run python scripts/tutorial_brown.py</code> "
+            f"(it writes to <code>{escape(str(d))}</code>).</p>"
+            if not items
+            else "<ul style='list-style:none;padding:0'>"
+            + "".join(items)
+            + "</ul>"
+        )
+        return (
+            "<!DOCTYPE html><html><head><title>Tutorial media</title></head>"
+            "<body style='font-family:sans-serif;margin:24px'>"
+            "<h2>Tutorial media</h2>"
+            "<p><a href='/'>&larr; back to dashboard</a></p>"
+            f"{body}</body></html>"
+        )
+
+    @app.server.route("/media/<path:filename>")
+    def serve_media(filename: str):
+        """Serve a single tutorial media file (path-traversal safe)."""
+        return send_from_directory(str(media_dir()), filename)
 
     @app.callback(
         [Output("main-content", "children"), Output("data-store", "data")],

@@ -64,6 +64,7 @@ class Tutorial:
         self.repeat = repeat
         self.timeout = timeout
         self.cases: list[dict] = []
+        self._no_media = False  # set by --no-media in single mode
         self.__doc__ = user_fn.__doc__
         self.__name__ = user_fn.__name__
 
@@ -84,34 +85,73 @@ class Tutorial:
         recorder: dict = {}
 
         def make_dashboard(goal, env, **kw):
+            # print_on_exit=True so the dashboard's __exit__ (i.e. the
+            # `with case.make_dashboard(...) as dashboard:` block in
+            # tutorial_main) tears down the live screen and prints the final
+            # history. The `with` form is what actually starts the Rich Live
+            # view; constructing without it shows nothing.
             if bench_mode:
                 console = Console(record=True, force_terminal=True, width=120)
                 recorder["console"] = console
                 dashboard = PlannerDashboard(
-                    goal, env, console=console, print_on_exit=False, **kw
+                    goal, env, console=console, print_on_exit=True, **kw
                 )
             else:
                 # Single mode is for the live talk: force the interactive TUI
                 # so the panels render regardless of headless auto-detection.
                 kw.setdefault("force_interactive", True)
-                dashboard = PlannerDashboard(goal, env, **kw)
+                dashboard = PlannerDashboard(goal, env, print_on_exit=True, **kw)
             recorder["dashboard"] = dashboard
             return dashboard
 
         case.make_dashboard = make_dashboard
         result = self.user_fn(case)
 
-        if bench_mode and isinstance(result, dict):
+        if not isinstance(result, dict):
+            return result
+
+        dashboard = recorder.get("dashboard")
+        if bench_mode:
             if "console" in recorder and "log_html" not in result:
                 result["log_html"] = recorder["console"].export_html(
                     inline_styles=True
                 )
             # Trajectory image (plot.jpg artifact); None when no trajectory.
-            if "dashboard" in recorder and "log_plot" not in result:
-                plot_image = recorder["dashboard"].get_plot_image()
+            if dashboard is not None and "log_plot" not in result:
+                plot_image = dashboard.get_plot_image()
                 if plot_image is not None:
                     result["log_plot"] = plot_image
+        elif dashboard is not None and not self._no_media:
+            self._save_media(dashboard)
         return result
+
+    def _save_media(self, dashboard) -> None:
+        """Single/TUI mode: write the trajectory plot + video to the shared
+        media dir so they're viewable remotely at the dashboard's /media/.
+        """
+        from datetime import datetime
+
+        from railroad.bench.tutorial_media import media_dir
+
+        d = media_dir()
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        base = d / f"tutorial_{stamp}"
+        try:
+            dashboard.show_plots(
+                save_plot=f"{base}.jpg",
+                save_video=f"{base}.mp4",
+                video_fps=30,
+            )
+            print(
+                f"\n[tutorial] saved plot/video to {d}\n"
+                "  View remotely:  uv run railroad benchmarks dashboard\n"
+                "  then open  http://<host>:8050/media/"
+            )
+        except Exception as e:  # e.g. ffmpeg missing; don't kill the demo
+            print(
+                f"\n[tutorial] could not save media ({e}). "
+                "Plot/video skipped; planning result is unaffected."
+            )
 
     # -- benchmark registration (idempotent by name) ---------------------
     def _register(self, label: str) -> Benchmark:
@@ -164,8 +204,14 @@ class Tutorial:
             default=0,
             help="Single mode: which sweep case index to run (default 0).",
         )
+        parser.add_argument(
+            "--no-media",
+            action="store_true",
+            help="Single mode: skip saving the trajectory plot/video.",
+        )
         args = parser.parse_args(argv)
 
+        self._no_media = args.no_media
         if args.bench:
             self._run_bench(args)
         else:
@@ -336,28 +382,27 @@ def tutorial_main(case: BenchmarkCase) -> dict:
         )
 
     start_time = time.perf_counter()
-    dashboard = case.make_dashboard(goal, env, fluent_filter=fluent_filter)
-
-    for _ in range(60):
-        if goal.evaluate(env.state.fluents):
-            break
-        all_actions = env.get_actions()
-        planner = MCTSPlanner(all_actions)
-        action_name = planner(
-            env.state,
-            goal,
-            max_iterations=case.mcts.iterations,
-            c=case.mcts.c,
-            max_depth=20,
-        )
-        if action_name == "NONE":
-            break
-        env.act(get_action_by_name(all_actions, action_name))
-        dashboard.update(planner, action_name)
+    # `with` is essential: __enter__ starts the Rich Live view; without it
+    # nothing renders. __exit__ tears it down and prints the final history.
+    with case.make_dashboard(goal, env, fluent_filter=fluent_filter) as dashboard:
+        for _ in range(60):
+            if goal.evaluate(env.state.fluents):
+                break
+            all_actions = env.get_actions()
+            planner = MCTSPlanner(all_actions)
+            action_name = planner(
+                env.state,
+                goal,
+                max_iterations=case.mcts.iterations,
+                c=case.mcts.c,
+                max_depth=20,
+            )
+            if action_name == "NONE":
+                break
+            env.act(get_action_by_name(all_actions, action_name))
+            dashboard.update(planner, action_name)
 
     wall_time = time.perf_counter() - start_time
-    dashboard.print_history()
-
     actions_taken = [name for name, _ in dashboard.actions_taken]
     return {
         "success": goal.evaluate(env.state.fluents),

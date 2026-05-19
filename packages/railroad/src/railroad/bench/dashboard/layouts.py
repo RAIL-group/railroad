@@ -303,6 +303,10 @@ def build_experiment_list_layout(experiments: list[dict]) -> list:
         f"Benchmark Experiments (showing {len(experiments)} most recent)",
         className="pre-text text-base"
     ))
+    children.append(html.A(
+        "→ tutorial media (plots / videos)",
+        href="/media/", className="link",
+    ))
     children.append(html.Br())
 
     for exp_idx, exp in enumerate(experiments):
