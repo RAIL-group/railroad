@@ -11,11 +11,10 @@ from railroad.operators import OptNumeric, _to_numeric
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from tutorial_brown_base import BenchmarkCase, LABEL_ENV_VAR, tutorial
-
-
 def fluent_filter(f):
     return any(kw in f.name for kw in ["at", "holding", "found", "searched", "free"])
+
+from tutorial_brown_base import BenchmarkCase, LABEL_ENV_VAR, tutorial
 
 
 @tutorial(description="Single rover: move, pick, place, search",
@@ -29,17 +28,23 @@ def tutorial_main(bcase: BenchmarkCase) -> dict:
         "C": np.array([1, 2]),
         "D": np.array([1, 10]),
     }
+    # Ground truth: the supplies are actually at 'B'.
+    objects_at_locations = {loc: set() for loc in locations}
+    objects_at_locations["B"] = {"supplies"}
+
     robots = ["rover"]
+
     initial_fluents = {
-        F("at rover start"), F("free rover"),
-        F("at supplies B"),
+        F("revealed start"),
+        F("at rover start"),
+        F("free rover"),
     }
     goal = F("at supplies A")
 
     objects_by_type = {
         "robot": set(robots),
         "location": set(locations.keys()),
-        "object": {"supplies", "crate"},
+        "object": {"supplies"},
     }
 
     # Define the operators
@@ -47,28 +52,49 @@ def tutorial_main(bcase: BenchmarkCase) -> dict:
         if loc_from not in locations or loc_to not in locations:
             raise ValueError(f"One of {loc_from}/{loc_to} not found.")
         return float(np.linalg.norm(locations[loc_from] - locations[loc_to]))
-    move_time_fn = _to_numeric(move_time)
-    move_op = Operator(
-        name="move",
-        parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
-        preconditions=[F("at ?r ?from"), F("free ?r")],
-        effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?r ?from")}),
-            Effect(time=(move_time_fn, ["?r", "?from", "?to"]),
-                   resulting_fluents={F("free ?r"), F("at ?r ?to")},
-            ),
-        ],
-    )
+    move_op = operators.construct_move_operator(move_time)
 
     pick_op = operators.construct_pick_operator(10.0)
     place_op = operators.construct_place_operator(10.0)
     no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
 
+    def find_prob(robot, loc, obj):
+        return 0.9 if obj in objects_at_locations.get(loc, set()) else 0.1
+    search_op = operators.construct_search_operator(find_prob, 10.0)
+
+    object_find_prob_fn = _to_numeric(find_prob)
+    search_op = Operator(
+        name="search",
+        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
+        preconditions=[
+            F("at ?r ?loc"), F("free ?r"),
+            F("not revealed ?loc"), F("not found ?obj"),
+            F("not searched ?loc ?obj"), F("not lock-search ?loc"),
+        ],
+        effects=[Effect(time=0,
+                        resulting_fluents={
+                            F("not free ?r"),
+                            F("lock-search ?loc")}),
+                 Effect(time=10.0,
+                        resulting_fluents={
+                            F("free ?r"),
+                            F("searched ?loc ?obj"),
+                            F("not lock-search ?loc"),},
+                        prob_effects=[(
+                            (object_find_prob_fn, ["?r", "?loc", "?obj"]),
+                            [Effect(time=0, resulting_fluents={F("found ?obj"), F("at ?obj ?loc")})],
+                        ), (
+                            (1 - object_find_prob_fn, ["?r", "?loc", "?obj"]),
+                            [],
+                        ),],),],)
+
     env = SymbolicEnvironment(
         state=State(0.0, initial_fluents, []),
         objects_by_type=objects_by_type,
-        operators=[no_op, move_op, pick_op, place_op],
+        operators=[no_op, move_op, search_op, pick_op, place_op],
+        true_object_locations=objects_at_locations,
     )
+
 
     # For plotting
     location_coords = {
@@ -81,13 +107,12 @@ def tutorial_main(bcase: BenchmarkCase) -> dict:
             if goal.evaluate(env.state.fluents):
                 break
             all_actions = env.get_actions()
-            planner = MCTSPlanner(all_actions,
-                                  lambda_add=0.0,
-                                  lambda_ff=1.0)
+            planner = MCTSPlanner(all_actions)
             action_name = planner(
                 env.state, goal,
                 max_iterations=bcase.mcts.iterations,
-                c=bcase.mcts.c, max_depth=20,)
+                c=bcase.mcts.c, max_depth=20,
+            )
             if action_name == "NONE":
                 break
             env.act(get_action_by_name(all_actions, action_name))
