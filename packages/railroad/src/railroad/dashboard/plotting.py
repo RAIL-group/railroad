@@ -199,7 +199,14 @@ class _PlottingMixin:
                     pts = np.array(path)
                     cum_dist = np.concatenate(([0], np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))))
                     t0, t1 = times[seg_i], times[seg_i + 1]
-                    seg_times = (t0 + (t1 - t0) * cum_dist / max(cum_dist[-1], 1e-9)).tolist()
+                    if cum_dist[-1] > 1e-9:
+                        seg_times = (t0 + (t1 - t0) * cum_dist / cum_dist[-1]).tolist()
+                    else:
+                        # Stationary segment (e.g. robot holding position
+                        # during pick/place/no_op): path collapses to a
+                        # single point, so distance-based timing would drop
+                        # t1 and make interpolation leak into the next move.
+                        seg_times = np.linspace(t0, t1, len(path)).tolist()
                     start = 1 if expanded_wps else 0
                     expanded_wps.extend(path[start:])
                     expanded_ts.extend(seg_times[start:])

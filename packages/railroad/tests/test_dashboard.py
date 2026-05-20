@@ -333,6 +333,33 @@ class TestGetEntityPositionsAtTimes:
         assert "r1" in result
         np.testing.assert_allclose(result["r1"][0], [10.0, 0.0], atol=1e-6)
 
+    def test_stationary_segment_holds_position(self, dashboard_with_trajectory):
+        """A B->B segment (e.g. pick/place) must keep the robot at B for the
+        full duration, not drift toward the next move's destination."""
+        import numpy as np
+        db = dashboard_with_trajectory
+        # Add a stationary hold at B from t=10 to t=20 (a "pick"), then a move
+        # back to A from t=20 to t=30. Without the fix, distance-based timing
+        # collapses the stationary segment and interp leaks into the next move.
+        db._entity_positions = {
+            "r1": [
+                (0.0, "A", None),
+                (10.0, "B", None),
+                (20.0, "B", None),
+                (30.0, "A", None),
+            ],
+        }
+        db._goal_time = 30.0
+        coords = {"A": (0.0, 0.0), "B": (10.0, 0.0)}
+        result = db.get_entity_positions_at_times(
+            [10.0, 15.0, 20.0], location_coords=coords,
+        )
+        assert "r1" in result
+        # All three query points are within the stationary B->B window.
+        np.testing.assert_allclose(result["r1"][0], [10.0, 0.0], atol=1e-6)
+        np.testing.assert_allclose(result["r1"][1], [10.0, 0.0], atol=1e-6)
+        np.testing.assert_allclose(result["r1"][2], [10.0, 0.0], atol=1e-6)
+
 
 # ------------------------------------------------------------------ #
 # get_plot_image
