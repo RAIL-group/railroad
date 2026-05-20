@@ -55,34 +55,96 @@ def get_cases_per_page() -> int:
 
 
 class StatusBarColumn(BarColumn):
-    """Custom bar column that changes color based on task status."""
+    """Segmented bar coloured by per-status counts on the task.
+
+    Reads ``success_count`` / ``failure_count`` / ``error_count`` /
+    ``timeout_count`` from ``task.fields`` and draws each as a proportional
+    block. The unfinished portion is shown dim. If the producer has not yet
+    pushed any counts (e.g. before the first task completes) the bar falls
+    back to a plain blue completed / dim remaining rendering driven by
+    ``task.completed`` and ``task.total``.
+    """
+
+    # Order chosen so the eye reads: good → degraded → bad.
+    _SEGMENT_ORDER = ("success", "error", "failure", "timeout")
+    _SEGMENT_STYLES = {
+        "success": Style(color="dodger_blue1"),
+        "error": Style(color="red3", bold=True),
+        "failure": Style(color="red3"),
+        "timeout": Style(color="yellow"),
+    }
+    _PENDING_STYLE = Style(color="bright_black")
+    _IN_PROGRESS_STYLE = Style(color="dodger_blue1")
 
     def __init__(self):
-        super().__init__(
-            complete_style="blue",  # Default in-progress color
-            finished_style="green",  # Default finished color
-        )
+        super().__init__()
 
     def render(self, task: "ProgressTask"):
-        """Render bar with dynamic color based on status."""
-        # Check if task has failure status
-        has_failures = task.fields.get("has_failures", False)
-        is_finished = task.finished
+        width = self.bar_width if isinstance(self.bar_width, int) else 40
+        total = int(task.total) if task.total else 0
+        if total <= 0 or width <= 0:
+            return Text(" " * max(width, 0))
 
-        if has_failures:
-            # Turn red immediately when failure detected (like PyTorch)
-            self.complete_style = Style(color="red")
-            self.finished_style = Style(color="red")
-        elif is_finished:
-            # Green for successful completion
-            self.complete_style = Style(color="green")
-            self.finished_style = Style(color="green")
-        else:
-            # Blue while in progress with no failures
-            self.complete_style = Style(color="blue")
-            self.finished_style = Style(color="blue")
+        counts = {
+            name: int(task.fields.get(f"{name}_count", 0))
+            for name in self._SEGMENT_ORDER
+        }
+        done = sum(counts.values())
 
-        return super().render(task)
+        if done == 0:
+            # No per-status info yet: fall back to a simple completed/pending
+            # bar so something animates while the first task is running.
+            in_progress = min(int(task.completed or 0), total)
+            n_done = int(round(in_progress / total * width))
+            bar = Text()
+            bar.append("━" * n_done, style=self._IN_PROGRESS_STYLE)
+            bar.append("━" * (width - n_done), style=self._PENDING_STYLE)
+            return bar
+
+        # Cells per status, proportional to its share of total. Floor first,
+        # then hand out leftover cells (from rounding) to the largest
+        # fractional remainders so the completed portion fills exactly
+        # round(done/total * width) cells.
+        target_done_cells = int(round(done / total * width))
+        target_done_cells = min(target_done_cells, width)
+        raw = {k: counts[k] / total * width for k in self._SEGMENT_ORDER}
+        cells = {k: int(raw[k]) for k in self._SEGMENT_ORDER}
+        # A status with a non-zero count should be visible if any segment will be.
+        for k in self._SEGMENT_ORDER:
+            if counts[k] > 0 and cells[k] == 0 and target_done_cells > sum(cells.values()):
+                cells[k] = 1
+        leftover = target_done_cells - sum(cells.values())
+        if leftover > 0:
+            remainders = sorted(
+                ((raw[k] - cells[k], k) for k in self._SEGMENT_ORDER),
+                reverse=True,
+            )
+            i = 0
+            while leftover > 0 and i < len(remainders):
+                cells[remainders[i][1]] += 1
+                leftover -= 1
+                i += 1
+        elif leftover < 0:
+            # Over-allocated: trim from the smallest visible segments.
+            shrinkables = sorted(
+                ((cells[k], k) for k in self._SEGMENT_ORDER if cells[k] > 0)
+            )
+            i = 0
+            while leftover < 0 and shrinkables:
+                _, k = shrinkables[i % len(shrinkables)]
+                if cells[k] > 0:
+                    cells[k] -= 1
+                    leftover += 1
+                i += 1
+
+        bar = Text()
+        for k in self._SEGMENT_ORDER:
+            if cells[k] > 0:
+                bar.append("━" * cells[k], style=self._SEGMENT_STYLES[k])
+        pending = width - sum(cells[k] for k in self._SEGMENT_ORDER)
+        if pending > 0:
+            bar.append("━" * pending, style=self._PENDING_STYLE)
+        return bar
 
 
 class CompactTimeRemainingColumn(ProgressColumn):
@@ -126,11 +188,11 @@ class BenchmarkStatsColumn(ProgressColumn):
             stats = self.case_stats[case_key]
             parts = []
             if stats["success"] > 0:
-                parts.append(f"[green]✓{stats['success']}[/green]")
+                parts.append(f"[dodger_blue1]✓{stats['success']}[/dodger_blue1]")
             if stats["error"] > 0:
-                parts.append(f"[red bold]⚠{stats['error']}[/red bold]")
+                parts.append(f"[red3 bold]⚠{stats['error']}[/red3 bold]")
             if stats["failure"] > 0:
-                parts.append(f"[red]✗{stats['failure']}[/red]")
+                parts.append(f"[red3]✗{stats['failure']}[/red3]")
             if stats["timeout"] > 0:
                 parts.append(f"[yellow]⏱{stats['timeout']}[/yellow]")
 
@@ -158,11 +220,11 @@ class BenchmarkStatsColumn(ProgressColumn):
                 stats = self.benchmark_stats[benchmark_name]
                 parts = []
                 if stats["success"] > 0:
-                    parts.append(f"[green]✓{stats['success']}[/green]")
+                    parts.append(f"[dodger_blue1]✓{stats['success']}[/dodger_blue1]")
                 if stats["error"] > 0:
-                    parts.append(f"[orange1]⚠{stats['error']}[/orange1]")
+                    parts.append(f"[red3 bold]⚠{stats['error']}[/red3 bold]")
                 if stats["failure"] > 0:
-                    parts.append(f"[red]✗{stats['failure']}[/red]")
+                    parts.append(f"[red3]✗{stats['failure']}[/red3]")
                 if stats["timeout"] > 0:
                     parts.append(f"[yellow]⏱{stats['timeout']}[/yellow]")
 
@@ -533,9 +595,9 @@ class ProgressDisplay:
         # Stats table
         stats_table = Table.grid(padding=(0, 2))
         stats_table.add_row(
-            f"[green]Success: {self.stats['success']}[/green]",
-            f"[red bold]Errors: {self.stats['error']}[/red bold]",
-            f"[red]Failed: {self.stats['failure']}[/red]",
+            f"[dodger_blue1]Success: {self.stats['success']}[/dodger_blue1]",
+            f"[red3 bold]Errors: {self.stats['error']}[/red3 bold]",
+            f"[red3]Failed: {self.stats['failure']}[/red3]",
             f"[yellow]Timeout: {self.stats['timeout']}[/yellow]",
             f"[dim]Workers: {self.running_tasks}/{self.num_workers}[/dim]",
         )
@@ -581,11 +643,11 @@ class ProgressDisplay:
         # Format stats
         result_parts = []
         if case_stats["success"] > 0:
-            result_parts.append(f"[green]✓{case_stats['success']}[/green]")
+            result_parts.append(f"[dodger_blue1]✓{case_stats['success']}[/dodger_blue1]")
         if case_stats["error"] > 0:
-            result_parts.append(f"[red bold]⚠{case_stats['error']}[/red bold]")
+            result_parts.append(f"[red3 bold]⚠{case_stats['error']}[/red3 bold]")
         if case_stats["failure"] > 0:
-            result_parts.append(f"[red]✗{case_stats['failure']}[/red]")
+            result_parts.append(f"[red3]✗{case_stats['failure']}[/red3]")
         if case_stats["timeout"] > 0:
             result_parts.append(f"[yellow]⏱{case_stats['timeout']}[/yellow]")
 
@@ -649,7 +711,7 @@ class ProgressDisplay:
 
         # Print header for errors
         self.console.print()
-        self.console.print("[red bold]Errors:[/red bold]")
+        self.console.print("[red3 bold]Errors:[/red3 bold]")
 
         for task in error_tasks_to_print:
             # Format task identifier
@@ -659,12 +721,12 @@ class ProgressDisplay:
             param_str = ", ".join(param_parts)
 
             self.console.print(
-                f"\n  [red bold]⚠[/red bold] Case {task.case_idx}, Repeat {task.repeat_idx}: {param_str}"
+                f"\n  [red3 bold]⚠[/red3 bold] Case {task.case_idx}, Repeat {task.repeat_idx}: {param_str}"
             )
 
             # Print error message
             if task.error:
-                self.console.print(f"    [red]Error: {task.error}[/red]")
+                self.console.print(f"    [red3]Error: {task.error}[/red3]")
 
             # Print stderr if available
             if task.stderr:
@@ -744,6 +806,17 @@ class ProgressDisplay:
 
         self.console.print()
 
+    @staticmethod
+    def _sync_segment_counts(progress: Progress, task_id, stats: dict) -> None:
+        """Push per-status counts onto a progress task for segmented rendering."""
+        progress.update(
+            task_id,
+            success_count=stats.get("success", 0),
+            failure_count=stats.get("failure", 0),
+            error_count=stats.get("error", 0),
+            timeout_count=stats.get("timeout", 0),
+        )
+
     def mark_task_started(self, task: Task) -> None:
         """
         Mark a task as started.
@@ -811,24 +884,25 @@ class ProgressDisplay:
                 self.stats["failure"] += 1
                 self.benchmark_stats[benchmark_name]["failure"] += 1
                 self.case_stats[case_key]["failure"] += 1
-
-            # Mark tasks as having failures for red bar color
-            self.overall_progress.update(self.overall_task, has_failures=True)
-            if benchmark_progress and benchmark_task_id is not None:
-                benchmark_progress.update(benchmark_task_id, has_failures=True)
-            if benchmark_progress and case_task_id is not None:
-                benchmark_progress.update(case_task_id, has_failures=True)
         elif task.status == TaskStatus.TIMEOUT:
             self.stats["timeout"] += 1
             self.benchmark_stats[benchmark_name]["timeout"] += 1
             self.case_stats[case_key]["timeout"] += 1
 
-            # Mark tasks as having failures for red bar color
-            self.overall_progress.update(self.overall_task, has_failures=True)
-            if benchmark_progress and benchmark_task_id is not None:
-                benchmark_progress.update(benchmark_task_id, has_failures=True)
-            if benchmark_progress and case_task_id is not None:
-                benchmark_progress.update(case_task_id, has_failures=True)
+        # Push counts to each bar so StatusBarColumn can render its segments.
+        self._sync_segment_counts(
+            self.overall_progress, self.overall_task, self.stats
+        )
+        if benchmark_progress is not None and benchmark_task_id is not None:
+            self._sync_segment_counts(
+                benchmark_progress,
+                benchmark_task_id,
+                self.benchmark_stats[benchmark_name],
+            )
+        if benchmark_progress is not None and case_task_id is not None:
+            self._sync_segment_counts(
+                benchmark_progress, case_task_id, self.case_stats[case_key]
+            )
 
         # Track aggregate metrics for cases (wall_time and plan_cost)
         if task.wall_time is not None:
