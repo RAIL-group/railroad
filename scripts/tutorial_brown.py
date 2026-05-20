@@ -29,18 +29,18 @@ def tutorial_main(bcase: BenchmarkCase) -> dict:
         "C": np.array([1, 2]),
         "D": np.array([1, 10]),
     }
-    robots = ["rover"]
+    objects_by_type = {
+        "robot": set(["rover"]),
+        "location": set(locations.keys()),
+        "object": {"supplies", "crate"},
+    }
+
     initial_fluents = {
         F("at rover start"), F("free rover"),
         F("at supplies B"),
     }
     goal = F("at supplies A")
 
-    objects_by_type = {
-        "robot": set(robots),
-        "location": set(locations.keys()),
-        "object": {"supplies", "crate"},
-    }
 
     # Define the operators
     def move_time(robot, loc_from, loc_to):
