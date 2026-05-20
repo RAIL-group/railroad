@@ -16,7 +16,7 @@ from railroad.environment.skill import (
 )
 from railroad.environment.symbolic import LocationRegistry, SymbolicEnvironment
 from railroad.environment.types import Pose
-from railroad.navigation.constants import OBSTACLE_THRESHOLD, UNOBSERVED_VAL
+from railroad.navigation.constants import FREE_VAL, OBSTACLE_THRESHOLD, UNOBSERVED_VAL
 from railroad.navigation import OccupancyGridPathingMixin
 
 from . import laser, mapping
@@ -68,6 +68,7 @@ class UnknownSpaceEnvironment(OccupancyGridPathingMixin, SymbolicEnvironment):
         self._observed_grid = UNOBSERVED_VAL * np.ones_like(true_grid)
         self._robot_poses: Dict[str, Pose] = dict(robot_initial_poses)
         self._hidden_sites: Dict[str, Tuple[int, int]] = dict(hidden_sites or {})
+        self._registered_hidden_sites: Set[str] = set()
         self._frontiers: Dict[str, Frontier] = {}
         self._frames: list[np.ndarray] = []
         self._grid_generation: int = 0  # bumped when observed_grid changes
@@ -103,6 +104,7 @@ class UnknownSpaceEnvironment(OccupancyGridPathingMixin, SymbolicEnvironment):
         self.observe_all_robots(time=state.time, allow_interrupt=False)
         self.refresh_frontiers()
         self.sync_dynamic_targets()
+        self._sync_hidden_sites()
 
     @property
     def state(self) -> State:
@@ -148,6 +150,35 @@ class UnknownSpaceEnvironment(OccupancyGridPathingMixin, SymbolicEnvironment):
         self._objects_by_type.setdefault("location", set()).add(name)
         if coords is not None and self._location_registry is not None:
             self._location_registry.register(name, np.asarray(coords, dtype=float))
+
+    def _snap_to_known_free_cell(self, row: int, col: int) -> tuple[int, int]:
+        """Snap a map coordinate to the nearest observed free cell."""
+        grid = self._observed_grid
+        r = max(0, min(int(row), grid.shape[0] - 1))
+        c = max(0, min(int(col), grid.shape[1] - 1))
+        if FREE_VAL <= float(grid[r, c]) < OBSTACLE_THRESHOLD:
+            return r, c
+        free_coords = np.argwhere(
+            (grid >= FREE_VAL) & (grid < OBSTACLE_THRESHOLD)
+        )
+        if free_coords.size == 0:
+            return r, c
+        deltas = free_coords - np.array([r, c], dtype=int)
+        nearest_idx = int(np.argmin(np.sum(deltas * deltas, axis=1)))
+        nearest = free_coords[nearest_idx]
+        return int(nearest[0]), int(nearest[1])
+
+    def _sync_hidden_sites(self) -> None:
+        """Expose hidden sites whose map cells have been observed."""
+        for site, (row, col) in self._hidden_sites.items():
+            if site in self._registered_hidden_sites:
+                continue
+            if self.is_cell_observed(row, col):
+                self.register_discovered_location(
+                    site, self._snap_to_known_free_cell(row, col)
+                )
+                self._objects_by_type.setdefault("container", set()).add(site)
+                self._registered_hidden_sites.add(site)
 
     # ------------------------------------------------------------------
     # Observation
@@ -362,6 +393,28 @@ class UnknownSpaceEnvironment(OccupancyGridPathingMixin, SymbolicEnvironment):
             return False
         return float(self._observed_grid[row, col]) != UNOBSERVED_VAL
 
+    def estimate_move_time_safe(
+        self, robot: str, loc_from: str, loc_to: str
+    ) -> float:
+        """Estimate move time with a Euclidean fallback for unreachable pairs.
+
+        Returns the cost-grid path time when reachable in the observed grid;
+        otherwise falls back to a registry-Euclidean estimate so the planner
+        receives a finite cost for hypothetical moves (reachability of the
+        actually-dispatched move is still enforced by ``_is_valid_action``).
+        """
+        t = self.estimate_move_time(robot, loc_from, loc_to)
+        if np.isfinite(t):
+            return t
+        registry = self._location_registry
+        speed = self._config.speed_cells_per_sec
+        if registry is not None:
+            c_from = registry.get(loc_from)
+            c_to = registry.get(loc_to)
+            if c_from is not None and c_to is not None:
+                return float(np.linalg.norm(c_to - c_from)) / max(speed, 1e-6)
+        return 5.0
+
     # ------------------------------------------------------------------
     # Interrupt hooks (override base Environment)
     # ------------------------------------------------------------------
@@ -429,6 +482,7 @@ class UnknownSpaceEnvironment(OccupancyGridPathingMixin, SymbolicEnvironment):
             pose = self._robot_poses.get(robot)
             if pose is not None:
                 self.observe_from_pose(robot, pose, advanced_to_time, allow_interrupt=True)
+        self._sync_hidden_sites()
 
     # ------------------------------------------------------------------
     # Skill creation (override SymbolicEnvironment)
@@ -462,8 +516,9 @@ class UnknownSpaceEnvironment(OccupancyGridPathingMixin, SymbolicEnvironment):
     # ------------------------------------------------------------------
 
     def act(self, action, loop_callback_fn=None):
-        """Execute action, then sync frontiers and dynamic targets."""
+        """Execute action, then sync frontiers, dynamic targets, and hidden sites."""
         result = super().act(action, loop_callback_fn=loop_callback_fn)
         self.refresh_frontiers()
         self.sync_dynamic_targets()
+        self._sync_hidden_sites()
         return result

@@ -49,7 +49,6 @@ def main(
         construct_search_at_site_operator,
         construct_search_frontier_operator,
     )
-    from railroad.navigation.constants import FREE_VAL, OBSTACLE_THRESHOLD
     from railroad.environment.symbolic import LocationRegistry
     from railroad.operators import construct_no_op_operator
     from railroad.planner import MCTSPlanner
@@ -74,48 +73,15 @@ def main(
     # Operators
     # ------------------------------------------------------------------
 
-    # Use a ref so the move-time closure can access env after construction
+    # The move operator's time function needs the env, which doesn't exist
+    # yet. Defer the binding through env_ref and use the env's safe
+    # estimator (Euclidean fallback for unreachable hypotheticals).
     env_ref: list[UnknownSpaceEnvironment | None] = [None]
-    unreachable_move_penalty = 1_000_000.0
-
-    def snap_to_known_free_cell(row: int, col: int) -> tuple[int, int]:
-        """Snap a map coordinate to the nearest observed free cell."""
-        if env_ref[0] is None:
-            return row, col
-        grid = env_ref[0].observed_grid
-        r = max(0, min(int(row), grid.shape[0] - 1))
-        c = max(0, min(int(col), grid.shape[1] - 1))
-
-        if FREE_VAL <= float(grid[r, c]) < OBSTACLE_THRESHOLD:
-            return r, c
-
-        free_coords = np.argwhere(
-            (grid >= FREE_VAL) & (grid < OBSTACLE_THRESHOLD)
-        )
-        if free_coords.size == 0:
-            return r, c
-
-        deltas = free_coords - np.array([r, c], dtype=int)
-        nearest_idx = int(np.argmin(np.sum(deltas * deltas, axis=1)))
-        nearest = free_coords[nearest_idx]
-        return int(nearest[0]), int(nearest[1])
 
     def move_time_fn(robot: str, loc_from: str, loc_to: str) -> float:
-        if env_ref[0] is not None:
-            move_time = env_ref[0].estimate_move_time(robot, loc_from, loc_to)
-            if np.isinf(move_time):
-                if F("at", robot, loc_from) in env_ref[0].fluents:
-                    return unreachable_move_penalty
-                registry = env_ref[0].location_registry
-                speed = env_ref[0].config.speed_cells_per_sec
-                if registry is not None:
-                    c_from = registry.get(loc_from)
-                    c_to = registry.get(loc_to)
-                    if c_from is not None and c_to is not None:
-                        return float(np.linalg.norm(c_to - c_from)) / max(speed, 1e-6)
-                return 5.0
-            return move_time
-        return 5.0
+        if env_ref[0] is None:
+            return 5.0
+        return env_ref[0].estimate_move_time_safe(robot, loc_from, loc_to)
 
     def search_frontier_prob_fn(robot: str, frontier: str, obj: str) -> float:
         return 0.5
@@ -196,15 +162,6 @@ def main(
     env.scene = scene  # type: ignore[attr-defined]  # ty: ignore[unresolved-attribute]  # expose to dashboard for overhead map
     env_ref[0] = env
 
-    def sync_known_hidden_sites() -> None:
-        """Expose hidden containers only after their map cells are observed."""
-        for site, (row, col) in hidden_sites.items():
-            if env.is_cell_observed(row, col):
-                env.register_discovered_location(site, snap_to_known_free_cell(row, col))
-                env.objects_by_type.setdefault("container", set()).add(site)
-
-    sync_known_hidden_sites()
-
     # ------------------------------------------------------------------
     # Planning loop
     # ------------------------------------------------------------------
@@ -244,7 +201,6 @@ def main(
 
             action = get_action_by_name(actions, action_name)
             env.act(action, loop_callback_fn=act_callback)
-            sync_known_hidden_sites()
             dashboard.update(mcts, action_name)
 
     dashboard.show_plots(

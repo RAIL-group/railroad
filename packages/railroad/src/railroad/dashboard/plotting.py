@@ -355,17 +355,24 @@ class _PlottingMixin:
             if len(waypoints) < 2:
                 continue
 
-            # Get original positions for location markers/labels
+            # Get original positions for location markers/labels.
+            # Skip frontiers: they're transient exploration targets, not
+            # persistent landmarks worth marking on the trajectory.
             positions = self._entity_positions[entity]
-            location_waypoints: list[tuple[float, float]] = []
+            annotated_locs: list[tuple[str, tuple[float, float]]] = []
             for _, loc_name, stored_coords in positions:
+                if loc_name.startswith("frontier_"):
+                    continue
                 if stored_coords is not None:
-                    location_waypoints.append(stored_coords)
+                    annotated_locs.append((loc_name, stored_coords))
                 elif loc_name in env_coords:
-                    location_waypoints.append(env_coords[loc_name])
+                    annotated_locs.append((loc_name, env_coords[loc_name]))
 
-            wx = [p[0] for p in location_waypoints]
-            wy = [p[1] for p in location_waypoints]
+            if not annotated_locs:
+                continue
+
+            wx = [c[0] for _, c in annotated_locs]
+            wy = [c[1] for _, c in annotated_locs]
             ax.scatter(wx, wy, s=20, zorder=6, color="black")
 
             ax.annotate(
@@ -373,13 +380,12 @@ class _PlottingMixin:
                 fontsize=7, fontweight="bold", color="brown",
             )
 
-            for i, (_, loc_name, _) in enumerate(positions):
-                if i < len(location_waypoints):
-                    ax.annotate(
-                        loc_name, location_waypoints[i],
-                        fontsize=5, color="brown",
-                        xytext=(3, 3), textcoords="offset points",
-                    )
+            for loc_name, coord in annotated_locs:
+                ax.annotate(
+                    loc_name, coord,
+                    fontsize=5, color="brown",
+                    xytext=(3, 3), textcoords="offset points",
+                )
 
         # Draw one combined scatter for all robot trails, sorted by time
         if trail is not None:
@@ -755,13 +761,15 @@ class _PlottingMixin:
             frame_times, location_coords=location_coords,
         )
 
-        # Static background: location markers + labels
+        # Static background: location markers + labels (skip transient frontiers)
         plotted_locs: set[str] = set()
         for positions in self._entity_positions.values():
             for _, loc_name, stored_coords in positions:
                 if loc_name in plotted_locs:
                     continue
                 plotted_locs.add(loc_name)
+                if loc_name.startswith("frontier_"):
+                    continue
                 coord = stored_coords if stored_coords is not None else env_coords.get(loc_name)
                 if coord is not None:
                     ax.plot(coord[0], coord[1], "ks", markersize=4, zorder=4)
