@@ -27,3 +27,4 @@ mlruns
 mlflow.db
 .worktrees/
 .benchmark_cache/
+/scripts/.ipynb_checkpoints/
