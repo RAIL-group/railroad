@@ -15,9 +15,20 @@ from railroad._bindings import (
     LiteralGoal,
     Action,
     Fluent,
-    get_relaxed_expected_cost,
-    get_achievers_for_fluent,
+    extract_cheapest_relaxed_plan,
 )
+
+from railroad.planner import (
+    MCTSPlanner,
+    convert_state_to_positive_preconditions,
+    convert_goal_to_positive_preconditions,
+    _normalize_goal,
+)
+
+def _clean_fluent_str(f_str: str) -> str:
+    if f_str.startswith("(not-"):
+        return "(not " + f_str[5:]
+    return f_str
 
 class HeuristicContextBuilder:
     """
@@ -27,82 +38,69 @@ class HeuristicContextBuilder:
     def __init__(self, fluent_filter: Callable[[Fluent], bool] | None = None):
         self.fluent_filter = fluent_filter
 
-    def build_context(self, state: State, goal: Union[Goal, Fluent], actions: list[Action], top_k_achievers: int = 3) -> dict[str, Any]:
+    def _extract_relaxed_plan(self, state: State, goal: Union[Goal, Fluent], all_actions: list[Action]) -> list[dict[str, Any]]:
+        if isinstance(goal, Fluent):
+            goal = LiteralGoal(goal)
+            
+        raw_plan = extract_cheapest_relaxed_plan(state, goal, all_actions)
+        
+        relaxed_plan = []
+        for step in raw_plan:
+            achieves_fluent, action_name, exec_cost, wait_cost, preconds = step
+            relaxed_plan.append({
+                "achieves_fluent": _clean_fluent_str(achieves_fluent),
+                "action": action_name,
+                "exec_cost": exec_cost,
+                "wait_cost": wait_cost,
+                "requires_preconditions": [_clean_fluent_str(p) for p in preconds]
+            })
+            
+        return relaxed_plan
+
+    def build_context(self, state: State, goal: Union[Goal, Fluent], actions: list[Action]) -> dict[str, Any]:
         """
         Build a dictionary containing the context for the LLM.
         """
-        context: dict[str, Any] = {
-            "current_time": state.time,
-        }
+        # Preprocess to handle negative fluents correctly in the relaxed graph
+        mcts = MCTSPlanner(actions)
+        norm_goal = _normalize_goal(goal)
+        mcts._ensure_mapping_includes_goal(norm_goal)
 
-        # Filter current state fluents
+        converted_state = convert_state_to_positive_preconditions(state, mcts._current_mapping)
+        converted_goal = convert_goal_to_positive_preconditions(norm_goal, mcts._current_mapping)
+        converted_actions = mcts._converted_actions
+
         current_fluents = state.fluents
         if self.fluent_filter:
             current_fluents = {f for f in current_fluents if self.fluent_filter(f)}
+
+        goal_str = str(goal)
+        if isinstance(goal, LiteralGoal):
+            goal_str = str(goal.fluent())
+        elif isinstance(goal, Fluent):
+            goal_str = str(goal)
+
+        plan = self._extract_relaxed_plan(converted_state, converted_goal, converted_actions)
+        plan.reverse()
         
-        context["current_fluents"] = [str(f) for f in current_fluents]
+        filtered_plan = []
+        for step in plan:
+            if "no_op" in step["action"] and step["wait_cost"] == 0:
+                continue
+            filtered_plan.append(step)
 
-        # Normalize goal input to a Goal object
-        if isinstance(goal, Fluent):
-            goal = LiteralGoal(goal)
+        return {
+            "current_time": state.time,
+            "current_fluents": [_clean_fluent_str(str(f)) for f in current_fluents],
+            "goal": _clean_fluent_str(goal_str),
+            "cheapest_relaxed_plan": filtered_plan
+        }
 
-        # Get DNF branches and find missing fluents
-        branches = goal.get_dnf_branches()
-        branch_contexts = []
-        
-        for branch_fluents in branches:
-            missing_fluents = [f for f in branch_fluents if f not in state.fluents]
-            
-            branch_info = {
-                "branch_fluents": [str(f) for f in branch_fluents],
-                "missing_fluents": [],
-            }
-
-            for f in missing_fluents:
-                # 1. Expected relaxed cost
-                cost = get_relaxed_expected_cost(state, f, actions)
-                is_reachable = cost != float("inf")
-
-                # 2. Achievers
-                raw_achievers = get_achievers_for_fluent(state, f, actions)
-                
-                # Sort achievers by attempt cost (wait_cost + exec_cost)
-                # achiever tuple: (action_name, wait_cost, exec_cost, probability)
-                sorted_achievers = sorted(
-                    raw_achievers,
-                    key=lambda a: a[1] + a[2]
-                )
-                
-                # Take top K
-                top_achievers = [
-                    {
-                        "action_name": a[0],
-                        "wait_cost": a[1],
-                        "exec_cost": a[2],
-                        "probability": a[3],
-                    }
-                    for a in sorted_achievers[:top_k_achievers]
-                ]
-
-                fluent_info = {
-                    "fluent": str(f),
-                    "expected_cost": cost if is_reachable else None,
-                    "is_reachable": is_reachable,
-                    "top_achievers": top_achievers,
-                }
-                branch_info["missing_fluents"].append(fluent_info)
-            
-            branch_contexts.append(branch_info)
-        
-        context["goal_branches"] = branch_contexts
-
-        return context
-
-    def to_json(self, state: State, goal: Union[Goal, Fluent], actions: list[Action], top_k_achievers: int = 3) -> str:
+    def to_json(self, state: State, goal: Union[Goal, Fluent], actions: list[Action], **kwargs) -> str:
         """
         Returns a JSON string of the context.
         """
-        context = self.build_context(state, goal, actions, top_k_achievers)
+        context = self.build_context(state, goal, actions)
         return json.dumps(context, indent=2)
 
 
