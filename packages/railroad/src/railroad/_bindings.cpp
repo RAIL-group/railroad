@@ -4,6 +4,7 @@
 #include "railroad/goal.hpp"
 #include "railroad/planner.hpp"
 #include "railroad/state.hpp"
+#include "railroad/relaxed_plan_extractor.hpp"
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -620,4 +621,13 @@ PYBIND11_MODULE(_bindings, m) {
         },
         "Compute deterministic FF heuristic value (classic fast-forward, no probabilistic adjustments)",
         py::arg("state"), py::arg("goal"), py::arg("all_actions"));
+
+  // Extract cheapest relaxed plan
+  m.def("extract_cheapest_relaxed_plan",
+        [](const State &state, const GoalPtr &goal,
+           const std::vector<Action> &all_actions) {
+          return extract_cheapest_relaxed_plan(state, goal.get(), all_actions);
+        },
+        "Extract the cheapest relaxed plan from the goal back to the initial state",
+        py::arg("input_state"), py::arg("goal"), py::arg("all_actions"));
 }
