@@ -117,6 +117,66 @@ def construct_search_at_site_operator(
     )
 
 
+def construct_explore_frontier_operator(
+    explore_time: OptNumeric = 5.0,
+    completion_prob: OptNumeric = 0.2,
+) -> Operator:
+    """Construct ``(explore ?robot ?frontier)`` for pure exploration.
+
+    Exploring a frontier may symbolically complete exploration with
+    probability ``completion_prob``. This sampled ``exploration-complete``
+    outcome is only a planning prior: after each action the environment's
+    ``refresh_frontiers()`` overwrites the fluent from the true frontier set,
+    so execution terminates exactly when no reachable frontiers remain.
+
+    Args:
+        explore_time: Time or function for the explore duration.
+            Function signature: (robot, frontier) -> float
+        completion_prob: Probability or function that exploring this frontier
+            completes exploration. Function signature: (robot, frontier) -> float
+
+    Returns:
+        Operator for exploring a frontier.
+    """
+    prob_fn = _to_numeric(completion_prob)
+    time_fn = _to_numeric(explore_time)
+
+    return Operator(
+        name="explore",
+        parameters=[("?r", "robot"), ("?f", "frontier")],
+        preconditions=[
+            F("at ?r ?f"),
+            F("free ?r"),
+            ~F("explored ?f"),
+            ~F("lock-explore ?f"),
+        ],
+        effects=[
+            Effect(
+                time=0,
+                resulting_fluents={F("not free ?r"), F("lock-explore ?f")},
+            ),
+            Effect(
+                time=(time_fn, ["?r", "?f"]),
+                resulting_fluents={
+                    F("free ?r"),
+                    F("explored ?f"),
+                    F("not lock-explore ?f"),
+                },
+                prob_effects=[
+                    (
+                        (prob_fn, ["?r", "?f"]),
+                        [Effect(time=0, resulting_fluents={F("exploration-complete")})],
+                    ),
+                    (
+                        (1 - prob_fn, ["?r", "?f"]),
+                        [],
+                    ),
+                ],
+            ),
+        ],
+    )
+
+
 def construct_search_frontier_operator(
     object_find_prob: OptNumeric,
     search_time: OptNumeric,

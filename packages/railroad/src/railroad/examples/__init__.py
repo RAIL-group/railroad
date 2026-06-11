@@ -104,6 +104,46 @@ EXAMPLES: Dict[str, ExampleInfo] = {
             },
         ],
     },
+    "visual-frontier-search": {
+        "main": _lazy_import("visual_frontier_search"),
+        "description": "Explore a maze or office world while collecting panoramic images (railsim)",
+        "options": [
+            {
+                "name": "--env",
+                "type": str,
+                "default": "maze",
+                "help": "World type: maze or office",
+                "param_name": "env_name",
+            },
+            {
+                "name": "--seed",
+                "type": int,
+                "default": None,
+                "help": "World generation seed",
+                "param_name": "seed",
+            },
+            {
+                "name": "--num-robots",
+                "default": 1,
+                "help": "Number of robots",
+                "param_name": "num_robots",
+            },
+            {
+                "name": "--save-pano-dir",
+                "type": str,
+                "default": None,
+                "help": "Directory to write collected panoramic images as PNGs",
+                "param_name": "save_pano_dir",
+            },
+            {
+                "name": "--allow-move-interruptions",
+                "is_flag": True,
+                "default": False,
+                "help": "Allow interruption of move skills",
+                "param_name": "allow_move_interruptions",
+            },
+        ],
+    },
 }
 
 # Only show procthor example if dependencies are installed
