@@ -18,6 +18,53 @@ Usage:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from railroad.environment.railsim import PanoRecord
+
+
+def _plot_onboard_images(
+    records: "list[PanoRecord]",
+    save_path: str | None = None,
+    show: bool = False,
+    max_images: int = 8,
+) -> None:
+    """Plot a time-sampled grid of panoramas captured onboard the robot(s)."""
+    import math
+
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    if not records or (save_path is None and not show):
+        return
+
+    indices = sorted(set(
+        np.linspace(0, len(records) - 1, min(max_images, len(records)))
+        .round().astype(int)
+    ))
+    sampled = [records[i] for i in indices]
+
+    ncols = 2 if len(sampled) > 1 else 1
+    nrows = math.ceil(len(sampled) / ncols)
+    fig, axes = plt.subplots(
+        nrows, ncols, figsize=(5.5 * ncols, 1.9 * nrows), squeeze=False
+    )
+    fig.suptitle("Onboard panoramas during exploration", fontsize=11)
+    for ax in axes.flat:
+        ax.axis("off")
+    for ax, rec in zip(axes.flat, sampled):
+        ax.imshow(rec.image)
+        ax.set_title(f"{rec.robot}  t={rec.time:.1f}s", fontsize=8)
+    fig.tight_layout()
+
+    if save_path is not None:
+        fig.savefig(save_path, dpi=150)
+        print(f"Saved onboard image plot to {save_path}")
+    if show:
+        plt.show()
+    plt.close(fig)
+
 
 def main(
     env_name: str = "maze",
@@ -266,6 +313,14 @@ def main(
         video_fps=video_fps,
         video_dpi=video_dpi,
     )
+
+    pano_plot_path = None
+    if save_plot is not None:
+        import os
+
+        stem, ext = os.path.splitext(save_plot)
+        pano_plot_path = f"{stem}_panos{ext or '.png'}"
+    _plot_onboard_images(env.pano_records, save_path=pano_plot_path, show=show_plot)
 
     scene.release()
 
