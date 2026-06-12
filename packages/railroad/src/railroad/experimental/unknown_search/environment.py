@@ -39,7 +39,7 @@ class UnknownSpaceEnvironment(OccupancyGridPathingMixin, SymbolicEnvironment):
         self,
         state: State,
         objects_by_type: Dict[str, Set[str]],
-        operators: List[Operator],
+        operators: List[Operator] | None,
         true_grid: np.ndarray,
         robot_initial_poses: Dict[str, Pose],
         location_registry: LocationRegistry,

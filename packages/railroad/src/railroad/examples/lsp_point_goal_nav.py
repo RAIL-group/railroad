@@ -2,26 +2,44 @@
 
 A robot must reach the scene's goal location through unknown space. The
 goal is treated like an object whose spatial location is known in
-advance: exploring a frontier may *reveal* it (with probability and
-durations from a property provider), and the robot then drives to it by
-following a real path on the observed map. The ``oracle`` provider
-computes frontier properties from the true map (per frontier, mask all
-other frontiers and check whether a path through it reaches the goal),
-while the ``optimistic`` provider uses fixed constants. Execution always
-resolves explore outcomes from the true map.
+advance: exploring a frontier may *reveal* it, and the robot then drives
+to it by following a real path on the observed map.
+
+How promising each frontier looks to the planner is set by a
+frontier-statistics estimator (``--frontier-statistics``):
+
+- ``oracle``: exact statistics from the true map (per frontier, mask all
+  other frontiers and check whether a path through it reaches the goal),
+- ``fixed-prior``: the same fixed constants for every frontier — no
+  oracle needed, as in a deployment.
+
+A learned model slots in the same way in code (no CLI flag until a
+trained model ships)::
+
+    from railroad.lsp import LearnedFrontierStatistics
+
+    env = LSPVisualEnvironment(
+        scene=scene,
+        frontier_statistics=LearnedFrontierStatistics(model),
+        ...,
+    )
+
+where ``model`` maps a batch of FrontierObservations (pano oriented at
+the frontier + egocentric frontier/goal locations — exactly what the
+training data stores) to FrontierStatistics. Regardless of estimator,
+*execution* always resolves explore outcomes from the true map.
 
 As the robot explores, every frontier is labeled against the true map
 and, whenever a frontier's label or best panoramic vantage changes, a
-training datum is written: the panorama rotated to look at the frontier,
-egocentric frontier/goal locations, the feasibility label, and the
-success or exploration costs.
+training datum is written (``--save-data-dir``); inspect the result with
+``railroad lsp inspect-data``.
 
 Rendering needs a working OpenGL context (CGL on macOS, GLX/EGL on
 Linux). Set ``RAILSIM_GL_BACKEND`` to pin a backend.
 
 Usage:
     uv run railroad example lsp-point-goal-nav
-    uv run railroad example lsp-point-goal-nav --env office --provider optimistic
+    uv run railroad example lsp-point-goal-nav --env office --frontier-statistics fixed-prior
     uv run railroad example lsp-point-goal-nav --save-data-dir data/lsp
 """
 
@@ -31,8 +49,8 @@ from __future__ import annotations
 def main(
     env_name: str = "maze",
     seed: int | None = None,
-    provider_name: str = "oracle",
-    optimistic_prob: float = 0.8,
+    frontier_statistics_name: str = "oracle",
+    prior_prob: float = 0.8,
     save_data_dir: str | None = None,
     allow_move_interruptions: bool = False,
     save_plot: str | None = None,
@@ -48,21 +66,12 @@ def main(
     from railroad.core import Fluent as F, get_action_by_name
     from railroad.dashboard import PlannerDashboard
     from railroad.environment.symbolic import LocationRegistry
-    from railroad.experimental.unknown_search import (
-        NavigationConfig,
-        Pose,
-    )
-    from railroad.experimental.unknown_search.operators import (
-        construct_move_navigable_operator,
-    )
+    from railroad.experimental.unknown_search import NavigationConfig, Pose
     from railroad.lsp import (
-        OptimisticFrontierPropertyProvider,
-        OracleFrontierPropertyProvider,
+        FixedPriorFrontierStatistics,
+        OracleFrontierStatistics,
         TrainingDataWriter,
-        construct_lsp_explore_operator,
-        construct_move_to_goal_operator,
     )
-    from railroad.operators import construct_no_op_operator
     from railroad.planner import MCTSPlanner
 
     try:
@@ -80,10 +89,6 @@ def main(
 
     if env_name not in ("maze", "office"):
         raise ValueError(f"Unknown --env {env_name!r}; expected 'maze' or 'office'")
-    if provider_name not in ("oracle", "optimistic"):
-        raise ValueError(
-            f"Unknown --provider {provider_name!r}; expected 'oracle' or 'optimistic'"
-        )
 
     scene_seed = seed if seed is not None else 2024
     print(f"Generating {env_name} scene (seed={scene_seed})...")
@@ -104,75 +109,29 @@ def main(
     print(f"Start: {start_coord}  Goal: {goal_coord}")
 
     # ------------------------------------------------------------------
-    # Operators
+    # Frontier statistics: how promising each frontier looks when planning
     # ------------------------------------------------------------------
 
-    config = NavigationConfig(
-        sensor_range=60.0,
-        max_move_action_time=10_000.0,
-        interrupt_min_new_cells=30000,
-        interrupt_min_dt=30000.0,
-    )
-
-    # Both the move-time function and the oracle provider need the env,
-    # which doesn't exist yet; defer the binding through env_ref.
-    env_ref: list[LSPVisualEnvironment | None] = [None]
-
-    def move_time_fn(robot: str, loc_from: str, loc_to: str) -> float:
-        if env_ref[0] is None:
-            return 5.0
-        return env_ref[0].estimate_move_time_safe(robot, loc_from, loc_to)
-
-    def goal_move_time_fn(robot: str, loc_from: str, loc_to: str) -> float:
-        # Lower-bounded by the unseen-as-free path time to the known goal
-        # location, so the planner never sees a free ride to the goal.
-        if env_ref[0] is None:
-            return 5.0
-        return env_ref[0].estimate_goal_move_time(robot, loc_from, loc_to)
-
-    if provider_name == "oracle":
-        provider = OracleFrontierPropertyProvider(
-            lambda: env_ref[0].oracle_labels if env_ref[0] is not None else {}
-        )
-    else:
-        provider = OptimisticFrontierPropertyProvider(
-            prob_feasible=optimistic_prob,
+    if frontier_statistics_name == "oracle":
+        frontier_statistics = OracleFrontierStatistics()
+    elif frontier_statistics_name == "fixed-prior":
+        frontier_statistics = FixedPriorFrontierStatistics(
+            prob_feasible=prior_prob,
             delta_success_cost=0.0,
             exploration_cost=10.0,
         )
-
-    operators = [
-        construct_move_navigable_operator(move_time_fn),
-        construct_move_to_goal_operator(goal_move_time_fn),
-        construct_lsp_explore_operator(
-            provider, speed_cells_per_sec=config.speed_cells_per_sec
-        ),
-        construct_no_op_operator(no_op_time=300.0, extra_cost=100.0),
-    ]
+    else:
+        raise ValueError(
+            f"Unknown --frontier-statistics {frontier_statistics_name!r}; "
+            "expected 'oracle' or 'fixed-prior'"
+        )
 
     # ------------------------------------------------------------------
-    # Environment
+    # Environment (owns the operators: moves, lsp-explore, no-op)
     # ------------------------------------------------------------------
 
     robot = "robot1"
     start_name = "start_loc"
-
-    # The goal's coordinates are known in advance (the environment
-    # registers them), but it only becomes a movable destination once
-    # revealed — by observing its cell, or symbolically through the
-    # lsp-explore success branch during planning rollouts.
-    location_registry = LocationRegistry({
-        start_name: np.array(start_coord, dtype=float)
-    })
-
-    fluents = {
-        F(f"at {robot} {start_name}"),
-        F(f"free {robot}"),
-        F(f"revealed {start_name}"),
-    }
-    robot_initial_poses = {
-        robot: Pose(float(start_coord[0]), float(start_coord[1]), 0.0)
-    }
 
     if allow_move_interruptions:
         from railroad.environment.skill import InterruptibleNavigationMoveSkill
@@ -188,30 +147,40 @@ def main(
             run_metadata={
                 "env": env_name,
                 "seed": scene_seed,
-                "provider": provider_name,
+                "frontier_statistics": frontier_statistics_name,
                 "goal_cell": [int(goal_coord[0]), int(goal_coord[1])],
             },
         )
 
     env = LSPVisualEnvironment(
         scene=scene,
-        goal_cell=(int(goal_coord[0]), int(goal_coord[1])),
+        frontier_statistics=frontier_statistics,
         data_writer=data_writer,
-        state=State(0.0, fluents, []),
+        state=State(0.0, {
+            F(f"at {robot} {start_name}"),
+            F(f"free {robot}"),
+            F(f"revealed {start_name}"),
+        }, []),
         objects_by_type={
             "robot": {robot},
             "location": {start_name},
             "frontier": set(),
             "object": set(),
-            "goal": set(),  # populated by the environment with the goal name
         },
-        operators=operators,
         skill_overrides={'move': move_skill},
-        robot_initial_poses=robot_initial_poses,
-        location_registry=location_registry,
-        config=config,
+        robot_initial_poses={
+            robot: Pose(float(start_coord[0]), float(start_coord[1]), 0.0)
+        },
+        location_registry=LocationRegistry({
+            start_name: np.array(start_coord, dtype=float)
+        }),
+        config=NavigationConfig(
+            sensor_range=60.0,
+            max_move_action_time=10_000.0,
+            interrupt_min_new_cells=30000,
+            interrupt_min_dt=30000.0,
+        ),
     )
-    env_ref[0] = env
 
     # ------------------------------------------------------------------
     # Planning loop
