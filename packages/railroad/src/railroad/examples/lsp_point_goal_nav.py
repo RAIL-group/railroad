@@ -60,23 +60,12 @@ def main(
     video_dpi: int = 150,
 ) -> None:
     """Run point-goal navigation with LSP frontier actions."""
-    import numpy as np
-
-    from railroad._bindings import State
-    from railroad.core import Fluent as F, get_action_by_name
+    from railroad.core import get_action_by_name
     from railroad.dashboard import PlannerDashboard
-    from railroad.environment.symbolic import LocationRegistry
-    from railroad.experimental.unknown_search import NavigationConfig, Pose
-    from railroad.lsp import (
-        FixedPriorFrontierStatistics,
-        OracleFrontierStatistics,
-        TrainingDataWriter,
-    )
     from railroad.planner import MCTSPlanner
 
     try:
-        from railroad.environment.railsim import RailsimScene
-        from railroad.lsp.environment import LSPVisualEnvironment
+        from railroad.lsp.rollout import build_point_goal_setup
     except ImportError as e:
         raise ImportError(
             "railsim dependencies not installed. "
@@ -84,109 +73,30 @@ def main(
         ) from e
 
     # ------------------------------------------------------------------
-    # Setup: scene (grid + visual simulator)
+    # Setup: scene, frontier statistics, environment, data writer
     # ------------------------------------------------------------------
-
-    if env_name not in ("maze", "office"):
-        raise ValueError(f"Unknown --env {env_name!r}; expected 'maze' or 'office'")
 
     scene_seed = seed if seed is not None else 2024
     print(f"Generating {env_name} scene (seed={scene_seed})...")
-    if env_name == "maze":
-        scene = RailsimScene.maze(seed=scene_seed)
-    else:
-        from railroad.environment.railsim import OfficeConfig
+    setup = build_point_goal_setup(
+        env_name,
+        scene_seed,
+        frontier_statistics_name=frontier_statistics_name,
+        prior_prob=prior_prob,
+        save_data_dir=save_data_dir,
+        allow_move_interruptions=allow_move_interruptions,
+    )
+    scene, env, goal = setup.scene, setup.env, setup.goal
+    data_writer = setup.data_writer
 
-        scene = RailsimScene.office(
-            seed=scene_seed,
-            config=OfficeConfig(grid_size=(300, 200), num_hallways=4),
-        )
-
-    start_coord = scene.locations["start_loc"]
-    goal_coord = scene.locations["goal_loc"]
     print(f"Grid: {scene.grid.shape[0]}x{scene.grid.shape[1]} "
           f"({scene.resolution} m/cell)")
-    print(f"Start: {start_coord}  Goal: {goal_coord}")
-
-    # ------------------------------------------------------------------
-    # Frontier statistics: how promising each frontier looks when planning
-    # ------------------------------------------------------------------
-
-    if frontier_statistics_name == "oracle":
-        frontier_statistics = OracleFrontierStatistics()
-    elif frontier_statistics_name == "fixed-prior":
-        frontier_statistics = FixedPriorFrontierStatistics(
-            prob_feasible=prior_prob,
-            delta_success_cost=0.0,
-            exploration_cost=10.0,
-        )
-    else:
-        raise ValueError(
-            f"Unknown --frontier-statistics {frontier_statistics_name!r}; "
-            "expected 'oracle' or 'fixed-prior'"
-        )
-
-    # ------------------------------------------------------------------
-    # Environment (owns the operators: moves, lsp-explore, no-op)
-    # ------------------------------------------------------------------
-
-    robot = "robot1"
-    start_name = "start_loc"
-
-    if allow_move_interruptions:
-        from railroad.environment.skill import InterruptibleNavigationMoveSkill
-        move_skill = InterruptibleNavigationMoveSkill
-    else:
-        from railroad.environment.skill import NavigationMoveSkill
-        move_skill = NavigationMoveSkill
-
-    data_writer = None
-    if save_data_dir is not None:
-        data_writer = TrainingDataWriter(
-            save_data_dir,
-            run_metadata={
-                "env": env_name,
-                "seed": scene_seed,
-                "frontier_statistics": frontier_statistics_name,
-                "goal_cell": [int(goal_coord[0]), int(goal_coord[1])],
-            },
-        )
-
-    env = LSPVisualEnvironment(
-        scene=scene,
-        frontier_statistics=frontier_statistics,
-        data_writer=data_writer,
-        state=State(0.0, {
-            F(f"at {robot} {start_name}"),
-            F(f"free {robot}"),
-            F(f"revealed {start_name}"),
-        }, []),
-        objects_by_type={
-            "robot": {robot},
-            "location": {start_name},
-            "frontier": set(),
-            "object": set(),
-        },
-        skill_overrides={'move': move_skill},
-        robot_initial_poses={
-            robot: Pose(float(start_coord[0]), float(start_coord[1]), 0.0)
-        },
-        location_registry=LocationRegistry({
-            start_name: np.array(start_coord, dtype=float)
-        }),
-        config=NavigationConfig(
-            sensor_range=60.0,
-            max_move_action_time=10_000.0,
-            interrupt_min_new_cells=30000,
-            interrupt_min_dt=30000.0,
-        ),
-    )
+    print(f"Start: {scene.locations['start_loc']}  Goal: {setup.goal_cell}")
 
     # ------------------------------------------------------------------
     # Planning loop
     # ------------------------------------------------------------------
 
-    goal = F(f"at {robot} goal")
     max_iterations = 200
 
     def fluent_filter(f):  # noqa: ANN001
