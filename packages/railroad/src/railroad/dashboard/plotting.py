@@ -649,31 +649,53 @@ class _PlottingMixin:
         n_onboard = len(onboard_robots) if onboard_robots else 0
 
         fig = plt.figure(figsize=figsize)
-        n_rows = 2 if n_onboard else 1
-        height_ratios = [3, 1] if n_onboard else None
+        onboard_spec = None
+        onboard_stacked = False
         if has_overhead:
-            gs = GridSpec(n_rows, 3, width_ratios=[1, 2, 1], height_ratios=height_ratios,
-                         figure=fig,
-                         wspace=0.1, left=0.03, right=0.97, top=0.95, bottom=0.05)
-            overhead_ax = fig.add_subplot(gs[0, 0])
-            main_ax = fig.add_subplot(gs[0, 1])
-            sidebar_ax = fig.add_subplot(gs[0, 2])
+            if n_onboard:
+                # Onboard images stack in the left column, under the
+                # top-down view; main plot and sidebar span both rows.
+                gs = GridSpec(2, 3, width_ratios=[1, 2, 1],
+                             height_ratios=[3, n_onboard], figure=fig,
+                             wspace=0.1, left=0.03, right=0.97, top=0.95, bottom=0.05)
+                overhead_ax = fig.add_subplot(gs[0, 0])
+                main_ax = fig.add_subplot(gs[:, 1])
+                sidebar_ax = fig.add_subplot(gs[:, 2])
+                onboard_spec = gs[1, 0]
+                onboard_stacked = True
+            else:
+                gs = GridSpec(1, 3, width_ratios=[1, 2, 1], figure=fig,
+                             wspace=0.1, left=0.03, right=0.97, top=0.95, bottom=0.05)
+                overhead_ax = fig.add_subplot(gs[0, 0])
+                main_ax = fig.add_subplot(gs[0, 1])
+                sidebar_ax = fig.add_subplot(gs[0, 2])
             self._render_overhead(overhead_ax)
         else:
+            # No top-down view: onboard images go in a bottom row instead.
+            n_rows = 2 if n_onboard else 1
+            height_ratios = [3, 1] if n_onboard else None
             gs = GridSpec(n_rows, 2, width_ratios=[3, 1], height_ratios=height_ratios,
                          figure=fig,
                          wspace=0.1, left=0.05, right=0.97, top=0.95, bottom=0.05)
             main_ax = fig.add_subplot(gs[0, 0])
             sidebar_ax = fig.add_subplot(gs[0, 1])
+            if n_onboard:
+                onboard_spec = gs[1, :]
         sidebar_ax.set_axis_off()
 
         onboard_axes: dict[str, Any] = {}
-        if onboard_robots:
-            onboard_gs = GridSpecFromSubplotSpec(
-                1, n_onboard, subplot_spec=gs[1, :], wspace=0.05,
-            )
+        if onboard_robots and onboard_spec is not None:
+            if onboard_stacked:
+                onboard_gs = GridSpecFromSubplotSpec(
+                    n_onboard, 1, subplot_spec=onboard_spec, hspace=0.25,
+                )
+            else:
+                onboard_gs = GridSpecFromSubplotSpec(
+                    1, n_onboard, subplot_spec=onboard_spec, wspace=0.05,
+                )
             for i, robot in enumerate(onboard_robots):
-                onboard_ax = fig.add_subplot(onboard_gs[0, i])
+                index = (i, 0) if onboard_stacked else (0, i)
+                onboard_ax = fig.add_subplot(onboard_gs[index])
                 onboard_ax.set_axis_off()
                 onboard_axes[robot] = onboard_ax
 
