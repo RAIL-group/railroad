@@ -54,8 +54,7 @@ The package is layered so that everything below `render/` works without a GPU:
 
 | Module | Role |
 | --- | --- |
-| `environments/` | Procedural map generators (`guided_maze`, `office`) producing `MapData`: occupancy grid + semantic grid + start/goal. Pure numpy/scipy — no geometry or GL. |
-| `grid.py` | Occupancy-grid utilities (inflation, connectivity checks). |
+| `environments/` | Procedural map generators (`guided_maze`, `office`) producing `MapData`: occupancy grid + semantic grid + start/goal. Pure numpy/scipy — no geometry or GL. Occupancy-grid inflation and connectivity checks reuse `railroad.navigation.pathing`. |
 | `world.py`, `geometry.py` | `World`/`OccupancyGridWorld`: shapely-polygon world models built from occupancy grids, plus breadcrumb and ceiling-light placement. |
 | `scene.py` | Triangle-mesh construction from a `World` (walls, floor/ceiling, tables, breadcrumbs, light fixtures). Numpy only — no GL. |
 | `render/` | The only OpenGL code: context creation (`context.py`), the forward renderer with shadow maps (`renderer.py`, `shaders.py`, `camera.py`), and GPU equirectangular panorama resampling (`pano.py`). |
@@ -130,8 +129,7 @@ space ends ~`inflation_radius_m` short of the true walls; pass
 
 **Robot-aligned panoramas.** The center column of a panorama looks along the
 robot's heading, and moving right in the image turns clockwise — matching the
-left/right sense of a perspective image. (The old Unity sim aligned panos to
-world +x; `image_aligned_to_world` recovers that convention.)
+left/right sense of a perspective image.
 
 **Lazy GL, portable backends.** Constructing a `Simulator` (or a
 `RailsimScene`) never touches OpenGL; the context is created on the first
@@ -162,10 +160,10 @@ seed, but not bit-identical to the old maps). A `Palette` is a plain dict, so
 experiments can recolor any subset of the scene (or add colors for new object
 types) without touching scene code.
 
-**No hard dependency on the lab stack.** Grid utilities (`grid.py`) and the
-occupancy-grid-to-polygon conversion (`geometry.py`) are vendored from the old
-lab packages and updated for shapely 2.x, so railsim needs nothing outside
-PyPI.
+**No hard dependency on the lab stack.** The occupancy-grid-to-polygon
+conversion (`geometry.py`) is self-contained and built on shapely 2.x, and
+grid inflation/connectivity reuse `railroad.navigation.pathing`, so railsim
+needs nothing outside PyPI.
 
 ## Testing
 

@@ -26,7 +26,8 @@ import numpy as np
 import scipy.ndimage
 import skimage.graph
 
-from .. import grid as grid_utils
+from railroad.navigation.pathing import inflate_grid
+
 from .base import MapData
 from ..palette import Color, resolve_palette
 from ..pose import Pose
@@ -663,7 +664,7 @@ def _sample_start_end_cells(rng: np.random.Generator,
     cost >= ``min_start_goal_separation_cells`` (the old sim's
     ``get_start_goal_poses``)."""
     inflation_radius_cells = config.inflation_radius_m / config.resolution
-    inflated = grid_utils.inflate_grid(occ_grid, inflation_radius_cells)
+    inflated = inflate_grid(occ_grid, inflation_radius_cells)
     free_cells = np.argwhere(inflated < 0.5)
     if len(free_cells) < 2:
         raise RuntimeError("No free space to sample start/goal poses from.")

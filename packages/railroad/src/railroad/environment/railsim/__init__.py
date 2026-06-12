@@ -12,8 +12,7 @@ Coordinate convention (used everywhere, no exceptions):
   positive yaw rotates +x toward +y. The camera sits at ``z =
   config.camera_height`` with zero pitch and roll.
 - Panoramic images are robot-aligned: the center column looks along the
-  robot's heading. Use :func:`image_aligned_to_world` to recover the old
-  Unity-sim convention (center column along world +x).
+  robot's heading.
 
 Note: railroad environments (e.g. ``VisualUnknownSpaceEnvironment``) work in
 grid-cell units; ``RailsimScene.cell_pose_to_meters`` converts cell-space
@@ -43,11 +42,9 @@ __all__ = [
     "Simulator",
     "SimulatorConfig",
     "World",
-    "image_aligned_to_world",
     "make_guided_maze",
     "make_office",
     "resolve_palette",
-    "world_from_occupancy_grid",
 ]
 
 _INSTALL_MSG = (
@@ -94,11 +91,9 @@ _LAZY_EXPORTS = {
     "Simulator": (".simulator", "Simulator"),
     "SimulatorConfig": (".simulator", "SimulatorConfig"),
     "World": (".world", "World"),
-    "image_aligned_to_world": (".simulator", "image_aligned_to_world"),
     "make_guided_maze": (".environments", "make_guided_maze"),
     "make_office": (".environments", "make_office"),
     "resolve_palette": (".palette", "resolve_palette"),
-    "world_from_occupancy_grid": (".world", "world_from_occupancy_grid"),
 }
 
 

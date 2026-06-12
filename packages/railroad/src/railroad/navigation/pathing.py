@@ -77,6 +77,20 @@ def inflate_grid(
     return out
 
 
+def cells_connected(
+    grid: np.ndarray,
+    cell_a: tuple[int, int],
+    cell_b: tuple[int, int],
+    inflation_radius: float = 0.0,
+) -> bool:
+    """Whether two free cells remain connected after inflating obstacles."""
+    inflated = inflate_grid(grid, inflation_radius)
+    labels, _ = scipy.ndimage.label(inflated < OBSTACLE_THRESHOLD)
+    label_a = labels[cell_a]
+    label_b = labels[cell_b]
+    return bool(label_a != 0 and label_a == label_b)
+
+
 def build_traversal_costs(
     occupancy_grid: np.ndarray,
     use_soft_cost: bool = True,

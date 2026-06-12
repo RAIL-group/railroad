@@ -20,7 +20,8 @@ from typing import Mapping
 import numpy as np
 import skimage.graph
 
-from .. import grid as grid_utils
+from railroad.navigation.pathing import cells_connected
+
 from .base import MapData
 from ..palette import Color, resolve_palette
 from ..pose import Pose
@@ -188,10 +189,10 @@ def make_guided_maze(seed: int | None = None,
     start, goal = generator.sample_start_goal(map_data, seed=seed)
 
     inflation_radius_cells = config.inflation_radius_m / config.resolution
-    if not grid_utils.cells_connected(map_data.occ_grid,
-                                      map_data.start_cell,
-                                      map_data.end_cell,
-                                      inflation_radius_cells):
+    if not cells_connected(map_data.occ_grid,
+                           map_data.start_cell,
+                           map_data.end_cell,
+                           inflation_radius_cells):
         raise RuntimeError("Generated maze start/goal are not connected after inflation.")
 
     return map_data, start, goal

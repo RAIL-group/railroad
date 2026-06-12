@@ -21,7 +21,6 @@ class World:
     Attributes:
         obstacles: list of shapely polygons (includes the boundary).
         boundary: polygon defining the outer wall of the world.
-        known_space_poly: polygon of free space (boundary minus obstacles).
     """
 
     def __init__(self,
@@ -30,10 +29,6 @@ class World:
         self.boundary = boundary
         self._internal_obstacles = list(obstacles)
         self.obstacles = list(obstacles) + [boundary]
-        self.known_space_poly = boundary
-        for obs in self._internal_obstacles:
-            self.known_space_poly = self.known_space_poly.difference(obs)
-        self.area = self.known_space_poly.area
 
     @property
     def map_bounds(self) -> tuple[tuple[float, float], tuple[float, float]]:
@@ -188,12 +183,3 @@ def _generate_light_poses(occ_grid: np.ndarray,
             lights.append((float(xy[0]), float(xy[1])))
             accepted = np.vstack([accepted, xy])
     return lights
-
-
-def world_from_occupancy_grid(occ_grid: np.ndarray, resolution: float) -> World:
-    """Build a plain `World` (no breadcrumbs/semantics) from an occupancy
-    grid where 1 = occupied, 0 = free."""
-    free_space = (occ_grid < 0.5).astype(float)
-    obstacles, boundary = obstacles_and_boundary_from_occupancy_grid(
-        free_space, resolution)
-    return World(obstacles=obstacles, boundary=boundary)
