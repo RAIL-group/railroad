@@ -344,6 +344,80 @@ def lsp_generate_data(
         raise SystemExit(1)
 
 
+@lsp.command("train-network")
+@click.argument("data_dir", type=click.Path(exists=True, file_okay=False))
+@click.option("--save-dir", type=click.Path(file_okay=False), default=None,
+              help="Output directory for weights and logs "
+                   "[default: <data-dir>/training]")
+@click.option("--num-epochs", type=int, default=8, show_default=True,
+              help="Number of passes over the training data")
+@click.option("--batch-size", type=int, default=32, show_default=True,
+              help="Number of data per training batch")
+@click.option("--learning-rate", type=float, default=2e-3, show_default=True,
+              help="Initial Adam learning rate")
+@click.option("--learning-rate-decay", type=float, default=0.6,
+              show_default=True, help="Learning-rate decay per epoch")
+@click.option("--relative-positive-weight", type=float, default=2.0,
+              show_default=True,
+              help="Weight of positive (feasible) examples in the "
+                   "feasibility cross-entropy")
+@click.option("--val-fraction", type=float, default=0.1, show_default=True,
+              help="Fraction of seed directories held out for validation")
+@click.option("--num-workers", type=int, default=4, show_default=True,
+              help="DataLoader worker processes")
+@click.option("--device", default=None,
+              help="Torch device (e.g. cuda, mps, cpu) [default: auto]")
+@click.option("--seed", type=int, default=0, show_default=True,
+              help="Seed for the train/val split and weight initialization")
+@click.option("--log-interval", type=int, default=25, show_default=True,
+              help="Print progress every this many training batches "
+                   "(0 disables)")
+def lsp_train_network(
+    data_dir: str,
+    save_dir: str | None,
+    num_epochs: int,
+    batch_size: int,
+    learning_rate: float,
+    learning_rate_decay: float,
+    relative_positive_weight: float,
+    val_fraction: float,
+    num_workers: int,
+    device: str | None,
+    seed: int,
+    log_interval: int,
+) -> None:
+    """Train the LSP frontier-statistics network on DATA_DIR.
+
+    DATA_DIR is an experiment directory produced by `railroad lsp
+    generate-data` (seed_* children) or a single run's data directory.
+    Validation holds out whole seeds. The saved weights then guide
+    planning:
+
+        railroad example lsp-point-goal-nav --frontier-statistics
+        learned --network-file <save-dir>/LSPFrontierNet.pt
+    """
+    from pathlib import Path
+
+    from railroad.lsp.train import TrainConfig, train_network
+
+    config = TrainConfig(
+        data_dir=data_dir,
+        save_dir=save_dir if save_dir is not None
+        else Path(data_dir) / "training",
+        num_epochs=num_epochs,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        learning_rate_decay=learning_rate_decay,
+        relative_positive_weight=relative_positive_weight,
+        val_fraction=val_fraction,
+        num_workers=num_workers,
+        device=device,
+        seed=seed,
+        log_interval=log_interval,
+    )
+    train_network(config)
+
+
 def _make_example_command(name: str, info: ExampleInfo) -> None:
     """Create and register a click command for an example."""
     description = info["description"]

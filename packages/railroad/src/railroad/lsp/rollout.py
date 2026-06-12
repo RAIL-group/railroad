@@ -50,7 +50,7 @@ class PointGoalSetup:
 
 
 def _make_frontier_statistics(
-    name: str, prior_prob: float
+    name: str, prior_prob: float, network_file: str | Path | None = None
 ) -> FrontierStatisticsEstimator:
     if name == "oracle":
         return OracleFrontierStatistics()
@@ -60,9 +60,22 @@ def _make_frontier_statistics(
             delta_success_cost=0.0,
             exploration_cost=10.0,
         )
+    if name == "learned":
+        if network_file is None:
+            raise ValueError(
+                "The 'learned' frontier statistics estimator needs trained "
+                "weights; pass network_file (--network-file), e.g. the "
+                "LSPFrontierNet.pt that 'railroad lsp train-network' saves."
+            )
+        from .frontier_statistics import LearnedFrontierStatistics
+        from .model import load_frontier_statistics_model
+
+        return LearnedFrontierStatistics(
+            load_frontier_statistics_model(network_file)
+        )
     raise ValueError(
         f"Unknown frontier statistics {name!r}; "
-        "expected 'oracle' or 'fixed-prior'"
+        "expected 'oracle', 'fixed-prior', or 'learned'"
     )
 
 
@@ -72,6 +85,7 @@ def build_point_goal_setup(
     *,
     frontier_statistics_name: str = "oracle",
     prior_prob: float = 0.8,
+    network_file: str | Path | None = None,
     save_data_dir: str | Path | None = None,
     allow_move_interruptions: bool = False,
 ) -> PointGoalSetup:
@@ -93,7 +107,7 @@ def build_point_goal_setup(
     goal_cell = (int(goal_coord[0]), int(goal_coord[1]))
 
     frontier_statistics = _make_frontier_statistics(
-        frontier_statistics_name, prior_prob
+        frontier_statistics_name, prior_prob, network_file
     )
 
     if allow_move_interruptions:
@@ -161,6 +175,7 @@ def run_point_goal_rollout(
     *,
     frontier_statistics_name: str = "oracle",
     prior_prob: float = 0.8,
+    network_file: str | Path | None = None,
     max_planning_iterations: int = 200,
     mcts_iterations: int = 4000,
     mcts_c: float = 10,
@@ -179,6 +194,7 @@ def run_point_goal_rollout(
         seed,
         frontier_statistics_name=frontier_statistics_name,
         prior_prob=prior_prob,
+        network_file=network_file,
         save_data_dir=save_data_dir,
     )
     env, goal = setup.env, setup.goal

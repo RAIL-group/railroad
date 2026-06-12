@@ -166,7 +166,7 @@ EXAMPLES: Dict[str, ExampleInfo] = {
                 "name": "--frontier-statistics",
                 "type": str,
                 "default": "oracle",
-                "help": "Frontier-statistics estimator: oracle or fixed-prior",
+                "help": "Frontier-statistics estimator: oracle, fixed-prior, or learned",
                 "param_name": "frontier_statistics_name",
             },
             {
@@ -175,6 +175,14 @@ EXAMPLES: Dict[str, ExampleInfo] = {
                 "default": 0.8,
                 "help": "Success probability used by the fixed-prior estimator",
                 "param_name": "prior_prob",
+            },
+            {
+                "name": "--network-file",
+                "type": str,
+                "default": None,
+                "help": "Trained LSPFrontierNet weights for the learned estimator "
+                        "(from 'railroad lsp train-network')",
+                "param_name": "network_file",
             },
             {
                 "name": "--save-data-dir",

@@ -11,23 +11,14 @@ frontier-statistics estimator (``--frontier-statistics``):
 - ``oracle``: exact statistics from the true map (per frontier, mask all
   other frontiers and check whether a path through it reaches the goal),
 - ``fixed-prior``: the same fixed constants for every frontier — no
-  oracle needed, as in a deployment.
+  oracle needed, as in a deployment,
+- ``learned``: an LSPFrontierNet (trained with ``railroad lsp
+  train-network``) predicts the statistics from each frontier's best
+  panoramic vantage + egocentric frontier/goal locations — exactly what
+  the training data stores. Pass the weights via ``--network-file``.
 
-A learned model slots in the same way in code (no CLI flag until a
-trained model ships)::
-
-    from railroad.lsp import LearnedFrontierStatistics
-
-    env = LSPVisualEnvironment(
-        scene=scene,
-        frontier_statistics=LearnedFrontierStatistics(model),
-        ...,
-    )
-
-where ``model`` maps a batch of FrontierObservations (pano oriented at
-the frontier + egocentric frontier/goal locations — exactly what the
-training data stores) to FrontierStatistics. Regardless of estimator,
-*execution* always resolves explore outcomes from the true map.
+Regardless of estimator, *execution* always resolves explore outcomes
+from the true map.
 
 As the robot explores, every frontier is labeled against the true map
 and, whenever a frontier's label or best panoramic vantage changes, a
@@ -41,6 +32,7 @@ Usage:
     uv run railroad example lsp-point-goal-nav
     uv run railroad example lsp-point-goal-nav --env office --frontier-statistics fixed-prior
     uv run railroad example lsp-point-goal-nav --save-data-dir data/lsp
+    uv run railroad example lsp-point-goal-nav --frontier-statistics learned --network-file data/maze/training/LSPFrontierNet.pt
 """
 
 from __future__ import annotations
@@ -51,6 +43,7 @@ def main(
     seed: int | None = None,
     frontier_statistics_name: str = "oracle",
     prior_prob: float = 0.8,
+    network_file: str | None = None,
     save_data_dir: str | None = None,
     allow_move_interruptions: bool = False,
     save_plot: str | None = None,
@@ -83,6 +76,7 @@ def main(
         scene_seed,
         frontier_statistics_name=frontier_statistics_name,
         prior_prob=prior_prob,
+        network_file=network_file,
         save_data_dir=save_data_dir,
         allow_move_interruptions=allow_move_interruptions,
     )
