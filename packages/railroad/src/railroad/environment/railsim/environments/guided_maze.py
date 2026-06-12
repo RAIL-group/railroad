@@ -46,6 +46,15 @@ class GuidedMazeConfig:
     inflation_radius_m: float = 0.75
 
 
+def _axis_positions(n: int, pw: int, ww: int) -> tuple[np.ndarray, np.ndarray]:
+    """Block widths and their cumulative offsets for inflating an ``n``-cell
+    lattice axis: even indices (cells) are ``ww`` wide, odd indices
+    (passages) ``pw`` wide."""
+    widths = np.ones(2 * n, dtype=int) * pw
+    widths[::2] = ww
+    return widths, np.cumsum(widths).astype(int)
+
+
 def gen_map_maze_base(config: GuidedMazeConfig = GuidedMazeConfig(),
                       seed: int | None = None,
                       palette: Mapping[str, Color] | None = None) -> MapData:
@@ -106,36 +115,26 @@ def gen_map_maze_base(config: GuidedMazeConfig = GuidedMazeConfig(),
 
     # Inflate the lattice to a high-resolution grid: lattice cells become
     # ww-wide blocks separated by pw-wide passages.
-    xd = np.ones([2 * w]) * pw
-    xd[::2] = ww
-    xd = xd.astype(int)
-    xp = np.cumsum(xd).astype(int)
-
-    yd = np.ones([2 * h]) * pw
-    yd[::2] = ww
-    yd = yd.astype(int)
-    yp = np.cumsum(yd).astype(int)
+    xd, xp = _axis_positions(w, pw, ww)
+    yd, yp = _axis_positions(h, pw, ww)
 
     semantic_grid = np.zeros([xp[-1] + ww, yp[-1] + ww])
 
+    def paint(xx: int, yy: int, label: int, pad_lo: int, pad_hi: int) -> None:
+        semantic_grid[xp[xx] - pad_lo:xp[xx] + xd[xx + 1] + pad_hi,
+                      yp[yy] - pad_lo:yp[yy] + yd[yy + 1] + pad_hi] = label
+
+    # Paint hallway cells, then goal-path cells second so they win where the
+    # padded blocks overlap. ``all_wide`` widens hallways on the high side.
+    hallway_pad_hi = dPW if config.all_wide else 0
     for xx in range(2 * w - 1):
         for yy in range(2 * h - 1):
             if grid[xx, yy] == 1:
-                if config.all_wide:
-                    semantic_grid[xp[xx] - dPW:xp[xx] + xd[xx + 1] + dPW,
-                                  yp[yy] - dPW:yp[yy] + yd[yy + 1] + dPW] = \
-                        SEMANTIC_LABELS['hallway']
-                else:
-                    semantic_grid[xp[xx] - dPW:xp[xx] + xd[xx + 1],
-                                  yp[yy] - dPW:yp[yy] + yd[yy + 1]] = \
-                        SEMANTIC_LABELS['hallway']
-
+                paint(xx, yy, SEMANTIC_LABELS['hallway'], dPW, hallway_pad_hi)
     for xx in range(2 * w - 1):
         for yy in range(2 * h - 1):
             if grid[xx, yy] == 2:
-                semantic_grid[xp[xx] - dPW:xp[xx] + xd[xx + 1] + dPW,
-                              yp[yy] - dPW:yp[yy] + yd[yy + 1] + dPW] = \
-                    SEMANTIC_LABELS['goal_path']
+                paint(xx, yy, SEMANTIC_LABELS['goal_path'], dPW, dPW)
 
     out_grid = np.ones(semantic_grid.shape)
     out_grid[semantic_grid == SEMANTIC_LABELS['goal_path']] = 0
