@@ -617,14 +617,18 @@ class _PlottingMixin:
         figsize: tuple[float, float],
         *,
         location_coords: dict[str, tuple[float, float]] | None = None,
-    ) -> tuple[Any, Any, Any, Any, Any, float] | None:
+        onboard_robots: list[str] | None = None,
+    ) -> tuple[Any, Any, Any, Any, Any, float, dict[str, Any]] | None:
         """Create a GridSpec figure with main + sidebar + optional overhead axes.
 
-        Returns (fig, main_ax, sidebar_ax, trajectories, env_coords, t_end),
-        or None if there are no trajectories to display.
+        When ``onboard_robots`` is given, a bottom row is added with one axes
+        per robot for onboard camera imagery.
+
+        Returns (fig, main_ax, sidebar_ax, trajectories, env_coords, t_end,
+        onboard_axes), or None if there are no trajectories to display.
         """
         import matplotlib.pyplot as plt
-        from matplotlib.gridspec import GridSpec
+        from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 
         trajectories, env_coords = self._build_entity_trajectories(
             location_coords=location_coords,
@@ -642,23 +646,38 @@ class _PlottingMixin:
             return None
 
         has_overhead = getattr(getattr(self._env, "scene", None), "get_top_down_image", None) is not None
+        n_onboard = len(onboard_robots) if onboard_robots else 0
 
         fig = plt.figure(figsize=figsize)
+        n_rows = 2 if n_onboard else 1
+        height_ratios = [3, 1] if n_onboard else None
         if has_overhead:
-            gs = GridSpec(1, 3, width_ratios=[1, 2, 1], figure=fig,
+            gs = GridSpec(n_rows, 3, width_ratios=[1, 2, 1], height_ratios=height_ratios,
+                         figure=fig,
                          wspace=0.1, left=0.03, right=0.97, top=0.95, bottom=0.05)
             overhead_ax = fig.add_subplot(gs[0, 0])
             main_ax = fig.add_subplot(gs[0, 1])
             sidebar_ax = fig.add_subplot(gs[0, 2])
             self._render_overhead(overhead_ax)
         else:
-            gs = GridSpec(1, 2, width_ratios=[3, 1], figure=fig,
+            gs = GridSpec(n_rows, 2, width_ratios=[3, 1], height_ratios=height_ratios,
+                         figure=fig,
                          wspace=0.1, left=0.05, right=0.97, top=0.95, bottom=0.05)
             main_ax = fig.add_subplot(gs[0, 0])
             sidebar_ax = fig.add_subplot(gs[0, 1])
         sidebar_ax.set_axis_off()
 
-        return fig, main_ax, sidebar_ax, trajectories, env_coords, t_end
+        onboard_axes: dict[str, Any] = {}
+        if onboard_robots:
+            onboard_gs = GridSpecFromSubplotSpec(
+                1, n_onboard, subplot_spec=gs[1, :], wspace=0.05,
+            )
+            for i, robot in enumerate(onboard_robots):
+                onboard_ax = fig.add_subplot(onboard_gs[0, i])
+                onboard_ax.set_axis_off()
+                onboard_axes[robot] = onboard_ax
+
+        return fig, main_ax, sidebar_ax, trajectories, env_coords, t_end, onboard_axes
 
     def save_video(
         self: PlannerDashboard,
@@ -685,10 +704,33 @@ class _PlottingMixin:
         import matplotlib.pyplot as plt
         from matplotlib.animation import FuncAnimation
 
-        result = self._create_trajectory_figure(figsize, location_coords=location_coords)
+        # Onboard camera imagery (duck-typed: env exposes pano_records with
+        # .robot/.time/.image, e.g. VisualUnknownSpaceEnvironment)
+        onboard_by_robot: dict[str, list[Any]] = {}
+        for record in getattr(self._env, "pano_records", None) or []:
+            onboard_by_robot.setdefault(record.robot, []).append(record)
+        onboard_robots = sorted(onboard_by_robot)
+
+        result = self._create_trajectory_figure(
+            figsize, location_coords=location_coords, onboard_robots=onboard_robots,
+        )
         if result is None:
             return
-        fig, ax, sidebar_ax, trajectories, env_coords, t_end = result
+        fig, ax, sidebar_ax, trajectories, env_coords, t_end, onboard_axes = result
+
+        # One image artist per robot; frames are selected by capture time.
+        onboard_artists: dict[str, Any] = {}
+        onboard_times: dict[str, Any] = {}
+        onboard_frame_idx: dict[str, int] = {}
+        for robot in onboard_robots:
+            records = sorted(onboard_by_robot[robot], key=lambda r: r.time)
+            onboard_by_robot[robot] = records
+            onboard_axes[robot].set_title(
+                f"{robot} onboard", fontsize=8, fontfamily="monospace",
+            )
+            onboard_artists[robot] = onboard_axes[robot].imshow(records[0].image)
+            onboard_times[robot] = np.array([r.time for r in records])
+            onboard_frame_idx[robot] = 0
 
         # Animated navigation grid background
         from railroad.navigation.plotting import make_plotting_grid, make_plotting_grid_rgba, _BACKGROUND_GRAY
@@ -855,6 +897,13 @@ class _PlottingMixin:
             trail_scatter.set_offsets(combined_xy[mask])
             trail_scatter.set_sizes(combined_sizes[mask])
             trail_scatter.set_facecolors(combined_colors[mask])
+            # Update onboard images to the latest capture <= current_time
+            for robot, artist in onboard_artists.items():
+                idx = int(np.searchsorted(onboard_times[robot], current_time, side="right")) - 1
+                idx = max(idx, 0)
+                if idx != onboard_frame_idx[robot]:
+                    artist.set_data(onboard_by_robot[robot][idx].image)
+                    onboard_frame_idx[robot] = idx
             # Show/hide actions based on whether their start time has passed
             for txt, act_time in action_texts:
                 txt.set_alpha(1.0 if current_time >= act_time else 0.0)
@@ -872,6 +921,7 @@ class _PlottingMixin:
             artists = markers + labels + [trail_scatter, title_artist]
             if nav_grid_artist is not None:
                 artists.append(nav_grid_artist)
+            artists += list(onboard_artists.values())
             artists += [txt for txt, _ in action_texts]
             artists += [txt for txt, _ in goal_text_artists]
             return artists
@@ -920,7 +970,7 @@ class _PlottingMixin:
         result = self._create_trajectory_figure(figsize, location_coords=location_coords)
         if result is None:
             return None
-        fig, main_ax, sidebar_ax, trajectories, env_coords, t_end = result
+        fig, main_ax, sidebar_ax, trajectories, env_coords, t_end, _ = result
 
         self.plot_trajectories(ax=main_ax, location_coords=location_coords)
 
