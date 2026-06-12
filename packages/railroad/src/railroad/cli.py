@@ -232,6 +232,54 @@ def benchmarks_cache_flush(experiment: str | None) -> None:
         click.echo("Flushed all benchmark caches and stamps.")
 
 
+# =============================================================================
+# LSP command group
+# =============================================================================
+
+
+@main.group()
+def lsp() -> None:
+    """Learning over subgoals planning (LSP) utilities."""
+    pass
+
+
+@lsp.command("inspect-data")
+@click.argument("data_dir", type=click.Path(exists=True, file_okay=False))
+@click.option("--num", type=int, default=6, show_default=True,
+              help="Number of data to plot, sampled evenly through the run")
+@click.option("--indices", type=str, default=None,
+              help="Comma-separated datum indices to plot (overrides --num)")
+@click.option("--save", "save_path", type=str, default=None,
+              help="Output figure path (default: <data_dir>/inspect.png)")
+@click.option("--show", is_flag=True, default=False,
+              help="Show the figure interactively")
+def lsp_inspect_data(
+    data_dir: str,
+    num: int,
+    indices: str | None,
+    save_path: str | None,
+    show: bool,
+) -> None:
+    """Summarize and visualize LSP training data in DATA_DIR.
+
+    Prints label balance and cost statistics, then renders sampled data:
+    each row shows the frontier-centered panorama (frontier and goal
+    directions marked) next to a top-down egocentric view.
+    """
+    from railroad.lsp import inspect_data
+
+    parsed_indices = None
+    if indices is not None:
+        parsed_indices = [int(token) for token in indices.split(",") if token.strip()]
+    inspect_data(
+        data_dir,
+        num=num,
+        indices=parsed_indices,
+        save_path=save_path,
+        show=show,
+    )
+
+
 def _make_example_command(name: str, info: ExampleInfo) -> None:
     """Create and register a click command for an example."""
     description = info["description"]
