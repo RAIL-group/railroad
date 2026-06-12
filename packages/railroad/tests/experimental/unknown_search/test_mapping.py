@@ -11,7 +11,10 @@ from railroad.experimental.unknown_search.laser import (
     get_laser_scanner_directions,
     simulate_sensor_measurement,
 )
-from railroad.experimental.unknown_search.mapping import insert_scan
+from railroad.experimental.unknown_search.mapping import (
+    compute_scan_polygon_vertices,
+    insert_scan,
+)
 from railroad.experimental.unknown_search.types import Pose
 
 
@@ -97,3 +100,30 @@ def test_observed_never_reverts_to_unobserved():
         was_observed = prev_observed != UNOBSERVED_VAL
         still_observed = observed_grid[was_observed] != UNOBSERVED_VAL
         assert still_observed.all(), "Some previously observed cells reverted to UNOBSERVED"
+
+
+def test_compute_scan_polygon_vertices():
+    """The scan polygon is a closed loop of truncated ray endpoints."""
+    true_grid = _make_corridor_grid(20)
+    pose = Pose(5.0, 5.0, 0.3)
+    directions = get_laser_scanner_directions(91, 2 * np.pi)
+    max_range = 6.0
+    laser_ranges = simulate_sensor_measurement(
+        true_grid, directions, max_range, pose
+    )
+
+    polygon = compute_scan_polygon_vertices(
+        directions, laser_ranges, max_range, pose
+    )
+
+    assert polygon.shape == (2, directions.shape[1] + 2)
+    # Closed loop anchored at the sensor origin.
+    np.testing.assert_allclose(polygon[:, 0], [pose.x, pose.y])
+    np.testing.assert_allclose(polygon[:, -1], [pose.x, pose.y])
+    # All vertices within max_range of the origin (ranges truncated).
+    distances = np.linalg.norm(
+        polygon - np.array([[pose.x], [pose.y]]), axis=0
+    )
+    assert np.all(distances <= max_range + 1e-6)
+    # Some rays hit the corridor walls before max_range.
+    assert distances[1:-1].min() < max_range - 1e-6

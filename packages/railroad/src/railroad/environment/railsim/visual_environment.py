@@ -31,6 +31,9 @@ class PanoRecord:
         pose_meters: The same pose in meters (x, y, yaw) as rendered.
         image: Robot-aligned equirectangular RGB panorama,
             ``(pano_height, pano_width, 3)`` uint8.
+        visibility_polygon: Closed vertex loop ``(2, N+2)`` in grid-cell
+            coordinates of the laser scan polygon visible from this pose,
+            or None when no scan accompanied the capture.
     """
 
     robot: str
@@ -38,6 +41,7 @@ class PanoRecord:
     pose_cells: Pose
     pose_meters: Tuple[float, float, float]
     image: np.ndarray
+    visibility_polygon: np.ndarray | None = None
 
 
 class VisualUnknownSpaceEnvironment(UnknownSpaceEnvironment):
@@ -61,12 +65,31 @@ class VisualUnknownSpaceEnvironment(UnknownSpaceEnvironment):
         self._capture_panos = capture_panos
         self.pano_records: list[PanoRecord] = []
         self._last_capture: Dict[str, Tuple[float, float, float, float]] = {}
+        self._last_scan_polygon: Dict[str, np.ndarray] = {}
 
         kwargs.setdefault("true_grid", scene.grid)
         super().__init__(**kwargs)
 
         # Expose the scene so the dashboard can draw overhead maps.
         self.scene = scene
+
+    def _on_laser_scan(
+        self,
+        robot: str,
+        pose: Pose,
+        time: float,
+        laser_ranges: np.ndarray,
+    ) -> None:
+        from railroad.experimental.unknown_search.mapping import (
+            compute_scan_polygon_vertices,
+        )
+
+        self._last_scan_polygon[robot] = compute_scan_polygon_vertices(
+            self._laser_directions,
+            laser_ranges,
+            self._config.sensor_range,
+            pose,
+        )
 
     def observe_from_pose(
         self,
@@ -87,6 +110,7 @@ class VisualUnknownSpaceEnvironment(UnknownSpaceEnvironment):
                         pose_cells=Pose(pose.x, pose.y, pose.yaw),
                         pose_meters=(sim_pose.x, sim_pose.y, sim_pose.yaw),
                         image=self._scene.get_pano_image(pose),
+                        visibility_polygon=self._last_scan_polygon.get(robot),
                     )
                 )
                 self._last_capture[robot] = key

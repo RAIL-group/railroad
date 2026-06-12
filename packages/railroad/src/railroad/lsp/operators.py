@@ -1,0 +1,157 @@
+"""LSP point-goal operators.
+
+The goal is treated like an object whose spatial location is known in
+advance: it lives in ``objects_by_type["goal"]`` (not ``"location"``)
+and its coordinates are registered in the location registry from the
+start. Exploring a frontier never relocates the robot — on success it
+*reveals* the goal, and a gated move action lets the robot physically
+drive there along a real path once one is known.
+"""
+
+from __future__ import annotations
+
+from railroad.core import Effect, Fluent, Operator
+from railroad.operators._utils import Numeric, OptNumeric, _to_numeric
+
+from .providers import FrontierPropertyProvider
+
+F = Fluent
+
+
+def construct_lsp_explore_operator(
+    provider: FrontierPropertyProvider,
+    *,
+    speed_cells_per_sec: float = 2.0,
+    goal_name: str = "goal",
+    min_branch_time: float = 0.1,
+    prob_clamp: tuple[float, float] = (0.001, 0.999),
+) -> Operator:
+    """Construct ``(lsp-explore ?robot ?frontier)`` for point-goal navigation.
+
+    Exploring a frontier succeeds with the provider's ``prob_feasible``:
+    on success the goal is *revealed* after ``delta_success_cost / speed``
+    seconds — the extra cost of pushing through the frontier beyond the
+    direct travel that a subsequent ``move`` to the goal accounts for; on
+    failure the robot returns empty-handed after
+    ``exploration_cost / speed`` seconds. Either way the frontier is
+    marked explored and the robot stays where it is: reaching the goal
+    always happens through a real move action.
+
+    Probabilities are clamped to *prob_clamp* so oracle 0/1 values stay
+    planner-friendly.
+    """
+    speed = max(speed_cells_per_sec, 1e-6)
+    lo, hi = prob_clamp
+
+    prob_fn = Numeric(
+        lambda r, f: min(hi, max(lo, provider.get(r, f).prob_feasible))
+    )
+    success_time_fn = Numeric(
+        lambda r, f: max(
+            min_branch_time, provider.get(r, f).delta_success_cost / speed
+        )
+    )
+    failure_time_fn = Numeric(
+        lambda r, f: max(
+            min_branch_time, provider.get(r, f).exploration_cost / speed
+        )
+    )
+
+    return Operator(
+        name="lsp-explore",
+        parameters=[("?r", "robot"), ("?f", "frontier")],
+        preconditions=[
+            F("at ?r ?f"),
+            F("free ?r"),
+            ~F("explored ?f"),
+            ~F("lock-explore ?f"),
+        ],
+        effects=[
+            Effect(
+                time=0,
+                resulting_fluents={F("not free ?r"), F("lock-explore ?f")},
+            ),
+            Effect(
+                time=min_branch_time,
+                resulting_fluents=set(),
+                prob_effects=[
+                    (
+                        (prob_fn, ["?r", "?f"]),
+                        [Effect(
+                            time=(success_time_fn, ["?r", "?f"]),
+                            resulting_fluents={
+                                F("free ?r"),
+                                F(f"revealed {goal_name}"),
+                                F("explored ?f"),
+                                F("not lock-explore ?f"),
+                            },
+                        )],
+                    ),
+                    (
+                        (1 - prob_fn, ["?r", "?f"]),
+                        [Effect(
+                            time=(failure_time_fn, ["?r", "?f"]),
+                            resulting_fluents={
+                                F("free ?r"),
+                                F("explored ?f"),
+                                F("not lock-explore ?f"),
+                            },
+                        )],
+                    ),
+                ],
+            ),
+        ],
+    )
+
+
+def construct_move_to_goal_operator(
+    move_time: OptNumeric,
+    *,
+    goal_type: str = "goal",
+) -> Operator:
+    """Construct a move whose destination is the (revealed) point goal.
+
+    Identical to the navigable move operator except the destination is
+    drawn from ``objects_by_type[goal_type]`` and must have been revealed
+    (by observing its cell, or symbolically by an lsp-explore success in
+    planning rollouts). The goal's coordinates are known in advance, so
+    the action grounds and time-estimates before discovery; reachability
+    of the dispatched move is still enforced against the observed map by
+    the environment.
+
+    Args:
+        move_time: Time or function to compute movement duration.
+            Function signature: (robot, from_location, to_location) -> float
+        goal_type: Object type holding the goal name.
+    """
+    move_time_fn = _to_numeric(move_time)
+    return Operator(
+        name="move",
+        parameters=[("?r", "robot"), ("?from", "location"), ("?to", goal_type)],
+        preconditions=[
+            F("at ?r ?from"),
+            F("free ?r"),
+            F("revealed ?to"),
+            ~F("just-moved ?r"),
+            ~F("claimed ?to"),
+        ],
+        effects=[
+            Effect(
+                time=0,
+                resulting_fluents={F("not free ?r"), F("not at ?r ?from"), F("claimed ?to")},
+            ),
+            Effect(
+                time=(move_time_fn, ["?r", "?from", "?to"]),
+                resulting_fluents={
+                    F("free ?r"),
+                    F("at ?r ?to"),
+                    F("not claimed ?to"),
+                    F("just-moved ?r"),
+                },
+            ),
+            Effect(
+                time=(move_time_fn + 0.1, ["?r", "?from", "?to"]),
+                resulting_fluents={~F("just-moved ?r")},
+            ),
+        ],
+    )

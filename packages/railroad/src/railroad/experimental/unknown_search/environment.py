@@ -184,6 +184,15 @@ class UnknownSpaceEnvironment(OccupancyGridPathingMixin, SymbolicEnvironment):
     # Observation
     # ------------------------------------------------------------------
 
+    def _on_laser_scan(
+        self,
+        robot: str,
+        pose: Pose,
+        time: float,
+        laser_ranges: np.ndarray,
+    ) -> None:
+        """Hook invoked with the raw laser ranges of every simulated scan."""
+
     def observe_from_pose(
         self,
         robot: str,
@@ -201,6 +210,7 @@ class UnknownSpaceEnvironment(OccupancyGridPathingMixin, SymbolicEnvironment):
             self._config.sensor_range,
             pose,
         )
+        self._on_laser_scan(robot, pose, time, laser_ranges)
 
         self._observed_grid, newly_observed = mapping.insert_scan(
             occupancy_grid=self._observed_grid,

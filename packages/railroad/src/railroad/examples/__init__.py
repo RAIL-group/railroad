@@ -144,6 +144,54 @@ EXAMPLES: Dict[str, ExampleInfo] = {
             },
         ],
     },
+    "lsp-point-goal-nav": {
+        "main": _lazy_import("lsp_point_goal_nav"),
+        "description": "Point-goal navigation with LSP frontier actions and training-data generation (railsim)",
+        "options": [
+            {
+                "name": "--env",
+                "type": str,
+                "default": "maze",
+                "help": "World type: maze or office",
+                "param_name": "env_name",
+            },
+            {
+                "name": "--seed",
+                "type": int,
+                "default": None,
+                "help": "World generation seed",
+                "param_name": "seed",
+            },
+            {
+                "name": "--provider",
+                "type": str,
+                "default": "oracle",
+                "help": "Frontier property provider: oracle or optimistic",
+                "param_name": "provider_name",
+            },
+            {
+                "name": "--optimistic-prob",
+                "type": float,
+                "default": 0.8,
+                "help": "Success probability used by the optimistic provider",
+                "param_name": "optimistic_prob",
+            },
+            {
+                "name": "--save-data-dir",
+                "type": str,
+                "default": None,
+                "help": "Directory to write LSP training data (npz + index.jsonl)",
+                "param_name": "save_data_dir",
+            },
+            {
+                "name": "--allow-move-interruptions",
+                "is_flag": True,
+                "default": False,
+                "help": "Allow interruption of move skills",
+                "param_name": "allow_move_interruptions",
+            },
+        ],
+    },
 }
 
 # Only show procthor example if dependencies are installed
