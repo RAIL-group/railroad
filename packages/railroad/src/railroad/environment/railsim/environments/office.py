@@ -50,6 +50,14 @@ WALL_CLASS_LABELS = ('hallway', 'room')
 LineSegment = tuple[tuple[int, int], tuple[int, int]]
 
 
+def _region_is_clear(grid: np.ndarray, p1, p2, pad_i: int = 0, pad_j: int = 0) -> bool:
+    """True if the box ``[p1, p2)``, grown by ``(pad_i, pad_j)`` on each side,
+    contains no room or hallway cells (i.e. a new room may be placed there)."""
+    region = grid[p1[0] - pad_i:p2[0] + pad_i, p1[1] - pad_j:p2[1] + pad_j]
+    return not (np.any(region == SEMANTIC_LABELS['room'])
+                or np.any(region == SEMANTIC_LABELS['hallway']))
+
+
 @dataclass(frozen=True)
 class OfficeConfig:
     """Defaults match the original ``office2.py`` (units are grid cells
@@ -294,6 +302,28 @@ def add_special_rooms(grid_with_hallway: np.ndarray,
             hallway_end = True
         return another_intersection_met, hallway_end
 
+    def _march_room_extent(start, end, grow_axis, sign):
+        """March outward from the hallway along ``grow_axis`` in direction
+        ``sign`` until an intersection or hallway end is hit; return how far
+        the room may extend."""
+        perp = 1 - grow_axis
+        met = hallway_end = False
+        distance = hallway_inflation_scale
+        while not (met or hallway_end):
+            distance += 1
+            poi = start[grow_axis] + sign * distance
+            check_start, check_end = [0, 0], [0, 0]
+            end_start, end_end = [0, 0], [0, 0]
+            check_start[grow_axis] = check_end[grow_axis] = poi
+            check_start[perp] = start[perp] + hallway_inflation_scale + 1
+            check_end[perp] = end[perp] - hallway_inflation_scale - 1
+            end_start[grow_axis] = end_end[grow_axis] = poi + sign
+            end_start[perp] = start[perp]
+            end_end[perp] = end[perp]
+            met, hallway_end = _check_intersection_or_hallway_end(
+                [check_start, check_end], [end_start, end_end])
+        return distance
+
     grid_with_sp_room = grid_with_hallway.copy()
     intersections = np.round(intersections).astype(int)
     intersection_pairs: list[tuple[np.ndarray, np.ndarray, float]] = []
@@ -319,53 +349,18 @@ def add_special_rooms(grid_with_hallway: np.ndarray,
         axis = int(is_horizontal)
         if start[axis] > end[axis]:
             start, end = end, start
-        distance = {}
+        grow_axis = 1 - axis
+        distance = {
+            'ascending': _march_room_extent(start, end, grow_axis, +1),
+            'descending': _march_room_extent(start, end, grow_axis, -1),
+        }
         if is_horizontal:
-            # Min distance along the hallway the room can expand, ascending.
-            another_intersection_met = False
-            hallway_end = False
-            distance_ascending = hallway_inflation_scale
-            while not (another_intersection_met or hallway_end):
-                distance_ascending += 1
-                poi_ascending = start[0] + distance_ascending
-
-                check_point_start = [poi_ascending, start[1] + hallway_inflation_scale + 1]
-                check_point_end = [poi_ascending, end[1] - hallway_inflation_scale - 1]
-                hallway_end_check_start = [poi_ascending + 1, start[1]]
-                hallway_end_check_end = [poi_ascending + 1, end[1]]
-
-                another_intersection_met, hallway_end = _check_intersection_or_hallway_end(
-                    [check_point_start, check_point_end],
-                    [hallway_end_check_start, hallway_end_check_end])
-            distance['ascending'] = distance_ascending
-
-            # ... and descending.
-            another_intersection_met = False
-            hallway_end = False
-            distance_descending = hallway_inflation_scale
-            while not (another_intersection_met or hallway_end):
-                distance_descending += 1
-                poi_descending = start[0] - distance_descending
-
-                check_point_start = [poi_descending, start[1] + hallway_inflation_scale + 1]
-                check_point_end = [poi_descending, end[1] - hallway_inflation_scale - 1]
-                hallway_end_check_start = [poi_descending - 1, start[1]]
-                hallway_end_check_end = [poi_descending - 1, end[1]]
-
-                another_intersection_met, hallway_end = _check_intersection_or_hallway_end(
-                    [check_point_start, check_point_end],
-                    [hallway_end_check_start, hallway_end_check_end])
-            distance['descending'] = distance_descending
-
             if distance['ascending'] > max_room_length:
                 room_p1 = [start[0] + distance['ascending'] - max_room_length,
                            start[1] + hallway_inflation_scale + hallway_room_space + 1]
                 room_p2 = [end[0] + distance['ascending'],
                            end[1] - hallway_inflation_scale - hallway_room_space]
-                room_slice = grid_with_sp_room[room_p1[0] - 1:room_p2[0] + 1,
-                                               room_p1[1]:room_p2[1]]
-                if not (np.any(room_slice == labels['room'])
-                        or np.any(room_slice == labels['hallway'])):
+                if _region_is_clear(grid_with_sp_room, room_p1, room_p2, pad_i=1):
                     grid_with_sp_room[room_p1[0]:room_p2[0],
                                       room_p1[1]:room_p2[1]] = labels['room']
                     rooms_coords.append((room_p1, room_p2))
@@ -379,10 +374,7 @@ def add_special_rooms(grid_with_hallway: np.ndarray,
                            start[1] + hallway_inflation_scale + hallway_room_space + 1]
                 room_q2 = [end[0] - distance['descending'] + max_room_length,
                            end[1] - hallway_inflation_scale - hallway_room_space]
-                room_slice = grid_with_sp_room[room_q1[0] - 1:room_q2[0] + 1,
-                                               room_q1[1]:room_q2[1]]
-                if not (np.any(room_slice == labels['room'])
-                        or np.any(room_slice == labels['hallway'])):
+                if _region_is_clear(grid_with_sp_room, room_q1, room_q2, pad_i=1):
                     grid_with_sp_room[room_q1[0]:room_q2[0],
                                       room_q1[1]:room_q2[1]] = labels['room']
                     rooms_coords.append((room_q1, room_q2))
@@ -391,45 +383,12 @@ def add_special_rooms(grid_with_hallway: np.ndarray,
                     grid_with_sp_room[room_q2[0] - room_door_space - door_size:room_q2[0] - room_door_space,
                                       room_q2[1]:room_q2[1] + hallway_room_space] = labels['door']
         else:
-            another_intersection_met = False
-            hallway_end = False
-            distance_ascending = hallway_inflation_scale
-            while not (another_intersection_met or hallway_end):
-                distance_ascending += 1
-                poi_ascending = start[1] + distance_ascending
-                check_point_start = [start[0] + hallway_inflation_scale + 1, poi_ascending]
-                check_point_end = [end[0] - hallway_inflation_scale - 1, poi_ascending]
-                hallway_end_check_start = [start[0], poi_ascending + 1]
-                hallway_end_check_end = [end[0], poi_ascending + 1]
-                another_intersection_met, hallway_end = _check_intersection_or_hallway_end(
-                    [check_point_start, check_point_end],
-                    [hallway_end_check_start, hallway_end_check_end])
-            distance['ascending'] = distance_ascending
-
-            another_intersection_met = False
-            hallway_end = False
-            distance_descending = hallway_inflation_scale
-            while not (another_intersection_met or hallway_end):
-                distance_descending += 1
-                poi_descending = start[1] - distance_descending
-                check_point_start = [start[0] + hallway_inflation_scale + 1, poi_descending]
-                check_point_end = [end[0] - hallway_inflation_scale - 1, poi_descending]
-                hallway_end_check_start = [start[0], poi_descending - 1]
-                hallway_end_check_end = [end[0], poi_descending - 1]
-                another_intersection_met, hallway_end = _check_intersection_or_hallway_end(
-                    [check_point_start, check_point_end],
-                    [hallway_end_check_start, hallway_end_check_end])
-            distance['descending'] = distance_descending
-
             if distance['ascending'] > max_room_length:
                 room_p1 = [start[0] + hallway_inflation_scale + hallway_room_space + 1,
                            start[1] + distance['ascending'] - max_room_length]
                 room_p2 = [end[0] - hallway_inflation_scale - hallway_room_space,
                            end[1] + distance['ascending'] - 1]
-                room_slice = grid_with_sp_room[room_p1[0]:room_p2[0],
-                                               room_p1[1] - 1:room_p2[1] + 1]
-                if not (np.any(room_slice == labels['room'])
-                        or np.any(room_slice == labels['hallway'])):
+                if _region_is_clear(grid_with_sp_room, room_p1, room_p2, pad_j=1):
                     grid_with_sp_room[room_p1[0]:room_p2[0],
                                       room_p1[1]:room_p2[1]] = labels['room']
                     rooms_coords.append((room_p1, room_p2))
@@ -445,10 +404,7 @@ def add_special_rooms(grid_with_hallway: np.ndarray,
                            start[1] - distance['descending']]
                 room_q2 = [end[0] - hallway_inflation_scale - hallway_room_space,
                            end[1] - distance['descending'] + max_room_length]
-                room_slice = grid_with_sp_room[room_q1[0] + 1:room_q2[0] - 1,
-                                               room_q1[1]:room_q2[1]]
-                if not (np.any(room_slice == labels['room'])
-                        or np.any(room_slice == labels['hallway'])):
+                if _region_is_clear(grid_with_sp_room, room_q1, room_q2, pad_i=-1):
                     grid_with_sp_room[room_q1[0]:room_q2[0],
                                       room_q1[1]:room_q2[1]] = labels['room']
                     rooms_coords.append((room_q1, room_q2))
@@ -489,10 +445,7 @@ def add_rooms(rng: np.random.Generator,
             room_p1 = (start[0] - int(room_l / 2),
                        start[1] - hallway_inflation_scale - room_b - hallway_room_space)
             room_p2 = (room_p1[0] + room_l, room_p1[1] + room_b)
-            room_slice = grid_with_room[room_p1[0] - 1:room_p2[0] + 1,
-                                        room_p1[1] - 1:room_p2[1] + 1]
-            if not (np.any(room_slice == labels['room'])
-                    or np.any(room_slice == labels['hallway'])):
+            if _region_is_clear(grid_with_room, room_p1, room_p2, pad_i=1, pad_j=1):
                 grid_with_room[room_p1[0]:room_p2[0], room_p1[1]:room_p2[1]] = labels['room']
                 rooms_coords.append((room_p1, room_p2))
                 door_p1 = (start[0] - int(door_size / 2),
@@ -504,10 +457,7 @@ def add_rooms(rng: np.random.Generator,
             room_q1 = (end[0] - int(room_l / 2),
                        end[1] + hallway_inflation_scale + hallway_room_space + 1)
             room_q2 = (room_q1[0] + room_l, room_q1[1] + room_b)
-            room_slice = grid_with_room[room_q1[0] - 1:room_q2[0] + 1,
-                                        room_q1[1] - 1:room_q2[1] + 1]
-            if not (np.any(room_slice == labels['room'])
-                    or np.any(room_slice == labels['hallway'])):
+            if _region_is_clear(grid_with_room, room_q1, room_q2, pad_i=1, pad_j=1):
                 grid_with_room[room_q1[0]:room_q2[0], room_q1[1]:room_q2[1]] = labels['room']
                 rooms_coords.append((room_q1, room_q2))
                 door_q1 = (end[0] - int(door_size / 2),
@@ -520,10 +470,7 @@ def add_rooms(rng: np.random.Generator,
                 room_l = int(rng.integers(*room_l_range))
                 room_p1 = (start[0] - hallway_inflation_scale - room_b - hallway_room_space, y)
                 room_p2 = (room_p1[0] + room_b, room_p1[1] + room_l)
-                room_slice = grid_with_room[room_p1[0] - 1:room_p2[0] + 1,
-                                            room_p1[1] - 1:room_p2[1] + 1]
-                if not (np.any(room_slice == labels['room'])
-                        or np.any(room_slice == labels['hallway'])):
+                if _region_is_clear(grid_with_room, room_p1, room_p2, pad_i=1, pad_j=1):
                     grid_with_room[room_p1[0]:room_p2[0], room_p1[1]:room_p2[1]] = labels['room']
                     rooms_coords.append((room_p1, room_p2))
                     door_p1 = (room_p2[0], room_p2[1] - room_door_space - door_size)
@@ -540,10 +487,7 @@ def add_rooms(rng: np.random.Generator,
                 room_l = int(rng.integers(*room_l_range))
                 room_q1 = (start[0] + hallway_inflation_scale + 1 + hallway_room_space, y)
                 room_q2 = (room_q1[0] + room_b, room_q1[1] + room_l)
-                room_slice = grid_with_room[room_q1[0] - 1:room_q2[0] + 1,
-                                            room_q1[1] - 1:room_q2[1] + 1]
-                if not (np.any(room_slice == labels['room'])
-                        or np.any(room_slice == labels['hallway'])):
+                if _region_is_clear(grid_with_room, room_q1, room_q2, pad_i=1, pad_j=1):
                     grid_with_room[room_q1[0]:room_q2[0], room_q1[1]:room_q2[1]] = labels['room']
                     rooms_coords.append((room_q1, room_q2))
                     door_q1 = (room_q1[0] - hallway_room_space, room_q1[1] + room_door_space)
@@ -556,10 +500,7 @@ def add_rooms(rng: np.random.Generator,
             room_p1 = (start[0] - hallway_inflation_scale - room_b - hallway_room_space,
                        start[1] - int(room_l / 2))
             room_p2 = (room_p1[0] + room_b, room_p1[1] + room_l)
-            room_slice = grid_with_room[room_p1[0] - 1:room_p2[0] + 1,
-                                        room_p1[1] - 1:room_p2[1] + 1]
-            if not (np.any(room_slice == labels['room'])
-                    or np.any(room_slice == labels['hallway'])):
+            if _region_is_clear(grid_with_room, room_p1, room_p2, pad_i=1, pad_j=1):
                 grid_with_room[room_p1[0]:room_p2[0], room_p1[1]:room_p2[1]] = labels['room']
                 rooms_coords.append((room_p1, room_p2))
                 door_p1 = (start[0] - hallway_inflation_scale - hallway_room_space,
@@ -571,10 +512,7 @@ def add_rooms(rng: np.random.Generator,
             room_q1 = (end[0] + hallway_inflation_scale + hallway_room_space + 1,
                        end[1] - int(room_l / 2))
             room_q2 = (room_q1[0] + room_b, room_q1[1] + room_l)
-            room_slice = grid_with_room[room_q1[0] - 1:room_q2[0] + 1,
-                                        room_q1[1] - 1:room_q2[1] + 1]
-            if not (np.any(room_slice == labels['room'])
-                    or np.any(room_slice == labels['hallway'])):
+            if _region_is_clear(grid_with_room, room_q1, room_q2, pad_i=1, pad_j=1):
                 grid_with_room[room_q1[0]:room_q2[0], room_q1[1]:room_q2[1]] = labels['room']
                 rooms_coords.append((room_q1, room_q2))
                 door_q1 = (end[0] + hallway_inflation_scale + 1,
@@ -587,10 +525,7 @@ def add_rooms(rng: np.random.Generator,
                 room_l = int(rng.integers(*room_l_range))
                 room_p1 = (x, start[1] - hallway_inflation_scale - room_b - hallway_room_space)
                 room_p2 = (room_p1[0] + room_l, room_p1[1] + room_b)
-                room_slice = grid_with_room[room_p1[0] - 1:room_p2[0] + 1,
-                                            room_p1[1] - 1:room_p2[1] + 1]
-                if not (np.any(room_slice == labels['room'])
-                        or np.any(room_slice == labels['hallway'])):
+                if _region_is_clear(grid_with_room, room_p1, room_p2, pad_i=1, pad_j=1):
                     grid_with_room[room_p1[0]:room_p2[0], room_p1[1]:room_p2[1]] = labels['room']
                     rooms_coords.append((room_p1, room_p2))
                     door_p1 = (room_p2[0] - room_door_space - door_size, room_p2[1])
@@ -607,10 +542,7 @@ def add_rooms(rng: np.random.Generator,
                 room_l = int(rng.integers(*room_l_range))
                 room_q1 = (x, start[1] + hallway_inflation_scale + 1 + hallway_room_space)
                 room_q2 = (room_q1[0] + room_l, room_q1[1] + room_b)
-                room_slice = grid_with_room[room_q1[0] - 1:room_q2[0] + 1,
-                                            room_q1[1] - 1:room_q2[1] + 1]
-                if not (np.any(room_slice == labels['room'])
-                        or np.any(room_slice == labels['hallway'])):
+                if _region_is_clear(grid_with_room, room_q1, room_q2, pad_i=1, pad_j=1):
                     grid_with_room[room_q1[0]:room_q2[0], room_q1[1]:room_q2[1]] = labels['room']
                     rooms_coords.append((room_q1, room_q2))
                     door_q1 = (room_q1[0] + room_door_space, room_q1[1] - hallway_room_space)
