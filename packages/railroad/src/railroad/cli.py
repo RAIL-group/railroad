@@ -280,6 +280,70 @@ def lsp_inspect_data(
     )
 
 
+@lsp.command("generate-data")
+@click.option("--seeds", "seeds_spec", required=True,
+              help="Seed range 'a:b' (half-open), comma list '1,5,9', or a single seed")
+@click.option("--env", "env_name", type=click.Choice(["maze", "office"]),
+              default="maze", show_default=True,
+              help="Environment to generate scenes from")
+@click.option("--data-dir", type=click.Path(file_okay=False), default="data",
+              show_default=True, help="Root directory for generated data")
+@click.option("--experiment-name", default=None,
+              help="Subdirectory under --data-dir [default: the env name]")
+@click.option("--parallel", "-j", type=int, default=None,
+              help="Worker processes; each renders its own GL context "
+                   "[default: cpu_count - 2]")
+@click.option("--frontier-statistics", "frontier_statistics_name",
+              type=click.Choice(["oracle", "fixed-prior"]), default="oracle",
+              show_default=True,
+              help="Estimator steering the rollouts (labels always come from the oracle)")
+@click.option("--prior-prob", type=float, default=0.8, show_default=True,
+              help="prob_feasible for the fixed-prior estimator")
+@click.option("--max-iterations", "max_planning_iterations", type=int,
+              default=200, show_default=True,
+              help="Planning iterations per rollout before giving up")
+def lsp_generate_data(
+    seeds_spec: str,
+    env_name: str,
+    data_dir: str,
+    experiment_name: str | None,
+    parallel: int | None,
+    frontier_statistics_name: str,
+    prior_prob: float,
+    max_planning_iterations: int,
+) -> None:
+    """Bulk-generate LSP training data: one rollout per seed, in parallel.
+
+    Each seed's data is finalized atomically into
+    <data-dir>/<experiment-name>/seed_<SEED>/ (a directory `railroad lsp
+    inspect-data` understands). Already-completed seeds are skipped, so
+    an interrupted invocation can simply be re-run.
+    """
+    import os
+
+    from railroad.lsp.bulk import generate_data, parse_seeds
+
+    try:
+        seeds = parse_seeds(seeds_spec)
+    except ValueError as e:
+        raise click.BadParameter(str(e), param_hint="--seeds")
+    if parallel is None:
+        parallel = max((os.cpu_count() or 2) - 2, 1)
+
+    summary = generate_data(
+        seeds,
+        env_name=env_name,
+        data_dir=data_dir,
+        experiment_name=experiment_name,
+        parallel=parallel,
+        frontier_statistics_name=frontier_statistics_name,
+        prior_prob=prior_prob,
+        max_planning_iterations=max_planning_iterations,
+    )
+    if summary.failed:
+        raise SystemExit(1)
+
+
 def _make_example_command(name: str, info: ExampleInfo) -> None:
     """Create and register a click command for an example."""
     description = info["description"]

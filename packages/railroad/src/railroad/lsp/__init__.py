@@ -15,9 +15,15 @@ Frontier statistics come from one of three estimators:
 - :class:`LearnedFrontierStatistics` — a model predicting statistics
   from the same panorama observations the training data stores.
 
+Training data is generated in bulk with ``railroad lsp generate-data``
+(:mod:`railroad.lsp.bulk` — parallel, resumable, one directory per
+seed), inspected with ``railroad lsp inspect-data``, and consumed from
+PyTorch via :class:`LSPFrontierDataset`.
+
 This package is GL-free except for :mod:`railroad.lsp.environment`
-(``LSPVisualEnvironment``), which requires the railsim optional
-dependency and must be imported explicitly::
+(``LSPVisualEnvironment``) and :mod:`railroad.lsp.rollout`, which
+require the railsim optional dependency and must be imported
+explicitly::
 
     from railroad.lsp.environment import LSPVisualEnvironment
 """
@@ -30,6 +36,7 @@ from .data import (
     read_index,
     vantage_key,
 )
+from .dataset import LSPFrontierDataset
 from .env_mixin import LSPEnvironmentMixin
 from .frontier_statistics import (
     DEFAULT_FRONTIER_STATISTICS,
@@ -82,6 +89,7 @@ __all__ = [
     "FrontierView",
     "LSPDataConfig",
     "LSPEnvironmentMixin",
+    "LSPFrontierDataset",
     "LearnedFrontierStatistics",
     "OracleFrontierLabel",
     "OracleFrontierStatistics",
