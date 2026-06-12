@@ -23,6 +23,7 @@ from .data import (
 )
 from .env_mixin import LSPEnvironmentMixin
 from .generator import TrainingDataGenerator
+from .inspect import inspect_data, make_inspection_figure
 from .operators import (
     construct_lsp_explore_operator,
     construct_move_to_goal_operator,
@@ -75,8 +76,10 @@ __all__ = [
     "egocentric_xy",
     "frontier_cells_hash",
     "frontier_signature",
+    "inspect_data",
     "is_goal_observed",
     "load_datum",
+    "make_inspection_figure",
     "make_training_view",
     "mask_grid_with_frontiers",
     "read_index",
