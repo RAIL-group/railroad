@@ -123,6 +123,13 @@ def main(
             return 5.0
         return env_ref[0].estimate_move_time_safe(robot, loc_from, loc_to)
 
+    def goal_move_time_fn(robot: str, loc_from: str, loc_to: str) -> float:
+        # Lower-bounded by the unseen-as-free path time to the known goal
+        # location, so the planner never sees a free ride to the goal.
+        if env_ref[0] is None:
+            return 5.0
+        return env_ref[0].estimate_goal_move_time(robot, loc_from, loc_to)
+
     if provider_name == "oracle":
         provider = OracleFrontierPropertyProvider(
             lambda: env_ref[0].oracle_labels if env_ref[0] is not None else {}
@@ -136,7 +143,7 @@ def main(
 
     operators = [
         construct_move_navigable_operator(move_time_fn),
-        construct_move_to_goal_operator(move_time_fn),
+        construct_move_to_goal_operator(goal_move_time_fn),
         construct_lsp_explore_operator(
             provider, speed_cells_per_sec=config.speed_cells_per_sec
         ),
@@ -229,13 +236,19 @@ def main(
                 break
 
             mcts = MCTSPlanner(actions)
+            # Point-goal navigation is value-driven: the FF heuristic on the
+            # post-move state is ~D_optimistic(frontier, goal), so a small
+            # exploration constant and a strong heuristic weight make MCTS
+            # follow min_f [D(robot, f) + D_opt(f, goal)] instead of
+            # wandering to whichever frontier is nearest (c=300 — tuned for
+            # the explore-everything examples — drowns the value signal).
             action_name = mcts(
                 env.state,
                 goal,
                 max_iterations=4000,
-                c=300,
+                c=10,
                 max_depth=20,
-                heuristic_multiplier=2,
+                heuristic_multiplier=5,
             )
 
             if action_name == "NONE":

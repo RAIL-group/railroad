@@ -23,9 +23,13 @@ from typing import TYPE_CHECKING, Dict, List, Set, Tuple
 import numpy as np
 
 from railroad._bindings import Fluent, GroundedEffect
+from railroad.navigation.constants import FREE_VAL, UNOBSERVED_VAL
+from railroad.navigation.pathing import compute_cost_grid_from_position
 
 from .oracle import compute_oracle_frontier_labels, is_goal_observed
 from .types import OracleFrontierLabel
+
+_UNREACHABLE = 1e8
 
 if TYPE_CHECKING:
     from railroad.experimental.unknown_search import UnknownSpaceEnvironment
@@ -73,6 +77,63 @@ class LSPEnvironmentMixin(_Base):
     @property
     def goal_observed(self) -> bool:
         return is_goal_observed(self._observed_grid, self._lsp_goal_cell)
+
+    # ------------------------------------------------------------------
+    # Goal move-time estimation
+    # ------------------------------------------------------------------
+
+    def _optimistic_goal_cost_grid(self) -> np.ndarray:
+        """Cost grid from the goal on the unseen-as-free observed map.
+
+        The goal's location is known in advance, so even before a real
+        path is observed we can lower-bound the travel cost to it by the
+        path length on the map where all unseen space is unoccupied
+        (observed obstacles respected). Cached per grid generation.
+        """
+        if getattr(self, "_lsp_opt_cost_generation", None) != self._grid_generation:
+            grid = self._observed_grid.copy()
+            grid[grid == UNOBSERVED_VAL] = FREE_VAL
+            cost_grid = compute_cost_grid_from_position(
+                grid,
+                start=[self._lsp_goal_cell[0], self._lsp_goal_cell[1]],
+                unknown_as_obstacle=True,
+                only_return_cost_grid=True,
+            )
+            assert isinstance(cost_grid, np.ndarray)
+            self._lsp_opt_cost_grid = cost_grid
+            self._lsp_opt_cost_generation = self._grid_generation
+        return self._lsp_opt_cost_grid
+
+    def estimate_goal_move_time(
+        self, robot: str, loc_from: str, loc_to: str
+    ) -> float:
+        """Move-time estimate for moves to the (known-location) goal.
+
+        Uses the real observed-map path time when one exists; otherwise
+        the optimistic (unseen-as-free) path time — the lower bound on
+        reaching the goal given its known location. Falls back to the
+        generic safe estimate for non-goal targets or degenerate maps.
+        """
+        if loc_to != self._lsp_goal_name:
+            return self.estimate_move_time_safe(robot, loc_from, loc_to)
+
+        t = self.estimate_move_time(robot, loc_from, loc_to)
+        if np.isfinite(t):
+            return t
+
+        registry = self._location_registry
+        if registry is not None:
+            coords_from = registry.get(loc_from)
+            if coords_from is not None:
+                cost_grid = self._optimistic_goal_cost_grid()
+                row = int(round(float(coords_from[0])))
+                col = int(round(float(coords_from[1])))
+                if 0 <= row < cost_grid.shape[0] and 0 <= col < cost_grid.shape[1]:
+                    cost = float(cost_grid[row, col])
+                    if np.isfinite(cost) and cost < _UNREACHABLE:
+                        speed = self._config.speed_cells_per_sec
+                        return cost / max(speed, 1e-6)
+        return self.estimate_move_time_safe(robot, loc_from, loc_to)
 
     # ------------------------------------------------------------------
     # Frontier refresh: goal setup, revelation, and data hook

@@ -58,6 +58,11 @@ def _make_env(
             return 5.0
         return env_ref[0].estimate_move_time_safe(robot, loc_from, loc_to)
 
+    def goal_move_time_fn(robot: str, loc_from: str, loc_to: str) -> float:
+        if env_ref[0] is None:
+            return 5.0
+        return env_ref[0].estimate_goal_move_time(robot, loc_from, loc_to)
+
     env = LSPVisualEnvironment(
         scene=scene,
         data_writer=data_writer,
@@ -75,7 +80,7 @@ def _make_env(
         },
         operators=[
             construct_move_navigable_operator(move_time_fn),
-            construct_move_to_goal_operator(move_time_fn),
+            construct_move_to_goal_operator(goal_move_time_fn),
             construct_lsp_explore_operator(provider),
         ],
         skill_overrides={"move": NavigationMoveSkill},

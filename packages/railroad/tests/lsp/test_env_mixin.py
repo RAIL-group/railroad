@@ -63,6 +63,11 @@ def _make_env(
             return 5.0
         return env_ref[0].estimate_move_time_safe(robot, loc_from, loc_to)
 
+    def goal_move_time_fn(robot: str, loc_from: str, loc_to: str) -> float:
+        if env_ref[0] is None:
+            return 5.0
+        return env_ref[0].estimate_goal_move_time(robot, loc_from, loc_to)
+
     env = _Env(
         goal_cell=goal_cell,
         state=State(0.0, {
@@ -79,7 +84,7 @@ def _make_env(
         },
         operators=[
             construct_move_navigable_operator(move_time_fn),
-            construct_move_to_goal_operator(move_time_fn),
+            construct_move_to_goal_operator(goal_move_time_fn),
             construct_lsp_explore_operator(provider, speed_cells_per_sec=2.0),
         ],
         true_grid=grid,
@@ -213,6 +218,52 @@ def test_explore_failure_marks_explored_without_revealing() -> None:
     assert F("explored", branch) in env.state.fluents
     assert F("free", "robot1") in env.state.fluents
     assert env.state.time == pytest.approx(0.1 + exploration_cost / 2.0)
+
+
+def test_goal_move_time_lower_bounded_by_optimistic_path() -> None:
+    """Moves to the unobserved goal cost at least the unseen-as-free path."""
+    env = _make_env(_branching_corridor_grid())
+    speed = env.config.speed_cells_per_sec
+
+    # No observed path exists yet, but the estimate is finite and at
+    # least the straight-line (obstacle-free) travel time — never ~0.
+    assert not np.isfinite(env.estimate_move_time("robot1", "start", "goal"))
+    t = env.estimate_goal_move_time("robot1", "start", "goal")
+    euclidean_time = math.hypot(GOAL_CELL[0] - 5, GOAL_CELL[1] - 5) / speed
+    assert np.isfinite(t)
+    assert t >= euclidean_time - 1e-6
+
+    # Non-goal targets delegate to the generic safe estimator.
+    frontier_id = next(iter(env.frontiers))
+    assert env.estimate_goal_move_time("robot1", "start", frontier_id) == (
+        env.estimate_move_time_safe("robot1", "start", frontier_id)
+    )
+
+
+def test_goal_move_time_respects_observed_obstacles() -> None:
+    """An observed wall makes the optimistic estimate exceed Euclidean."""
+    grid = COLLISION_VAL * np.ones((30, 30))
+    grid[1:29, 1:29] = FREE_VAL
+    grid[:, 12] = COLLISION_VAL  # wall between the robot and the goal
+
+    goal_cell = (5, 20)
+    env = _make_env(grid, goal_cell=goal_cell)
+    speed = env.config.speed_cells_per_sec
+
+    euclidean_time = math.hypot(goal_cell[0] - 5, goal_cell[1] - 5) / speed
+    t = env.estimate_goal_move_time("robot1", "start", "goal")
+    assert np.isfinite(t)
+    # The observed portion of the wall forces a detour through (still
+    # unseen, assumed free) space beyond it.
+    assert t > euclidean_time + 0.5
+
+
+def test_goal_move_time_uses_real_path_when_observed() -> None:
+    env = _make_env(_branching_corridor_grid(), goal_cell=(5, 10))
+    assert env.goal_observed
+    real = env.estimate_move_time("robot1", "start", "goal")
+    assert np.isfinite(real)
+    assert env.estimate_goal_move_time("robot1", "start", "goal") == real
 
 
 def test_observed_goal_is_revealed_and_reached_by_moving() -> None:
