@@ -18,14 +18,19 @@ Frontier statistics come from one of three estimators:
 Training data is generated in bulk with ``railroad lsp generate-data``
 (:mod:`railroad.lsp.bulk` — parallel, resumable, one directory per
 seed), inspected with ``railroad lsp inspect-data``, and consumed from
-PyTorch via :class:`LSPFrontierDataset`.
+PyTorch via :class:`LSPFrontierDataset`. The learned model itself
+(``LSPFrontierNet``) is trained with ``railroad lsp train-network``
+(:mod:`railroad.lsp.train`) and loaded for planning via
+:func:`railroad.lsp.model.load_frontier_statistics_model`.
 
 This package is GL-free except for :mod:`railroad.lsp.environment`
 (``LSPVisualEnvironment``) and :mod:`railroad.lsp.rollout`, which
-require the railsim optional dependency and must be imported
-explicitly::
+require the railsim optional dependency, and torch-free except for
+:mod:`railroad.lsp.model` and :mod:`railroad.lsp.train`; those modules
+must be imported explicitly::
 
     from railroad.lsp.environment import LSPVisualEnvironment
+    from railroad.lsp.model import LSPFrontierNet
 """
 
 from .data import (
