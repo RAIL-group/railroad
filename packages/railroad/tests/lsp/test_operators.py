@@ -1,4 +1,4 @@
-"""Tests for the lsp-explore / move-to-goal operators and providers."""
+"""Tests for the lsp-explore / move-to-goal operators."""
 
 from __future__ import annotations
 
@@ -6,10 +6,9 @@ import pytest
 
 from railroad._bindings import Fluent
 from railroad.lsp import (
-    FrontierProperties,
-    OptimisticFrontierPropertyProvider,
-    OracleFrontierPropertyProvider,
-    OracleFrontierLabel,
+    FixedPriorFrontierStatistics,
+    FrontierStatistics,
+    FrontierStatisticsEstimator,
     construct_lsp_explore_operator,
     construct_move_to_goal_operator,
 )
@@ -17,43 +16,22 @@ from railroad.lsp import (
 F = Fluent
 
 
-def test_optimistic_provider_constants() -> None:
-    provider = OptimisticFrontierPropertyProvider(
-        prob_feasible=0.7, delta_success_cost=1.0, exploration_cost=12.0
-    )
-    props = provider.get("robot1", "anything")
-    assert props == FrontierProperties(0.7, 1.0, 12.0)
+class _MappingStatistics(FrontierStatisticsEstimator):
+    """Test estimator returning canned per-frontier statistics."""
 
+    def __init__(self, statistics: dict[str, FrontierStatistics]) -> None:
+        self._statistics = statistics
 
-def test_oracle_provider_maps_labels() -> None:
-    labels = {
-        "f_yes": OracleFrontierLabel("f_yes", 1.0, 30.0, 25.0, None, "h1"),
-        "f_no": OracleFrontierLabel("f_no", 0.0, None, None, 8.0, "h2"),
-        "f_degenerate": OracleFrontierLabel("f_degenerate", 0.0, None, None, None, "h3"),
-    }
-    provider = OracleFrontierPropertyProvider(lambda: labels)
-
-    props_yes = provider.get("robot1", "f_yes")
-    assert props_yes.prob_feasible == 1.0
-    # Delta success cost = true cost - optimistic cost.
-    assert props_yes.delta_success_cost == pytest.approx(5.0)
-
-    props_no = provider.get("robot1", "f_no")
-    assert props_no.prob_feasible == 0.0
-    assert props_no.exploration_cost == 8.0
-
-    # Missing or degenerate labels fall back to the default.
-    default = provider.get("robot1", "f_missing")
-    assert provider.get("robot1", "f_degenerate") == default
-    assert 0.0 < default.prob_feasible < 1.0
+    def get(self, robot: str, frontier_id: str) -> FrontierStatistics:
+        return self._statistics[frontier_id]
 
 
 def test_lsp_explore_operator_grounding() -> None:
-    provider = OracleFrontierPropertyProvider(lambda: {
-        "f1": OracleFrontierLabel("f1", 1.0, 30.0, 25.0, None, "h1"),
-        "f2": OracleFrontierLabel("f2", 0.0, None, None, 8.0, "h2"),
+    statistics = _MappingStatistics({
+        "f1": FrontierStatistics(1.0, 5.0, 10.0),
+        "f2": FrontierStatistics(0.0, 0.0, 8.0),
     })
-    operator = construct_lsp_explore_operator(provider, speed_cells_per_sec=2.0)
+    operator = construct_lsp_explore_operator(statistics, speed_cells_per_sec=2.0)
 
     actions = operator.instantiate({
         "robot": {"robot1"},
@@ -85,7 +63,7 @@ def test_lsp_explore_operator_grounding() -> None:
     # Success reveals the goal after the delta success cost — it never
     # relocates the robot.
     success_effect = success_branch[0]
-    assert success_effect.time == pytest.approx((30.0 - 25.0) / 2.0)
+    assert success_effect.time == pytest.approx(5.0 / 2.0)
     assert F("revealed goal") in success_effect.resulting_fluents
     assert F("explored f1") in success_effect.resulting_fluents
     assert F("free robot1") in success_effect.resulting_fluents
@@ -108,11 +86,11 @@ def test_lsp_explore_operator_grounding() -> None:
 
 
 def test_lsp_explore_min_branch_time_floor() -> None:
-    provider = OptimisticFrontierPropertyProvider(
+    statistics = FixedPriorFrontierStatistics(
         prob_feasible=0.8, delta_success_cost=0.0, exploration_cost=10.0
     )
     operator = construct_lsp_explore_operator(
-        provider, speed_cells_per_sec=2.0, min_branch_time=0.1
+        statistics, speed_cells_per_sec=2.0, min_branch_time=0.1
     )
     (action,) = operator.instantiate({
         "robot": {"robot1"}, "frontier": {"f1"},

@@ -12,13 +12,11 @@ from .data import (
     frontier_signature,
     vantage_key,
 )
-from .pano import make_training_view
 from .types import LSPDataConfig, OracleFrontierLabel, TrainingDatum
+from .views import compute_frontier_views
 
 if TYPE_CHECKING:
     from railroad.environment.railsim import PanoRecord
-
-from .vantage import select_best_vantage
 
 
 class TrainingDataGenerator:
@@ -50,35 +48,30 @@ class TrainingDataGenerator:
         if self.writer is None:
             return 0
 
+        views = compute_frontier_views(
+            frontiers=frontiers,
+            pano_records=pano_records,
+            goal_cell=self.goal_cell,
+            vantage_inflation_radius=self.config.vantage_inflation_radius,
+        )
         written = 0
-        for frontier_id, frontier in frontiers.items():
+        for frontier_id, view in views.items():
             label = labels.get(frontier_id)
             if label is None:
                 continue
-            record = select_best_vantage(
-                frontier, pano_records, self.config.vantage_inflation_radius
-            )
-            if record is None:
-                continue
 
-            key = vantage_key(record)
             signature = frontier_signature(
-                label, key,
+                label, vantage_key(view.record),
                 cost_round_decimals=self.config.cost_round_decimals,
             )
             if not self.tracker.should_emit(frontier_id, signature):
                 continue
 
-            frontier_rc = (
-                float(frontier.centroid_row), float(frontier.centroid_col)
-            )
-            image, frontier_xy, goal_xy = make_training_view(
-                record, frontier_rc, (float(self.goal_cell[0]), float(self.goal_cell[1]))
-            )
+            observation = view.observation
             self.writer.write(TrainingDatum(
-                image=image,
-                frontier_xy_ego=frontier_xy,
-                goal_xy_ego=goal_xy,
+                image=observation.image,
+                frontier_xy_ego=observation.frontier_xy_ego,
+                goal_xy_ego=observation.goal_xy_ego,
                 label=label.prob_feasible >= 0.5,
                 success_cost=label.success_cost,
                 optimistic_cost=label.optimistic_cost,
@@ -86,8 +79,8 @@ class TrainingDataGenerator:
                 metadata={
                     "frontier_id": frontier_id,
                     "signature": signature,
-                    "robot": record.robot,
-                    "time": record.time,
+                    "robot": view.record.robot,
+                    "time": view.record.time,
                     "success_cost": label.success_cost,
                     "optimistic_cost": label.optimistic_cost,
                     "exploration_cost": label.exploration_cost,

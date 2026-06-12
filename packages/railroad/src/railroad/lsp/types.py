@@ -8,8 +8,8 @@ from typing import Any, Dict, NamedTuple, Tuple
 import numpy as np
 
 
-class FrontierProperties(NamedTuple):
-    """Planner-facing parameters of a frontier-exploration action.
+class FrontierStatistics(NamedTuple):
+    """Planner-facing statistics of a frontier-exploration action.
 
     Costs are in grid cells; operator constructors convert them to time
     via a robot speed. ``delta_success_cost`` is the *extra* cost of
@@ -21,6 +21,21 @@ class FrontierProperties(NamedTuple):
     prob_feasible: float
     delta_success_cost: float
     exploration_cost: float
+
+
+class FrontierObservation(NamedTuple):
+    """What a robot can *see* of a frontier: the input to a learned model.
+
+    The image is the panorama from the best vantage, rolled so the
+    frontier is image-centered; the frontier and goal locations are in
+    that frame (x forward, y left). These fields match a
+    :class:`TrainingDatum` minus the oracle labels, so a model trained
+    on the generated data consumes observations directly.
+    """
+
+    image: np.ndarray  # HxWx3 uint8
+    frontier_xy_ego: Tuple[float, float]
+    goal_xy_ego: Tuple[float, float]
 
 
 class OracleFrontierLabel(NamedTuple):

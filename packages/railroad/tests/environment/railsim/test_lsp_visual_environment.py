@@ -12,14 +12,12 @@ from railroad.environment.railsim import GuidedMazeConfig, RailsimScene
 from railroad.environment.skill import NavigationMoveSkill
 from railroad.environment.symbolic import LocationRegistry
 from railroad.experimental.unknown_search import NavigationConfig, Pose
-from railroad.experimental.unknown_search.operators import (
-    construct_move_navigable_operator,
-)
 from railroad.lsp import (
-    OracleFrontierPropertyProvider,
+    FrontierStatistics,
+    FrontierStatisticsEstimator,
+    LearnedFrontierStatistics,
+    OracleFrontierStatistics,
     TrainingDataWriter,
-    construct_lsp_explore_operator,
-    construct_move_to_goal_operator,
     load_datum,
     read_index,
 )
@@ -45,26 +43,14 @@ def maze_scene() -> RailsimScene:
 
 
 def _make_env(
-    scene: RailsimScene, data_writer: TrainingDataWriter | None
+    scene: RailsimScene,
+    data_writer: TrainingDataWriter | None,
+    frontier_statistics: FrontierStatisticsEstimator | None = None,
 ) -> LSPVisualEnvironment:
     start = scene.locations["start_loc"]
-    env_ref: list[LSPVisualEnvironment | None] = [None]
-    provider = OracleFrontierPropertyProvider(
-        lambda: env_ref[0].oracle_labels if env_ref[0] is not None else {}
-    )
-
-    def move_time_fn(robot: str, loc_from: str, loc_to: str) -> float:
-        if env_ref[0] is None:
-            return 5.0
-        return env_ref[0].estimate_move_time_safe(robot, loc_from, loc_to)
-
-    def goal_move_time_fn(robot: str, loc_from: str, loc_to: str) -> float:
-        if env_ref[0] is None:
-            return 5.0
-        return env_ref[0].estimate_goal_move_time(robot, loc_from, loc_to)
-
-    env = LSPVisualEnvironment(
+    return LSPVisualEnvironment(
         scene=scene,
+        frontier_statistics=frontier_statistics or OracleFrontierStatistics(),
         data_writer=data_writer,
         state=State(0.0, {
             F("at robot1 start_loc"),
@@ -76,13 +62,7 @@ def _make_env(
             "location": {"start_loc"},
             "frontier": set(),
             "object": set(),
-            "goal": set(),
         },
-        operators=[
-            construct_move_navigable_operator(move_time_fn),
-            construct_move_to_goal_operator(goal_move_time_fn),
-            construct_lsp_explore_operator(provider),
-        ],
         skill_overrides={"move": NavigationMoveSkill},
         robot_initial_poses={"robot1": Pose(float(start[0]), float(start[1]), 0.0)},
         location_registry=LocationRegistry({
@@ -95,8 +75,6 @@ def _make_env(
             interrupt_min_dt=30000.0,
         ),
     )
-    env_ref[0] = env
-    return env
 
 
 def test_pano_records_carry_visibility_polygons(maze_scene: RailsimScene) -> None:
@@ -131,3 +109,42 @@ def test_training_data_emitted(tmp_path, maze_scene: RailsimScene) -> None:  # n
     label = labels[entry["frontier_id"]]
     assert datum.label == (label.prob_feasible >= 0.5)
     writer.close()
+
+
+def test_learned_statistics_drive_explore_actions(
+    maze_scene: RailsimScene,
+) -> None:
+    """A model plugged in as the estimator parameterizes lsp-explore."""
+    batch_sizes: list[int] = []
+
+    def model(observations):  # noqa: ANN001, ANN202
+        batch_sizes.append(len(observations))
+        for obs in observations:
+            assert obs.image.dtype == np.uint8 and obs.image.ndim == 3
+        return [FrontierStatistics(0.9, 2.0, 5.0)] * len(observations)
+
+    env = _make_env(
+        maze_scene,
+        data_writer=None,
+        frontier_statistics=LearnedFrontierStatistics(model),
+    )
+
+    # The model was batch-evaluated on real panorama observations during
+    # the initial refresh...
+    assert batch_sizes and max(batch_sizes) >= 1
+    assert max(batch_sizes) <= len(env.frontiers)
+
+    # ...and its predictions parameterize the grounded explore actions.
+    predicted_ids = {
+        fid for fid in env.frontiers
+        if env.frontier_statistics.get("robot1", fid)
+        == FrontierStatistics(0.9, 2.0, 5.0)
+    }
+    assert predicted_ids, "expected at least one frontier with a vantage"
+    explore = next(
+        a for a in env.get_actions()
+        if a.name.startswith("lsp-explore")
+        and a.name.split()[-1] in predicted_ids
+    )
+    probs = sorted(p for p, _ in explore.effects[1].prob_effects)
+    assert probs[1] == pytest.approx(0.9)

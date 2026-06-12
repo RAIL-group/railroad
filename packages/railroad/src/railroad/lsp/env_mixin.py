@@ -1,12 +1,17 @@
-"""Environment mixin adding oracle labeling and lsp-explore execution.
+"""Environment mixin for LSP point-goal navigation.
 
 Mix in *before* :class:`UnknownSpaceEnvironment`::
 
     class MyEnv(LSPEnvironmentMixin, UnknownSpaceEnvironment): ...
 
-The subclass must set ``self._lsp_goal_cell`` before calling
-``super().__init__`` (the base constructor triggers the initial
-``refresh_frontiers``, which this mixin hooks).
+The subclass must set ``self._lsp_goal_cell`` and
+``self._lsp_frontier_statistics`` (a
+:class:`~railroad.lsp.FrontierStatisticsEstimator`) before calling
+``super().__init__`` — the base constructor resolves operators via
+:meth:`define_operators` and triggers the initial ``refresh_frontiers``,
+both of which this mixin hooks. Operators (navigable moves, the gated
+move-to-goal, lsp-explore parameterized by the estimator, and a no-op)
+are owned by the environment; don't pass ``operators=``.
 
 The goal is treated like an object whose spatial location is known in
 advance: its name lives in ``objects_by_type["goal"]`` and its
@@ -14,6 +19,13 @@ coordinates are registered in the location registry from the start, but
 it only becomes a movable destination once *revealed* — by observing its
 map cell. Exploring a frontier never relocates the robot; the robot
 reaches the goal exclusively by following a real path via a move action.
+
+The true-map oracle is needed only to resolve explore outcomes during
+*simulated* execution and to label training data; planning works with
+any frontier-statistics estimator. Where no oracle exists (deployment),
+``oracle_labels`` is empty and explore outcomes fall back to the base
+environment's probabilistic sampling — subclasses there should resolve
+outcomes from real sensing instead.
 """
 
 from __future__ import annotations
@@ -23,9 +35,19 @@ from typing import TYPE_CHECKING, Dict, List, Set, Tuple
 import numpy as np
 
 from railroad._bindings import Fluent, GroundedEffect
+from railroad.core import Operator
+from railroad.experimental.unknown_search.operators import (
+    construct_move_navigable_operator,
+)
 from railroad.navigation.constants import FREE_VAL, UNOBSERVED_VAL
 from railroad.navigation.pathing import compute_cost_grid_from_position
+from railroad.operators import construct_no_op_operator
 
+from .frontier_statistics import FrontierStatisticsEstimator
+from .operators import (
+    construct_lsp_explore_operator,
+    construct_move_to_goal_operator,
+)
 from .oracle import compute_oracle_frontier_labels, is_goal_observed
 from .types import OracleFrontierLabel
 
@@ -40,14 +62,33 @@ else:
 
 
 class LSPEnvironmentMixin(_Base):
-    """Oracle labels, goal revelation, and deterministic lsp-explore outcomes."""
+    """Operators, oracle labels, goal revelation, and explore execution."""
 
     # NOTE: the symbolic goal name must not end in "_loc" — the base
     # environment reserves that suffix for transient robot anchors and
     # filters out move actions targeting such names.
     _lsp_goal_cell: Tuple[int, int]
+    _lsp_frontier_statistics: FrontierStatisticsEstimator
     _lsp_goal_name: str = "goal"
     _lsp_exploration_cost_factor: float = 1.0
+
+    @property
+    def frontier_statistics(self) -> FrontierStatisticsEstimator:
+        """The estimator parameterizing lsp-explore actions."""
+        return self._lsp_frontier_statistics
+
+    def define_operators(self) -> List[Operator]:
+        """LSP point-goal operators; override to customize the set."""
+        return [
+            construct_move_navigable_operator(self.estimate_move_time_safe),
+            construct_move_to_goal_operator(self.estimate_goal_move_time),
+            construct_lsp_explore_operator(
+                self._lsp_frontier_statistics,
+                speed_cells_per_sec=self._config.speed_cells_per_sec,
+                goal_name=self._lsp_goal_name,
+            ),
+            construct_no_op_operator(no_op_time=300.0, extra_cost=100.0),
+        ]
 
     @property
     def goal_cell(self) -> Tuple[int, int]:
@@ -58,8 +99,18 @@ class LSPEnvironmentMixin(_Base):
         return self._lsp_goal_name
 
     @property
+    def oracle_available(self) -> bool:
+        """Whether a true map exists to compute oracle labels from."""
+        return getattr(self, "_true_grid", None) is not None
+
+    @property
     def oracle_labels(self) -> Dict[str, OracleFrontierLabel]:
-        """Current true-map frontier labels (cached per grid generation)."""
+        """Current true-map frontier labels (cached per grid generation).
+
+        Empty when no true map is available (deployment).
+        """
+        if not self.oracle_available:
+            return {}
         labeled_generation = getattr(self, "_lsp_labeled_generation", None)
         if labeled_generation != (self._grid_generation, len(self._frontiers)):
             self._lsp_labels = compute_oracle_frontier_labels(
@@ -143,6 +194,7 @@ class LSPEnvironmentMixin(_Base):
         super().refresh_frontiers()
         self._ensure_goal_setup()
         self._reveal_goal_if_observed()
+        self._lsp_frontier_statistics.refresh(self)
         self._after_lsp_refresh()
 
     def _ensure_goal_setup(self) -> None:

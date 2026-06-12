@@ -15,14 +15,10 @@ from railroad.experimental.unknown_search import (
     Pose,
     UnknownSpaceEnvironment,
 )
-from railroad.experimental.unknown_search.operators import (
-    construct_move_navigable_operator,
-)
 from railroad.lsp import (
+    FrontierStatisticsEstimator,
     LSPEnvironmentMixin,
-    OracleFrontierPropertyProvider,
-    construct_lsp_explore_operator,
-    construct_move_to_goal_operator,
+    OracleFrontierStatistics,
 )
 from railroad.navigation.constants import COLLISION_VAL, FREE_VAL
 
@@ -35,8 +31,15 @@ from typing import Any
 
 
 class _Env(LSPEnvironmentMixin, UnknownSpaceEnvironment):
-    def __init__(self, goal_cell: tuple[int, int], **kwargs: Any) -> None:
+    def __init__(
+        self,
+        goal_cell: tuple[int, int],
+        frontier_statistics: FrontierStatisticsEstimator,
+        **kwargs: Any,
+    ) -> None:
         self._lsp_goal_cell = goal_cell
+        self._lsp_frontier_statistics = frontier_statistics
+        kwargs.setdefault("operators", None)
         super().__init__(**kwargs)
 
 
@@ -53,23 +56,9 @@ def _make_env(
     goal_cell: tuple[int, int] = GOAL_CELL,
     sensor_range: float = 8.0,
 ) -> _Env:
-    env_ref: list[_Env | None] = [None]
-    provider = OracleFrontierPropertyProvider(
-        lambda: env_ref[0].oracle_labels if env_ref[0] is not None else {}
-    )
-
-    def move_time_fn(robot: str, loc_from: str, loc_to: str) -> float:
-        if env_ref[0] is None:
-            return 5.0
-        return env_ref[0].estimate_move_time_safe(robot, loc_from, loc_to)
-
-    def goal_move_time_fn(robot: str, loc_from: str, loc_to: str) -> float:
-        if env_ref[0] is None:
-            return 5.0
-        return env_ref[0].estimate_goal_move_time(robot, loc_from, loc_to)
-
-    env = _Env(
+    return _Env(
         goal_cell=goal_cell,
+        frontier_statistics=OracleFrontierStatistics(),
         state=State(0.0, {
             F("at robot1 start"),
             F("free robot1"),
@@ -80,13 +69,7 @@ def _make_env(
             "location": {"start"},
             "frontier": set(),
             "object": set(),
-            "goal": set(),
         },
-        operators=[
-            construct_move_navigable_operator(move_time_fn),
-            construct_move_to_goal_operator(goal_move_time_fn),
-            construct_lsp_explore_operator(provider, speed_cells_per_sec=2.0),
-        ],
         true_grid=grid,
         robot_initial_poses={"robot1": Pose(5.0, 5.0, 0.0)},
         location_registry=LocationRegistry({"start": np.array([5, 5])}),
@@ -98,8 +81,6 @@ def _make_env(
             interrupt_min_dt=30000.0,
         ),
     )
-    env_ref[0] = env
-    return env
 
 
 def _frontier_ids_by_kind(env: _Env) -> tuple[str, str]:

@@ -13,13 +13,13 @@ from __future__ import annotations
 from railroad.core import Effect, Fluent, Operator
 from railroad.operators._utils import Numeric, OptNumeric, _to_numeric
 
-from .providers import FrontierPropertyProvider
+from .frontier_statistics import FrontierStatisticsEstimator
 
 F = Fluent
 
 
 def construct_lsp_explore_operator(
-    provider: FrontierPropertyProvider,
+    statistics: FrontierStatisticsEstimator,
     *,
     speed_cells_per_sec: float = 2.0,
     goal_name: str = "goal",
@@ -28,7 +28,7 @@ def construct_lsp_explore_operator(
 ) -> Operator:
     """Construct ``(lsp-explore ?robot ?frontier)`` for point-goal navigation.
 
-    Exploring a frontier succeeds with the provider's ``prob_feasible``:
+    Exploring a frontier succeeds with the estimated ``prob_feasible``:
     on success the goal is *revealed* after ``delta_success_cost / speed``
     seconds — the extra cost of pushing through the frontier beyond the
     direct travel that a subsequent ``move`` to the goal accounts for; on
@@ -44,16 +44,16 @@ def construct_lsp_explore_operator(
     lo, hi = prob_clamp
 
     prob_fn = Numeric(
-        lambda r, f: min(hi, max(lo, provider.get(r, f).prob_feasible))
+        lambda r, f: min(hi, max(lo, statistics.get(r, f).prob_feasible))
     )
     success_time_fn = Numeric(
         lambda r, f: max(
-            min_branch_time, provider.get(r, f).delta_success_cost / speed
+            min_branch_time, statistics.get(r, f).delta_success_cost / speed
         )
     )
     failure_time_fn = Numeric(
         lambda r, f: max(
-            min_branch_time, provider.get(r, f).exploration_cost / speed
+            min_branch_time, statistics.get(r, f).exploration_cost / speed
         )
     )
 
