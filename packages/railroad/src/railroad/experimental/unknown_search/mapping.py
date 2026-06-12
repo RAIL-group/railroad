@@ -38,6 +38,28 @@ def _get_poly_for_scan(transformed_rays: np.ndarray, sensor_pose: PoseLike) -> P
     return Path(path_points.T, closed=True)
 
 
+def compute_scan_polygon_vertices(
+    laser_scanner_directions: np.ndarray,
+    laser_ranges: np.ndarray,
+    max_range: float,
+    sensor_pose: PoseLike,
+) -> np.ndarray:
+    """Return the visibility polygon of a scan as a closed vertex loop.
+
+    The loop is a 2x(N+2) array in grid-cell coordinates: the sensor
+    origin, the transformed ray endpoints (ranges truncated to
+    ``max_range``), and the origin again to close the polygon. This is the
+    same polygon ``insert_scan`` uses to mark free space.
+    """
+    truncated_ranges = laser_ranges.copy()
+    truncated_ranges[truncated_ranges > max_range] = max_range
+    transformed_rays = _transform_rays(
+        truncated_ranges * laser_scanner_directions, sensor_pose
+    )
+    origin = np.array([[float(sensor_pose.x)], [float(sensor_pose.y)]])
+    return np.concatenate((origin, transformed_rays, origin), axis=1)
+
+
 def _set_points_inside_poly(
     grid: np.ndarray,
     poly: Path,
