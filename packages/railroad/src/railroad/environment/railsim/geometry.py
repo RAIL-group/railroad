@@ -1,5 +1,4 @@
-"""Occupancy grid -> shapely polygon conversion (vendored from the old
-`environments.utils.calc`, updated for shapely 2.x)."""
+"""Occupancy grid -> shapely polygon conversion (shapely 2.x)."""
 
 from __future__ import annotations
 

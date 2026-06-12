@@ -151,11 +151,3 @@ class Simulator:
                  exc: BaseException | None,
                  tb: TracebackType | None) -> None:
         self.release()
-
-
-def image_aligned_to_world(image: np.ndarray, pose: Pose) -> np.ndarray:
-    """Roll a robot-aligned panorama so its center column faces world +x
-    (the old Unity-sim convention)."""
-    cols = image.shape[1]
-    roll_amount = -int(round(cols * pose.yaw / (2 * math.pi)))
-    return np.roll(image, shift=roll_amount, axis=1)
