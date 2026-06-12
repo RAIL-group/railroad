@@ -91,6 +91,27 @@ class LSPEnvironmentMixin(_Base):
         ]
 
     @property
+    def frontier_probability_overlays(self) -> List[Tuple[np.ndarray, float]]:
+        """(cells, prob_feasible) per current frontier, for visualization.
+
+        Reports what the *planner* believes — whatever the active
+        estimator predicts (learned, oracle, or fixed prior). The
+        dashboard duck-types this to color frontier cells in plots and
+        videos. Cells are copies, safe to keep across refreshes.
+        """
+        robot = next(iter(sorted(self._objects_by_type.get("robot", set()))), "")
+        return [
+            (
+                np.array(frontier.cells, dtype=int, copy=True),
+                float(
+                    self._lsp_frontier_statistics.get(robot, frontier_id)
+                    .prob_feasible
+                ),
+            )
+            for frontier_id, frontier in self.frontiers.items()
+        ]
+
+    @property
     def goal_cell(self) -> Tuple[int, int]:
         return self._lsp_goal_cell
 

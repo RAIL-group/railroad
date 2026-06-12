@@ -63,6 +63,24 @@ def test_split_single_dir_skips_validation(experiment_dir: Path) -> None:
     assert val_dirs == []
 
 
+def test_train_network_custom_filename(
+    experiment_dir: Path, tmp_path: Path
+) -> None:
+    save_dir = tmp_path / "training"
+    result = train_network(TrainConfig(
+        data_dir=experiment_dir,
+        save_dir=save_dir,
+        network_filename="my_net.pt",
+        num_epochs=1,
+        batch_size=4,
+        val_fraction=0.0,
+        num_workers=0,
+        device="cpu",
+    ))
+    assert result.network_file == save_dir / "my_net.pt"
+    assert result.network_file.exists()
+
+
 def test_train_network(experiment_dir: Path, tmp_path: Path) -> None:
     save_dir = tmp_path / "training"
     result = train_network(TrainConfig(
