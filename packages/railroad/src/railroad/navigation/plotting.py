@@ -46,6 +46,38 @@ def make_plotting_grid_rgba(grid_map: np.ndarray) -> np.ndarray:
     return rgba
 
 
+def make_frontier_overlay_rgba(
+    grid_shape: tuple[int, ...],
+    overlays: Any,
+    *,
+    alpha: float = 0.8,
+) -> np.ndarray:
+    """RGBA overlay coloring frontier cells by their predicted probability.
+
+    Each overlay is a ``(cells, prob_feasible)`` pair, where *cells* is a
+    2xN array of (row, col) grid indices. The probability is mapped onto
+    the 0.1--0.9 span of the viridis colormap; everything else is fully
+    transparent. *alpha* stays high so the colors read as viridis rather
+    than washing out against the white free space.
+
+    The returned image is transposed to match ``make_plotting_grid(grid.T)``:
+    shape ``(grid_shape[1], grid_shape[0], 4)``, so grid cell (r, c) lands
+    at pixel [c, r].
+    """
+    import matplotlib
+
+    cmap = matplotlib.colormaps["viridis"]
+    rgba = np.zeros((grid_shape[1], grid_shape[0], 4), dtype=np.float32)
+    for cells, prob in overlays:
+        cells = np.asarray(cells, dtype=int)
+        if cells.size == 0:
+            continue
+        color = cmap(0.1 + 0.8 * float(np.clip(prob, 0.0, 1.0)))
+        rgba[cells[1], cells[0], :3] = color[:3]
+        rgba[cells[1], cells[0], 3] = alpha
+    return rgba
+
+
 def plot_grid_background(
     ax: Any,
     observed_grid: np.ndarray,

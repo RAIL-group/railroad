@@ -106,6 +106,20 @@ def _place_robot_at_frontier(env: _Env, frontier_id: str) -> None:
     )
 
 
+def test_frontier_probability_overlays_match_frontiers() -> None:
+    env = _make_env(_branching_corridor_grid())
+    overlays = env.frontier_probability_overlays
+    assert len(overlays) == len(env.frontiers) == 2
+
+    # Oracle statistics: the east corridor leads to the goal, the
+    # dead-end branch does not.
+    assert sorted(prob for _, prob in overlays) == [0.0, 1.0]
+
+    cell_counts = sorted(cells.shape[1] for cells, _ in overlays)
+    expected = sorted(f.cells.shape[1] for f in env.frontiers.values())
+    assert cell_counts == expected
+
+
 def test_oracle_labels_populated_after_init() -> None:
     env = _make_env(_branching_corridor_grid())
     assert len(env.frontiers) == 2

@@ -339,6 +339,15 @@ class _PlottingMixin:
             from railroad.navigation.plotting import plot_grid_background
             true_grid = getattr(self._env, 'true_grid', None)
             plot_grid_background(ax, occupancy_grid, true_grid)
+            # Predicted frontier probabilities (LSP environments): color
+            # each frontier's cells by its prob_feasible.
+            overlays = getattr(self._env, 'frontier_probability_overlays', None)
+            if overlays:
+                from railroad.navigation.plotting import make_frontier_overlay_rgba
+                ax.imshow(
+                    make_frontier_overlay_rgba(occupancy_grid.shape, overlays),
+                    origin="upper", zorder=1,
+                )
 
         if self._goal_time is not None:
             t_end = self._goal_time
@@ -519,8 +528,13 @@ class _PlottingMixin:
         cbar_top = 0.88
         cbar_height = cbar_top - cbar_bottom
 
-        # Total width used by colorbar strips
+        # Total width used by colorbar strips (plus the frontier
+        # probability legend when overlays were captured)
+        has_frontier_cbar = bool(self._frontier_overlay_snapshots)
         cbar_total_width = n_entities * cbar_width + max(0, n_entities - 1) * cbar_gap
+        if has_frontier_cbar:
+            # Extra room for the legend's right-side tick labels
+            cbar_total_width += 2 * cbar_gap + cbar_width + 0.06
         actions_left = cbar_left + cbar_total_width + 0.08
 
         for idx, entity in enumerate(entity_names):
@@ -550,6 +564,25 @@ class _PlottingMixin:
             )
             sidebar_ax.text(
                 x0 + cbar_width / 2, cbar_top + 0.08, entity,
+                fontsize=5, fontfamily="monospace", fontweight="bold",
+                ha="center", va="bottom",
+                transform=sidebar_ax.transAxes,
+            )
+
+        # --- Frontier probability legend ---
+        if has_frontier_cbar:
+            x0 = cbar_left + n_entities * (cbar_width + cbar_gap) + 2 * cbar_gap
+            cbar_ax = sidebar_ax.inset_axes((x0, cbar_bottom, cbar_width, cbar_height))
+            gradient = np.linspace(0.1, 0.9, 256).reshape(-1, 1)
+            cbar_ax.imshow(gradient, aspect="auto", cmap="viridis", origin="lower",
+                           vmin=0.0, vmax=1.0, extent=(0, 1, 0, 1))
+            cbar_ax.set_xticks([])
+            cbar_ax.set_ylim(0, 1)
+            cbar_ax.yaxis.tick_right()
+            cbar_ax.set_yticks([0, 0.5, 1])
+            cbar_ax.tick_params(axis="y", labelsize=5)
+            sidebar_ax.text(
+                x0 + cbar_width / 2, cbar_top + 0.04, "frontier\nP(goal)",
                 fontsize=5, fontfamily="monospace", fontweight="bold",
                 ha="center", va="bottom",
                 transform=sidebar_ax.transAxes,
@@ -794,6 +827,19 @@ class _PlottingMixin:
                     _composite_frame(occupancy_grid), origin="upper", zorder=0,
                 )
 
+        # Animated frontier-probability overlay (LSP environments)
+        frontier_overlay_artist = None
+        frontier_overlay_frames: list[tuple[float, Any]] = []
+        if occupancy_grid is not None and self._frontier_overlay_snapshots:
+            from railroad.navigation.plotting import make_frontier_overlay_rgba
+            frontier_overlay_frames = [
+                (t, make_frontier_overlay_rgba(occupancy_grid.shape, overlays))
+                for t, overlays in self._frontier_overlay_snapshots
+            ]
+            frontier_overlay_artist = ax.imshow(
+                frontier_overlay_frames[0][1], origin="upper", zorder=1,
+            )
+
         n_frames = int(fps * duration)
         animation_times = np.linspace(0.0, t_end, n_frames)
         # Prepend the final time as frame 0 so the video thumbnail/poster
@@ -908,6 +954,15 @@ class _PlottingMixin:
                     else:
                         break
                 nav_grid_artist.set_data(latest_rgb)
+            # Update frontier-probability overlay
+            if frontier_overlay_artist is not None:
+                latest_rgba = frontier_overlay_frames[0][1]
+                for snap_time, rgba in frontier_overlay_frames:
+                    if snap_time <= current_time:
+                        latest_rgba = rgba
+                    else:
+                        break
+                frontier_overlay_artist.set_data(latest_rgba)
             for idx, entity in enumerate(entity_names):
                 # Update current position marker
                 pos = marker_positions[entity]
@@ -943,6 +998,8 @@ class _PlottingMixin:
             artists = markers + labels + [trail_scatter, title_artist]
             if nav_grid_artist is not None:
                 artists.append(nav_grid_artist)
+            if frontier_overlay_artist is not None:
+                artists.append(frontier_overlay_artist)
             artists += list(onboard_artists.values())
             artists += [txt for txt, _ in action_texts]
             artists += [txt for txt, _ in goal_text_artists]

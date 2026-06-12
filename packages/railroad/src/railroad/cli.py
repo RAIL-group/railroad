@@ -349,6 +349,9 @@ def lsp_generate_data(
 @click.option("--save-dir", type=click.Path(file_okay=False), default=None,
               help="Output directory for weights and logs "
                    "[default: <data-dir>/training]")
+@click.option("--network-filename", default="LSPFrontierNet.pt",
+              show_default=True,
+              help="Filename of the saved weights inside the save dir")
 @click.option("--num-epochs", type=int, default=8, show_default=True,
               help="Number of passes over the training data")
 @click.option("--batch-size", type=int, default=32, show_default=True,
@@ -375,6 +378,7 @@ def lsp_generate_data(
 def lsp_train_network(
     data_dir: str,
     save_dir: str | None,
+    network_filename: str,
     num_epochs: int,
     batch_size: int,
     learning_rate: float,
@@ -404,6 +408,7 @@ def lsp_train_network(
         data_dir=data_dir,
         save_dir=save_dir if save_dir is not None
         else Path(data_dir) / "training",
+        network_filename=network_filename,
         num_epochs=num_epochs,
         batch_size=batch_size,
         learning_rate=learning_rate,

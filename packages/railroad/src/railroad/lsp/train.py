@@ -33,6 +33,8 @@ class TrainConfig:
 
     data_dir: str | Path
     save_dir: str | Path
+    # Filename of the saved weights inside save_dir.
+    network_filename: str = NETWORK_FILENAME
     num_epochs: int = 8
     batch_size: int = 32
     learning_rate: float = 2e-3
@@ -182,8 +184,9 @@ def _make_loader(
 def train_network(config: TrainConfig) -> TrainResult:
     """Train an :class:`LSPFrontierNet` and save it under ``save_dir``.
 
-    Writes the weights (``LSPFrontierNet.pt``), a ``training_log.json``
-    with the config and per-epoch losses, and a ``loss_curves.png``.
+    Writes the weights (``config.network_filename``, by default
+    ``LSPFrontierNet.pt``), a ``training_log.json`` with the config and
+    per-epoch losses, and a ``loss_curves.png``.
     """
     device = (
         default_device() if config.device is None
@@ -235,7 +238,7 @@ def train_network(config: TrainConfig) -> TrainResult:
 
     save_dir = Path(config.save_dir)
     save_dir.mkdir(parents=True, exist_ok=True)
-    network_file = save_dir / NETWORK_FILENAME
+    network_file = save_dir / config.network_filename
     torch.save(network.cpu().state_dict(), network_file)
     with open(save_dir / "training_log.json", "w") as f:
         json.dump(

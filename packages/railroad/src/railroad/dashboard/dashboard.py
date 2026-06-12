@@ -123,6 +123,9 @@ class PlannerDashboard(_PlottingMixin):
         self._entity_positions: dict[str, list[tuple[float, str, tuple[float, float] | None]]] = {}
         self._goal_time: float | None = None
         self._nav_grid_snapshots: list[tuple[float, Any]] = []
+        # Per-frontier (cells, prob_feasible) snapshots, captured in
+        # lockstep with the grid snapshots (LSP environments only).
+        self._frontier_overlay_snapshots: list[tuple[float, Any]] = []
         self._nav_continuous_positions: dict[str, list[tuple[float, float, float]]] = {}
 
         # Root layout
@@ -797,6 +800,9 @@ class PlannerDashboard(_PlottingMixin):
             observed_grid = getattr(env, 'observed_grid', None)
             if observed_grid is not None and (t - last_snapshot_time[0]) >= min_snapshot_interval:
                 self._nav_grid_snapshots.append((t, observed_grid.copy()))
+                overlays = getattr(env, 'frontier_probability_overlays', None)
+                if overlays is not None:
+                    self._frontier_overlay_snapshots.append((t, overlays))
                 last_snapshot_time[0] = t
 
         return _callback
@@ -835,6 +841,9 @@ class PlannerDashboard(_PlottingMixin):
         observed_grid = getattr(self._env, 'observed_grid', None)
         if observed_grid is not None:
             self._nav_grid_snapshots.append((state.time, observed_grid.copy()))
+            overlays = getattr(self._env, 'frontier_probability_overlays', None)
+            if overlays is not None:
+                self._frontier_overlay_snapshots.append((state.time, overlays))
 
         # Use best branch progress for OR goals
         achieved, total, label = self._get_best_branch_progress(state)
