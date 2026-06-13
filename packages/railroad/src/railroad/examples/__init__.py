@@ -192,6 +192,13 @@ EXAMPLES: Dict[str, ExampleInfo] = {
                 "param_name": "save_data_dir",
             },
             {
+                "name": "--num-robots",
+                "type": int,
+                "default": 1,
+                "help": "Number of robots (all start co-located; goal reached when any arrives)",
+                "param_name": "num_robots",
+            },
+            {
                 "name": "--allow-move-interruptions",
                 "is_flag": True,
                 "default": False,

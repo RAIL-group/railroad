@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from railroad._bindings import Fluent, State
+from railroad._bindings import Fluent, Goal, State
 from railroad.core import get_action_by_name
 from railroad.environment.railsim import RailsimScene
 from railroad.environment.symbolic import LocationRegistry
@@ -38,13 +38,20 @@ ROBOT = "robot1"
 START_NAME = "start_loc"
 
 
+def _robot_names(num_robots: int) -> list[str]:
+    """Names for ``num_robots`` robots: ``robot1``, ``robot2``, ..."""
+    if num_robots < 1:
+        raise ValueError(f"num_robots must be >= 1, got {num_robots}")
+    return [f"robot{i}" for i in range(1, num_robots + 1)]
+
+
 @dataclass
 class PointGoalSetup:
     """Everything a point-goal-navigation run needs."""
 
     scene: RailsimScene
     env: LSPVisualEnvironment
-    goal: Fluent
+    goal: Fluent | Goal
     goal_cell: tuple[int, int]
     data_writer: TrainingDataWriter | None
 
@@ -88,8 +95,14 @@ def build_point_goal_setup(
     network_file: str | Path | None = None,
     save_data_dir: str | Path | None = None,
     allow_move_interruptions: bool = False,
+    num_robots: int = 1,
 ) -> PointGoalSetup:
-    """Build the scene, environment, and (optionally) data writer."""
+    """Build the scene, environment, and (optionally) data writer.
+
+    With ``num_robots`` > 1, all robots start co-located at ``start_loc``;
+    the goal is satisfied as soon as *any* robot reaches it.
+    """
+    robots = _robot_names(num_robots)
     if env_name == "maze":
         scene = RailsimScene.maze(seed=seed)
     elif env_name == "office":
@@ -129,25 +142,26 @@ def build_point_goal_setup(
             },
         )
 
+    initial_fluents: set[Fluent] = {F(f"revealed {START_NAME}")}
+    for robot in robots:
+        initial_fluents.add(F(f"at {robot} {START_NAME}"))
+        initial_fluents.add(F(f"free {robot}"))
+
+    start_pose = Pose(float(start_coord[0]), float(start_coord[1]), 0.0)
+
     env = LSPVisualEnvironment(
         scene=scene,
         frontier_statistics=frontier_statistics,
         data_writer=data_writer,
-        state=State(0.0, {
-            F(f"at {ROBOT} {START_NAME}"),
-            F(f"free {ROBOT}"),
-            F(f"revealed {START_NAME}"),
-        }, []),
+        state=State(0.0, initial_fluents, []),
         objects_by_type={
-            "robot": {ROBOT},
+            "robot": set(robots),
             "location": {START_NAME},
             "frontier": set(),
             "object": set(),
         },
         skill_overrides={'move': move_skill},
-        robot_initial_poses={
-            ROBOT: Pose(float(start_coord[0]), float(start_coord[1]), 0.0)
-        },
+        robot_initial_poses={robot: start_pose for robot in robots},
         location_registry=LocationRegistry({
             START_NAME: np.array(start_coord, dtype=float)
         }),
@@ -159,10 +173,15 @@ def build_point_goal_setup(
         ),
     )
 
+    # The goal is reached once any robot arrives at the goal location.
+    goal = F(f"at {robots[0]} goal")
+    for robot in robots[1:]:
+        goal = goal | F(f"at {robot} goal")
+
     return PointGoalSetup(
         scene=scene,
         env=env,
-        goal=F(f"at {ROBOT} goal"),
+        goal=goal,
         goal_cell=goal_cell,
         data_writer=data_writer,
     )
@@ -176,6 +195,7 @@ def run_point_goal_rollout(
     frontier_statistics_name: str = "oracle",
     prior_prob: float = 0.8,
     network_file: str | Path | None = None,
+    num_robots: int = 1,
     max_planning_iterations: int = 200,
     mcts_iterations: int = 4000,
     mcts_c: float = 10,
@@ -196,6 +216,7 @@ def run_point_goal_rollout(
         prior_prob=prior_prob,
         network_file=network_file,
         save_data_dir=save_data_dir,
+        num_robots=num_robots,
     )
     env, goal = setup.env, setup.goal
     try:

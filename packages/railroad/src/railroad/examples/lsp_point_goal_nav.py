@@ -3,7 +3,9 @@
 A robot must reach the scene's goal location through unknown space. The
 goal is treated like an object whose spatial location is known in
 advance: exploring a frontier may *reveal* it, and the robot then drives
-to it by following a real path on the observed map.
+to it by following a real path on the observed map. With ``--num-robots``
+> 1, all robots start co-located and the goal is reached as soon as any
+one of them arrives.
 
 How promising each frontier looks to the planner is set by a
 frontier-statistics estimator (``--frontier-statistics``):
@@ -32,6 +34,7 @@ Usage:
     uv run railroad example lsp-point-goal-nav
     uv run railroad example lsp-point-goal-nav --env office --frontier-statistics fixed-prior
     uv run railroad example lsp-point-goal-nav --save-data-dir data/lsp
+    uv run railroad example lsp-point-goal-nav --num-robots 3
     uv run railroad example lsp-point-goal-nav --frontier-statistics learned --network-file data/maze/training/LSPFrontierNet.pt
 """
 
@@ -45,6 +48,7 @@ def main(
     prior_prob: float = 0.8,
     network_file: str | None = None,
     save_data_dir: str | None = None,
+    num_robots: int = 1,
     allow_move_interruptions: bool = False,
     save_plot: str | None = None,
     show_plot: bool = False,
@@ -79,13 +83,15 @@ def main(
         network_file=network_file,
         save_data_dir=save_data_dir,
         allow_move_interruptions=allow_move_interruptions,
+        num_robots=num_robots,
     )
     scene, env, goal = setup.scene, setup.env, setup.goal
     data_writer = setup.data_writer
 
     print(f"Grid: {scene.grid.shape[0]}x{scene.grid.shape[1]} "
           f"({scene.resolution} m/cell)")
-    print(f"Start: {scene.locations['start_loc']}  Goal: {setup.goal_cell}")
+    print(f"Start: {scene.locations['start_loc']}  Goal: {setup.goal_cell}  "
+          f"Robots: {num_robots}")
 
     # ------------------------------------------------------------------
     # Planning loop
@@ -118,10 +124,10 @@ def main(
             action_name = mcts(
                 env.state,
                 goal,
-                max_iterations=4000,
-                c=10,
+                max_iterations=25000,
+                c=100,
                 max_depth=20,
-                heuristic_multiplier=5,
+                heuristic_multiplier=1.5,
             )
 
             if action_name == "NONE":
