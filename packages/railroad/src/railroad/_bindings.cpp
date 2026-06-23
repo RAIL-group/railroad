@@ -385,6 +385,28 @@ PYBIND11_MODULE(_bindings, m) {
         py::arg("input_state"), py::arg("fluent"), py::arg("all_actions"),
         "Optimistic relaxed-plan cost for a single fluent from the given state");
 
+  m.def("get_probabilistic_path_achievers",
+        [](const State &input_state, const GoalPtr &goal,
+           const std::vector<Action> &all_actions, bool at_implies_found) {
+          return get_probabilistic_path_achievers(input_state, goal.get(),
+                                                   all_actions, at_implies_found);
+        },
+        py::arg("input_state"), py::arg("goal"), py::arg("all_actions"),
+        py::arg("at_implies_found") = true,
+        "For each probabilistic fluent on the relaxed path to the goal, return "
+        "its achievers as (action_name, probability, exec_cost, wait_cost).");
+
+  m.def("get_goal_relevant_action_names",
+        [](const State &input_state, const GoalPtr &goal,
+           const std::vector<Action> &all_actions, bool at_implies_found) {
+          return get_goal_relevant_action_names(input_state, goal.get(),
+                                                all_actions, at_implies_found);
+        },
+        py::arg("input_state"), py::arg("goal"), py::arg("all_actions"),
+        py::arg("at_implies_found") = true,
+        "Names of all actions that can contribute to the goal under relaxed "
+        "reachability (the backward closure following every achiever).");
+
   m.def("astar", &astar, py::arg("start_state"), py::arg("all_actions"),
         py::arg("goal"), py::arg("heuristic_fn") = nullptr,
         "Run A* search and return the action path");

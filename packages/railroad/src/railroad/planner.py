@@ -1,8 +1,9 @@
 from typing import List, Dict, Union, SupportsFloat, SupportsInt
 from collections.abc import Set
 from railroad._bindings import get_usable_actions
+from railroad._action_pruning import prune_probabilistic_achievers
 
-__all__ = ["MCTSPlanner", "get_usable_actions"]
+__all__ = ["MCTSPlanner", "get_usable_actions", "prune_probabilistic_achievers"]
 from railroad._bindings import MCTSPlanner as _MCTSPlannerCpp
 from railroad._bindings import Action, State, Fluent
 from railroad._bindings import Goal, LiteralGoal
@@ -59,6 +60,11 @@ class MCTSPlanner:
         lambda_add: SupportsFloat = 0.5,
         lambda_max: SupportsFloat = 0.0,
         lambda_ff: SupportsFloat = 0.5,
+        prune_achievers: bool = False,
+        prune_top_n: int = 4,
+        prune_cheapest_m: int = 2,
+        prune_orphaned_supports: bool = True,
+        frontier_objects: set[str] | None = None,
     ):
         """Initialize MCTSPlanner with automatic preprocessing.
 
@@ -67,6 +73,21 @@ class MCTSPlanner:
             lambda_add: weight on the additive (h_add) heuristic component
             lambda_max: weight on the max (h_max) heuristic component
             lambda_ff: weight on the relaxed-plan-cost (h_ff) heuristic component
+            prune_achievers: if set, prune the action set before each MCTS
+                search so that, for every probabilistic fluent on the path to
+                the goal, each robot keeps only the most-probable / cheapest
+                achievers (see ``railroad._action_pruning``)
+            prune_top_n: per (fluent, robot), number of achievers to keep by
+                success probability
+            prune_cheapest_m: per (fluent, robot), number of achievers to keep
+                by time-to-execute
+            prune_orphaned_supports: also drop support actions left unable to
+                reach the goal after achiever pruning (relaxed backward closure)
+            frontier_objects: names of frontier objects (special, exploration-
+                only objects). When given, any frontier whose achievers were all
+                pruned and that has nothing located at it is removed entirely --
+                including the moves that route to/through it -- which the generic
+                closure cannot do in densely connected location graphs.
 
         Defaults are an even split between h_add and h_ff (0.5, 0.0, 0.5).
         Weights are free-form (not normalized); the heuristic used during MCTS
@@ -80,6 +101,13 @@ class MCTSPlanner:
         self._lambda_add = float(lambda_add)
         self._lambda_max = float(lambda_max)
         self._lambda_ff = float(lambda_ff)
+
+        # Action-pruning configuration (applied per-call in __call__).
+        self._prune_achievers = prune_achievers
+        self._prune_top_n = prune_top_n
+        self._prune_cheapest_m = prune_cheapest_m
+        self._prune_orphaned_supports = prune_orphaned_supports
+        self._frontier_objects = frontier_objects
 
         # Extract negative preconditions from actions (base mapping)
         self._base_negative_fluents: Set[Fluent] = extract_negative_preconditions(actions)
@@ -98,6 +126,11 @@ class MCTSPlanner:
             lambda_max=self._lambda_max,
             lambda_ff=self._lambda_ff,
         )
+
+        # Action counts from the most recent search, for introspection/display:
+        # how many actions MCTS actually considered vs. the unpruned total.
+        self.num_actions_total: int = len(self._converted_actions)
+        self.num_actions_considered: int = len(self._converted_actions)
 
     def _convert_actions(
         self, actions: List[Action], mapping: Dict[Fluent, Fluent]
@@ -191,6 +224,31 @@ class MCTSPlanner:
         converted_goal = convert_goal_to_positive_preconditions(
             goal, self._current_mapping
         )
+
+        # Optionally prune redundant probabilistic achievers (and the support
+        # actions they orphan) before searching. The pruned set depends on the
+        # state/goal, so a planner is built per call; assign it to
+        # self._cpp_planner so get_trace_from_last_mcts_tree() and other stats
+        # readers see the planner that actually ran.
+        self.num_actions_total = len(self._converted_actions)
+        self.num_actions_considered = self.num_actions_total
+        if self._prune_achievers:
+            pruned_actions = prune_probabilistic_achievers(
+                converted_state,
+                converted_goal,
+                self._converted_actions,
+                top_n=self._prune_top_n,
+                cheapest_m=self._prune_cheapest_m,
+                prune_orphaned_supports=self._prune_orphaned_supports,
+                frontier_objects=self._frontier_objects,
+            )
+            self.num_actions_considered = len(pruned_actions)
+            self._cpp_planner = _MCTSPlannerCpp(
+                pruned_actions,
+                lambda_add=self._lambda_add,
+                lambda_max=self._lambda_max,
+                lambda_ff=self._lambda_ff,
+            )
 
         return self._cpp_planner(
             converted_state, converted_goal, max_iterations, max_depth, c,
