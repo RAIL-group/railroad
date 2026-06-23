@@ -29,57 +29,51 @@ namespace railroad {
 
 inline std::vector<const Action *>
 get_next_actions(const State &state, const std::vector<Action> &all_actions) {
-  // Step 1: Extract all `free(...)` fluents (sorting as I go)
-  auto cmp = [](const Fluent &a, const Fluent &b) {
-    return a.name() < b.name();
-  };
-
-  // // This filters actions based on the 'next free robot'.
-  // // Not only does it not work properly, but we need to comment
-  // // it out for multi-robot actions to work.
-
-  // std::set<Fluent, decltype(cmp)> free_robot_fluents(cmp);
-
-  // for (const auto &f : state.fluents()) {
-  //   if (f.is_free()) {
-  //     free_robot_fluents.insert(f);
-  //   }
-  // }
-
-  // // Step 2: Create negated state (excluding all free)
-  // std::unordered_set<Fluent> negated;
-  // for (const auto &f : free_robot_fluents) {
-  //   negated.insert(f.invert());
-  // }
-
-  // // Step 3: For each free predicate, create temp state with just that one
-  // // enabled
-  // State temp_state = State(0, state.fluents());
-  // temp_state.update_fluents(negated);
-  // for (const auto &free_pred : free_robot_fluents) {
-  //   temp_state.update_fluents({free_pred});
-
-  //   std::vector<const Action *> applicable;
-  //   for (const auto &action : all_actions) {
-  //     if (temp_state.satisfies_precondition(action)) {
-  //       applicable.push_back(&action);
-  //     }
-  //   }
-
-  //   if (!applicable.empty()) {
-  //     return applicable;
-  //   }
-  // }
-
-  // Step 4: Fall back to any applicable action
-  std::vector<const Action *> fallback;
+  // All actions applicable right now.
+  std::vector<const Action *> applicable;
   for (const auto &action : all_actions) {
     if (state.satisfies_precondition(action)) {
-      fallback.push_back(&action);
+      applicable.push_back(&action);
     }
   }
+  if (applicable.empty()) return applicable;
 
-  return fallback;
+  // Robot-serialization filter: when several robots are free, commit to the
+  // robots' actions in a fixed order rather than branching over every robot at
+  // once. Because the robots act concurrently, deciding what each does in a
+  // deterministic order loses no generality -- a later decision node (where the
+  // first robot is busy) picks up the next free robot -- but it cuts the
+  // branching factor from "actions of all free robots" to "actions of one".
+  //
+  // We keep only the applicable actions *executed by* the first free robot,
+  // i.e. those whose positive preconditions include its `free` fluent. A
+  // multi-robot action that also needs another robot is still kept (it lists
+  // this robot's `free` too), so coordinated actions are not lost -- the reason
+  // the earlier "mask out the other robots' free fluents" attempt failed.
+  std::vector<const Fluent *> free_fluents;
+  for (const auto &f : state.fluents()) {
+    if (f.is_free()) free_fluents.push_back(&f);
+  }
+  if (free_fluents.size() <= 1) return applicable;  // nothing to serialize
+
+  // Deterministic order by robot id (the `free` fluent's argument).
+  std::sort(free_fluents.begin(), free_fluents.end(),
+            [](const Fluent *a, const Fluent *b) { return a->args() < b->args(); });
+
+  // Return the actions of the first free robot that has any; only fall through
+  // to later robots if an earlier one has no applicable action (it is stuck),
+  // so a free-but-idle robot never blocks the others.
+  for (const Fluent *free_robot : free_fluents) {
+    std::vector<const Action *> subset;
+    for (const Action *action : applicable) {
+      if (action->pos_preconditions().count(*free_robot)) {
+        subset.push_back(action);
+      }
+    }
+    if (!subset.empty()) return subset;
+  }
+
+  return applicable;  // no applicable action is executed by a free robot
 }
 
 using HeuristicFn = std::function<double(const State &)>;
