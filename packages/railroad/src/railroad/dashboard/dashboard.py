@@ -81,6 +81,11 @@ class PlannerDashboard(_PlottingMixin):
         self._print_on_exit = print_on_exit
         self._step_index = 0
 
+        # Action counts from the last planning step: how many actions the
+        # planner actually considered vs. the unpruned total (None until set).
+        self._actions_considered: int | None = None
+        self._actions_total: int | None = None
+
         # Determine if we should use interactive mode
         # Check for explicit override first, then headless environments, then console detection
         if force_interactive is not None:
@@ -283,6 +288,14 @@ class PlannerDashboard(_PlottingMixin):
             meta.add_row("Step", str(step_index))
         if last_action_name is not None:
             meta.add_row("Last action", f"[bold]{last_action_name}[/]")
+        if self._actions_considered is not None and self._actions_total is not None:
+            considered, total = self._actions_considered, self._actions_total
+            actions_cell = (
+                f"{considered} [dim]/ {total}[/]"
+                if considered != total
+                else f"{considered}"
+            )
+            meta.add_row("Actions", actions_cell)
 
         # Active fluents
         active_table = Table(
@@ -741,6 +754,11 @@ class PlannerDashboard(_PlottingMixin):
         heuristic_value = mcts.heuristic(state, self.goal)
         step_index = self._step_index
         self._step_index += 1
+
+        # Surface how many actions the planner considered after pruning, if it
+        # reports them (e.g. MCTSPlanner with action pruning enabled).
+        self._actions_considered = getattr(mcts, "num_actions_considered", None)
+        self._actions_total = getattr(mcts, "num_actions_total", None)
 
         self._do_update(
             state=state,

@@ -157,6 +157,85 @@ inline const std::vector<std::unordered_set<Fluent>>& extract_or_branches(const 
   return goal->get_dnf_branches();
 }
 
+// For each probabilistic fluent on the relaxed path to `goal`, return its
+// achievers as (action_name, probability, exec_cost, wait_cost). "On the path"
+// means the fluent appears in the backward extraction (on_path) of some DNF
+// branch; "probabilistic" means it has at least one achiever with probability
+// < 1 (forward.has_probabilistic_achiever). This is exactly the set of
+// fluents/achievers an action-pruning step should bound per robot.
+inline std::unordered_map<Fluent, std::vector<std::tuple<std::string, double, double, double>>>
+get_probabilistic_path_achievers(const State &input_state,
+                                 const GoalBase *goal,
+                                 const std::vector<Action> &all_actions,
+                                 bool at_implies_found = true) {
+
+  std::unordered_map<Fluent, std::vector<std::tuple<std::string, double, double, double>>> result;
+  if (!goal) return result;
+
+  auto relaxed_result = transition(input_state, nullptr, true);
+  if (relaxed_result.empty()) return result;
+  State relaxed = relaxed_result[0].first;
+
+  std::unordered_set<Fluent> initial_fluents(
+      relaxed.fluents().begin(), relaxed.fluents().end());
+
+  auto forward = ff_forward_phase(initial_fluents, all_actions);
+  compute_optimistic_costs(forward);
+
+  // Union of on-path fluents across DNF branches.
+  std::unordered_set<Fluent> on_path;
+  for (const auto& branch : extract_or_branches(goal)) {
+    auto opt = ff_backward_optimistic(forward, branch, at_implies_found);
+    if (opt.h_add == std::numeric_limits<double>::infinity()) continue;  // unreachable branch
+    on_path.insert(opt.on_path.begin(), opt.on_path.end());
+  }
+
+  for (const auto& f : on_path) {
+    if (!forward.has_probabilistic_achiever.count(f)) continue;
+    auto it = forward.achievers_by_fluent.find(f);
+    if (it == forward.achievers_by_fluent.end()) continue;
+    auto& tuples = result[f];
+    tuples.reserve(it->second.size());
+    for (const auto& a : it->second) {
+      tuples.emplace_back(a.action->name(), a.probability, a.exec_cost, a.wait_cost);
+    }
+  }
+  return result;
+}
+
+// Names of all actions that can contribute to `goal` under relaxed reachability
+// (the backward closure following every achiever). Any action whose name is not
+// returned cannot help reach the goal and is safe to prune. Union over DNF
+// branches.
+inline std::vector<std::string> get_goal_relevant_action_names(
+    const State &input_state,
+    const GoalBase *goal,
+    const std::vector<Action> &all_actions,
+    bool at_implies_found = true) {
+
+  std::vector<std::string> names;
+  if (!goal) return names;
+
+  auto relaxed_result = transition(input_state, nullptr, true);
+  if (relaxed_result.empty()) return names;
+  State relaxed = relaxed_result[0].first;
+
+  std::unordered_set<Fluent> initial_fluents(
+      relaxed.fluents().begin(), relaxed.fluents().end());
+
+  auto forward = ff_forward_phase(initial_fluents, all_actions);
+
+  std::unordered_set<const Action*> keep;
+  for (const auto& branch : extract_or_branches(goal)) {
+    auto branch_keep = goal_relevant_actions(forward, branch, at_implies_found);
+    keep.insert(branch_keep.begin(), branch_keep.end());
+  }
+
+  names.reserve(keep.size());
+  for (const Action* a : keep) names.push_back(a->name());
+  return names;
+}
+
 inline std::size_t hash_action_set_for_heuristic(const std::vector<Action>& all_actions) {
   std::size_t h = all_actions.size();
   std::size_t xor_hash = 0;

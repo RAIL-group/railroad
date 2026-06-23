@@ -123,4 +123,50 @@ inline FFBackwardResult ff_backward_optimistic(
   return result;
 }
 
+// Backward closure of actions that can contribute to `goal_fluents` under
+// relaxed reachability. Unlike ff_backward_optimistic (which follows only the
+// single best_optimistic_achiever per fluent), this follows *every* achiever of
+// every needed fluent and collects their actions. The result is the set of
+// actions provably able to help reach the goal in the relaxed graph; any action
+// outside it cannot contribute and is safe to prune. Returns empty if a goal
+// fluent is unreachable.
+inline std::unordered_set<const Action*> goal_relevant_actions(
+    const FFForwardResult &forward,
+    const std::unordered_set<Fluent> &goal_fluents,
+    bool at_implies_found = true) {
+
+  std::unordered_set<const Action*> keep;
+  if (goal_fluents.empty()) return keep;
+
+  std::unordered_set<Fluent> goals = goal_fluents;
+  if (at_implies_found) augment_at_with_found(goals, forward);
+
+  for (const auto& gf : goals) {
+    if (!forward.known_fluents.count(gf)) return {};
+  }
+
+  std::unordered_set<Fluent> seen;
+  std::unordered_set<Fluent> frontier = goals;
+  while (!frontier.empty()) {
+    std::unordered_set<Fluent> next_frontier;
+    for (const auto& f : frontier) {
+      if (seen.count(f) || forward.initial_fluents.count(f)) continue;
+      seen.insert(f);
+
+      auto it = forward.achievers_by_fluent.find(f);
+      if (it == forward.achievers_by_fluent.end()) continue;
+      for (const auto& achiever : it->second) {
+        keep.insert(achiever.action);
+        for (const auto& prec : achiever.action->pos_preconditions()) {
+          next_frontier.insert(prec);
+        }
+      }
+    }
+    if (at_implies_found) augment_at_with_found(next_frontier, forward);
+    frontier = std::move(next_frontier);
+  }
+
+  return keep;
+}
+
 }  // namespace railroad

@@ -114,7 +114,16 @@ def main(
                 dashboard.console.print("[red]No actions available — stuck.[/red]")
                 break
 
-            mcts = MCTSPlanner(actions)
+            # Large scenes expose many frontiers, so prune the explore actions:
+            # per robot keep only the most-probable / cheapest few achievers of
+            # `revealed goal`, then drop any frontier left with no reason to be
+            # visited (and the moves routing to it), so MCTS branches over a
+            # bounded set of exploration subgoals.
+            mcts = MCTSPlanner(
+                actions,
+                prune_achievers=True,
+                frontier_objects=set(env.frontiers),
+            )
             # Point-goal navigation is value-driven: the FF heuristic on the
             # post-move state is ~D_optimistic(frontier, goal), so a small
             # exploration constant and a strong heuristic weight make MCTS
@@ -124,9 +133,9 @@ def main(
             action_name = mcts(
                 env.state,
                 goal,
-                max_iterations=25000,
-                c=100,
-                max_depth=20,
+                max_iterations=5000,
+                c=300,
+                max_depth=10,
                 heuristic_multiplier=1.5,
             )
 
