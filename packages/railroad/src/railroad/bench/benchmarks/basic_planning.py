@@ -5,6 +5,7 @@ Demonstrates benchmark registration and parametrization.
 """
 
 from railroad.bench import benchmark, BenchmarkCase
+from railroad.bench.benchmarks._helpers import capture_timeout_log
 from railroad.core import Fluent as F, State, get_action_by_name
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
@@ -77,23 +78,25 @@ def bench_single_robot_nav(case: BenchmarkCase):
     planner = MCTSPlanner(sim.get_actions())
 
     max_steps = 100
-    for iteration in range(max_steps):
-        if goal.evaluate(sim.state.fluents):
-            break
+    # If the harness timeout fires mid-loop, still log the in-progress dashboard.
+    with capture_timeout_log(case, dashboard):
+        for iteration in range(max_steps):
+            if goal.evaluate(sim.state.fluents):
+                break
 
-        action_name = planner(
-            sim.state,
-            goal,
-            max_iterations=case.mcts.iterations,
-            c=100
-        )
+            action_name = planner(
+                sim.state,
+                goal,
+                max_iterations=case.mcts.iterations,
+                c=100
+            )
 
-        if action_name == 'NONE':
-            break
+            if action_name == 'NONE':
+                break
 
-        action = get_action_by_name(sim.get_actions(), action_name)
-        sim.advance(action)
-        dashboard.update(planner, action_name)
+            action = get_action_by_name(sim.get_actions(), action_name)
+            sim.advance(action)
+            dashboard.update(planner, action_name)
 
     wall_time = time.perf_counter() - start_time
 

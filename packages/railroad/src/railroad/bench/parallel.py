@@ -121,6 +121,11 @@ def _execute_task_worker(
             except TimeoutError:
                 task.status = TaskStatus.TIMEOUT
                 task.error = f"Task exceeded timeout of {task.timeout}s"
+                # If the benchmark stashed a partial result before re-raising
+                # (see capture_timeout_log), log it so timed-out runs still keep
+                # their artifacts (e.g. log_html), mirroring the CLI's
+                # keyboard-interrupt behaviour.
+                task.result = case.get_timeout_result()
             except Exception as e:
                 task.status = TaskStatus.FAILURE
                 task.error = str(e)

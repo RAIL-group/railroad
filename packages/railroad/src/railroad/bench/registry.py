@@ -91,6 +91,23 @@ class BenchmarkCase:
     # Class-level set of dataclass field names (not stored in extra)
     _FIELDS = {'benchmark_name', 'case_idx', 'repeat_idx', 'params', 'extra'}
 
+    # Key under which a partial timeout result is stashed in ``extra``.
+    _TIMEOUT_RESULT_KEY = '_timeout_result'
+
+    def set_timeout_result(self, result: Dict[str, Any]):
+        """Stash a partial result for this case, used if it hits the timeout.
+
+        The executor logs this in its timeout handler so that runs killed by the
+        timeout still log their artifacts (e.g. the dashboard ``log_html``),
+        mirroring the CLI behaviour where a keyboard interrupt prints the
+        in-progress run. See ``capture_timeout_log``.
+        """
+        self.extra[BenchmarkCase._TIMEOUT_RESULT_KEY] = result
+
+    def get_timeout_result(self) -> Optional[Dict[str, Any]]:
+        """Return the stashed partial timeout result, or ``None``."""
+        return self.extra.get(BenchmarkCase._TIMEOUT_RESULT_KEY)
+
     def __setattr__(self, name: str, value: Any):
         """Store unknown attributes in extra dict (not logged)."""
         # Allow setting dataclass fields normally

@@ -22,6 +22,7 @@ from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
 from railroad import operators
 from railroad.bench import benchmark, BenchmarkCase
+from railroad.bench.benchmarks._helpers import capture_timeout_log
 
 
 def _sample_objects_and_location(scene, num_objects: int, seed: int | None):
@@ -123,27 +124,29 @@ def bench_procthor_search(case: BenchmarkCase):
 
     start_time = time.perf_counter()
 
-    for _iteration in range(max_iterations):
-        if goal.evaluate(env.state.fluents):
-            break
+    # If the harness timeout fires mid-loop, still log the in-progress dashboard.
+    with capture_timeout_log(case, dashboard):
+        for _iteration in range(max_iterations):
+            if goal.evaluate(env.state.fluents):
+                break
 
-        all_actions = env.get_actions()
-        mcts = MCTSPlanner(all_actions)
-        action_name = mcts(
-            env.state, goal,
-            max_iterations=case.mcts.iterations,
-            c=case.mcts.c,
-            max_depth=20,
-            heuristic_multiplier=case.mcts.h_mult,
-        )
+            all_actions = env.get_actions()
+            mcts = MCTSPlanner(all_actions)
+            action_name = mcts(
+                env.state, goal,
+                max_iterations=case.mcts.iterations,
+                c=case.mcts.c,
+                max_depth=20,
+                heuristic_multiplier=case.mcts.h_mult,
+            )
 
-        if action_name == "NONE":
-            dashboard.console.print("No more actions available. Goal may not be achievable.")
-            break
+            if action_name == "NONE":
+                dashboard.console.print("No more actions available. Goal may not be achievable.")
+                break
 
-        action = get_action_by_name(all_actions, action_name)
-        env.act(action)
-        dashboard.update(mcts, action_name)
+            action = get_action_by_name(all_actions, action_name)
+            env.act(action)
+            dashboard.update(mcts, action_name)
 
     actions_taken = [name for name, _ in dashboard.actions_taken]
     dashboard.print_history()
