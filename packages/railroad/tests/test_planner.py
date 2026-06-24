@@ -1,12 +1,33 @@
 from railroad.core import Fluent, State, transition, get_action_by_name
 from railroad.operators import construct_move_visited_operator
 from railroad.operators import construct_search_and_pick_operator
+from railroad import operators
+from railroad._bindings import get_next_actions
 from railroad.planner import MCTSPlanner, get_usable_actions
 
 import pytest
 import random
 
 F = Fluent
+
+
+def test_no_op_offered_only_when_only_option():
+    move_op = operators.construct_move_operator_blocking(lambda r, a, b: 1.0)
+    no_op = operators.construct_no_op_operator(no_op_time=5.0)
+    objects = {"robot": {"r1"}, "location": {"a", "b", "c"}}
+    move_actions = list(move_op.instantiate(objects))
+    no_op_actions = list(no_op.instantiate(objects))
+
+    state = State(0.0, {F("at r1 a"), F("free r1")})
+
+    # With moves available, the planner must not be offered the wait action.
+    names = {x.name for x in get_next_actions(state, move_actions + no_op_actions)}
+    assert any(n.startswith("move r1 a") for n in names)
+    assert not any(n.startswith("no_op") for n in names)
+
+    # When waiting is the only applicable action, it is offered.
+    only_wait = {x.name for x in get_next_actions(state, no_op_actions)}
+    assert only_wait == {"no_op r1"}
 
 
 def test_pruning_unavailable_actions():

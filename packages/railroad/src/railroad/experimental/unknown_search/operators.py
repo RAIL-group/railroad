@@ -7,10 +7,16 @@ F = Fluent
 
 
 def construct_move_navigable_operator(move_time: OptNumeric) -> Operator:
-    """Construct a move operator with claim locking and just-moved throttling.
+    """Construct a move operator with just-moved throttling.
 
     Suitable for unknown-space navigation where the environment controls the
     set of valid locations through ``objects_by_type["location"]``.
+
+    Multiple robots may target the same destination concurrently: there is no
+    destination reservation here. Exclusivity that actually matters --- two
+    robots must not both *explore* the same frontier --- is enforced at the
+    explore action via ``lock-explore``, not by pre-claiming travel targets.
+    (A robot is still free to drive to a shared destination such as the goal.)
 
     Args:
         move_time: Time or function to compute movement duration.
@@ -27,19 +33,17 @@ def construct_move_navigable_operator(move_time: OptNumeric) -> Operator:
             F("at ?r ?from"),
             F("free ?r"),
             ~F("just-moved ?r"),
-            ~F("claimed ?to"),
         ],
         effects=[
             Effect(
                 time=0,
-                resulting_fluents={F("not free ?r"), F("not at ?r ?from"), F("claimed ?to")},
+                resulting_fluents={F("not free ?r"), F("not at ?r ?from")},
             ),
             Effect(
                 time=(move_time_fn, ["?r", "?from", "?to"]),
                 resulting_fluents={
                     F("free ?r"),
                     F("at ?r ?to"),
-                    F("not claimed ?to"),
                     F("just-moved ?r"),
                 },
             ),

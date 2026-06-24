@@ -343,17 +343,6 @@ class UnknownSpaceEnvironment(OccupancyGridPathingMixin, SymbolicEnvironment):
 
     def sync_dynamic_targets(self) -> None:
         """Prune stale target-tracking fluents after frontier/location updates."""
-        valid_targets = set(self._objects_by_type.get("location", set()))
-
-        # Remove stale claims whose target no longer exists.
-        stale_claims = [
-            f for f in self._fluents
-            if f.name == "claimed" and not f.negated
-            and len(f.args) >= 1 and f.args[0] not in valid_targets
-        ]
-        for f in stale_claims:
-            self._fluents.discard(f)
-
         # Legacy cleanup: remove any leftover navigable fluents.
         stale_nav = [
             f for f in self._fluents
@@ -504,7 +493,7 @@ class UnknownSpaceEnvironment(OccupancyGridPathingMixin, SymbolicEnvironment):
             return False
 
         parts = action.name.split()
-        if parts and parts[0] == "move":
+        if parts and parts[0].startswith("move"):  # "move" and "move-to-goal"
             if len(parts) > 3 and Fluent("at", parts[1], parts[2]) in self._fluents:
                 # Fast reachability guard: use cached cost-grid lookup
                 # instead of reconstructing a full path per action candidate.

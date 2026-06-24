@@ -145,8 +145,9 @@ class NavigationMoveSkill(SymbolicSkill, MotionSkill):
         # Collect fluents from remaining effects, retargeting only
         # positive ``at`` fluents to the intermediate location.  All
         # other fluents keep their original args so they correctly undo
-        # state set with the original destination (e.g. ``not claimed
-        # ?to`` removes the ``claimed`` set at time-0).
+        # state set with the original destination (e.g. a time-0 effect
+        # such as ``claimed ?to`` is cleared by its ``not claimed ?to``
+        # counterpart with the original ``?to``).
         new_fluents: set[Fluent] = set()
         for _, eff in self._upcoming_effects:
             if eff.is_probabilistic:

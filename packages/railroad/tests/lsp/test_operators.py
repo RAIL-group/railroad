@@ -60,11 +60,13 @@ def test_lsp_explore_operator_grounding() -> None:
         effects for p, effects in branches if p == pytest.approx(0.001)
     )
 
-    # Success reveals the goal after the delta success cost — it never
-    # relocates the robot.
+    # Success marks the goal reachable after the delta success cost — it
+    # never relocates the robot, and it does not mark the goal *revealed*
+    # (that is reserved for direct observation of the goal cell).
     success_effect = success_branch[0]
     assert success_effect.time == pytest.approx(5.0 / 2.0)
-    assert F("revealed goal") in success_effect.resulting_fluents
+    assert F("reachable goal") in success_effect.resulting_fluents
+    assert F("revealed goal") not in success_effect.resulting_fluents
     assert F("explored f1") in success_effect.resulting_fluents
     assert F("free robot1") in success_effect.resulting_fluents
     assert not any(
@@ -73,7 +75,7 @@ def test_lsp_explore_operator_grounding() -> None:
 
     failure_effect = failure_branch[0]
     assert F("explored f1") in failure_effect.resulting_fluents
-    assert F("revealed goal") not in failure_effect.resulting_fluents
+    assert F("reachable goal") not in failure_effect.resulting_fluents
 
     # The infeasible frontier's failure duration comes from its
     # exploration cost.
@@ -112,12 +114,15 @@ def test_move_to_goal_operator_grounding() -> None:
     })
     by_name = {a.name: a for a in actions}
     assert set(by_name) == {
-        "move robot1 start goal",
-        "move robot1 f1 goal",
+        "move-to-goal robot1 start goal",
+        "move-to-goal robot1 f1 goal",
     }
 
-    action = by_name["move robot1 start goal"]
-    assert F("revealed goal") in action.preconditions
+    action = by_name["move-to-goal robot1 start goal"]
+    # Gated on the goal being reachable (explore success) but not yet
+    # revealed (directly observed); once revealed the plain move takes over.
+    assert F("reachable goal") in action.preconditions
+    assert ~F("revealed goal") in action.preconditions
     assert F("at robot1 start") in action.preconditions
     arrival = action.effects[1]
     assert arrival.time == pytest.approx(4.0)

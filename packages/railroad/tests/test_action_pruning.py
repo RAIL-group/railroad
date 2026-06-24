@@ -180,6 +180,41 @@ def test_dead_frontier_removal_drops_all_referencing_actions() -> None:
     assert "explore r1 f8" in names  # kept as a cheapest frontier
 
 
+def test_revealed_goal_prunes_all_frontier_actions() -> None:
+    # Once the goal is revealed there is no probabilistic fluent left on the
+    # path, so achiever ranking has nothing to do -- but every frontier is now
+    # purposeless, so all frontier actions should still be dropped.
+    frontiers = _frontiers(6)
+    prob = {f: 0.5 for f in frontiers}
+    dist = {f: 5.0 for f in frontiers}
+    objects = {
+        "robot": {"r1"},
+        "location": {"start", *frontiers},
+        "frontier": set(frontiers),
+        "goal": {"goal"},
+    }
+    operators = [
+        _move_operator(dist),
+        _move_to_goal_operator(),
+        _explore_operator(prob),
+        _no_op_operator(),
+    ]
+    actions = [a for op in operators for a in op.instantiate(objects)]
+    # Goal already revealed.
+    state = State(time=0, fluents={F("at r1 start"), F("free r1"), F("revealed goal")})
+    goal = LiteralGoal(F("at r1 goal"))
+
+    pruned = prune_probabilistic_achievers(
+        state, goal, actions, frontier_objects=set(frontiers),
+    )
+    names = {a.name for a in pruned}
+
+    # No action references any frontier any more.
+    assert not any(set(name.split()[1:]) & set(frontiers) for name in names)
+    # The way to the goal survives.
+    assert "reach r1 start goal" in names
+
+
 def test_orphaned_support_actions_pruned() -> None:
     # Restricted (non-dense) domain: the only way to a frontier is the direct
     # move from start, and the goal is `revealed goal` itself. Dropping an
