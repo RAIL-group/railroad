@@ -115,9 +115,11 @@ astar(const State &start_state, const std::vector<Action> &all_actions,
       came_from;
 
   FFMemory ff_memory;
-  heuristic_fn = [&goal, &all_actions, &ff_memory](const State& s) -> double {
-    return ff_heuristic(s, goal.get(), all_actions, &ff_memory);
-  };
+  if (!heuristic_fn) {
+    heuristic_fn = [&goal, &all_actions, &ff_memory](const State& s) -> double {
+      return ff_heuristic(s, goal.get(), all_actions, &ff_memory);
+    };
+  }
 
   int counter = 0;
   open_heap.emplace(0.0, start_state);
@@ -318,7 +320,8 @@ inline std::string mcts(const State &root_state,
                         double c = std::sqrt(2.0),
                         double heuristic_multiplier = HEURISTIC_MULTIPLIER,
                         std::string* out_tree_trace = nullptr,
-                        bool use_det_heuristic = false) {
+                        bool use_det_heuristic = false,
+                        HeuristicFn custom_heuristic = nullptr) {
   // RNG
   static thread_local std::mt19937 rng{std::random_device{}()};
 
@@ -328,9 +331,11 @@ inline std::string mcts(const State &root_state,
   auto root = std::make_unique<MCTSDecisionNode>(root_state.copy_and_zero_out_time());
   root->untried_actions = get_next_actions(root_state, all_actions);
 
-  // Select heuristic: deterministic (classic FF) or probabilistic
+  // Select heuristic: custom, deterministic (classic FF), or probabilistic
   HeuristicFn heuristic_fn;
-  if (use_det_heuristic) {
+  if (custom_heuristic) {
+    heuristic_fn = std::move(custom_heuristic);
+  } else if (use_det_heuristic) {
     heuristic_fn = [goal, all_actions, ff_memory](const State& s) -> double {
       return det_ff_heuristic(s, goal, all_actions, ff_memory);
     };
@@ -482,9 +487,11 @@ inline std::string mcts(const State &root_state,
 class MCTSPlanner {
 public:
   explicit MCTSPlanner(std::vector<Action> all_actions,
-                       bool use_det_heuristic = false)
+                       bool use_det_heuristic = false,
+                       HeuristicFn custom_heuristic = nullptr)
       : all_actions_(std::move(all_actions)),
-        use_det_heuristic_(use_det_heuristic) {}
+        use_det_heuristic_(use_det_heuristic),
+        custom_heuristic_(std::move(custom_heuristic)) {}
 
   // Call operator: planner(initial_state, goal) → string
   std::string operator()(const State &root_state,
@@ -492,10 +499,12 @@ public:
                          int max_iterations = 1000,
                          int max_depth = 20,
                          double c = std::sqrt(2.0),
-                         double heuristic_multiplier = HEURISTIC_MULTIPLIER) {
+                         double heuristic_multiplier = HEURISTIC_MULTIPLIER,
+                         HeuristicFn custom_heuristic = nullptr) {
+    HeuristicFn h_fn = custom_heuristic ? std::move(custom_heuristic) : custom_heuristic_;
     return mcts(root_state, all_actions_, goal.get(), &ff_memory_,
                 max_iterations, max_depth, c, heuristic_multiplier,
-                &last_mcts_tree_trace_, use_det_heuristic_);
+                &last_mcts_tree_trace_, use_det_heuristic_, std::move(h_fn));
   }
 
   void clear_cache() { ff_memory_.clear(); }
@@ -511,6 +520,7 @@ private:
   bool use_det_heuristic_;
   FFMemory ff_memory_;
   std::string last_mcts_tree_trace_;
+  HeuristicFn custom_heuristic_;
 };
 
 } // namespace railroad
