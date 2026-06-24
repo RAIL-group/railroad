@@ -121,7 +121,8 @@ def main(
             # bounded set of exploration subgoals.
             mcts = MCTSPlanner(
                 actions,
-                prune_achievers=True,
+                prune_top_n=4,
+                prune_cheapest_m=2,
                 frontier_objects=set(env.frontiers),
             )
             # Point-goal navigation is value-driven: the FF heuristic on the
