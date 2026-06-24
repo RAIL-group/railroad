@@ -179,6 +179,9 @@ def test_explore_success_marks_goal_reachable_without_moving_robot() -> None:
 
     _place_robot_at_frontier(env, east)
     pose_before = env.robot_poses["robot1"]
+    # Success cost = optimistic lower bound (added back by the operator) +
+    # delta; capture the optimistic part now, before exploring changes the map.
+    opt_cost = env.optimistic_goal_cost("robot1", east)
     action = next(
         a for a in env.get_actions()
         if a.name == f"lsp-explore robot1 {east}"
@@ -194,8 +197,10 @@ def test_explore_success_marks_goal_reachable_without_moving_robot() -> None:
     assert F("free", "robot1") in env.state.fluents
     pose = env.robot_poses["robot1"]
     assert (pose.x, pose.y) == (pose_before.x, pose_before.y)
-    # Action duration reflects the delta success cost (speed = 2.0).
-    assert env.state.time == pytest.approx(0.1 + max(0.1, delta / 2.0))
+    # Success completes at its absolute time: (optimistic bound + delta) / speed,
+    # floored at min_time (speed = 2.0). The probabilistic branch resolves at
+    # the earlier of success/failure, so completion lands exactly here.
+    assert env.state.time == pytest.approx(max(0.1, (opt_cost + delta) / 2.0))
 
 
 def test_explore_failure_marks_explored_without_revealing() -> None:
@@ -215,7 +220,9 @@ def test_explore_failure_marks_explored_without_revealing() -> None:
     assert F("revealed", "goal") not in env.state.fluents
     assert F("explored", branch) in env.state.fluents
     assert F("free", "robot1") in env.state.fluents
-    assert env.state.time == pytest.approx(0.1 + exploration_cost / 2.0)
+    # Failure completes at its absolute time: exploration_cost / speed (2.0),
+    # floored at min_time.
+    assert env.state.time == pytest.approx(max(0.1, exploration_cost / 2.0))
 
 
 def test_goal_move_time_lower_bounded_by_optimistic_path() -> None:

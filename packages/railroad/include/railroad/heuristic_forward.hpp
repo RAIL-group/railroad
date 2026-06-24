@@ -71,16 +71,29 @@ inline FFForwardResult ff_forward_phase(
     // produces fluent f is the sum of branch probabilities that contain f.
     // If that sum is ~1, the action is an effectively deterministic
     // achiever of f even when every individual branch has prob < 1.
+    //
+    // Separately, count how many branches *structurally* contain f --- over
+    // all branches, including zero-probability ones. A fluent produced in
+    // some but not all branches is *conditional* on the probabilistic
+    // outcome, hence a genuine probabilistic subgoal, even when one branch
+    // is certain (probability exactly 1.0, e.g. an oracle that knows a
+    // frontier reveals the goal). Probability-weighting alone misses this:
+    // a 1.0/0.0 split sums to 1.0 and would look deterministic.
     std::unordered_map<Fluent, double> fluent_prob;
+    std::unordered_map<Fluent, std::size_t> branch_membership;
     fluent_prob.reserve(succs.size() * 4);
     double duration = 0;
     for (const auto &[succ_state, succ_prob] : succs) {
       duration = std::max(succ_state.time(), duration);
+      for (const auto &f : succ_state.fluents()) {
+        branch_membership[f] += 1;
+      }
       if (succ_prob <= 0.0) continue;
       for (const auto &f : succ_state.fluents()) {
         fluent_prob[f] += succ_prob;
       }
     }
+    const std::size_t n_branches = succs.size();
     result.action_duration[a] = duration;
 
     for (const auto& [f, total_prob] : fluent_prob) {
@@ -90,7 +103,9 @@ inline FFForwardResult ff_forward_phase(
       // wait_cost set to 0 here; compute_optimistic_costs fills it in.
       result.achievers_by_fluent[f].push_back({a, 0.0, duration, prob});
 
-      if (prob < 1.0 - 1e-9) {
+      const bool conditional =
+          n_branches > 1 && branch_membership[f] < n_branches;
+      if (prob < 1.0 - 1e-9 || conditional) {
         result.has_probabilistic_achiever.insert(f);
       }
 

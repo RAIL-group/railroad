@@ -88,6 +88,7 @@ class LSPEnvironmentMixin(_Base):
             construct_move_to_goal_operator(self.estimate_goal_move_time),
             construct_lsp_explore_operator(
                 self._lsp_frontier_statistics,
+                self.optimistic_goal_cost,
                 speed_cells_per_sec=self._config.speed_cells_per_sec,
                 goal_name=self._lsp_goal_name,
             ),
@@ -180,6 +181,45 @@ class LSPEnvironmentMixin(_Base):
             self._lsp_opt_cost_generation = self._grid_generation
         return self._lsp_opt_cost_grid
 
+    def _optimistic_goal_cost_cells(self, loc_from: str) -> float | None:
+        """Optimistic (unseen-as-free) path cost in cells to the goal.
+
+        Lower bound on the travel cost from *loc_from* to the goal given
+        the goal's known coordinates: the path length on the map where all
+        unseen space is treated as free (observed obstacles respected).
+        Returns ``None`` when no such path exists or *loc_from* has no
+        registered coordinates.
+        """
+        registry = self._location_registry
+        if registry is None:
+            return None
+        coords_from = registry.get(loc_from)
+        if coords_from is None:
+            return None
+        cost_grid = self._optimistic_goal_cost_grid()
+        row = int(round(float(coords_from[0])))
+        col = int(round(float(coords_from[1])))
+        if not (0 <= row < cost_grid.shape[0] and 0 <= col < cost_grid.shape[1]):
+            return None
+        cost = float(cost_grid[row, col])
+        if np.isfinite(cost) and cost < _UNREACHABLE:
+            return cost
+        return None
+
+    def optimistic_goal_cost(self, robot: str, frontier_id: str) -> float:
+        """Optimistic lower-bound travel cost (in cells) frontier → goal.
+
+        Supplied to ``lsp-explore`` so a frontier's ``delta_success_cost``
+        (the *extra* cost beyond this bound) can be turned back into a full
+        success cost. Falls back to the generic safe estimate (converted to
+        a cost) when no optimistic path is known.
+        """
+        cost = self._optimistic_goal_cost_cells(frontier_id)
+        if cost is not None:
+            return cost
+        speed = max(self._config.speed_cells_per_sec, 1e-6)
+        return self.estimate_move_time_safe(robot, frontier_id, self._lsp_goal_name) * speed
+
     def estimate_goal_move_time(
         self, robot: str, loc_from: str, loc_to: str
     ) -> float:
@@ -197,18 +237,10 @@ class LSPEnvironmentMixin(_Base):
         if np.isfinite(t):
             return t
 
-        registry = self._location_registry
-        if registry is not None:
-            coords_from = registry.get(loc_from)
-            if coords_from is not None:
-                cost_grid = self._optimistic_goal_cost_grid()
-                row = int(round(float(coords_from[0])))
-                col = int(round(float(coords_from[1])))
-                if 0 <= row < cost_grid.shape[0] and 0 <= col < cost_grid.shape[1]:
-                    cost = float(cost_grid[row, col])
-                    if np.isfinite(cost) and cost < _UNREACHABLE:
-                        speed = self._config.speed_cells_per_sec
-                        return cost / max(speed, 1e-6)
+        cost = self._optimistic_goal_cost_cells(loc_from)
+        if cost is not None:
+            speed = self._config.speed_cells_per_sec
+            return cost / max(speed, 1e-6)
         return self.estimate_move_time_safe(robot, loc_from, loc_to)
 
     # ------------------------------------------------------------------
