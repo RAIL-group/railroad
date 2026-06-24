@@ -21,6 +21,8 @@ resources/
 data/
 /uv.lock
 
+# dotenv
+.env
 
 # Logging
 mlruns
