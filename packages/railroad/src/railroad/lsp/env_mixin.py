@@ -15,10 +15,14 @@ are owned by the environment; don't pass ``operators=``.
 
 The goal is treated like an object whose spatial location is known in
 advance: its name lives in ``objects_by_type["goal"]`` and its
-coordinates are registered in the location registry from the start, but
-it only becomes a movable destination once *revealed* — by observing its
-map cell. Exploring a frontier never relocates the robot; the robot
-reaches the goal exclusively by following a real path via a move action.
+coordinates are registered in the location registry from the start. Two
+fluents track it (see :mod:`railroad.lsp.operators`): an lsp-explore
+success marks it ``reachable`` (a route exists; the gated ``move-to-goal``
+heads there), and directly observing its cell marks it ``revealed`` and
+promotes it to a real ``location`` so the ordinary ``move`` takes over.
+This mixin owns the ``revealed`` half: it watches the observed map and
+fires :meth:`_reveal_goal_if_observed`. Exploring a frontier never
+relocates the robot; the robot reaches the goal only by a real move.
 
 The true-map oracle is needed only to resolve explore outcomes during
 *simulated* execution and to label training data; planning works with
@@ -264,7 +268,7 @@ class LSPEnvironmentMixin(_Base):
         frontier_id = None
         for _, branch_effects in branches:
             is_success = any(
-                f.name == "revealed" and not f.negated
+                f.name == "reachable" and not f.negated
                 and f.args and f.args[0] == self._lsp_goal_name
                 for eff in branch_effects
                 for f in eff.resulting_fluents

@@ -94,9 +94,11 @@ def prune_probabilistic_achievers(
     action that achiever pruning *newly* orphaned (was on a relaxed path to
     the goal before pruning, but is not after).
     """
+    # Probabilistic fluents still on the path to the goal, with their achievers.
+    # When empty (e.g. the goal is already revealed, so no exploration remains
+    # to reason about), there is nothing to rank -- but the dead-frontier pass
+    # below still fires, dropping every now-purposeless frontier action.
     by_fluent = get_probabilistic_path_achievers(state, goal, actions)
-    if not by_fluent:
-        return actions
 
     keep_names: set[str] = set()
     candidate_names: set[str] = set()
@@ -143,7 +145,7 @@ def prune_probabilistic_achievers(
                 if dead.intersection(action.name.split()[1:]):
                     drop.add(action.name)
 
-    if prune_orphaned_supports:
+    if prune_orphaned_supports and drop:
         # Drop only what achiever pruning *newly* orphaned: actions that were on
         # a relaxed path to the goal before pruning but no longer are. Diffing
         # the closure (rather than just intersecting with it) leaves always-

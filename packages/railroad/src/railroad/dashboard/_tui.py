@@ -81,7 +81,7 @@ def split_markdown_flat(text: str) -> List[Dict[str, str]]:
 def action_color(action: str) -> str:
     """Return Rich color name based on action type."""
     act = action.split()[0] if action else ""
-    if act == "move":
+    if act.startswith("move"):  # "move" and variants e.g. "move-to-goal"
         return "blue"
     elif act in ("pick", "place"):
         return "green"

@@ -162,15 +162,15 @@ def test_resolve_probabilistic_effect_is_oracle_deterministic() -> None:
         effects, _ = env.resolve_probabilistic_effect(
             action.effects[1], env._fluents
         )
-        reveals_goal = any(
-            f.name == "revealed" and not f.negated and f.args[0] == "goal"
+        marks_reachable = any(
+            f.name == "reachable" and not f.negated and f.args[0] == "goal"
             for eff in effects
             for f in eff.resulting_fluents
         )
-        assert reveals_goal == expect_success
+        assert marks_reachable == expect_success
 
 
-def test_explore_success_reveals_goal_without_moving_robot() -> None:
+def test_explore_success_marks_goal_reachable_without_moving_robot() -> None:
     env = _make_env(_branching_corridor_grid())
     east, _ = _frontier_ids_by_kind(env)
     label = env.oracle_labels[east]
@@ -185,8 +185,10 @@ def test_explore_success_reveals_goal_without_moving_robot() -> None:
     )
     env.act(action)
 
-    # The goal is revealed but the robot has not moved: no teleport.
-    assert F("revealed", "goal") in env.state.fluents
+    # The goal is marked reachable but the robot has not moved: no teleport.
+    # It is *not* yet revealed — its cell is still beyond sensor range.
+    assert F("reachable", "goal") in env.state.fluents
+    assert F("revealed", "goal") not in env.state.fluents
     assert F("at", "robot1", "goal") not in env.state.fluents
     assert F("explored", east) in env.state.fluents
     assert F("free", "robot1") in env.state.fluents
@@ -209,6 +211,7 @@ def test_explore_failure_marks_explored_without_revealing() -> None:
     )
     env.act(action)
 
+    assert F("reachable", "goal") not in env.state.fluents
     assert F("revealed", "goal") not in env.state.fluents
     assert F("explored", branch) in env.state.fluents
     assert F("free", "robot1") in env.state.fluents

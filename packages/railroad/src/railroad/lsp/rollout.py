@@ -160,7 +160,7 @@ def build_point_goal_setup(
             "frontier": set(),
             "object": set(),
         },
-        skill_overrides={'move': move_skill},
+        skill_overrides={'move': move_skill, 'move-to-goal': move_skill},
         robot_initial_poses={robot: start_pose for robot in robots},
         location_registry=LocationRegistry({
             START_NAME: np.array(start_coord, dtype=float)

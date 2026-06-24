@@ -216,7 +216,26 @@ class Environment(ABC):
             )
         )
 
-        return [a for a in all_actions if self._is_valid_action(a)]
+        valid_actions = [a for a in all_actions if self._is_valid_action(a)]
+
+        # Action names must be unique: the planner and get_action_by_name both
+        # identify actions by name, so two distinct groundings sharing a name
+        # (e.g. two operators that both produce "move r1 a goal" with different
+        # preconditions) are silently ambiguous. Fail loudly instead.
+        seen: Dict[str, Action] = {}
+        for action in valid_actions:
+            other = seen.get(action.name)
+            if other is not None and other != action:
+                raise ValueError(
+                    "Duplicate action name from distinct groundings: "
+                    f"{action.name!r}. Two operators produce the same grounded "
+                    "name with different preconditions, which is ambiguous to "
+                    "the planner. Rename one operator or restrict its parameter "
+                    "domains so their groundings don't collide."
+                )
+            seen[action.name] = action
+
+        return valid_actions
 
     def _is_valid_action(self, action: Action) -> bool:
         """Filter actions with infinite effects or invalid destinations."""
@@ -227,7 +246,7 @@ class Environment(ABC):
         if not parts:
             return False
 
-        if parts[0] == "move":
+        if parts[0].startswith("move"):  # "move" and variants e.g. "move-to-goal"
             if len(parts) > 3 and parts[2] == parts[3]:
                 return False
             if action.effects and all(eff.time <= 1e-9 for eff in action.effects):

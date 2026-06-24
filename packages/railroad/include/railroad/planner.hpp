@@ -38,6 +38,8 @@ get_next_actions(const State &state, const std::vector<Action> &all_actions) {
   }
   if (applicable.empty()) return applicable;
 
+  std::vector<const Action *> result = applicable;
+
   // Robot-serialization filter: when several robots are free, commit to the
   // robots' actions in a fixed order rather than branching over every robot at
   // once. Because the robots act concurrently, deciding what each does in a
@@ -54,26 +56,33 @@ get_next_actions(const State &state, const std::vector<Action> &all_actions) {
   for (const auto &f : state.fluents()) {
     if (f.is_free()) free_fluents.push_back(&f);
   }
-  if (free_fluents.size() <= 1) return applicable;  // nothing to serialize
+  if (free_fluents.size() > 1) {
+    // Deterministic order by robot id (the `free` fluent's argument).
+    std::sort(free_fluents.begin(), free_fluents.end(),
+              [](const Fluent *a, const Fluent *b) { return a->args() < b->args(); });
 
-  // Deterministic order by robot id (the `free` fluent's argument).
-  std::sort(free_fluents.begin(), free_fluents.end(),
-            [](const Fluent *a, const Fluent *b) { return a->args() < b->args(); });
-
-  // Return the actions of the first free robot that has any; only fall through
-  // to later robots if an earlier one has no applicable action (it is stuck),
-  // so a free-but-idle robot never blocks the others.
-  for (const Fluent *free_robot : free_fluents) {
-    std::vector<const Action *> subset;
-    for (const Action *action : applicable) {
-      if (action->pos_preconditions().count(*free_robot)) {
-        subset.push_back(action);
+    // Take the actions of the first free robot that has any; only fall through
+    // to later robots if an earlier one has no applicable action (it is stuck),
+    // so a free-but-idle robot never blocks the others.
+    for (const Fluent *free_robot : free_fluents) {
+      std::vector<const Action *> subset;
+      for (const Action *action : applicable) {
+        if (action->pos_preconditions().count(*free_robot)) {
+          subset.push_back(action);
+        }
       }
+      if (!subset.empty()) { result = std::move(subset); break; }
     }
-    if (!subset.empty()) return subset;
   }
 
-  return applicable;  // no applicable action is executed by a free robot
+  // Don't let the planner wait by choice: drop no_op (wait) actions unless they
+  // are the only option, i.e. a free robot genuinely has nothing else to do.
+  std::vector<const Action *> non_wait;
+  for (const Action *action : result) {
+    if (action->name().rfind("no_op", 0) != 0) non_wait.push_back(action);
+  }
+  if (!non_wait.empty()) return non_wait;
+  return result;
 }
 
 using HeuristicFn = std::function<double(const State &)>;

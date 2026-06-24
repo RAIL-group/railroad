@@ -3,9 +3,18 @@
 The goal is treated like an object whose spatial location is known in
 advance: it lives in ``objects_by_type["goal"]`` (not ``"location"``)
 and its coordinates are registered in the location registry from the
-start. Exploring a frontier never relocates the robot — on success it
-*reveals* the goal, and a gated move action lets the robot physically
-drive there along a real path once one is known.
+start. Two fluents track its status, deliberately distinct:
+
+* ``reachable goal`` — exploring a frontier succeeded, so a route to the
+  goal is known to exist beyond it. The robot has *not* yet sensed the
+  goal cell. The gated ``move-to-goal`` action drives there along the
+  optimistic known-location path. Set by ``lsp-explore`` (success).
+* ``revealed goal`` — the goal cell has been *directly observed* and the
+  goal is now a real ``location``; the ordinary navigable ``move`` can
+  target it and ``move-to-goal`` steps aside. Set by the environment when
+  the cell enters the observed map (see :mod:`railroad.lsp.env_mixin`).
+
+Exploring a frontier never relocates the robot.
 """
 
 from __future__ import annotations
@@ -29,13 +38,18 @@ def construct_lsp_explore_operator(
     """Construct ``(lsp-explore ?robot ?frontier)`` for point-goal navigation.
 
     Exploring a frontier succeeds with the estimated ``prob_feasible``:
-    on success the goal is *revealed* after ``delta_success_cost / speed``
-    seconds — the extra cost of pushing through the frontier beyond the
-    direct travel that a subsequent ``move`` to the goal accounts for; on
-    failure the robot returns empty-handed after
+    on success the goal is marked ``reachable`` after
+    ``delta_success_cost / speed`` seconds — a route to it through the
+    frontier is now known to exist (the extra cost of pushing through the
+    frontier beyond the direct travel a subsequent ``move-to-goal``
+    accounts for); on failure the robot returns empty-handed after
     ``exploration_cost / speed`` seconds. Either way the frontier is
     marked explored and the robot stays where it is: reaching the goal
     always happens through a real move action.
+
+    Success sets ``reachable goal``, *not* ``revealed goal`` — the goal
+    cell has not been sensed yet, so the goal is not yet a real
+    ``location``. ``revealed`` is reserved for direct observation.
 
     Probabilities are clamped to *prob_clamp* so oracle 0/1 values stay
     planner-friendly.
@@ -81,7 +95,7 @@ def construct_lsp_explore_operator(
                             time=(success_time_fn, ["?r", "?f"]),
                             resulting_fluents={
                                 F("free ?r"),
-                                F(f"revealed {goal_name}"),
+                                F(f"reachable {goal_name}"),
                                 F("explored ?f"),
                                 F("not lock-explore ?f"),
                             },
@@ -109,15 +123,20 @@ def construct_move_to_goal_operator(
     *,
     goal_type: str = "goal",
 ) -> Operator:
-    """Construct a move whose destination is the (revealed) point goal.
+    """Construct a move toward the ``reachable``-but-not-yet-``revealed`` goal.
 
-    Identical to the navigable move operator except the destination is
-    drawn from ``objects_by_type[goal_type]`` and must have been revealed
-    (by observing its cell, or symbolically by an lsp-explore success in
-    planning rollouts). The goal's coordinates are known in advance, so
-    the action grounds and time-estimates before discovery; reachability
-    of the dispatched move is still enforced against the observed map by
-    the environment.
+    This is the planning *landmark* that lets a robot head for the goal
+    once exploration has shown it is reachable, before its cell has been
+    directly observed. It is gated on ``reachable ?to`` (set by an
+    lsp-explore success) and on the goal *not* yet being ``revealed``: the
+    moment the goal cell is observed it becomes a real ``location`` and the
+    ordinary navigable ``move`` takes over, so this operator deactivates to
+    avoid two ways of reaching the same destination.
+
+    The goal's coordinates are known in advance, so the action grounds and
+    time-estimates (optimistically) before discovery; reachability of the
+    dispatched move is still enforced against the observed map by the
+    environment.
 
     Args:
         move_time: Time or function to compute movement duration.
@@ -126,26 +145,30 @@ def construct_move_to_goal_operator(
     """
     move_time_fn = _to_numeric(move_time)
     return Operator(
-        name="move",
+        # Distinct from the navigable "move" operator: once the goal is
+        # observed it also joins the location set, so both operators would
+        # otherwise ground the same "move <r> <from> goal" name. A unique,
+        # descriptive name keeps get_action_by_name / the planner
+        # unambiguous; the ~revealed gate ensures only one is ever active.
+        name="move-to-goal",
         parameters=[("?r", "robot"), ("?from", "location"), ("?to", goal_type)],
         preconditions=[
             F("at ?r ?from"),
             F("free ?r"),
-            F("revealed ?to"),
+            F("reachable ?to"),
+            ~F("revealed ?to"),
             ~F("just-moved ?r"),
-            ~F("claimed ?to"),
         ],
         effects=[
             Effect(
                 time=0,
-                resulting_fluents={F("not free ?r"), F("not at ?r ?from"), F("claimed ?to")},
+                resulting_fluents={F("not free ?r"), F("not at ?r ?from")},
             ),
             Effect(
                 time=(move_time_fn, ["?r", "?from", "?to"]),
                 resulting_fluents={
                     F("free ?r"),
                     F("at ?r ?to"),
-                    F("not claimed ?to"),
                     F("just-moved ?r"),
                 },
             ),

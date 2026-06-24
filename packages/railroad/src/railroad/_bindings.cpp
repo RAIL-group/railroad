@@ -361,8 +361,18 @@ PYBIND11_MODULE(_bindings, m) {
       py::arg("state"), py::arg("action") = std::nullopt,
       py::arg("relax") = false);
 
-  m.def("get_next_actions", &get_next_actions, py::arg("state"),
-        py::arg("all_actions"),
+  m.def("get_next_actions",
+        [](const State &state, const std::vector<Action> &all_actions) {
+          // Return owned copies: get_next_actions yields pointers into
+          // `all_actions`, which is a temporary built from the Python list and
+          // destroyed when the call returns, so the pointers must not escape.
+          std::vector<Action> out;
+          for (const Action *a : get_next_actions(state, all_actions)) {
+            out.push_back(*a);
+          }
+          return out;
+        },
+        py::arg("state"), py::arg("all_actions"),
         "Return list of applicable actions for at least one free robot");
   m.def("get_usable_actions",
         [](const State &input_state, const std::vector<Action> &all_actions) {
