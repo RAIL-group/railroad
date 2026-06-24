@@ -19,6 +19,8 @@ Exploring a frontier never relocates the robot.
 
 from __future__ import annotations
 
+from typing import Callable
+
 from railroad.core import Effect, Fluent, Operator
 from railroad.operators._utils import Numeric, OptNumeric, _to_numeric
 
@@ -29,46 +31,70 @@ F = Fluent
 
 def construct_lsp_explore_operator(
     statistics: FrontierStatisticsEstimator,
+    optimistic_goal_cost: Callable[[str, str], float],
     *,
     speed_cells_per_sec: float = 2.0,
     goal_name: str = "goal",
-    min_branch_time: float = 0.1,
-    prob_clamp: tuple[float, float] = (0.001, 0.999),
+    min_time: float = 0.1,
+    prob_clamp: tuple[float, float] = (0.0, 1.0),
 ) -> Operator:
     """Construct ``(lsp-explore ?robot ?frontier)`` for point-goal navigation.
 
-    Exploring a frontier succeeds with the estimated ``prob_feasible``:
-    on success the goal is marked ``reachable`` after
-    ``delta_success_cost / speed`` seconds — a route to it through the
-    frontier is now known to exist (the extra cost of pushing through the
-    frontier beyond the direct travel a subsequent ``move-to-goal``
-    accounts for); on failure the robot returns empty-handed after
-    ``exploration_cost / speed`` seconds. Either way the frontier is
-    marked explored and the robot stays where it is: reaching the goal
-    always happens through a real move action.
+    Exploring a frontier succeeds with the estimated ``prob_feasible``.
+    The two outcomes complete at different times:
 
-    Success sets ``reachable goal``, *not* ``revealed goal`` — the goal
-    cell has not been sensed yet, so the goal is not yet a real
-    ``location``. ``revealed`` is reserved for direct observation.
+    * **success** at ``success_time = (optimistic_goal_cost + delta_success_cost)
+      / speed``. ``optimistic_goal_cost(robot, frontier)`` is the lower-bound
+      travel cost to the goal through the frontier — its length on the map with
+      all *unseen* space treated as free — and ``delta_success_cost`` is the
+      learned/oracle *extra* cost beyond that optimistic bound. The statistics
+      only carry the delta, so the bound must be added back here; omitting it
+      badly under-costs success. On success the goal is marked ``reachable``.
+    * **failure** at ``failure_time = exploration_cost / speed``: the robot
+      returns empty-handed.
 
-    Probabilities are clamped to *prob_clamp* so oracle 0/1 values stay
-    planner-friendly.
+    Both times are floored at *min_time*. Either way the frontier is marked
+    explored and the robot stays put — reaching the goal always happens through
+    a real move action.
+
+    The probabilistic effect (where the outcome becomes known) is scheduled at
+    ``min(success_time, failure_time)``, the earliest instant the two outcomes
+    could diverge. Charging it any earlier would hand the robot privileged
+    knowledge of the result before it could possibly have it. The branch
+    effects themselves fire at ``success_time - branch_point`` /
+    ``failure_time - branch_point`` *after* that point, so each outcome still
+    completes at its absolute ``success_time`` / ``failure_time`` (one offset is
+    always zero, the other the gap between them).
+
+    Success sets ``reachable goal``, *not* ``revealed goal`` — the goal cell has
+    not been sensed yet, so the goal is not yet a real ``location``.
+    ``revealed`` is reserved for direct observation.
+
+    Probabilities are clamped to *prob_clamp* (``[0, 1]`` by default).
     """
     speed = max(speed_cells_per_sec, 1e-6)
     lo, hi = prob_clamp
 
+    def _success_time(r: str, f: str) -> float:
+        cost = optimistic_goal_cost(r, f) + statistics.get(r, f).delta_success_cost
+        return max(min_time, cost / speed)
+
+    def _failure_time(r: str, f: str) -> float:
+        return max(min_time, statistics.get(r, f).exploration_cost / speed)
+
     prob_fn = Numeric(
         lambda r, f: min(hi, max(lo, statistics.get(r, f).prob_feasible))
     )
-    success_time_fn = Numeric(
-        lambda r, f: max(
-            min_branch_time, statistics.get(r, f).delta_success_cost / speed
-        )
+    branch_point_fn = Numeric(
+        lambda r, f: min(_success_time(r, f), _failure_time(r, f))
     )
-    failure_time_fn = Numeric(
-        lambda r, f: max(
-            min_branch_time, statistics.get(r, f).exploration_cost / speed
-        )
+    success_offset_fn = Numeric(
+        lambda r, f: _success_time(r, f)
+        - min(_success_time(r, f), _failure_time(r, f))
+    )
+    failure_offset_fn = Numeric(
+        lambda r, f: _failure_time(r, f)
+        - min(_success_time(r, f), _failure_time(r, f))
     )
 
     return Operator(
@@ -86,13 +112,13 @@ def construct_lsp_explore_operator(
                 resulting_fluents={F("not free ?r"), F("lock-explore ?f")},
             ),
             Effect(
-                time=min_branch_time,
+                time=(branch_point_fn, ["?r", "?f"]),
                 resulting_fluents=set(),
                 prob_effects=[
                     (
                         (prob_fn, ["?r", "?f"]),
                         [Effect(
-                            time=(success_time_fn, ["?r", "?f"]),
+                            time=(success_offset_fn, ["?r", "?f"]),
                             resulting_fluents={
                                 F("free ?r"),
                                 F(f"reachable {goal_name}"),
@@ -104,7 +130,7 @@ def construct_lsp_explore_operator(
                     (
                         (1 - prob_fn, ["?r", "?f"]),
                         [Effect(
-                            time=(failure_time_fn, ["?r", "?f"]),
+                            time=(failure_offset_fn, ["?r", "?f"]),
                             resulting_fluents={
                                 F("free ?r"),
                                 F("explored ?f"),
