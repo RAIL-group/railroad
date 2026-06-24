@@ -533,46 +533,6 @@ inline std::unordered_map<Fluent, double> get_relaxed_expected_costs(
   return forward.expected_cost;
 }
 
-// Debug function: Get achiever information for a fluent
-// Returns vector of tuples: (action_name, wait_cost, exec_cost, probability)
-inline std::vector<std::tuple<std::string, double, double, double>> get_achievers_for_fluent(
-    const State &input_state,
-    const Fluent &fluent,
-    const std::vector<Action> &all_actions) {
-
-  std::vector<std::tuple<std::string, double, double, double>> achiever_info;
-
-  // Step 1: Relaxed transition
-  auto relaxed_result = transition(input_state, nullptr, true);
-  if (relaxed_result.empty()) {
-    return achiever_info;
-  }
-  State relaxed = relaxed_result[0].first;
-
-  // Get initial fluents from relaxed state
-  std::unordered_set<Fluent> initial_fluents(
-      relaxed.fluents().begin(), relaxed.fluents().end());
-
-  // Run forward phase
-  auto forward = ff_forward_phase(initial_fluents, all_actions);
-
-  // Compute expected costs via Bellman iteration
-  compute_expected_costs(forward);
-
-  // Get achievers for the target fluent
-  auto it = forward.achievers_by_fluent.find(fluent);
-  if (it != forward.achievers_by_fluent.end()) {
-    for (const auto& achiever : it->second) {
-      achiever_info.emplace_back(
-          achiever.action->name(),
-          achiever.wait_cost,
-          achiever.exec_cost,
-          achiever.probability);
-    }
-  }
-
-  return achiever_info;
-}
 
 // Get the relaxed expected cost for a single fluent
 // Returns infinity if fluent is unreachable, 0 if already true, otherwise the computed cost
