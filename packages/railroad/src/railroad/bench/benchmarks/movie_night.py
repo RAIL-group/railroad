@@ -24,6 +24,7 @@ from railroad import operators
 from rich.console import Console
 
 from railroad.bench import benchmark, BenchmarkCase
+from railroad.bench.benchmarks._helpers import capture_timeout_log
 @benchmark(
     name="movie_night_search",
     description="Robots must search a small home to find some objects to bring to the den.",
@@ -133,29 +134,31 @@ def bench_movie_night(case: BenchmarkCase):
         return any(keyword in f.name for keyword in ["at", "holding", "found", "searched"])
     dashboard = PlannerDashboard(goal, sim, fluent_filter=fluent_filter, print_on_exit=False, console=recording_console)
 
-    for iteration in range(max_iterations):
-        # Check if goal is reached
-        if goal.evaluate(sim.state.fluents):
-            break
+    # If the harness timeout fires mid-loop, still log the in-progress dashboard.
+    with capture_timeout_log(case, dashboard):
+        for iteration in range(max_iterations):
+            # Check if goal is reached
+            if goal.evaluate(sim.state.fluents):
+                break
 
-        # Get available actions
-        all_actions = sim.get_actions()
+            # Get available actions
+            all_actions = sim.get_actions()
 
-        # Plan next action
-        mcts = MCTSPlanner(all_actions)
-        action_name = mcts(sim.state, goal,
-                            max_iterations=case.mcts.iterations,
-                            c=case.mcts.c,
-                            max_depth=20)
+            # Plan next action
+            mcts = MCTSPlanner(all_actions)
+            action_name = mcts(sim.state, goal,
+                                max_iterations=case.mcts.iterations,
+                                c=case.mcts.c,
+                                max_depth=20)
 
-        if action_name == 'NONE':
-            dashboard.console.print("No more actions available. Goal may not be achievable.")
-            break
+            if action_name == 'NONE':
+                dashboard.console.print("No more actions available. Goal may not be achievable.")
+                break
 
-        # Execute action
-        action = get_action_by_name(all_actions, action_name)
-        sim.advance(action, do_interrupt=False)
-        dashboard.update(mcts, action_name)
+            # Execute action
+            action = get_action_by_name(all_actions, action_name)
+            sim.advance(action, do_interrupt=False)
+            dashboard.update(mcts, action_name)
 
     # Export the recorded console output as HTML
     actions_taken = [name for name, _ in dashboard.actions_taken]
