@@ -60,9 +60,8 @@ class MCTSPlanner:
         lambda_add: SupportsFloat = 0.5,
         lambda_max: SupportsFloat = 0.0,
         lambda_ff: SupportsFloat = 0.5,
-        prune_achievers: bool = False,
-        prune_top_n: int = 4,
-        prune_cheapest_m: int = 2,
+        prune_top_n: int | None = None,
+        prune_cheapest_m: int | None = None,
         prune_orphaned_supports: bool = True,
         frontier_objects: set[str] | None = None,
     ):
@@ -73,14 +72,15 @@ class MCTSPlanner:
             lambda_add: weight on the additive (h_add) heuristic component
             lambda_max: weight on the max (h_max) heuristic component
             lambda_ff: weight on the relaxed-plan-cost (h_ff) heuristic component
-            prune_achievers: if set, prune the action set before each MCTS
-                search so that, for every probabilistic fluent on the path to
-                the goal, each robot keeps only the most-probable / cheapest
-                achievers (see ``railroad._action_pruning``)
             prune_top_n: per (fluent, robot), number of achievers to keep by
-                success probability
+                success probability. Pruning is **off by default** (``None``);
+                set this and/or ``prune_cheapest_m`` to a number to enable it.
+                When pruning is on but this is ``None`` it counts as 0 (keep
+                none by probability). See ``railroad._action_pruning``.
             prune_cheapest_m: per (fluent, robot), number of achievers to keep
-                by time-to-execute
+                by time-to-execute. ``None`` (the default) leaves pruning off
+                unless ``prune_top_n`` is set; ``None`` while pruning is on
+                counts as 0 (keep none by cost).
             prune_orphaned_supports: also drop support actions left unable to
                 reach the goal after achiever pruning (relaxed backward closure)
             frontier_objects: names of frontier objects (special, exploration-
@@ -102,10 +102,14 @@ class MCTSPlanner:
         self._lambda_max = float(lambda_max)
         self._lambda_ff = float(lambda_ff)
 
-        # Action-pruning configuration (applied per-call in __call__).
-        self._prune_achievers = prune_achievers
+        # Action-pruning configuration (applied per-call in __call__). Pruning
+        # is enabled only when a keep-count is given; both None => off, so
+        # planners elsewhere are unaffected unless they opt in.
         self._prune_top_n = prune_top_n
         self._prune_cheapest_m = prune_cheapest_m
+        self._prune_achievers = (
+            prune_top_n is not None or prune_cheapest_m is not None
+        )
         self._prune_orphaned_supports = prune_orphaned_supports
         self._frontier_objects = frontier_objects
 
@@ -237,8 +241,12 @@ class MCTSPlanner:
                 converted_state,
                 converted_goal,
                 self._converted_actions,
-                top_n=self._prune_top_n,
-                cheapest_m=self._prune_cheapest_m,
+                top_n=self._prune_top_n if self._prune_top_n is not None else 0,
+                cheapest_m=(
+                    self._prune_cheapest_m
+                    if self._prune_cheapest_m is not None
+                    else 0
+                ),
                 prune_orphaned_supports=self._prune_orphaned_supports,
                 frontier_objects=self._frontier_objects,
             )
