@@ -1,0 +1,162 @@
+{
+  "current_time": 0.0,
+  "current_fluents": [
+    "(at Mug table)",
+    "(blocking-access cabinet)",
+    "(blocking-access fridge)",
+    "(at Cereal pantry)",
+    "(at Waterbottle bed)",
+    "(at robot1 start_loc)",
+    "(at Pillow bed)",
+    "(closed cabinet_door)",
+    "(closed fridge_door)",
+    "(at Clock table)",
+    "(at Plate cabinet)",
+    "(at Notebook table)"
+  ],
+  "goal": "((at Mug cabinet) & (at Waterbottle fridge))",
+  "cheapest_relaxed_plan": [
+    {
+      "achieves_fluent": "(at robot1 table)",
+      "action": "move robot1 start_loc table",
+      "exec_cost": 7.171067811865475,
+      "wait_cost": 0.0,
+      "requires_preconditions": [
+        "(free robot1)",
+        "(at robot1 start_loc)",
+        "(not just-moved robot1)"
+      ]
+    },
+    {
+      "achieves_fluent": "(at robot1 bed)",
+      "action": "move robot1 start_loc bed",
+      "exec_cost": 17.82004514666935,
+      "wait_cost": 0.0,
+      "requires_preconditions": [
+        "(free robot1)",
+        "(at robot1 start_loc)",
+        "(not just-moved robot1)"
+      ]
+    },
+    {
+      "achieves_fluent": "(at robot1 cabinet)",
+      "action": "move robot1 start_loc cabinet",
+      "exec_cost": 22.77156809750927,
+      "wait_cost": 0.0,
+      "requires_preconditions": [
+        "(free robot1)",
+        "(at robot1 start_loc)",
+        "(not just-moved robot1)"
+      ]
+    },
+    {
+      "achieves_fluent": "(holding robot1 Mug)",
+      "action": "pick robot1 table Mug",
+      "exec_cost": 5.1,
+      "wait_cost": 7.171067811865475,
+      "requires_preconditions": [
+        "(not just-placed robot1 Mug)",
+        "(free robot1)",
+        "(not blocking-access table)",
+        "(at robot1 table)",
+        "(at Mug table)",
+        "(not hand-full robot1)"
+      ]
+    },
+    {
+      "achieves_fluent": "(not blocking-access cabinet)",
+      "action": "open_container robot1 cabinet_door cabinet",
+      "exec_cost": 3.1,
+      "wait_cost": 22.77156809750927,
+      "requires_preconditions": [
+        "(free robot1)",
+        "(closed cabinet_door)",
+        "(not just-opened robot1 cabinet_door)",
+        "(has-door cabinet cabinet_door)",
+        "(not hand-full robot1)",
+        "(at robot1 cabinet)"
+      ]
+    },
+    {
+      "achieves_fluent": "(hand-full robot1)",
+      "action": "pick robot1 table Mug",
+      "exec_cost": 5.1,
+      "wait_cost": 7.171067811865475,
+      "requires_preconditions": [
+        "(not just-placed robot1 Mug)",
+        "(free robot1)",
+        "(not blocking-access table)",
+        "(at robot1 table)",
+        "(at Mug table)",
+        "(not hand-full robot1)"
+      ]
+    },
+    {
+      "achieves_fluent": "(at robot1 fridge)",
+      "action": "move robot1 start_loc fridge",
+      "exec_cost": 26.348809496813377,
+      "wait_cost": 0.0,
+      "requires_preconditions": [
+        "(free robot1)",
+        "(at robot1 start_loc)",
+        "(not just-moved robot1)"
+      ]
+    },
+    {
+      "achieves_fluent": "(holding robot1 Waterbottle)",
+      "action": "pick robot1 bed Waterbottle",
+      "exec_cost": 5.1,
+      "wait_cost": 17.82004514666935,
+      "requires_preconditions": [
+        "(free robot1)",
+        "(at Waterbottle bed)",
+        "(not just-placed robot1 Waterbottle)",
+        "(at robot1 bed)",
+        "(not hand-full robot1)",
+        "(not blocking-access bed)"
+      ]
+    },
+    {
+      "achieves_fluent": "(not blocking-access fridge)",
+      "action": "open_container robot1 fridge_door fridge",
+      "exec_cost": 3.1,
+      "wait_cost": 26.348809496813377,
+      "requires_preconditions": [
+        "(free robot1)",
+        "(not just-opened robot1 fridge_door)",
+        "(closed fridge_door)",
+        "(not hand-full robot1)",
+        "(has-door fridge fridge_door)",
+        "(at robot1 fridge)"
+      ]
+    },
+    {
+      "achieves_fluent": "(at Mug cabinet)",
+      "action": "place robot1 cabinet Mug",
+      "exec_cost": 5.1,
+      "wait_cost": 25.87156809750927,
+      "requires_preconditions": [
+        "(not blocking-access cabinet)",
+        "(not just-picked robot1 Mug)",
+        "(holding robot1 Mug)",
+        "(at robot1 cabinet)",
+        "(free robot1)",
+        "(hand-full robot1)"
+      ]
+    },
+    {
+      "achieves_fluent": "(at Waterbottle fridge)",
+      "action": "place robot1 fridge Waterbottle",
+      "exec_cost": 5.1,
+      "wait_cost": 29.44880949681338,
+      "requires_preconditions": [
+        "(not just-picked robot1 Waterbottle)",
+        "(not blocking-access fridge)",
+        "(holding robot1 Waterbottle)",
+        "(at robot1 fridge)",
+        "(free robot1)",
+        "(hand-full robot1)"
+      ]
+    }
+  ]
+}

@@ -180,3 +180,202 @@ Please return a JSON list of action names ordered from best to worst. Do not inc
         else:
             print(f"[LLMActionReranker] GEMINI_API_KEY not set or google-generativeai missing. Prompt length: {len(prompt)}. (LLM call mocked)")
             return candidate_actions
+
+
+class LLMHeuristicGenerator:
+    """
+    Constructs prompt and calls the Gemini API to generate custom heuristic function candidates.
+    """
+    def __init__(self, model_name: str = "gemini-2.5-pro"):
+        self.api_key = os.environ.get("GEMINI_API_KEY")
+        self.client = None
+        if self.api_key:
+            self.client = genai.Client(api_key=self.api_key)
+            self.model_name = model_name
+
+    def generate_prompt(self, domain_pddl: str, problem_pddl: str, rpg_context_json: str) -> str:
+        return f"""You are an expert AI planning researcher writing a heuristic function in Python.
+Your goal is to write a custom heuristic class that inherits from `Heuristic` to guide a concurrent multi-agent MCTS planner.
+
+Here is the PDDL-like domain description:
+{domain_pddl}
+
+Here is the problem definition:
+{problem_pddl}
+
+Here is an example of the Relaxed Planning Graph (RPG) cheapest plan extracted from the initial state:
+{rpg_context_json}
+
+Your custom heuristic class must:
+1. Inherit from `Heuristic` (imported as `from railroad.core import Heuristic`).
+2. Implement `__call__(self, state, goal, rpg)` which:
+   - Takes a `State` object `state`.
+   - Takes a `Goal` object `goal`.
+   - Takes a dict `rpg` (described below).
+   - Returns a `float` representing the estimated cost to reach the goal.
+3. Not hardcode values specific to the initial state; it must generalize.
+4. Return lower values for states closer to achieving the goal, and higher values for dead ends or states further away.
+
+Here is the exact Python API of the objects you will be working with:
+- `state`: Has property `state.fluents` which is a set of `Fluent` objects.
+- `fluent` object:
+  - `fluent.name`: The predicate name (string, e.g. "at" or "holding" or "free").
+  - `fluent.args`: A list/tuple of string arguments (e.g. ["robot1", "table"]).
+  - `fluent.negated`: A boolean indicating if the fluent is negated.
+  - To inspect a fluent, use its properties, e.g., checking `fluent.name == "holding" and "Mug" in fluent.args`.
+- `goal` object:
+  - `goal.evaluate(state.fluents)`: Returns a boolean indicating if the goal is fully satisfied.
+  - `goal.goal_count(state.fluents)`: Returns an integer count of how many goals are achieved.
+- `rpg` dictionary:
+  - `rpg["cheapest_relaxed_plan"]`: A list of steps (actions in the relaxed plan). Each step is a dict:
+    - `step["achieves_fluent"]`: string representation of the achieved fluent (e.g. "(at robot1 cabinet)")
+    - `step["action"]`: string name of the action (e.g. "move robot1 start_loc cabinet")
+    - `step["exec_cost"]`: float duration of the action execution
+    - `step["wait_cost"]`: float wait cost for preconditions to be satisfied
+    - `step["requires_preconditions"]`: list of precondition strings
+
+Examples of how to import needed modules:
+Make sure to include any needed imports (e.g., `import re` or `from railroad.core import Fluent`) inside your code block if you use them.
+
+Please return ONLY the Python code containing the class definition. Do not include markdown formatting like ```python or ```. Just the raw Python code.
+"""
+
+
+    def generate_heuristic_candidates(self, prompt: str, n: int = 5) -> list[str]:
+        candidates = []
+        if not self.client:
+            print("[LLMHeuristicGenerator] GEMINI_API_KEY not set. Cannot generate heuristics.")
+            return candidates
+
+        import time
+        # List of models to try in case of failure (spikes/availability)
+        models_to_try = [self.model_name, "gemini-2.5-flash", "gemini-1.5-flash"]
+        # De-duplicate to preserve order
+        models_to_try = list(dict.fromkeys(models_to_try))
+
+        for i in range(n):
+            success = False
+            for model in models_to_try:
+                for attempt in range(3):
+                    try:
+                        print(f"[LLMHeuristicGenerator] Generating candidate {i+1}/{n} using {model} (attempt {attempt+1})...")
+                        response = self.client.models.generate_content(
+                            model=model,
+                            contents=prompt,
+                            config=types.GenerateContentConfig(
+                                temperature=0.8, # high temperature for diversity
+                            )
+                        )
+                        code = response.text.strip()
+                        # Clean up markdown code block if LLM returned it anyway
+                        if code.startswith("```python"):
+                            code = code[9:]
+                        if code.endswith("```"):
+                            code = code[:-3]
+                        candidates.append(code.strip())
+                        success = True
+                        break
+                    except Exception as e:
+                        print(f"Attempt {attempt+1} failed with error: {e}")
+                        if "503" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+                            time.sleep(2 * (attempt + 1))
+                        else:
+                            break # Non-temporary error
+                if success:
+                    break
+            if not success:
+                print(f"Failed to generate candidate {i+1} after trying all fallback models.")
+        return candidates
+
+
+class SandboxEvaluator:
+    """
+    Runs the Tournament to evaluate generated Python heuristic code candidates.
+    """
+    def __init__(self, actions: list[Action], initial_state: State, goal: Goal, max_iterations: int = 1000):
+        self.actions = actions
+        self.initial_state = initial_state
+        self.goal = goal
+        self.max_iterations = max_iterations
+
+    def evaluate_candidate(self, code_str: str) -> dict[str, Any]:
+        """
+        Compiles and evaluates a single heuristic candidate by simulating an MCTS run.
+        """
+        result = {
+            "success": False,
+            "error": None,
+            "steps_taken": 9999,
+        }
+
+        # Sandbox dict
+        loc = {}
+        try:
+            # 1. Compile the code
+            exec(code_str, globals(), loc)
+            
+            # Find the class that inherits from Heuristic or is a class
+            from railroad.core import Heuristic
+            heuristic_class = None
+            for key, val in loc.items():
+                if isinstance(val, type) and val.__name__ != "Heuristic":
+                    heuristic_class = val
+                    break
+                    
+            if not heuristic_class:
+                raise ValueError("No class found in generated code.")
+                
+            # 2. Instantiate
+            custom_h = heuristic_class()
+            
+            # 3. Create a planner using the custom heuristic
+            mcts = MCTSPlanner(self.actions, custom_heuristic=custom_h)
+            
+            # 4. Run the planning tournament
+            state = self.initial_state
+            step_count = 0
+            success = False
+            
+            from railroad.core import get_action_by_name, transition
+            
+            # Simulate execution loop
+            for step in range(30):
+                if self.goal.evaluate(state.fluents):
+                    success = True
+                    break
+                action_name = mcts(state, self.goal, max_iterations=self.max_iterations, c=10.0)
+                if action_name == "NONE":
+                    break
+                
+                action = get_action_by_name(self.actions, action_name)
+                state = transition(state, action)[0][0]
+                step_count += 1
+                
+            result["success"] = success
+            result["steps_taken"] = step_count
+            
+        except Exception as e:
+            result["error"] = str(e)
+            
+        return result
+
+    def run_tournament(self, candidates: list[str]) -> tuple[str | None, int]:
+        """
+        Runs evaluation on all candidates and returns the best candidate's code.
+        """
+        best_code = None
+        best_steps = 9999
+        
+        for idx, candidate in enumerate(candidates):
+            print(f"Evaluating Candidate {idx + 1}...")
+            res = self.evaluate_candidate(candidate)
+            if res["success"]:
+                print(f"Candidate {idx + 1} succeeded in {res['steps_taken']} steps!")
+                if res["steps_taken"] < best_steps:
+                    best_steps = res["steps_taken"]
+                    best_code = candidate
+            else:
+                print(f"Candidate {idx + 1} failed or errored: {res['error']}")
+                
+        return best_code, best_steps
+

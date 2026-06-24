@@ -1,4 +1,4 @@
-from typing import List, Dict, Union, SupportsFloat, SupportsInt
+from typing import List, Dict, Union, SupportsFloat, SupportsInt, Callable
 from collections.abc import Set
 from railroad._bindings import get_usable_actions
 
@@ -53,15 +53,22 @@ class MCTSPlanner:
         action_name = mcts(state, goal, max_iterations=1000, c=1.414)
     """
 
-    def __init__(self, actions: List[Action], use_det_heuristic: bool = False):
+    def __init__(
+        self,
+        actions: List[Action],
+        use_det_heuristic: bool = False,
+        custom_heuristic: Callable[[State, Goal, dict], float] | None = None
+    ):
         """Initialize MCTSPlanner with automatic preprocessing.
 
         Args:
             actions: List of Action objects to use for planning
             use_det_heuristic: If True, use the deterministic (classic) FF
                 heuristic instead of the probabilistic version.
+            custom_heuristic: A Python callable matching custom heuristic interface.
         """
         self._use_det_heuristic = use_det_heuristic
+        self._custom_heuristic = custom_heuristic
         # Store original actions for later re-conversion if needed
         self._original_actions = actions
 
@@ -76,7 +83,41 @@ class MCTSPlanner:
         # Convert actions with base mapping and create initial C++ planner
         self._current_mapping = self._base_mapping
         self._converted_actions = self._convert_actions(actions, self._current_mapping)
-        self._cpp_planner = _MCTSPlannerCpp(self._converted_actions, self._use_det_heuristic)
+        self._converted_goal = None
+
+        cpp_custom_h = self._wrap_custom_heuristic(custom_heuristic) if custom_heuristic else None
+        self._cpp_planner = _MCTSPlannerCpp(
+            self._converted_actions, self._use_det_heuristic, cpp_custom_h
+        )
+
+    def _wrap_custom_heuristic(self, py_heuristic) -> Callable[[State], float] | None:
+        if not py_heuristic:
+            return None
+
+        from railroad.experimental.llm_heuristic import HeuristicContextBuilder, _clean_fluent_str
+        context_builder = HeuristicContextBuilder()
+
+        def wrapper(cpp_state: State) -> float:
+            plan = context_builder._extract_relaxed_plan(
+                cpp_state, self._converted_goal, self._converted_actions
+            )
+            plan.reverse()
+            filtered_plan = [step for step in plan if not ("no_op" in step["action"] and step["wait_cost"] == 0)]
+
+            current_fluents = cpp_state.fluents
+            if context_builder.fluent_filter:
+                current_fluents = {f for f in current_fluents if context_builder.fluent_filter(f)}
+
+            rpg = {
+                "current_time": cpp_state.time,
+                "current_fluents": [_clean_fluent_str(str(f)) for f in current_fluents],
+                "goal": str(self._converted_goal),
+                "cheapest_relaxed_plan": filtered_plan
+            }
+
+            return py_heuristic(cpp_state, self._converted_goal, rpg)
+
+        return wrapper
 
     def _convert_actions(
         self, actions: List[Action], mapping: Dict[Fluent, Fluent]
@@ -124,7 +165,10 @@ class MCTSPlanner:
             )
 
             # Create new C++ planner with re-converted actions
-            self._cpp_planner = _MCTSPlannerCpp(self._converted_actions, self._use_det_heuristic)
+            cpp_custom_h = self._wrap_custom_heuristic(self._custom_heuristic) if self._custom_heuristic else None
+            self._cpp_planner = _MCTSPlannerCpp(
+                self._converted_actions, self._use_det_heuristic, cpp_custom_h
+            )
 
     def __call__(
         self,
@@ -134,6 +178,7 @@ class MCTSPlanner:
         max_depth: SupportsInt = 100,
         c: SupportsFloat = 1.414,
         heuristic_multiplier: SupportsFloat = 5.0,
+        custom_heuristic: Callable[[State, Goal, dict], float] | None = None,
     ) -> str:
         """Run MCTS planning to find the next action.
 
@@ -166,9 +211,15 @@ class MCTSPlanner:
             goal, self._current_mapping
         )
 
+        # Save them on self so the heuristic wrapper can access them
+        self._converted_goal = converted_goal
+
+        h_to_use = custom_heuristic if custom_heuristic is not None else self._custom_heuristic
+        cpp_custom_h = self._wrap_custom_heuristic(h_to_use) if h_to_use is not None else None
+
         return self._cpp_planner(
             converted_state, converted_goal, max_iterations, max_depth, c,
-            heuristic_multiplier
+            heuristic_multiplier, cpp_custom_h
         )
 
     def get_trace_from_last_mcts_tree(self):

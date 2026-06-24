@@ -6,7 +6,7 @@ from railroad._bindings import GroundedEffect, Fluent, Action, State
 from railroad._bindings import transition
 from railroad._bindings import LiteralGoal, AndGoal, OrGoal, Goal
 
-__all__ = ["transition"]  # re-exported from _bindings
+__all__ = ["transition", "Heuristic"]  # re-exported from _bindings
 from railroad._bindings import ff_heuristic as _ff_heuristic_cpp
 from railroad._bindings import det_ff_heuristic as _det_ff_heuristic_cpp
 
@@ -584,3 +584,10 @@ def _convert_fluent(
             return neg_to_pos_mapping[positive_fluent]
     # No conversion needed
     return fluent
+
+
+class Heuristic:
+    """Base class for custom Python-based heuristics."""
+    def __call__(self, state: State, goal: Goal, rpg: dict) -> float:
+        raise NotImplementedError("Subclasses must implement __call__")
+

@@ -386,12 +386,6 @@ PYBIND11_MODULE(_bindings, m) {
         py::arg("input_state"), py::arg("fluent"), py::arg("all_actions"),
         "Get relaxed expected cost for a single fluent from the given state");
 
-  m.def("get_achievers_for_fluent",
-        [](const State &input_state, const Fluent &fluent, const std::vector<Action> &all_actions) {
-          return get_achievers_for_fluent(input_state, fluent, all_actions);
-        },
-        py::arg("input_state"), py::arg("fluent"), py::arg("all_actions"),
-        "Get achievers for a single fluent from the given state");
 
   m.def("astar", &astar, py::arg("start_state"), py::arg("all_actions"),
         py::arg("goal"), py::arg("heuristic_fn") = nullptr,
@@ -588,18 +582,21 @@ PYBIND11_MODULE(_bindings, m) {
 
 
   py::class_<MCTSPlanner>(m, "MCTSPlanner")
-      .def(py::init<std::vector<Action>, bool>(),
-           py::arg("all_actions"), py::arg("use_det_heuristic") = false)
+      .def(py::init<std::vector<Action>, bool, HeuristicFn>(),
+           py::arg("all_actions"), py::arg("use_det_heuristic") = false,
+           py::arg("custom_heuristic") = nullptr)
       .def(
           "__call__",
           [](MCTSPlanner &self, const State &s,
              const GoalPtr &goal, int max_iterations,
-             int max_depth, double c, double heuristic_multiplier) {
-            return self(s, goal, max_iterations, max_depth, c, heuristic_multiplier);
+             int max_depth, double c, double heuristic_multiplier,
+             HeuristicFn custom_heuristic) {
+            return self(s, goal, max_iterations, max_depth, c, heuristic_multiplier, std::move(custom_heuristic));
           },
           py::arg("state"), py::arg("goal"),
           py::arg("max_iterations") = 1000, py::arg("max_depth") = 20,
           py::arg("c") = 1.414, py::arg("heuristic_multiplier") = 5.0,
+          py::arg("custom_heuristic") = nullptr,
           "Plan with a Goal object (supports complex AND/OR goals)")
       .def("get_trace_from_last_mcts_tree", &MCTSPlanner::get_trace_from_last_mcts_tree,
            "Get the tree trace from the most recent MCTS planning call");
