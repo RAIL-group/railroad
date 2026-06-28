@@ -9,8 +9,13 @@ Because the map is known, **travel is exact** — there is no unseen-as-free
 optimism in the travel term. Because the deployment revealed the truth (it found
 the target), every alternative policy's cost is computable **exactly**: it
 searches containers in its own order until it hits the true one, and every other
-container's emptiness is known too. So the "simply-connected" cost reported here
-is the alternative's *exact* counterfactual cost, not just a lower bound (§7.1).
+container's emptiness is known too. So the cost reported here is the
+alternative's *exact* counterfactual cost, not a lower bound (§7.1).
+
+Consequently the two LSP-style bounds do **not** apply: the optimistic vs.
+simply-connected gap exists only to bracket *unobserved-space* uncertainty (a
+possible shortcut-to-goal through unseen cells), and here there is none. Both
+``Bounds`` slots therefore collapse onto the single exact cost.
 
 The key simplification: :class:`~railroad.environment.symbolic.SymbolicEnvironment`
 already resolves a ``search`` deterministically from ``_objects_at_locations``.
@@ -22,7 +27,6 @@ recording. A container the deployment never inspected has empty recorded content
 
 from __future__ import annotations
 
-import math
 from typing import Any, Callable, Dict, List, Mapping, Set, Tuple
 
 import numpy as np
@@ -307,9 +311,12 @@ def run_known_map_search_replay(
     """Replay one candidate policy over a known-map search recording.
 
     The map is known and the truth was revealed, so the realized cost is the
-    candidate's **exact** counterfactual makespan (``simply_connected_lb``); the
-    ``optimistic_lb`` is the optimal "straight to the true container" cost. Both
-    are in deployment units (seconds), comparable to ``log.actual_total_cost``.
+    candidate's **exact** counterfactual makespan — there is no optimism gap to
+    bound (no unobserved space, hence no shortcut-to-goal: the only unknown,
+    which container holds the target, was revealed by the deployment). The two
+    LSP-style bounds therefore collapse: ``optimistic_lb == simply_connected_lb
+    == total_cost``, the exact cost in deployment units (seconds), comparable to
+    ``log.actual_total_cost``. See ``replay_design.md`` §7.1.
     """
     if isinstance(arena, KnownMapSearchReplayEnvironment):
         log = arena._source_log
@@ -347,23 +354,12 @@ def run_known_map_search_replay(
 
     total_cost = float(env.state.time)
 
-    # Optimistic: the optimal "straight to the true container" cost (exact travel
-    # on the known map + one search verify). The true container is the recorded
-    # location that holds the target.
-    true_location = next(
-        (s.signature for s in log.subgoals if target in s.contents), None
-    )
-    search_time = float(log.config.get("search_time", DEFAULT_SEARCH_TIME))
-    if true_location is not None:
-        optimistic = (
-            env.estimate_move_time(log.robots[0], START_NAME, true_location)
-            + search_time
-        )
-    else:
-        optimistic = math.inf
-
+    # Exact replay: with the map known and the truth revealed, the candidate's
+    # cost is exact — no unobserved space means no shortcut-to-goal optimism, so
+    # there is no separate optimistic bound to compute (it would equal the exact
+    # cost). The two LSP-style bounds collapse onto total_cost (§7.1).
     return ReplayResult(
-        bounds=Bounds(optimistic_lb=optimistic, simply_connected_lb=total_cost),
+        bounds=Bounds(optimistic_lb=total_cost, simply_connected_lb=total_cost),
         commits=[],
         termination=termination,
         total_cost=total_cost,

@@ -398,9 +398,15 @@ revealed the truth → **exact replay** (exact counterfactual cost), not a lower
 bound. Built as `KnownMapSearchReplayEnvironment`: it restricts the recorded
 contents and lets the base deterministic search resolution do exact replay; an
 uninspected container has empty recorded contents and resolves not-found (correct,
-since the truth was found elsewhere). `run_known_map_search_replay` returns
-`simply_connected_lb` = the alternative's exact makespan and `optimistic_lb` = the
-optimal straight-to-container cost.
+since the truth was found elsewhere). `run_known_map_search_replay` returns the
+alternative's **exact** makespan as the cost. The optimistic / simply-connected
+distinction does **not** apply here: that gap exists only to bracket
+*unobserved-space* uncertainty (a possible shortcut-to-goal through unseen cells),
+and a fully-known map has none — so both `Bounds` slots collapse onto the single
+exact cost (`optimistic_lb == simply_connected_lb == total_cost`). (An *oracle*
+"straight to the true container" cost would be a meaningful regret baseline, but it
+is policy-independent and is **not** the candidate's optimistic bound, so it is not
+reported in the `Bounds`.)
 
 ---
 
