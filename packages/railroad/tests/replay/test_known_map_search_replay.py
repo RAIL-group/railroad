@@ -179,9 +179,10 @@ def test_replay_bounds_are_seconds_and_admissible() -> None:
         arena, container_find_prob=lambda r, l, o: 0.5,
         select_action=scripted_search,
     )
-    # Optimal (straight to the true container) <= the naive exact replay cost.
+    # Known map + revealed truth → exact replay, no optimism gap: both bounds
+    # collapse onto the exact counterfactual cost (§7.1).
     assert math.isfinite(res.bounds.optimistic_lb)
-    assert res.bounds.optimistic_lb <= res.total_cost + 1e-6
+    assert res.bounds.optimistic_lb == res.total_cost
     assert res.bounds.simply_connected_lb == res.total_cost
     assert res.total_cost > 0
 
