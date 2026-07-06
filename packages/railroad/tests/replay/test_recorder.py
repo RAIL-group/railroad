@@ -76,6 +76,48 @@ def test_records_makespan_as_actual_total_cost() -> None:
     assert recorded.actual_total_cost > 0
 
 
+def test_recorder_never_leaks_uninspected_container_contents() -> None:
+    """Soundness: a revealed-but-UNsearched container's true contents must never
+    enter the log. Replay may only see what the deployment observed; leaking
+    ground-truth contents of a container the deployment never opened would give
+    replay information no real deployment had (breaks the lower-bound guarantee).
+    """
+    from railroad.core import Fluent
+    from railroad.environment.symbolic import LocationRegistry
+
+    class _State:
+        # Only c_searched was actually searched (searched fluent present).
+        fluents = {Fluent("searched c_searched apple")}
+        time = 42.0
+
+    class _Env:
+        observed_grid = np.zeros((5, 5))
+        objects_by_type = {"container": {"c_searched", "c_revealed"}}
+        # Full ground truth for BOTH (as the live env holds it) — the recorder
+        # must not copy the unsearched one's contents into the log.
+        _objects_at_locations = {"c_searched": {"apple"}, "c_revealed": {"ring"}}
+        _location_registry = LocationRegistry(
+            {"c_searched": np.array([1.0, 1.0]), "c_revealed": np.array([2.0, 3.0])}
+        )
+        pano_records: list = []
+        config = None
+        state = _State()
+
+    log = build_rollout_log(
+        _Env(),
+        goal_cell=(0, 0),
+        robot_starts={"robot1": Pose(0.0, 0.0, 0.0)},
+        problem_class="object-search",
+    )
+    by_sig = {s.signature: s for s in log.subgoals}
+    # Searched container: its observed contents are recorded.
+    assert by_sig["c_searched"].contents == ("apple",)
+    # Revealed-but-unsearched container: coords kept (cell was observed, so the
+    # candidate may navigate there) but contents MUST be empty (no leak of "ring").
+    assert by_sig["c_revealed"].centroid == (2, 3)
+    assert by_sig["c_revealed"].contents == ()
+
+
 def test_recorded_log_round_trips(tmp_path) -> None:
     src_log, env = _live_env()
     recorded = build_rollout_log(

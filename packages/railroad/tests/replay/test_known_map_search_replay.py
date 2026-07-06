@@ -92,7 +92,8 @@ def scripted_search(env, actions, goal) -> str:
     return any_move[0].name if any_move else "NONE"
 
 
-def _drive(env, target, max_iter=30) -> None:
+def _drive(env, target, max_iter=30, select=None) -> None:
+    select = select or scripted_search
     goal = F(f"found {target}")
     for _ in range(max_iter):
         if goal.evaluate(env.state.fluents):
@@ -100,10 +101,28 @@ def _drive(env, target, max_iter=30) -> None:
         actions = env.get_actions()
         if not actions:
             return
-        name = scripted_search(env, actions, goal)
+        name = select(env, actions, goal)
         if name == "NONE":
             return
         env.act(get_action_by_name(actions, name))
+
+
+def _beeline_search(container):
+    """A deployment selector that goes straight to *container* and searches only
+    it — leaving the other containers revealed but UNsearched."""
+    def select(env, actions, goal) -> str:
+        app = [a for a in actions if env.state.satisfies_precondition(a)]
+        for a in app:
+            p = a.name.split()
+            if p[0] == "search" and len(p) >= 3 and p[2] == container:
+                return a.name
+        for a in sorted(app, key=lambda a: a.name):
+            p = a.name.split()
+            if p[0] == "move" and p[-1] == container:
+                return a.name
+        return "NONE"
+
+    return select
 
 
 # --------------------------------------------------------------------------
@@ -179,12 +198,53 @@ def test_replay_bounds_are_seconds_and_admissible() -> None:
         arena, container_find_prob=lambda r, l, o: 0.5,
         select_action=scripted_search,
     )
-    # Known map + revealed truth → exact replay, no optimism gap: both bounds
-    # collapse onto the exact counterfactual cost (§7.1).
+    # This deployment (scripted_search) searched EVERY container, so replay has
+    # no unverified subgoal → no commits → exact replay: both bounds collapse
+    # onto the realized cost. (A partial-search deployment does not — see
+    # test_replay_logs_commits_for_unsearched_containers below.)
+    assert not res.commits
     assert math.isfinite(res.bounds.optimistic_lb)
     assert res.bounds.optimistic_lb == res.total_cost
     assert res.bounds.simply_connected_lb == res.total_cost
     assert res.total_cost > 0
+
+
+def test_replay_logs_commits_for_unsearched_containers() -> None:
+    """Dropping the one-container-per-object assumption: when the deployment
+    searched only the true container, the others are revealed-but-unsearched, so
+    a candidate searching them commits (optimistic_to_goal=0). The bound is then a
+    real lower bound below the makespan, not the collapsed exact cost."""
+    target = "ring"
+    dep = _env({"container_c": {target}}, target,
+               prob=lambda r, l, o: 1.0 if l == "container_c" else 0.0)
+    _drive(dep, target, select=_beeline_search("container_c"))
+    dep_searched = {f.args[0] for f in dep.state.fluents
+                    if f.name == "searched" and not f.negated and f.args}
+    assert dep_searched == {"container_c"}, "deployment should search only the true container"
+
+    log = build_known_map_search_log(
+        dep, robot_starts={"robot1": (float(_coords()["start_loc"][0]),
+                                      float(_coords()["start_loc"][1]), 0.0)},
+        target_object=target,
+    )
+    by_sig = {s.signature: s for s in log.subgoals}
+    assert by_sig["container_a"].searched is False and by_sig["container_a"].contents == ()
+    assert by_sig["container_c"].searched is True and target in by_sig["container_c"].contents
+
+    arena = KnownMapSearchReplayEnvironment.from_log(log, target_object=target)
+    res = run_known_map_search_replay(
+        arena, container_find_prob=lambda r, l, o: 0.5, select_action=scripted_search,
+    )
+    assert res.goal_reached
+    commit_sigs = {c.frontier_signature for c in res.commits}
+    # Unsearched containers the candidate searched → commits; the searched true
+    # container (found) → no commit.
+    assert "container_a" in commit_sigs and "container_b" in commit_sigs
+    assert "container_c" not in commit_sigs
+    # A genuine optimism gap now: opt < makespan, and (optimistic_to_goal=0) opt is
+    # the earliest unsearched-container search time.
+    assert res.bounds.optimistic_lb < res.total_cost
+    assert res.bounds.optimistic_lb == min(c.cost_accrued for c in res.commits)
 
 
 def test_replay_is_deterministic() -> None:

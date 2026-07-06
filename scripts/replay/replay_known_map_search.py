@@ -160,15 +160,21 @@ def main(seed: int = 4001) -> None:
                             str(OUT_DIR / "replay.mp4"))
     rep_searched = [f.args[0] for f in rep_env.state.fluents if f.name == "searched"]
 
-    # ---- Bounds (seconds / makespan). Map known -> exact; truth revealed ->
-    #      C_sc is the naive policy's EXACT counterfactual cost, not a bound. ----
-    c_opt = rep_env.estimate_move_time("robot1", "start_loc", true_location) + 10.0
+    # ---- Bounds (seconds / makespan). Commit-based: a container the deployment
+    #      did not search is an unverified subgoal (we do not assume one container
+    #      per object), so searching it commits (optimistic_to_goal=0). C_opt is
+    #      the min over those commits; it collapses onto C_sc only if the
+    #      deployment searched every container. ----
+    from railroad.replay.cost import accumulate_bounds
+    bounds = accumulate_bounds(rep_env.replay_commits, rep_cost)
+    c_oracle = rep_env.estimate_move_time("robot1", "start_loc", true_location) + 10.0
     print("\n================ RESULTS ================")
     print(f"deployment (informed) cost   = {dep_cost:.1f}s")
     print(f"replay (naive) found={goal.evaluate(rep_env.state.fluents)} "
           f"cost = {rep_cost:.1f}s; searched {sorted(set(rep_searched))}")
-    print(f"C_sc (naive policy's exact replay makespan) = {rep_cost:.1f}s")
-    print(f"C_opt (straight to the true container)      = {c_opt:.1f}s")
+    print(f"C_sc (naive policy's replay makespan)        = {rep_cost:.1f}s")
+    print(f"C_opt (min over unsearched-container commits) = {bounds.optimistic_lb:.1f}s")
+    print(f"(oracle straight-to-true-container baseline    = {c_oracle:.1f}s)")
     print(f"saved videos to {OUT_DIR}/deployment.mp4 and {OUT_DIR}/replay.mp4")
 
 

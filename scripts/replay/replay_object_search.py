@@ -52,7 +52,7 @@ from railroad.experimental.unknown_search.operators import (
 from railroad.operators import construct_no_op_operator
 from railroad.planner import MCTSPlanner
 from railroad.replay import build_rollout_log
-from railroad.replay.cost import optimistic_cost_to_goal
+from railroad.replay.cost import accumulate_bounds
 from railroad.replay.search_replay_env import build_search_replay_env
 
 OUT_DIR = Path("data/replay_object_search")
@@ -239,11 +239,11 @@ def main(seed: int = 1089) -> None:
     rep_cost = run_planning(rep_env, goal, "Replay (naive policy)", str(OUT_DIR / "replay.mp4"))
 
     # ---- Bounds (all in deployment units: seconds / makespan) ----
-    speed = rep_env.config.speed_cells_per_sec
+    # Commit-based, exactly as in navigation: each not-found search is a commit
+    # to a subgoal the deployment never verified; optimistically the object is
+    # immediately at/past it, so optimistic_lb = min over those commit times.
     sc = float(rep_env.state.time)
-    optimistic = optimistic_cost_to_goal(
-        log.recorded_grid, start, hidden[true_container]
-    ) / speed
+    bounds = accumulate_bounds(rep_env.replay_commits, sc)
     searched = [loc for loc, _, _ in rep_env.search_log]
     print("\n================ RESULTS ================")
     print(f"deployment (informed) cost/time = {dep_cost:.1f}s")
@@ -251,7 +251,8 @@ def main(seed: int = 1089) -> None:
           f"cost/time = {rep_cost:.1f}s; searched {searched}")
     print(
         f"C_sc (simply-connected: naive policy's exact replay makespan) = {sc:.1f}s\n"
-        f"C_opt (optimistic: straight to the true container) = {optimistic:.1f}s"
+        f"C_opt (optimistic: object at the candidate's earliest unverified "
+        f"commit) = {bounds.optimistic_lb:.1f}s"
     )
     print(f"saved videos to {OUT_DIR}/deployment.mp4 and {OUT_DIR}/replay.mp4")
 

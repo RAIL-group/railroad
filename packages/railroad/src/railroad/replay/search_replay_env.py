@@ -16,12 +16,11 @@ same model call site as in navigation (see :mod:`railroad.replay.stub_model`).
 
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Sequence, Set, Tuple
+from typing import Callable, Collection, Dict, List, Sequence, Set, Tuple
 
 import numpy as np
 
 from railroad._bindings import Fluent, GroundedEffect, State
-from railroad.core import get_action_by_name
 from railroad.environment.symbolic import LocationRegistry
 from railroad.environment.types import Pose
 from railroad.experimental.unknown_search import (
@@ -40,7 +39,7 @@ from railroad.lsp.frontier_statistics import (
 from railroad.operators import construct_no_op_operator
 
 from .base_env import ReplayConfinementMixin, navigation_config_from_log
-from .cost import Bounds, optimistic_cost_to_goal
+from .cost import Commit
 from .types import ReplayResult, RolloutLog
 
 
@@ -53,16 +52,26 @@ class SearchReplayEnvironment(ReplayConfinementMixin, UnknownSpaceEnvironment):
         recorded_grid: np.ndarray,
         recorded_object_locations: Dict[str, Set[str]],
         reference_cell: Tuple[int, int],
+        searched_sites: Collection[str] = (),
         refresh_estimators: Sequence[FrontierStatisticsEstimator] = (),
         pano_records: Sequence = (),
         **kwargs,
     ) -> None:
         confinement = self._setup_replay_grids(recorded_grid, pano_records)
         self._recorded_object_locations = recorded_object_locations
+        # Containers the deployment actually searched: their outcome is known, so
+        # replay resolves them exactly (no optimistic commit). A revealed-but-
+        # unsearched container is unknown — we must not infer it empty from the
+        # object being found elsewhere (that assumes one container per object).
+        self._searched_sites = set(searched_sites)
         self._reference_cell = (int(reference_cell[0]), int(reference_cell[1]))
         self._refresh_estimators = list(refresh_estimators)
         # (loc, cost_accrued, found) per executed search.
         self._search_log: List[Tuple[str, float, bool]] = []
+        # One commit per not-found search at a subgoal the deployment did NOT
+        # verify (unsearched container or frontier). optimistic_lb = min over
+        # these (design §6/§7).
+        self._replay_commits: List[Commit] = []
         super().__init__(true_grid=confinement, **kwargs)
         for robot in self._objects_by_type.get("robot", set()):
             self._net_motion.setdefault(robot, 0.0)
@@ -82,6 +91,11 @@ class SearchReplayEnvironment(ReplayConfinementMixin, UnknownSpaceEnvironment):
     @property
     def search_log(self) -> List[Tuple[str, float, bool]]:
         return self._search_log
+
+    @property
+    def replay_commits(self) -> List[Commit]:
+        """One commit per not-found search (drives the optimistic bound)."""
+        return self._replay_commits
 
     @property
     def oracle_available(self) -> bool:
@@ -145,9 +159,53 @@ class SearchReplayEnvironment(ReplayConfinementMixin, UnknownSpaceEnvironment):
                 found = obj in self._recorded_object_locations.get(loc, set())
                 # cost_accrued in seconds (sim time at the search) to match the
                 # makespan-based bounds and deployment cost.
-                self._search_log.append((loc, float(self._time), found))
+                accrued = float(self._time)
+                self._search_log.append((loc, accrued, found))
+                if not found:
+                    self._maybe_log_commit(loc, accrued, failure)
                 return (success if found else failure), current_fluents
         return super().resolve_probabilistic_effect(effect, current_fluents)
+
+    def _maybe_log_commit(
+        self, loc: str, accrued: float, failure_branch: List[GroundedEffect]
+    ) -> None:
+        """Log an optimistic commit for a not-found search.
+
+        Every commit uses ``optimistic_to_goal = 0`` — the object could be at/just
+        past the committed subgoal — exactly mirroring navigation ``lsp-explore``
+        (which commits at the reached frontier), only with a 0 cost-to-goal since
+        object search has no point goal.
+
+        - **searched container** → no commit (outcome recorded → replay exactly).
+        - **unsearched container** → commit (contents unknown; the object could be
+          here — we do not assume one container per object).
+        - **frontier** → commit. No "is the space beyond unseen?" check is needed:
+          ``search-frontier`` requires ``at ?r ?frontier``, and a frontier whose
+          beyond the deployment already revealed is *sensed away* when the robot
+          reaches it (its free beyond becomes observed → it stops being a
+          frontier). So a ``search-frontier`` that actually **executes** is always
+          into genuinely-unseen space (design §7; same reasoning as ``lsp-explore``).
+        """
+        is_container = loc in self._recorded_object_locations
+        if is_container and loc in self._searched_sites:
+            return
+        self._replay_commits.append(
+            Commit(
+                cost_accrued=accrued,
+                optimistic_to_goal=0.0,
+                robot=self._robot_of_branch(failure_branch),
+                frontier_signature=loc,
+            )
+        )
+
+    @staticmethod
+    def _robot_of_branch(branch: List[GroundedEffect]) -> str:
+        """The robot named by a branch's ``free ?robot`` effect (provenance)."""
+        for eff in branch:
+            for f in eff.resulting_fluents:
+                if f.name == "free" and not f.negated and f.args:
+                    return f.args[0]
+        return ""
 
     @staticmethod
     def _match_search_branches(effect: GroundedEffect):
@@ -263,10 +321,16 @@ def build_search_replay_env(
         poses[robot] = Pose(*log.robot_starts[robot])
     start_xy = log.robot_starts[robots[0]][:2]
 
+    # Containers the deployment actually searched — their outcome is recorded,
+    # so replay resolves them exactly (no optimistic commit). Derived from the
+    # log so callers need not thread it.
+    searched_sites = {s.signature for s in log.subgoals if s.searched}
+
     env = SearchReplayEnvironment(
         recorded_grid=log.recorded_grid,
         recorded_object_locations=recorded_object_locations,
         reference_cell=(int(start_xy[0]), int(start_xy[1])),
+        searched_sites=searched_sites,
         refresh_estimators=refresh_estimators,
         pano_records=log.pano_records,
         state=State(0.0, fluents, []),
@@ -306,84 +370,27 @@ def run_search_replay(
 ) -> ReplayResult:
     """Replay one object-search candidate policy over *arena*; return its bounds.
 
-    *arena* is a :meth:`SearchReplayEnvironment.from_log` handle. A fresh arena is
-    built per call (option A) and configured with the candidate's probability
-    callables; outcomes resolve from the recorded ground truth. The standard
-    frontier-search planning task (operators + MCTS loop) drives it.
+    *arena* is a :meth:`SearchReplayEnvironment.from_log` handle. A thin wrapper
+    over the unified :func:`~railroad.replay.domains.replay` (unknown-map search
+    domain): a fresh arena is built per call and configured with the candidate's
+    probability callables; outcomes resolve from the recorded ground truth.
     """
-    from railroad.planner import MCTSPlanner
+    from .domains import MctsParams, replay
+    from .policy import CandidatePolicy
 
     log = arena._source_log
     assert isinstance(log, RolloutLog)
-    target_object = arena._target_object
-    hidden_sites = dict(arena._hidden_sites)
-    recorded = {k: set(v) for k, v in arena._recorded_object_locations.items()}
-
-    env = build_search_replay_env(
+    return replay(
         log,
-        frontier_find_prob=frontier_find_prob,
-        container_find_prob=container_find_prob,
-        refresh_estimators=refresh_estimators,
-        hidden_sites=hidden_sites,
-        target_object=target_object,
-        recorded_object_locations=recorded,
+        CandidatePolicy(
+            frontier_find_prob=frontier_find_prob,
+            container_find_prob=container_find_prob,
+            refresh_estimators=refresh_estimators,
+        ),
+        target_object=arena._target_object,
         config=config,
-    )
-    goal = Fluent(f"found {target_object}")
-
-    termination = "max_iterations"
-    for _ in range(max_planning_iterations):
-        if goal.evaluate(env.state.fluents):
-            termination = "goal_reached"
-            break
-        actions = env.get_actions()
-        if not actions:
-            termination = "no_actions"
-            break
-        mcts = MCTSPlanner(actions)
-        name = mcts(
-            env.state,
-            goal,
-            max_iterations=mcts_iterations,
-            c=mcts_c,
-            max_depth=mcts_max_depth,
-            heuristic_multiplier=mcts_heuristic_multiplier,
-        )
-        if name in ("NONE", ""):
-            termination = "planner_none"
-            break
-        env.act(get_action_by_name(actions, name))
-
-    if termination == "max_iterations" and goal.evaluate(env.state.fluents):
-        termination = "goal_reached"
-
-    # All costs in deployment units (seconds / makespan), so they compare
-    # directly with the recorded actual_total_cost.
-    total_cost = float(env.state.time)
-    speed = env.config.speed_cells_per_sec
-
-    # Optimistic bound: the cost of going straight to the container that truly
-    # holds the target (admissible geometric distance -> seconds via speed).
-    # Pessimistic: the policy's actual replay makespan.
-    start = log.robot_starts[log.robots[0]]
-    true_container = next(
-        (name for name, objs in recorded.items() if target_object in objs), None
-    )
-    optimistic = (
-        optimistic_cost_to_goal(
-            log.recorded_grid,
-            (int(start[0]), int(start[1])),
-            hidden_sites[true_container],
-        ) / speed
-        if true_container is not None
-        else float("inf")
-    )
-    return ReplayResult(
-        bounds=Bounds(optimistic_lb=optimistic, simply_connected_lb=total_cost),
-        commits=[],
-        termination=termination,
-        total_cost=total_cost,
-        sim_time=float(env.state.time),
-        goal_reached=goal.evaluate(env.state.fluents),
-        search_log=list(env.search_log),
+        max_planning_iterations=max_planning_iterations,
+        mcts=MctsParams(
+            mcts_iterations, mcts_c, mcts_max_depth, mcts_heuristic_multiplier
+        ),
     )

@@ -138,6 +138,26 @@ def test_procthor_object_search_replay_end_to_end() -> None:
     assert tc is not None, "true container not recorded"
     assert target in tc.contents, "recorded container is missing the target object"
 
+    # SOUNDNESS: replay may only see what the deployment observed. A container the
+    # deployment revealed (cell observed) but never SEARCHED must carry no
+    # contents in the log — leaking its ground truth would hand replay knowledge
+    # no real deployment had. Assert the invariant directly against the
+    # deployment's searched set, and that the scenario is non-trivial (there IS at
+    # least one revealed-but-unsearched container).
+    dep_searched = {
+        f.args[0]
+        for f in dep_env.state.fluents
+        if f.name == "searched" and not f.negated and f.args
+    }
+    for s in log.subgoals:
+        if s.signature not in dep_searched:
+            assert s.contents == (), (
+                f"leak: unsearched container {s.signature} carries {s.contents}"
+            )
+    assert any(s.signature not in dep_searched for s in log.subgoals), (
+        "test is trivial: every recorded container was searched"
+    )
+
     # --- Replay: an informed candidate beelines to the true container. ---
     arena = SearchReplayEnvironment.from_log(log, target_object=target)
     res = run_search_replay(
@@ -150,7 +170,37 @@ def test_procthor_object_search_replay_end_to_end() -> None:
     assert res.goal_reached, "replay should resolve found=True from recorded truth"
     # Outcome came from the recording: the true container resolved as found.
     assert any(loc == true_container and found for loc, _, found in res.search_log)
-    # Bounds are admissible and in seconds (comparable to the deployment makespan).
-    assert np.isfinite(res.bounds.optimistic_lb)
+    # Commit-based bound, in seconds (comparable to the deployment makespan).
+    # Commits are logged only at subgoals the deployment did NOT search; the
+    # bound is their min (or the exact makespan if there were none).
+    from railroad.navigation.constants import UNOBSERVED_VAL
+
+    grid = log.recorded_grid
+    searched_sigs = {s.signature for s in log.subgoals if s.searched}
+    container_sigs = {s.signature for s in log.subgoals}
+    for c in res.commits:
+        assert c.frontier_signature not in searched_sigs, (
+            f"commit at searched subgoal {c.frontier_signature}"
+        )
+        # Every commit uses optimistic_to_goal = 0 (object at/just past the
+        # committed subgoal) — search-frontier mirrors lsp-explore with 0.
+        assert c.optimistic_to_goal == 0.0
+        # A frontier commit must be at a GENUINELY unseen-beyond frontier: its
+        # snap cell (frontier_<r>_<c>) must border UNOBSERVED space in the
+        # recording. A frontier into already-revealed space is sensed away when
+        # the robot reaches it, so it can never execute/commit (rule 1, dynamic).
+        if c.frontier_signature not in container_sigs:
+            parts = c.frontier_signature.split("_")
+            r, col = int(parts[-2]), int(parts[-1])
+            nbhd = grid[max(0, r - 1) : r + 2, max(0, col - 1) : col + 2]
+            assert (nbhd == UNOBSERVED_VAL).any(), (
+                f"frontier commit {c.frontier_signature} is not adjacent to unseen "
+                "space in the recording — a known-space frontier must not commit"
+            )
+    expected = (
+        min(c.cost_accrued + c.optimistic_to_goal for c in res.commits)
+        if res.commits else res.total_cost
+    )
+    assert res.bounds.optimistic_lb == expected
     assert res.bounds.optimistic_lb <= res.total_cost + 1e-6
     assert res.total_cost > 0

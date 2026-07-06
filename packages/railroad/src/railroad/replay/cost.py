@@ -101,14 +101,18 @@ class Bounds:
 def accumulate_bounds(commits: Sequence[Commit], total_cost: float) -> Bounds:
     """Reduce a replay's commits + final cost to its two bounds.
 
-    ``optimistic_lb`` is the cheapest "if this subgoal had led straight to
-    the goal" total across all commits (``inf`` if there were none);
-    ``simply_connected_lb`` is the total cost accrued.
+    ``optimistic_lb`` is the cheapest "if this subgoal had led straight to the
+    goal" total across all commits; ``simply_connected_lb`` is the total cost
+    accrued. With **no commits** the candidate reached the goal touching only
+    subgoals the deployment had already resolved — an *exact* replay — so the
+    tightest lower bound is the realized cost itself, ``total_cost``. (Returning
+    ``inf`` there would be a non-lower-bound that reads as "always worse" in
+    selection.)
     """
     if commits:
         optimistic_lb = min(c.cost_accrued + c.optimistic_to_goal for c in commits)
     else:
-        optimistic_lb = math.inf
+        optimistic_lb = total_cost
     return Bounds(
         optimistic_lb=float(optimistic_lb),
         simply_connected_lb=float(total_cost),

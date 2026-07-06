@@ -145,9 +145,11 @@ def test_accumulate_bounds_picks_minimum_commit() -> None:
     assert bounds == Bounds(optimistic_lb=7.0, simply_connected_lb=30.0)
 
 
-def test_accumulate_bounds_empty_is_inf() -> None:
+def test_accumulate_bounds_empty_is_exact_cost() -> None:
+    """No commits ⇒ exact replay ⇒ optimistic bound is the realized cost, not
+    inf (inf would be a non-lower-bound, reading as 'always worse' in selection)."""
     bounds = accumulate_bounds([], total_cost=42.0)
-    assert bounds.optimistic_lb == math.inf
+    assert bounds.optimistic_lb == 42.0
     assert bounds.simply_connected_lb == 42.0
 
 
