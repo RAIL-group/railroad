@@ -1,0 +1,9 @@
+pickupable = om.get_pickup_candidates() # list of objects that can be picked up.
+print(f"\n[PICKUPABLE OBJECTS] {len(pickupable)} object(s) with a free joint:")
+for obj in pickupable:
+    print(f"  - {obj.name}")
+
+receptacles = om.get_receptacles() # list of receptacles/surfaces the robot can navigate to.
+print(f"\n[NAMED LOCATIONS] {len(receptacles)} receptacle/surface(s) the robot can navigate to:")
+for recep in receptacles:
+    print(f"  - {recep.name}")

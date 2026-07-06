@@ -111,20 +111,20 @@ astar(const State &start_state, const std::vector<Action> &all_actions,
   std::priority_queue<QueueEntry, std::vector<QueueEntry>, std::greater<>>
       open_heap;
   std::unordered_set<std::size_t> closed_set;
-  std::unordered_map<std::size_t, std::pair<std::size_t, const Action *>>
-      came_from;
+  // Maps child state hash → (parent state, action taken to reach child)
+  std::unordered_map<std::size_t, std::pair<State, Action>> came_from;
+  // Best g-value seen so far for each state hash
+  std::unordered_map<std::size_t, double> best_g;
 
   FFMemory ff_memory;
   heuristic_fn = [&goal, &all_actions, &ff_memory](const State& s) -> double {
     return ff_heuristic(s, goal.get(), all_actions, &ff_memory);
   };
 
-  int counter = 0;
+  best_g[start_state.hash()] = start_state.time();
   open_heap.emplace(0.0, start_state);
 
-  std::cerr << "Starting the main planning loop." << std::endl;
   while (!open_heap.empty()) {
-    counter++;
     QueueEntry top = open_heap.top();
     State current = std::get<1>(top);
     open_heap.pop();
@@ -134,9 +134,16 @@ astar(const State &start_state, const std::vector<Action> &all_actions,
     closed_set.insert(current.hash());
 
     if (goal->evaluate(current.fluents())) {
-      std::cerr << "Goal reached!! count: " << counter << std::endl;
-      return std::nullopt; // no path found
-                           // return reconstruct_path(came_from, current);
+      // Reconstruct path by walking came_from back to the start
+      std::vector<Action> path;
+      State cur = current;
+      while (came_from.count(cur.hash())) {
+        const auto& [parent, act] = came_from.at(cur.hash());
+        path.push_back(act);
+        cur = parent;
+      }
+      std::reverse(path.begin(), path.end());
+      return path;
     }
 
     auto next_actions = get_next_actions(current, all_actions);
@@ -144,20 +151,24 @@ astar(const State &start_state, const std::vector<Action> &all_actions,
       for (const auto &[successor, prob] : transition(current, action)) {
         if (prob == 0.0)
           continue;
+        if (closed_set.count(successor.hash()))
+          continue;
 
         double g = successor.time();
+        auto g_it = best_g.find(successor.hash());
+        if (g_it != best_g.end() && g >= g_it->second)
+          continue;
 
-        came_from[successor.hash()] = std::make_pair(current.hash(), action);
+        best_g[successor.hash()] = g;
+        came_from[successor.hash()] = {current, *action};
 
         double h = heuristic_fn ? heuristic_fn(successor) : 0.0;
-        double f = g + h;
-
-        open_heap.emplace(f, std::move(successor));
+        open_heap.emplace(g + h, std::move(successor));
       }
     }
   }
 
-  return std::nullopt; // no path found
+  return std::nullopt;
 }
 
 // ############## MCTS ###############

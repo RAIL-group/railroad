@@ -233,6 +233,29 @@ packages/railroad/
 Additional packages:
 - `packages/environments/` -- Extra environment backends (e.g. PyRoboSim)
 
+## MolmoSpaces Pick-and-Place Demo
+
+`scripts/plan_and_render.py` runs a fully automatic, argument-free pipeline:
+it picks a random ProcTHOR house, samples a real feasible pick-and-place task
+in it (via MolmoSpaces' task sampler), plans the move/pick/move/place order
+with railroad's `MCTSPlanner`, executes that plan step by step in MolmoSpaces'
+MuJoCo simulator, and renders the run to an MP4. Translation/glue logic
+between railroad's symbolic plan and MolmoSpaces' policy lives in
+`scripts/bridge.py`.
+
+```bash
+python scripts/plan_and_render.py
+```
+
+Each run prints the random seed used (for reproducing that exact demo), the
+sampled house/object/receptacle, the railroad plan, and the output video path
+(named `demo_house<idx>_<Object>_to_<Receptacle>.mp4`). If planning or
+sampling fails on a given house/object, the script automatically resamples
+(new object/target, then a new house) a few times before giving up. If a
+plan step fails *during* simulator execution, the script logs the failure,
+still writes out the video recorded up to that point (suffixed `_FAILED`),
+and exits with a non-zero status.
+
 ## Development
 
 ```bash
