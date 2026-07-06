@@ -11,10 +11,13 @@
 >   than §7's original "known-map" framing — see §7.)
 > - **Known-map object-search replay** (§7.1, now built) —
 >   `KnownMapSearchReplayEnvironment` + `run_known_map_search_replay`: the whole
->   floorplan is given, travel is exact, the deployment revealed the truth, so the
->   replayed cost is the alternative's **exact** counterfactual, not a bound. No
->   bespoke intercept — it restricts `SymbolicEnvironment`'s deterministic search
->   resolution to the recorded contents.
+>   floorplan is given so travel is exact, but object presence is known only where
+>   the deployment *searched*. Not assuming one-container-per-object, an unsearched
+>   container is an unverified subgoal → the replayed cost is the **same
+>   commit-based lower bound** as the unknown case (it collapses onto the exact
+>   makespan only when the deployment searched every container). It restricts
+>   `SymbolicEnvironment`'s deterministic search resolution to the recorded
+>   contents and commits at unsearched containers.
 > - **Learned-policy served-vantage replay** (the §2.1 insight, now real for both
 >   domains): the deployment records panoramas (`VisualUnknownSpaceEnvironment` /
 >   `LSPVisualEnvironment`, OpenGL — verified headless on `egl`/`cpu`); the
@@ -26,10 +29,27 @@
 >   change. Candidate policies are ranked by replaying each over one recording and
 >   sorting by bound (`replay/replay_learned_demo.py`) — a selection precursor.
 >
+> **Unified entry (all three domains).** `replay(log, policy)` in `domains.py`
+> replays a `RolloutLog` from *any* domain: it dispatches on
+> `log.problem_class` (`navigation` / `object-search` / `known-map-search`) to a
+> `ReplayDomain` — `NavigationDomain`, `UnknownSearchDomain`,
+> `KnownMapSearchDomain` — each supplying the three seams that actually differ
+> (build the arena, the goal, reduce cost → `Bounds`) over one shared plan→act
+> loop (`run_plan_act_loop`). Candidates are the single `CandidatePolicy`
+> container (`policy.py`; navigation reads `frontier_statistics`, search reads the
+> `*_find_prob` callables + `refresh_estimators`). The three `run_*` drivers are
+> now thin wrappers over `replay()`, kept for their established signatures. The
+> log is self-describing: `target_object` is recorded so search dispatch needs no
+> side-channel. This is the §9 selection substrate: `for policy in candidates:
+> replay(log, policy)`. The two world-model *bases* stay distinct on purpose —
+> confined-unknown (`ReplayConfinementMixin`) vs. known-symbolic — since a
+> finite-range laser over a fully-known grid would spawn spurious frontiers (§7).
+>
 > **Modules:** `cost.py` (pure bounds), `types.py` + `serialization.py`
-> (`RolloutLog` ↔ disk incl. panoramas), `base_env.py`
-> (`ReplayConfinementMixin`: confinement sensing + net-motion + served panos,
-> shared by the two confinement envs; `navigation_config_from_log`),
+> (`RolloutLog` ↔ disk incl. panoramas + `target_object`), `policy.py`
+> (`CandidatePolicy`), `domains.py` (`ReplayDomain`s + `replay()` + shared loop),
+> `base_env.py` (`ReplayConfinementMixin`: confinement sensing + net-motion +
+> served panos, shared by the two confinement envs; `navigation_config_from_log`),
 > `replay_env.py` (navigation), `search_replay_env.py` (unknown-env object search +
 > `learned_frontier_search_prob`), `known_map_search_replay_env.py` (known-map
 > object search §7.1, with its own `build_known_map_search_log` recorder),
@@ -363,15 +383,42 @@ replay-stable frontier key that the `explored ?f` fluent refers to.
 > probability is the learned, served-vantage knob (`learned_frontier_search_prob`
 > + a served `LearnedFrontierStatistics`), so a trained net drops in there too.
 >
+> **Optimistic bound is commit-based — search-frontier mirrors `lsp-explore`
+> (§6), with `optimistic_to_goal = 0`.** Every commit uses `optimistic_to_goal =
+> 0` (the object could be at/just past the committed subgoal; there is no point
+> goal to measure a distance to). A commit is logged at:
+> - a **revealed-but-unsearched container** — contents unknown, so force
+>   not-found + commit. A *searched* container (the `SubgoalRecord.searched` flag)
+>   has a recorded outcome → replay exactly, no commit. We do **not** infer an
+>   unsearched container empty from the object being found elsewhere (that would
+>   assume one container per object, which the bound must not rely on).
+> - a **frontier** the robot reaches via `search-frontier`. No "is the space
+>   beyond unseen?" test is needed: `search-frontier` requires `at ?r ?frontier`,
+>   and a frontier whose beyond the deployment already revealed is *sensed away*
+>   the moment the robot reaches it (confinement lets the laser through recorded-
+>   free space → the beyond becomes observed → it stops being a frontier). So a
+>   `search-frontier` that actually **executes** is always into genuinely-unseen
+>   space — rule 1 holds by the dynamics, exactly as for `lsp-explore`.
+>
+> `optimistic_lb = min` over commits of `cost_accrued` (since `optimistic_to_goal
+> = 0`), else — no unverified subgoal → exact replay — `total_cost`
+> (`accumulate_bounds`). *(Earlier iterations used a policy-independent "straight
+> to the true container" oracle, then a "nearest seen container beyond the
+> frontier" distance; both retired — the object can be immediately past a genuine
+> frontier, so `0` is the admissible value.)*
+>
 > **The known-map specialization below is now also built** —
 > `replay/known_map_search_replay_env.py` (`KnownMapSearchReplayEnvironment` +
 > `run_known_map_search_replay`, demo `scripts/replay/replay_known_map_search.py`). It
 > needs **no bespoke intercept**: `SymbolicEnvironment` already resolves `search`
-> deterministically from `_objects_at_locations`, so replay just restricts that map
-> to the **recorded** contents and the existing resolution becomes exact replay
-> (§7.1). Travel is exact on the known grid (`OccupancyGridPathingMixin`), and
-> `container_find_prob` is the swappable candidate policy that drives only the MCTS
-> belief, never the outcome.
+> deterministically from `_objects_at_locations`, so replay restricts that map to
+> the **recorded** contents. Travel is exact on the known grid
+> (`OccupancyGridPathingMixin`), and `container_find_prob` is the swappable
+> candidate policy that drives only the MCTS belief, never the outcome. It is the
+> **same commit-based lower bound** (container commits, `optimistic_to_goal = 0`,
+> no frontier term since the map is fully known) — **not** exact, because without
+> the one-container-per-object assumption an unsearched container may hold the
+> object too (§7.1, updated).
 
 The original known-map analysis still holds and is **cleaner and strictly more
 informative** than navigation:
@@ -382,30 +429,34 @@ informative** than navigation:
   fluent `searched ?loc ?obj` — no geometric threshold whatsoever.
 
 Intercept: when the alternative commits to `search ?r ?loc ?obj` at a container the
-deployment **did inspect**, replay the recorded outcome exactly. At a container it
-**did not** inspect, force the **not-found** branch and log the optimistic bound
-(if it *were* there: travel + verify).
+deployment **did search**, replay the recorded outcome exactly (no commit). At a
+container it **did not** search, force the **not-found** branch and log an
+optimistic commit (`optimistic_to_goal = 0` — the object could be right here).
 
-### 7.1 Exact replay when the deployment revealed the truth (point 10)
+### 7.1 Known map: a commit-based bound, not exact (updated — no uniqueness)
 
-A successful search deployment reveals the object's true container. With the truth
-known *and* the map fully known, every alternative policy's cost is computable
-**exactly** (it searches in its own order until it hits the true container; every
-other container's emptiness is also known). No optimism, no looseness.
+**Superseded reasoning (kept for context):** an earlier version argued that with a
+fully known map *and* the truth revealed, every alternative's cost is **exact** —
+"it searches in its own order until it hits the true container; every other
+container's emptiness is also known." That last clause silently assumes the object
+occupies **exactly one container**, so finding it in the true container proves all
+others empty. Our current scenes happen to satisfy that, but the bound must not
+rely on it.
 
-**Decision (DONE, as recommended):** when the map is fully known and the deployment
-revealed the truth → **exact replay** (exact counterfactual cost), not a lower
-bound. Built as `KnownMapSearchReplayEnvironment`: it restricts the recorded
-contents and lets the base deterministic search resolution do exact replay; an
-uninspected container has empty recorded contents and resolves not-found (correct,
-since the truth was found elsewhere). `run_known_map_search_replay` returns the
-alternative's **exact** makespan as the cost. The optimistic / simply-connected
-distinction does **not** apply here: that gap exists only to bracket
-*unobserved-space* uncertainty (a possible shortcut-to-goal through unseen cells),
-and a fully-known map has none — so both `Bounds` slots collapse onto the single
-exact cost (`optimistic_lb == simply_connected_lb == total_cost`). (An *oracle*
-"straight to the true container" cost would be a meaningful regret baseline, but it
-is policy-independent and is **not** the candidate's optimistic bound, so it is not
+**Current decision (DONE):** we do **not** assume one-container-per-object. So a
+container the deployment did **not** search has genuinely unknown contents even in
+a known map — a candidate searching it commits (force not-found +
+`optimistic_to_goal = 0`, since the object could be right there and there is no
+unobserved space / frontier term). Known-map search is therefore the **same
+commit-based lower bound** as the unknown case, not an exact value. Only when the
+deployment happened to search *every* container does replay have no unverified
+subgoal → no commits → the bound collapses onto the exact makespan
+(`optimistic_lb == simply_connected_lb == total_cost`) — a special case, not the
+rule. `KnownMapSearchReplayEnvironment` implements this: it restricts recorded
+contents (gated on `searched`), resolves searched containers exactly, and logs a
+commit at each not-found search of an **unsearched** container. (An *oracle*
+"straight to the true container" cost remains a meaningful policy-independent
+regret baseline, but it is **not** the candidate's optimistic bound, so it is not
 reported in the `Bounds`.)
 
 ---
@@ -433,13 +484,22 @@ simply-connected bound.
 
 ## 9. Policy selection layer
 
+> **Substrate built.** The per-candidate replay call this layer iterates now
+> exists as one domain-agnostic entry — `replay(log, policy)` (§ "Unified entry"
+> above): dispatch on `log.problem_class`, candidates are `CandidatePolicy`
+> objects, result is a `ReplayResult` carrying the `Bounds`. So the selection
+> loop is literally `for policy in candidates: replay(log, policy)` across the
+> navigation, unknown-search, and known-map domains without special-casing.
+> **Remaining:** `selection.py` (the aggregation/recommendation on top) + `bulk.py`
+> + CLI + bench.
+
 `PolicySelectionPlanner`-equivalent:
 - Holds N candidate estimators (the swappable knob — `lsp-explore` is parameterized
   by the estimator via `construct_lsp_explore_operator`; search by
-  `object_find_prob`).
+  `object_find_prob`). Each becomes a `CandidatePolicy` (`policy.py`).
 - Deploys the chosen estimator for real, records the `RolloutLog`.
-- Offline-replays each other candidate → `(optimistic_lb, simply_connected_lb)` or
-  exact cost.
+- Offline-replays each other candidate via `replay(log, candidate)` →
+  `(optimistic_lb, simply_connected_lb)` or exact cost.
 - Aggregates across trials to recommend a policy (regret-style; the deployed policy
   gets its actual cost, others their bounds). Cross-trial aggregation detail to be
   pulled from the reference `scripts/` when we build this layer.
@@ -531,9 +591,14 @@ CLI under the existing group: `railroad replay record …`,
    each and sorting by bound (selection precursor).
    (Shared `ReplayConfinementMixin` unifies the two replay envs; a fully
    subgoal-agnostic observation source remains a possible refactor.)
+3.5. ✅ **Unified replay entry** — `replay(log, policy)` + `ReplayDomain`
+   dispatch on `problem_class` (`domains.py`), one `CandidatePolicy`
+   (`policy.py`), self-describing `target_object`; the three `run_*` are now thin
+   wrappers. The per-candidate substrate the selection layer iterates.
 4. **Multi-robot** — should require little beyond confirming makespan accrual and
    shared retirement (§8).
-5. **Selection + cross-trial aggregation** (`selection.py`, `bulk.py`, CLI, bench).
+5. **Selection + cross-trial aggregation** (`selection.py`, `bulk.py`, CLI, bench)
+   — built on the step-3.5 `replay(log, candidate)` loop.
 6. **Train real networks** and run end-to-end policy selection among them
    (replaces `preset_model(...)` with `load_frontier_statistics_model(...)`).
 

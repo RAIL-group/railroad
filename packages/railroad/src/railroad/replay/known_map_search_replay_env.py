@@ -27,17 +27,17 @@ recording. A container the deployment never inspected has empty recorded content
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Mapping, Set, Tuple
+from typing import Any, Callable, Collection, Dict, List, Mapping, Set, Tuple
 
 import numpy as np
 
 from railroad import operators as _operators
-from railroad._bindings import Fluent, GroundedEffect, State
-from railroad.core import Operator, get_action_by_name
+from railroad._bindings import Fluent, Goal, GroundedEffect, State
+from railroad.core import Operator
 from railroad.environment.symbolic import LocationRegistry, SymbolicEnvironment
 from railroad.navigation import OccupancyGridPathingMixin
 
-from .cost import Bounds
+from .cost import Commit
 from .types import ReplayResult, RolloutLog, SubgoalRecord
 
 ProbFn = Callable[[str, str, str], float]
@@ -50,9 +50,18 @@ class KnownMapSearchReplayEnvironment(OccupancyGridPathingMixin, SymbolicEnviron
     """Known-map object-search replay: ``move`` + ``search`` over a known grid.
 
     Search outcomes resolve from *recorded_object_locations* (the deployment's
-    revealed contents) via the inherited deterministic resolution — exact replay
-    when the deployment revealed the truth. ``container_find_prob`` is the
-    swappable candidate policy; it only drives MCTS belief, never the outcome.
+    revealed contents) via the inherited deterministic resolution.
+    ``container_find_prob`` is the swappable candidate policy; it only drives MCTS
+    belief, never the outcome.
+
+    The map is known so travel is exact, but object *presence* is only known where
+    the deployment **searched**. We do not assume an object lives in a single
+    container, so a revealed-but-unsearched container's emptiness cannot be
+    inferred from the object being found elsewhere: searching it forces not-found
+    and logs an optimistic commit (``optimistic_to_goal = 0`` — the object could be
+    right here; there is no unobserved space, hence no frontier term). Thus the
+    cost is a **commit-based lower bound** (``optimistic_lb`` vs. makespan), not an
+    exact value (design §7.1, updated).
     """
 
     def __init__(
@@ -64,6 +73,7 @@ class KnownMapSearchReplayEnvironment(OccupancyGridPathingMixin, SymbolicEnviron
         state: State,
         objects_by_type: Dict[str, Set[str]],
         location_registry: LocationRegistry,
+        searched_sites: Collection[str] = (),
         search_time: float = DEFAULT_SEARCH_TIME,
         speed_cells_per_sec: float = DEFAULT_SPEED,
     ) -> None:
@@ -71,6 +81,10 @@ class KnownMapSearchReplayEnvironment(OccupancyGridPathingMixin, SymbolicEnviron
         self._speed = float(speed_cells_per_sec)
         self._search_time = float(search_time)
         self._search_log: List[Tuple[str, float, bool]] = []
+        # Containers the deployment searched (outcome known → replay exact).
+        self._searched_sites = set(searched_sites)
+        # One commit per not-found search at an UNsearched container.
+        self._replay_commits: List[Commit] = []
         # Bootstrap pathing state (used by estimate_move_time captured below)
         # before super().__init__.
         self._location_registry = location_registry
@@ -109,7 +123,12 @@ class KnownMapSearchReplayEnvironment(OccupancyGridPathingMixin, SymbolicEnviron
         """(location, sim_time, found) per executed search."""
         return self._search_log
 
-    # -- record search provenance (resolution itself is the base's job) --
+    @property
+    def replay_commits(self) -> List[Commit]:
+        """One commit per not-found search at an unsearched container."""
+        return self._replay_commits
+
+    # -- record search provenance + optimistic commits -------------------
     def resolve_probabilistic_effect(
         self, effect: GroundedEffect, current_fluents: Set[Fluent]
     ) -> Tuple[List[GroundedEffect], Set[Fluent]]:
@@ -117,12 +136,26 @@ class KnownMapSearchReplayEnvironment(OccupancyGridPathingMixin, SymbolicEnviron
         if effect.is_probabilistic:
             loc = _search_location(effect)
             if loc is not None:
+                accrued = float(self._time)
                 found = any(
                     f.name == "found" and not f.negated
                     for eff in effects
                     for f in eff.resulting_fluents
                 )
-                self._search_log.append((loc, float(self._time), found))
+                self._search_log.append((loc, accrued, found))
+                # Commit only at a container the deployment did NOT search: its
+                # contents are unknown, so replay forces not-found and this is an
+                # unverified subgoal (object could be here → optimistic_to_goal=0).
+                # A searched container's outcome is known → replay exact, no commit.
+                if not found and loc not in self._searched_sites:
+                    self._replay_commits.append(
+                        Commit(
+                            cost_accrued=accrued,
+                            optimistic_to_goal=0.0,
+                            robot=_robot_of(effects),
+                            frontier_signature=loc,
+                        )
+                    )
         return effects, fluents
 
     # -- arena handle for run_known_map_search_replay -----------------
@@ -164,6 +197,15 @@ def _search_location(effect: GroundedEffect) -> str | None:
     return None
 
 
+def _robot_of(effects: List[GroundedEffect]) -> str:
+    """The robot named by a ``free ?robot`` effect among *effects* (provenance)."""
+    for eff in effects:
+        for f in eff.resulting_fluents:
+            if f.name == "free" and not f.negated and f.args:
+                return f.args[0]
+    return ""
+
+
 # ----------------------------------------------------------------------
 # Recorder
 # ----------------------------------------------------------------------
@@ -181,6 +223,7 @@ def build_known_map_search_log(
     robot_starts: Mapping[str, Any],
     env_name: str = "",
     seed: int | None = None,
+    target_object: str = "",
 ) -> RolloutLog:
     """Snapshot a known-map search deployment into a :class:`RolloutLog`.
 
@@ -203,8 +246,9 @@ def build_known_map_search_log(
     for loc in searchable:
         coords = registry.get(loc) if registry is not None else None
         row, col = (int(coords[0]), int(coords[1])) if coords is not None else (0, 0)
+        was_searched = loc in searched
         contents = (
-            tuple(sorted(contents_map.get(loc, set()))) if loc in searched else ()
+            tuple(sorted(contents_map.get(loc, set()))) if was_searched else ()
         )
         subgoals.append(
             SubgoalRecord(
@@ -212,6 +256,7 @@ def build_known_map_search_log(
                 centroid=(row, col),
                 cells=np.array([[row], [col]], dtype=int),
                 contents=contents,
+                searched=was_searched,
             )
         )
 
@@ -227,6 +272,7 @@ def build_known_map_search_log(
         problem_class="known-map-search",
         env_name=env_name,
         seed=seed,
+        target_object=target_object,
         subgoals=subgoals,
         actual_total_cost=float(getattr(getattr(env, "state", None), "time", 0.0)),
         config=config,
@@ -251,9 +297,12 @@ def build_known_map_search_replay_env(
         START_NAME: np.array(start[:2], dtype=float)
     }
     recorded: Dict[str, Set[str]] = {}
+    searched_sites: Set[str] = set()
     for s in log.subgoals:
         coords[s.signature] = np.array(s.centroid, dtype=float)
         recorded[s.signature] = set(s.contents)
+        if s.searched:
+            searched_sites.add(s.signature)
 
     targets = {target_object} if target_object else set()
     fluents: Set[Fluent] = {Fluent(f"revealed {START_NAME}")}
@@ -275,25 +324,14 @@ def build_known_map_search_replay_env(
             "object": targets,
         },
         location_registry=LocationRegistry(coords),
+        searched_sites=searched_sites,
         search_time=float(log.config.get("search_time", DEFAULT_SEARCH_TIME)),
         speed_cells_per_sec=float(log.config.get("speed_cells_per_sec", DEFAULT_SPEED)),
     )
     return env
 
 
-ActionSelector = Callable[[KnownMapSearchReplayEnvironment, list, "Fluent"], str]
-
-
-def _mcts_select(iterations: int, c: float, depth: int, mult: float) -> ActionSelector:
-    from railroad.planner import MCTSPlanner
-
-    def select(env, actions, goal) -> str:
-        return MCTSPlanner(actions)(
-            env.state, goal, max_iterations=iterations, c=c,
-            max_depth=depth, heuristic_multiplier=mult,
-        )
-
-    return select
+ActionSelector = Callable[[Any, list, "Goal | Fluent"], str]
 
 
 def run_known_map_search_replay(
@@ -310,14 +348,19 @@ def run_known_map_search_replay(
 ) -> ReplayResult:
     """Replay one candidate policy over a known-map search recording.
 
-    The map is known and the truth was revealed, so the realized cost is the
-    candidate's **exact** counterfactual makespan — there is no optimism gap to
-    bound (no unobserved space, hence no shortcut-to-goal: the only unknown,
-    which container holds the target, was revealed by the deployment). The two
-    LSP-style bounds therefore collapse: ``optimistic_lb == simply_connected_lb
-    == total_cost``, the exact cost in deployment units (seconds), comparable to
-    ``log.actual_total_cost``. See ``replay_design.md`` §7.1.
+    A thin wrapper over the unified :func:`~railroad.replay.domains.replay`
+    (known-map search domain). The map is known and the truth was revealed, so
+    the realized cost is the candidate's **exact** counterfactual makespan —
+    there is no optimism gap to bound (no unobserved space, hence no
+    shortcut-to-goal: the only unknown, which container holds the target, was
+    revealed by the deployment). The two LSP-style bounds therefore collapse:
+    ``optimistic_lb == simply_connected_lb == total_cost``, the exact cost in
+    deployment units (seconds), comparable to ``log.actual_total_cost``. See
+    ``replay_design.md`` §7.1.
     """
+    from .domains import MctsParams, replay
+    from .policy import CandidatePolicy
+
     if isinstance(arena, KnownMapSearchReplayEnvironment):
         log = arena._source_log
         target = target_object or arena._target_object
@@ -327,43 +370,13 @@ def run_known_map_search_replay(
     assert isinstance(log, RolloutLog)
     assert target, "target_object is required (pass it or use from_log)"
 
-    env = build_known_map_search_replay_env(
-        log, container_find_prob=container_find_prob, target_object=target
-    )
-    goal = Fluent(f"found {target}")
-    select = select_action or _mcts_select(
-        mcts_iterations, mcts_c, mcts_max_depth, mcts_heuristic_multiplier
-    )
-
-    termination = "max_iterations"
-    for _ in range(max_planning_iterations):
-        if goal.evaluate(env.state.fluents):
-            termination = "goal_reached"
-            break
-        actions = env.get_actions()
-        if not actions:
-            termination = "no_actions"
-            break
-        name = select(env, actions, goal)
-        if name in ("NONE", "", None):
-            termination = "planner_none"
-            break
-        env.act(get_action_by_name(actions, name))
-    if termination == "max_iterations" and goal.evaluate(env.state.fluents):
-        termination = "goal_reached"
-
-    total_cost = float(env.state.time)
-
-    # Exact replay: with the map known and the truth revealed, the candidate's
-    # cost is exact — no unobserved space means no shortcut-to-goal optimism, so
-    # there is no separate optimistic bound to compute (it would equal the exact
-    # cost). The two LSP-style bounds collapse onto total_cost (§7.1).
-    return ReplayResult(
-        bounds=Bounds(optimistic_lb=total_cost, simply_connected_lb=total_cost),
-        commits=[],
-        termination=termination,
-        total_cost=total_cost,
-        sim_time=total_cost,
-        goal_reached=goal.evaluate(env.state.fluents),
-        search_log=list(env.search_log),
+    return replay(
+        log,
+        CandidatePolicy(container_find_prob=container_find_prob),
+        target_object=target,
+        select_action=select_action,
+        max_planning_iterations=max_planning_iterations,
+        mcts=MctsParams(
+            mcts_iterations, mcts_c, mcts_max_depth, mcts_heuristic_multiplier
+        ),
     )

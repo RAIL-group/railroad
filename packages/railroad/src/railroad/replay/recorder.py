@@ -24,21 +24,43 @@ def _pose_tuple(pose: Any) -> Pose3:
 
 
 def _container_subgoals(env: Any, containers: list) -> list:
-    """Revealed containers as subgoals: signature=name, centroid=coords,
-    contents=true objects (so search replay can reconstruct hidden_sites +
-    recorded_object_locations from the log alone)."""
+    """Revealed containers as subgoals: signature=name, centroid=coords, and —
+    **only for containers the deployment actually searched** — their contents.
+
+    A container is *revealed* (added to ``objects_by_type["container"]``) the
+    moment its map cell is observed, but its **contents are unknown until it is
+    searched**. Offline replay's soundness rests on it seeing *only what the
+    deployment observed*, so a revealed-but-uninspected container's true contents
+    must never enter the log (they are ground truth the deployment never learned).
+    Coordinates are fine — the cell was observed, so the candidate may navigate
+    there; searching it then resolves not-found (design §7). Inspected containers
+    are identified by a ``searched ?loc ?obj`` fluent, set deterministically by
+    the search operator on both found and not-found outcomes.
+    """
     registry = getattr(env, "_location_registry", None)
     contents_map = getattr(env, "_objects_at_locations", {})
+    state = getattr(env, "state", None)
+    fluents = getattr(state, "fluents", ()) if state is not None else ()
+    searched = {
+        f.args[0]
+        for f in fluents
+        if f.name == "searched" and not f.negated and f.args
+    }
     out = []
     for name in containers:
         coord = registry.get(name) if registry is not None else None
         row, col = (int(coord[0]), int(coord[1])) if coord is not None else (0, 0)
+        was_searched = name in searched
+        contents = (
+            tuple(sorted(contents_map.get(name, set()))) if was_searched else ()
+        )
         out.append(
             SubgoalRecord(
                 signature=name,
                 centroid=(row, col),
                 cells=np.array([[row], [col]], dtype=int),
-                contents=tuple(sorted(contents_map.get(name, set()))),
+                contents=contents,
+                searched=was_searched,
             )
         )
     return out
@@ -52,6 +74,7 @@ def build_rollout_log(
     env_name: str = "",
     seed: int | None = None,
     problem_class: str = "navigation",
+    target_object: str = "",
 ) -> RolloutLog:
     """Snapshot *env*'s final observed map and frontiers into a log.
 
@@ -107,6 +130,7 @@ def build_rollout_log(
         problem_class=problem_class,
         env_name=env_name,
         seed=seed,
+        target_object=target_object,
         subgoals=subgoals,
         actual_total_cost=float(actual_total_cost),
         config=config,
