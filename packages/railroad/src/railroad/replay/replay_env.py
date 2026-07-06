@@ -30,7 +30,6 @@ from typing import Callable, Dict, List, Sequence, Set, Tuple
 import numpy as np
 
 from railroad._bindings import Fluent, Goal, GroundedEffect, State
-from railroad.core import get_action_by_name
 from railroad.environment.symbolic import LocationRegistry
 from railroad.environment.types import Pose
 from railroad.experimental.unknown_search import (
@@ -42,7 +41,7 @@ from railroad.lsp.frontier_statistics import FrontierStatisticsEstimator
 from railroad.lsp.oracle import frontier_cells_hash
 
 from .base_env import ReplayConfinementMixin, navigation_config_from_log
-from .cost import Commit, accumulate_bounds, optimistic_cost_to_goal
+from .cost import Commit, optimistic_cost_to_goal
 from .types import ReplayResult, RolloutLog
 
 START_NAME = "start_loc"
@@ -263,25 +262,6 @@ def goal_fluent(robots: List[str]) -> "Goal | Fluent":
     return goal
 
 
-def _mcts_select(
-    iterations: int, c: float, max_depth: int, heuristic_multiplier: float
-) -> ActionSelector:
-    from railroad.planner import MCTSPlanner
-
-    def select(env: ReplayEnvironment, actions: list, goal: "Goal | Fluent") -> str:
-        mcts = MCTSPlanner(actions)
-        return mcts(
-            env.state,
-            goal,
-            max_iterations=iterations,
-            c=c,
-            max_depth=max_depth,
-            heuristic_multiplier=heuristic_multiplier,
-        )
-
-    return select
-
-
 def frontier_sweep_select(
     env: ReplayEnvironment, actions: list, goal: "Goal | Fluent"
 ) -> str:
@@ -340,52 +320,30 @@ def run_replay(
     mcts_max_depth: int = 20,
     mcts_heuristic_multiplier: float = 5.0,
 ) -> ReplayResult:
-    """Replay one candidate policy over a recording; return its two bounds.
+    """Replay one navigation candidate policy over a recording; return its bounds.
 
-    *arena* is a :meth:`ReplayEnvironment.from_log` handle (preferred) or a raw
-    :class:`RolloutLog`. A fresh arena is built per call from the source log and
+    A thin wrapper over the unified :func:`~railroad.replay.domains.replay`
+    (navigation domain). *arena* is a :meth:`ReplayEnvironment.from_log` handle
+    (preferred) or a raw :class:`RolloutLog`; a fresh arena is built per call and
     configured with *frontier_statistics* (the candidate policy), so the same
-    arena can be replayed with many candidates (option A: one-shot per call).
+    log replays many candidates.
     """
+    from .domains import MctsParams, replay
+    from .policy import CandidatePolicy
+
     log = (
         arena._source_log
         if isinstance(arena, ReplayEnvironment) and arena._source_log is not None
         else arena
     )
     assert isinstance(log, RolloutLog)
-    env = ReplayEnvironment.from_log(log, frontier_statistics, config=config)
-    goal = goal_fluent(log.robots)
-    select = select_action or _mcts_select(
-        mcts_iterations, mcts_c, mcts_max_depth, mcts_heuristic_multiplier
-    )
-
-    termination = "max_iterations"
-    for _ in range(max_planning_iterations):
-        if goal.evaluate(env.state.fluents):
-            termination = "goal_reached"
-            break
-        actions = env.get_actions()
-        if not actions:
-            termination = "no_actions"
-            break
-        action_name = select(env, actions, goal)
-        if action_name in ("NONE", "", None):
-            termination = "planner_none"
-            break
-        env.act(get_action_by_name(actions, action_name))
-
-    if termination == "max_iterations" and goal.evaluate(env.state.fluents):
-        termination = "goal_reached"
-
-    # Makespan in deployment units (seconds), from the shared sim clock —
-    # directly comparable to the recorded actual_total_cost.
-    total_cost = float(env.state.time)
-    bounds = accumulate_bounds(env.replay_commits, total_cost)
-    return ReplayResult(
-        bounds=bounds,
-        commits=list(env.replay_commits),
-        termination=termination,
-        total_cost=total_cost,
-        sim_time=float(env.state.time),
-        goal_reached=(termination == "goal_reached"),
+    return replay(
+        log,
+        CandidatePolicy(frontier_statistics=frontier_statistics),
+        config=config,
+        select_action=select_action,
+        max_planning_iterations=max_planning_iterations,
+        mcts=MctsParams(
+            mcts_iterations, mcts_c, mcts_max_depth, mcts_heuristic_multiplier
+        ),
     )
