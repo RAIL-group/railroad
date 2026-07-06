@@ -147,6 +147,7 @@ def save_rollout_log(log: RolloutLog, directory: str | Path) -> Path:
         "problem_class": log.problem_class,
         "env_name": log.env_name,
         "seed": log.seed,
+        "target_object": log.target_object,
         "pano_robots": pano_robots,
         "goal_cell": [int(log.goal_cell[0]), int(log.goal_cell[1])],
         "robot_starts": {
@@ -160,6 +161,7 @@ def save_rollout_log(log: RolloutLog, directory: str | Path) -> Path:
                 "signature": s.signature,
                 "centroid": [int(s.centroid[0]), int(s.centroid[1])],
                 "contents": list(s.contents),
+                "searched": bool(s.searched),
             }
             for s in log.subgoals
         ],
@@ -201,6 +203,7 @@ def load_rollout_log(directory: str | Path) -> RolloutLog:
                     centroid=(int(raw["centroid"][0]), int(raw["centroid"][1])),
                     cells=cells.copy(),
                     contents=tuple(raw.get("contents", ())),
+                    searched=bool(raw.get("searched", False)),
                 )
             )
 
@@ -229,6 +232,7 @@ def load_rollout_log(directory: str | Path) -> RolloutLog:
         problem_class=meta["problem_class"],
         env_name=meta["env_name"],
         seed=meta["seed"],
+        target_object=meta.get("target_object", ""),
         subgoals=subgoals,
         steps=steps,
         actual_total_cost=float(meta["actual_total_cost"]),

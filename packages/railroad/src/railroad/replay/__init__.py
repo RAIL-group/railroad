@@ -20,6 +20,17 @@ from .cost import (
     optimistic_cost_grid_from_goal,
     optimistic_cost_to_goal,
 )
+from .domains import (
+    DOMAINS,
+    KnownMapSearchDomain,
+    MctsParams,
+    NavigationDomain,
+    ReplayDomain,
+    UnknownSearchDomain,
+    get_domain,
+    replay,
+)
+from .policy import CandidatePolicy
 from .known_map_search_replay_env import (
     KnownMapSearchReplayEnvironment,
     build_known_map_search_log,
@@ -50,8 +61,17 @@ from .types import ReplayResult, RolloutLog, StepRecord, SubgoalRecord
 
 __all__ = [
     "Bounds",
+    "CandidatePolicy",
     "Commit",
+    "DOMAINS",
+    "KnownMapSearchDomain",
     "KnownMapSearchReplayEnvironment",
+    "MctsParams",
+    "NavigationDomain",
+    "ReplayDomain",
+    "UnknownSearchDomain",
+    "get_domain",
+    "replay",
     "PresetFrontierStatisticsModel",
     "PresetSearchModel",
     "ReplayEnvironment",

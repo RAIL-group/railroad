@@ -30,12 +30,22 @@ class SubgoalRecord:
     ``signature`` is the replay-stable key (a cell-set hash for frontiers,
     §6.1). ``contents`` carries per-container observations for the search
     extension (§4); empty for navigation.
+
+    ``searched`` records whether the deployment actually *searched* this
+    container (vs. merely revealing its cell). It is load-bearing for the bound:
+    a searched container's outcome is known (replay it exactly, no optimism),
+    while a revealed-but-unsearched container's outcome is unknown — replay must
+    force not-found and log an optimistic commit there (design §7). We do **not**
+    infer an unsearched container's emptiness from the object being found
+    elsewhere: that would assume an object occupies exactly one container, which
+    the bound must not rely on. ``contents`` is empty unless ``searched``.
     """
 
     signature: str
     centroid: Tuple[int, int]
     cells: np.ndarray  # 2xN (row, col)
     contents: Tuple[str, ...] = ()
+    searched: bool = False
 
 
 @dataclass
@@ -58,6 +68,11 @@ class RolloutLog:
     problem_class: str = "navigation"
     env_name: str = ""
     seed: int | None = None
+    # The object being searched for (object-search domains). Empty for
+    # navigation. Recorded so a search log is self-describing: the unified
+    # ``replay(log, policy)`` entry can read the target off the log instead of
+    # threading it separately (an explicit ``target_object=`` still overrides).
+    target_object: str = ""
     subgoals: List[SubgoalRecord] = field(default_factory=list)
     steps: List[StepRecord] = field(default_factory=list)
     actual_total_cost: float = 0.0

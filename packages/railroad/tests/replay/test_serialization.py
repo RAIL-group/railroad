@@ -43,7 +43,8 @@ def test_round_trip_with_subgoals_and_steps(tmp_path) -> None:
         robot_starts={"robot1": (1.0, 1.0, 0.0), "robot2": (2.0, 2.0, 1.0)},
         env_name="maze",
         seed=7,
-        problem_class="navigation",
+        problem_class="object-search",
+        target_object="Knife",
         actual_total_cost=42.5,
         config={"sensor_range": 60.0, "speed_cells_per_sec": 2.0},
         subgoals=[
@@ -52,6 +53,7 @@ def test_round_trip_with_subgoals_and_steps(tmp_path) -> None:
                 centroid=(1, 1),
                 cells=np.array([[1, 1, 2], [0, 1, 1]], dtype=int),
                 contents=("Knife", "Fork"),
+                searched=True,
             ),
             SubgoalRecord(
                 signature="def",
@@ -73,6 +75,8 @@ def test_round_trip_with_subgoals_and_steps(tmp_path) -> None:
 
     assert loaded.seed == 7
     assert loaded.env_name == "maze"
+    assert loaded.problem_class == "object-search"
+    assert loaded.target_object == "Knife"
     assert loaded.actual_total_cost == 42.5
     assert loaded.config == {"sensor_range": 60.0, "speed_cells_per_sec": 2.0}
     assert loaded.robot_starts["robot2"] == (2.0, 2.0, 1.0)
@@ -81,6 +85,8 @@ def test_round_trip_with_subgoals_and_steps(tmp_path) -> None:
     assert loaded.subgoals[0].signature == "abc"
     assert loaded.subgoals[0].centroid == (1, 1)
     assert loaded.subgoals[0].contents == ("Knife", "Fork")
+    assert loaded.subgoals[0].searched is True
+    assert loaded.subgoals[1].searched is False
     np.testing.assert_array_equal(
         loaded.subgoals[0].cells, np.array([[1, 1, 2], [0, 1, 1]])
     )
