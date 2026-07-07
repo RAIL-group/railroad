@@ -166,11 +166,16 @@ function-valued costs mapped to durations.
   robust on IPPC domains full of degenerate-but-legal actions (e.g.
   probabilistic blocksworld), while MCTS gives better plans on deterministic
   domains.
-- **Dead ends are not avoided.** The FF heuristic is a delete-relaxation, so
-  it cannot see that driving without a spare tire risks an unrecoverable
-  flat (ippc-2006 tireworld) or that dropping a block may detonate it
-  (ex-blocksworld). Dead-end-aware planning (penalizing states with no
-  applicable actions) is future planner work, independent of this converter.
+- **Dead ends are not avoided by MCTS.** Two separate reasons: (a) the FF
+  heuristic is a delete-relaxation, so it cannot see that driving without a
+  spare risks an unrecoverable flat (ippc-2006 tireworld); (b) even when the
+  relaxation *does* flag a state as hopeless (h = inf, e.g. after breaking
+  an object a negated goal needs intact), MCTS currently clamps that to
+  `HEURISTIC_CANNOT_FIND_GOAL_PENALTY = 0`, which makes such states look
+  goal-adjacent. Raising the penalty perturbs multi-robot search-ordering
+  behavior, so it stays 0 for now; dead-end-aware planning is future planner
+  work. The `greedy` planner uses the unclamped heuristic and does steer
+  around type-(b) dead ends (see the `fragile-delivery` feature benchmark).
 - **Conditional effects and the heuristic**: the relaxed-plan heuristic
   optimistically assumes `when` conditions hold (relaxation fires every
   conditional branch), so conditionally-achievable goals get finite h values

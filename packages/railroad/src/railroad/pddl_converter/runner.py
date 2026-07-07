@@ -13,6 +13,12 @@ from typing import List, Optional
 
 from railroad.core import (
     State,
+    convert_action_effects,
+    convert_action_to_positive_preconditions,
+    convert_goal_to_positive_preconditions,
+    convert_state_to_positive_preconditions,
+    create_positive_fluent_mapping,
+    extract_all_negative_fluents,
     ff_heuristic,
     get_action_by_name,
     get_next_actions,
@@ -62,6 +68,9 @@ def solve(
     if planner not in ("mcts", "greedy"):
         raise ValueError(f"Unknown planner {planner!r}; use 'mcts' or 'greedy'")
     mcts = MCTSPlanner(actions) if planner == "mcts" else None
+    heuristic = (
+        _GreedyHeuristic(actions, problem.goal) if planner == "greedy" else None
+    )
     rng = random.Random(seed)
     state = problem.initial_state
     plan: List[str] = []
@@ -90,7 +99,8 @@ def solve(
                 return finish(False, "planner returned NONE")
             action = get_action_by_name(actions, action_name)
         else:
-            action = _greedy_action(state, problem, actions)
+            assert heuristic is not None
+            action = _greedy_action(state, heuristic, actions)
             if action is None:
                 return finish(False, "no applicable action (dead end)")
         if verbose:
@@ -101,15 +111,45 @@ def solve(
     return finish(False, f"goal not reached within {max_steps} steps")
 
 
-def _greedy_action(state: State, problem: ConvertedProblem, actions):
+class _GreedyHeuristic:
+    """FF heuristic evaluator that handles negative preconditions and goals.
+
+    ``ff_heuristic`` reasons over positive literals only, so negated fluents
+    (in goals like ``(not (broken vase))`` or in preconditions) must first be
+    rewritten to positive ``not-*`` bookkeeping fluents — the same
+    preprocessing ``MCTSPlanner`` applies internally.
+    """
+
+    def __init__(self, actions, goal):
+        negatives = extract_all_negative_fluents(actions, goal)
+        if negatives:
+            self._mapping = create_positive_fluent_mapping(negatives)
+            self._actions = [
+                convert_action_effects(
+                    convert_action_to_positive_preconditions(a, self._mapping),
+                    self._mapping,
+                )
+                for a in actions
+            ]
+            self._goal = convert_goal_to_positive_preconditions(goal, self._mapping)
+        else:
+            self._mapping = None
+            self._actions = actions
+            self._goal = goal
+
+    def __call__(self, state: State) -> float:
+        if self._mapping is not None:
+            state = convert_state_to_positive_preconditions(state, self._mapping)
+        return ff_heuristic(state, self._goal, self._actions)
+
+
+def _greedy_action(state: State, heuristic: _GreedyHeuristic, actions):
     """The applicable action minimizing expected FF heuristic over outcomes."""
     best_action, best_value = None, float("inf")
     for action in get_next_actions(state, actions):
         expected = 0.0
         for successor, prob in transition(state, action):
-            expected += prob * (
-                successor.time + ff_heuristic(successor, problem.goal, actions)
-            )
+            expected += prob * (successor.time + heuristic(successor))
         if expected < best_value:
             best_action, best_value = action, expected
     return best_action
