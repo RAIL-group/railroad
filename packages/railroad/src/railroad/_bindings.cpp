@@ -136,17 +136,25 @@ PYBIND11_MODULE(_bindings, m) {
       .def(py::init<double, std::unordered_set<Fluent>,
                     std::vector<std::pair<
                         double,
+                        std::vector<std::shared_ptr<const GroundedEffect>>>>,
+                    std::vector<std::pair<
+                        std::unordered_set<Fluent>,
                         std::vector<std::shared_ptr<const GroundedEffect>>>>>(),
            py::arg("time"),
            py::arg("resulting_fluents") = std::unordered_set<Fluent>{},
            py::arg("prob_effects") =
-               std::vector<std::pair<double, std::vector<GroundedEffect>>>{})
+               std::vector<std::pair<double, std::vector<GroundedEffect>>>{},
+           py::arg("cond_effects") = std::vector<std::pair<
+               std::unordered_set<Fluent>, std::vector<GroundedEffect>>>{})
       .def_property_readonly("time", &GroundedEffect::time)
       .def_property_readonly("resulting_fluents",
                              &GroundedEffect::resulting_fluents)
       .def_property_readonly("prob_effects", &GroundedEffect::prob_effects)
+      .def_property_readonly("cond_effects", &GroundedEffect::cond_effects)
       .def_property_readonly("is_probabilistic",
                              &GroundedEffect::is_probabilistic)
+      .def_property_readonly("is_conditional",
+                             &GroundedEffect::is_conditional)
       .def(py::pickle(
           [](const GroundedEffect &eff) {
             // Serialize the GroundedEffect into a tuple
@@ -162,14 +170,26 @@ PYBIND11_MODULE(_bindings, m) {
               pickled_prob_effects.append(py::make_tuple(prob, sub_effects));
             }
 
+            py::list pickled_cond_effects;
+            for (const auto &branch : eff.cond_effects()) {
+              py::list sub_effects;
+              for (const auto &sub_eff : branch.effects()) {
+                sub_effects.append(sub_eff);
+              }
+              pickled_cond_effects.append(
+                  py::make_tuple(py::cast(branch.conditions()), sub_effects));
+            }
+
             return py::make_tuple(
                 eff.time(),
                 py::cast(eff.resulting_fluents()), // std::unordered_set<Fluent>
-                pickled_prob_effects // List of (double, list of GroundedEffect)
+                pickled_prob_effects, // List of (double, list of GroundedEffect)
+                pickled_cond_effects  // List of (set of Fluent, list of GroundedEffect)
             );
           },
           [](py::tuple t) {
-            if (t.size() != 3)
+            // Size 3 accepted for pickles predating conditional effects.
+            if (t.size() != 3 && t.size() != 4)
               throw std::runtime_error("Invalid state for GroundedEffect!");
 
             double time = t[0].cast<double>();
@@ -194,8 +214,29 @@ PYBIND11_MODULE(_bindings, m) {
               prob_effects.emplace_back(prob, std::move(effects));
             }
 
+            std::vector<std::pair<std::unordered_set<Fluent>,
+                                  std::vector<std::shared_ptr<const GroundedEffect>>>>
+                cond_effects;
+            if (t.size() == 4) {
+              for (auto item : t[3].cast<py::list>()) {
+                auto tup = item.cast<py::tuple>();
+                if (tup.size() != 2)
+                  throw std::runtime_error("Invalid conditional structure!");
+
+                auto conditions = tup[0].cast<std::unordered_set<Fluent>>();
+                std::vector<std::shared_ptr<const GroundedEffect>> effects;
+                for (auto sub : tup[1].cast<py::list>()) {
+                  effects.push_back(
+                      sub.cast<std::shared_ptr<const GroundedEffect>>());
+                }
+                cond_effects.emplace_back(std::move(conditions),
+                                          std::move(effects));
+              }
+            }
+
             return std::make_shared<GroundedEffect>(time, std::move(fluents),
-                                                    std::move(prob_effects));
+                                                    std::move(prob_effects),
+                                                    std::move(cond_effects));
           }))
       .def("__str__", &GroundedEffect::str)
       .def("__repr__",
@@ -346,6 +387,20 @@ PYBIND11_MODULE(_bindings, m) {
       .def("__repr__", [](const ProbBranchWrapper &b) {
         std::ostringstream oss;
         oss << "<ProbBranch p=" << b.prob()
+            << ", n_effects=" << b.effects().size() << ">";
+        return oss.str();
+      });
+
+  py::class_<CondBranchWrapper>(m, "CondBranch")
+      .def(py::init<std::unordered_set<Fluent>,
+                    std::vector<std::shared_ptr<const GroundedEffect>>>())
+      .def_property_readonly("conditions", &CondBranchWrapper::conditions)
+      .def_property_readonly("effects", &CondBranchWrapper::effects)
+      .def("holds", &CondBranchWrapper::holds, py::arg("fluents"),
+           "Whether the conditions hold in the given fluent set")
+      .def("__repr__", [](const CondBranchWrapper &b) {
+        std::ostringstream oss;
+        oss << "<CondBranch n_conditions=" << b.conditions().size()
             << ", n_effects=" << b.effects().size() << ">";
         return oss.str();
       });

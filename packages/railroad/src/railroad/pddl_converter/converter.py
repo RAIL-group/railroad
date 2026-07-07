@@ -55,6 +55,7 @@ from .parser import (
     PDDLProblem,
     Probabilistic,
     TypedVars,
+    When,
 )
 
 # Zero-cost actions still need to advance time (the event queue is what
@@ -67,7 +68,13 @@ PROBABILITY_TOLERANCE = 1e-6
 # "not-" prefix reserved by negative-precondition preprocessing. PDDL
 # predicates that collide are transparently renamed with this prefix.
 _RENAME_PREFIX = "pddl-"
-_RESERVED_PREDICATES = {"free", "waiting", "not"}
+
+# Equality in `when` conditions compiles to this static predicate; the
+# initial state is seeded with (pddl-eq o o) for every object, so condition
+# evaluation by fluent lookup answers (= a b) exactly.
+EQ_PREDICATE = "pddl-eq"
+
+_RESERVED_PREDICATES = {"free", "waiting", "not", EQ_PREDICATE}
 
 CostAmount = Union[float, Tuple[str, Tuple[str, ...]]]
 
@@ -169,6 +176,12 @@ def convert(domain: PDDLDomain, problem: PDDLProblem) -> ConvertedProblem:
 
     initial_fluents = set(init_fluents)
     initial_fluents.add(Fluent("free", agent))
+    if any(
+        _uses_eq_conditions(comp.operator.effects) for comp in compiled_operators
+    ):
+        initial_fluents.update(
+            Fluent(EQ_PREDICATE, obj, obj) for obj in object_types
+        )
     goal = _compile_goal(problem.goal, type_objects, rename)
 
     return ConvertedProblem(
@@ -278,6 +291,9 @@ def _find_static_predicates(
         elif isinstance(node, Probabilistic):
             for _, branch in node.branches:
                 visit(branch)
+        elif isinstance(node, When):
+            # Only the effect side writes; the condition merely reads.
+            visit(node.effect)
         # Increase nodes carry no predicates.
 
     for action in domain.actions:
@@ -326,6 +342,11 @@ def _substitute_effect(node: EffectNode, mapping: Dict[str, str]) -> EffectNode:
     if isinstance(node, Probabilistic):
         return Probabilistic(
             [(p, _substitute_effect(e, mapping)) for p, e in node.branches]
+        )
+    if isinstance(node, When):
+        return When(
+            _substitute_condition(node.condition, mapping),
+            _substitute_effect(node.effect, mapping),
         )
     if isinstance(node, Increase):
         amount = node.amount
@@ -430,6 +451,11 @@ class _CompiledEffect:
     prob_groups: List[List[Tuple[float, "_CompiledEffect"]]] = field(
         default_factory=list
     )
+    # Each group is one (when ...) construct: condition literals plus the
+    # sub-effect applied when they hold.
+    cond_groups: List[Tuple[List[Literal], "_CompiledEffect"]] = field(
+        default_factory=list
+    )
     cost_terms: List[CostAmount] = field(default_factory=list)
 
 
@@ -437,10 +463,10 @@ def _compile_effect(
     node: EffectNode,
     type_objects: Dict[str, Set[str]],
     context: str,
-    top_level: bool,
+    nested_in: Optional[str] = None,
 ) -> _CompiledEffect:
     out = _CompiledEffect()
-    _compile_effect_into(node, type_objects, context, top_level, out)
+    _compile_effect_into(node, type_objects, context, nested_in, out)
     return out
 
 
@@ -448,21 +474,21 @@ def _compile_effect_into(
     node: EffectNode,
     type_objects: Dict[str, Set[str]],
     context: str,
-    top_level: bool,
+    nested_in: Optional[str],
     out: _CompiledEffect,
 ) -> None:
     if isinstance(node, Literal):
         out.literals.append(node)
     elif isinstance(node, EffectAnd):
         for c in node.children:
-            _compile_effect_into(c, type_objects, context, top_level, out)
+            _compile_effect_into(c, type_objects, context, nested_in, out)
     elif isinstance(node, EffectForall):
         for mapping in _quantifier_expansions(node.variables, type_objects, context):
             _compile_effect_into(
                 _substitute_effect(node.body, mapping),
                 type_objects,
                 context,
-                top_level,
+                nested_in,
                 out,
             )
     elif isinstance(node, Probabilistic):
@@ -473,13 +499,22 @@ def _compile_effect_into(
                 raise PDDLParseError(f"Probability {prob} out of range in {context}")
             total += prob
             branches.append(
-                (prob, _compile_effect(branch_node, type_objects, context, False))
+                (
+                    prob,
+                    _compile_effect(
+                        branch_node, type_objects, context, "probabilistic"
+                    ),
+                )
             )
         if total > 1 + PROBABILITY_TOLERANCE:
             raise PDDLParseError(
                 f"Probabilities sum to {total} > 1 in {context}"
             )
         out.prob_groups.append(branches)
+    elif isinstance(node, When):
+        conditions = _compile_when_condition(node.condition, type_objects, context)
+        sub_effect = _compile_effect(node.effect, type_objects, context, "conditional")
+        out.cond_groups.append((conditions, sub_effect))
     elif isinstance(node, Increase):
         if node.function == "reward":
             raise UnsupportedPDDLError("rewards", f"(increase (reward) ...) in {context}")
@@ -491,14 +526,49 @@ def _compile_effect_into(
             raise UnsupportedPDDLError(
                 "numeric-effects", f"parameterized total-cost in {context}"
             )
-        if not top_level:
+        if nested_in is not None:
             raise UnsupportedPDDLError(
-                "probabilistic-cost",
-                f"(increase (total-cost) ...) inside a probabilistic branch in {context}",
+                f"{nested_in}-cost",
+                f"(increase (total-cost) ...) inside a {nested_in} branch in {context}",
             )
         out.cost_terms.append(node.amount)
     else:
         raise PDDLParseError(f"Unexpected effect node in {context}: {node!r}")
+
+
+def _compile_when_condition(
+    node: ConditionNode, type_objects: Dict[str, Set[str]], context: str
+) -> List[Literal]:
+    """Compile a ``when`` condition to a conjunction of literals.
+
+    Negated literals are fine (the core evaluates them by absence); anything
+    that cannot be flattened to a conjunction — disjunction, equality,
+    existential — is unsupported.
+    """
+    if isinstance(node, Literal):
+        return [node]
+    if isinstance(node, Equals):
+        # Equality is static, so it becomes a lookup against the seeded
+        # (pddl-eq o o) fluents (see convert()).
+        return [Literal(EQ_PREDICATE, (node.left, node.right), node.negated)]
+    if isinstance(node, And):
+        return [
+            lit
+            for child in node.children
+            for lit in _compile_when_condition(child, type_objects, context)
+        ]
+    if isinstance(node, Forall):
+        return [
+            lit
+            for mapping in _quantifier_expansions(node.variables, type_objects, context)
+            for lit in _compile_when_condition(
+                _substitute_condition(node.body, mapping), type_objects, context
+            )
+        ]
+    raise UnsupportedPDDLError(
+        "conditional-effect-condition",
+        f"unsupported (when ...) condition {type(node).__name__} in {context}",
+    )
 
 
 def _make_duration(
@@ -554,7 +624,7 @@ def _compile_action(
     context = f"action {action.name}"
     counter = itertools.count()
     pre = _compile_precondition(action.precondition, type_objects, context, counter)
-    eff = _compile_effect(action.effect, type_objects, context, top_level=True)
+    eff = _compile_effect(action.effect, type_objects, context)
 
     parameters = list(action.parameters) + pre.extra_parameters
     param_names = {var for var, _ in parameters}
@@ -571,6 +641,9 @@ def _compile_action(
     completion_fluents = {_make_fluent(lit, rename) for lit in eff.literals}
     completion_fluents.add(Fluent("free", agent))
     first_group = eff.prob_groups[0] if eff.prob_groups else None
+    # All conditional branches ride on the single completion effect: their
+    # conditions are evaluated when it fires, before its fluents apply, so
+    # they see the pre-action state (PDDL `when` semantics).
     effects = [
         Effect(time=0, resulting_fluents={Fluent("free", agent, negated=True)}),
         Effect(
@@ -579,6 +652,7 @@ def _compile_action(
             prob_effects=_group_to_prob_effects(first_group, rename)
             if first_group
             else [],
+            cond_effects=_cond_groups_to_effects(eff.cond_groups, rename),
         ),
     ]
     for group in eff.prob_groups[1:]:
@@ -614,13 +688,40 @@ def _group_to_prob_effects(
     return branches
 
 
+def _uses_eq_conditions(effects: Sequence[Effect]) -> bool:
+    """Whether any conditional branch (recursively) tests the eq predicate."""
+    for eff in effects:
+        for conditions, sub_effects in eff.cond_effects:
+            if any(f.name == EQ_PREDICATE for f in conditions):
+                return True
+            if _uses_eq_conditions(sub_effects):
+                return True
+        for _, sub_effects in eff.prob_effects:
+            if _uses_eq_conditions(sub_effects):
+                return True
+    return False
+
+
+def _cond_groups_to_effects(
+    cond_groups: List[Tuple[List[Literal], _CompiledEffect]],
+    rename: Dict[str, str],
+) -> List[Tuple[Set[Fluent], List[Effect]]]:
+    return [
+        (
+            {_make_fluent(lit, rename) for lit in conditions},
+            _compiled_to_sub_effects(sub_effect, rename),
+        )
+        for conditions, sub_effect in cond_groups
+    ]
+
+
 def _compiled_to_sub_effects(
     compiled: _CompiledEffect, rename: Dict[str, str]
 ) -> List[Effect]:
     fluents = {_make_fluent(lit, rename) for lit in compiled.literals}
     first_group = compiled.prob_groups[0] if compiled.prob_groups else None
     sub_effects = []
-    if fluents or first_group:
+    if fluents or first_group or compiled.cond_groups:
         sub_effects.append(
             Effect(
                 time=0,
@@ -628,6 +729,7 @@ def _compiled_to_sub_effects(
                 prob_effects=_group_to_prob_effects(first_group, rename)
                 if first_group
                 else [],
+                cond_effects=_cond_groups_to_effects(compiled.cond_groups, rename),
             )
         )
     for group in compiled.prob_groups[1:]:
@@ -663,6 +765,10 @@ def _check_variables_bound(
         for group in e.prob_groups:
             for _, branch in group:
                 check_effect(branch)
+        for conditions, sub_effect in e.cond_groups:
+            for lit in conditions:
+                check_terms(lit.args)
+            check_effect(sub_effect)
 
     check_effect(eff)
 

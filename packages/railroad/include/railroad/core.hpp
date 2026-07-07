@@ -129,17 +129,70 @@ private:
   mutable std::optional<std::size_t> cached_hash_;
 };
 
+// A conditional effect branch (PDDL `when`): sub-effects applied only if the
+// conditions hold in the state at the moment the parent effect fires.
+// The state-selected analogue of ProbBranchWrapper. Negated conditions use
+// negation-as-absence, mirroring negative preconditions.
+class CondBranchWrapper {
+public:
+  CondBranchWrapper(std::unordered_set<Fluent> conditions,
+                    std::vector<std::shared_ptr<const GroundedEffect>> effects)
+      : conditions_(std::move(conditions)), effects_(std::move(effects)) {
+    for (const auto &f : conditions_) {
+      if (f.is_negated()) {
+        neg_conditions_.insert(f.invert());
+      } else {
+        pos_conditions_.insert(f);
+      }
+    }
+  }
+
+  const std::unordered_set<Fluent> &conditions() const { return conditions_; }
+  const std::vector<std::shared_ptr<const GroundedEffect>> &effects() const {
+    return effects_;
+  }
+
+  bool holds(const std::unordered_set<Fluent> &fluents) const {
+    for (const auto &f : pos_conditions_) {
+      if (!fluents.count(f)) {
+        return false;
+      }
+    }
+    for (const auto &f : neg_conditions_) {
+      if (fluents.count(f)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  std::size_t hash() const;
+
+private:
+  std::unordered_set<Fluent> conditions_;
+  std::unordered_set<Fluent> pos_conditions_;
+  std::unordered_set<Fluent> neg_conditions_;
+  std::vector<std::shared_ptr<const GroundedEffect>> effects_;
+  mutable std::optional<std::size_t> cached_hash_;
+};
+
 class GroundedEffect {
 public:
   GroundedEffect(
       double time, std::unordered_set<Fluent> resulting_fluents,
       std::vector<
           std::pair<double, std::vector<std::shared_ptr<const GroundedEffect>>>>
-          prob_pairs)
+          prob_pairs,
+      std::vector<std::pair<std::unordered_set<Fluent>,
+                            std::vector<std::shared_ptr<const GroundedEffect>>>>
+          cond_pairs = {})
       : time_(time), resulting_fluents_(std::move(resulting_fluents)),
         cached_hash_(std::nullopt) {
     for (auto &[p, effects] : prob_pairs) {
       prob_effects_.emplace_back(p, std::move(effects));
+    }
+    for (auto &[conditions, effects] : cond_pairs) {
+      cond_effects_.emplace_back(std::move(conditions), std::move(effects));
     }
     for (const auto &f : resulting_fluents_) {
       if (f.is_negated()) {
@@ -166,8 +219,12 @@ public:
   const std::vector<ProbBranchWrapper> &prob_effects() const {
     return prob_effects_;
   }
+  const std::vector<CondBranchWrapper> &cond_effects() const {
+    return cond_effects_;
+  }
 
   bool is_probabilistic() const { return !prob_effects_.empty(); }
+  bool is_conditional() const { return !cond_effects_.empty(); }
 
   bool operator<(const GroundedEffect &other) const {
     return time_ < other.time_;
@@ -200,9 +257,18 @@ public:
       h_branches ^= h;
     }
 
+    // Hash conditional branches
+    std::size_t h_cond_branches = 0;
+    for (const auto &branch : cond_effects_) {
+      std::size_t h = branch.hash();
+      hash_combine(h, 1);
+      h_cond_branches ^= h;
+    }
+
     // Final combination: time, fluents, branches (ordered)
     hash_combine(h_time, h_fluents);
     hash_combine(h_time, h_branches);
+    hash_combine(h_time, h_cond_branches);
     cached_hash_ = h_time;
 
     return h_time;
@@ -234,6 +300,25 @@ public:
         first = false;
       }
     }
+    for (const auto &branch : cond_effects_) {
+      out << " when {";
+      bool first = true;
+      for (const auto &f : branch.conditions()) {
+        if (!first)
+          out << ", ";
+        out << (f.is_negated() ? "not " : "") << f.name();
+        for (const auto &arg : f.args())
+          out << " " << arg;
+        first = false;
+      }
+      out << "}: [";
+      for (size_t i = 0; i < branch.effects().size(); ++i) {
+        out << branch.effects()[i]->str();
+        if (i + 1 < branch.effects().size())
+          out << "; ";
+      }
+      out << "]";
+    }
     return out.str();
   }
 
@@ -243,11 +328,16 @@ private:
   std::unordered_set<Fluent> pos_fluents_;
   std::unordered_set<Fluent> flipped_neg_fluents_;
   std::vector<ProbBranchWrapper> prob_effects_;
+  std::vector<CondBranchWrapper> cond_effects_;
   mutable std::optional<std::size_t> cached_hash_;
 };
 
 inline bool operator==(const ProbBranchWrapper &a, const ProbBranchWrapper &b) {
   return a.prob() == b.prob() && a.effects() == b.effects();
+}
+
+inline bool operator==(const CondBranchWrapper &a, const CondBranchWrapper &b) {
+  return a.conditions() == b.conditions() && a.effects() == b.effects();
 }
 
 } // namespace railroad
@@ -396,6 +486,27 @@ std::size_t ProbBranchWrapper::hash() const {
     h_branch ^= h;
   }
   hash_combine(h_branch, std::hash<double>{}(prob_));
+  cached_hash_ = h_branch;
+  return h_branch;
+}
+
+std::size_t CondBranchWrapper::hash() const {
+  if (cached_hash_)
+    return *cached_hash_;
+
+  std::size_t h_branch = 0;
+  for (const auto &inner_eff : effects_) {
+    std::size_t h = inner_eff->hash();
+    hash_combine(h, 0);
+    h_branch ^= h;
+  }
+  std::size_t h_conditions = 0;
+  for (const auto &f : conditions_) {
+    std::size_t h = f.hash();
+    hash_combine(h, 0);
+    h_conditions ^= h;
+  }
+  hash_combine(h_branch, h_conditions);
   cached_hash_ = h_branch;
   return h_branch;
 }

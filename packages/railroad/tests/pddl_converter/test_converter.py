@@ -430,3 +430,188 @@ def test_self_loop_grounding_preserves_fluent():
     (successor, prob), = transition(converted.initial_state, self_loop)
     assert prob == pytest.approx(1.0)
     assert F("at plane apt") in successor.fluents
+
+
+# ============================================================================
+# Conditional effects
+# ============================================================================
+
+
+def _apply(converted, action_name):
+    from railroad.core import transition
+
+    action = _get_action(converted, action_name)
+    ((successor, prob),) = transition(converted.initial_state, action)
+    assert prob == pytest.approx(1.0)
+    return successor
+
+
+def test_conditional_effect_fires_when_condition_holds():
+    domain = """
+    (define (domain d) (:requirements :strips :conditional-effects)
+      (:predicates (fragile ?x) (dropped ?x) (broken ?x))
+      (:action drop :parameters (?x)
+               :precondition ()
+               :effect (and (dropped ?x) (when (fragile ?x) (broken ?x)))))
+    """
+    problem = """
+    (define (problem p) (:domain d) (:objects vase brick)
+      (:init (fragile vase)) (:goal (dropped brick)))
+    """
+    converted = convert_texts(domain, problem)
+    after_vase = _apply(converted, "drop vase")
+    assert F("dropped vase") in after_vase.fluents
+    assert F("broken vase") in after_vase.fluents
+    after_brick = _apply(converted, "drop brick")
+    assert F("dropped brick") in after_brick.fluents
+    assert F("broken brick") not in after_brick.fluents
+
+
+def test_conditional_effect_reads_pre_action_state():
+    """Conditions are evaluated before the action's own effects apply."""
+    domain = """
+    (define (domain d) (:requirements :strips :conditional-effects)
+      (:predicates (p) (q) (r))
+      (:action a :parameters ()
+               :precondition ()
+               :effect (and (not (p)) (q) (when (p) (r)))))
+    """
+    problem = """
+    (define (problem p1) (:domain d) (:objects x)
+      (:init (p)) (:goal (q)))
+    """
+    converted = convert_texts(domain, problem)
+    successor = _apply(converted, "a")
+    # PDDL: the (when (p) ...) condition saw the pre-state where p held,
+    # even though the same action deletes p.
+    assert F("p") not in successor.fluents
+    assert F("r") in successor.fluents
+
+
+def test_conditional_effect_negative_condition():
+    domain = """
+    (define (domain d) (:requirements :strips :conditional-effects)
+      (:predicates (locked ?x) (opened ?x) (tried ?x))
+      (:action try-open :parameters (?x)
+               :precondition ()
+               :effect (and (tried ?x) (when (not (locked ?x)) (opened ?x)))))
+    """
+    problem = """
+    (define (problem p) (:domain d) (:objects door1 door2)
+      (:init (locked door1)) (:goal (tried door1)))
+    """
+    converted = convert_texts(domain, problem)
+    assert F("opened door1") not in _apply(converted, "try-open door1").fluents
+    assert F("opened door2") in _apply(converted, "try-open door2").fluents
+
+
+def test_forall_when_expands_per_object():
+    domain = """
+    (define (domain d) (:requirements :strips :conditional-effects)
+      (:predicates (boarded ?p) (at-dest ?p) (moved))
+      (:action move :parameters ()
+               :precondition ()
+               :effect (and (moved)
+                            (forall (?p) (when (boarded ?p) (at-dest ?p))))))
+    """
+    problem = """
+    (define (problem p) (:domain d) (:objects alice bob carol)
+      (:init (boarded alice) (boarded carol)) (:goal (moved)))
+    """
+    converted = convert_texts(domain, problem)
+    successor = _apply(converted, "move")
+    assert F("at-dest alice") in successor.fluents
+    assert F("at-dest carol") in successor.fluents
+    assert F("at-dest bob") not in successor.fluents
+
+
+def test_when_inside_probabilistic_branch():
+    domain = """
+    (define (domain d)
+      (:requirements :strips :probabilistic-effects :conditional-effects)
+      (:predicates (armed) (fired) (hit))
+      (:action fire :parameters ()
+               :precondition ()
+               :effect (and (fired)
+                            (probabilistic 1.0 (when (armed) (hit))))))
+    """
+    problem = """
+    (define (problem p) (:domain d) (:objects x)
+      (:init (armed)) (:goal (fired)))
+    """
+    converted = convert_texts(domain, problem)
+    successor = _apply(converted, "fire")
+    assert F("hit") in successor.fluents
+
+
+def test_unsupported_when_condition_rejected():
+    domain = """
+    (define (domain d) (:requirements :strips :conditional-effects)
+      (:predicates (p ?x) (q ?x) (r ?x))
+      (:action a :parameters (?x)
+               :precondition ()
+               :effect (when (or (p ?x) (q ?x)) (r ?x))))
+    """
+    with pytest.raises(UnsupportedPDDLError) as excinfo:
+        convert_texts(domain, _minimal_problem())
+    assert excinfo.value.reason == "conditional-effect-condition"
+
+
+def test_cost_inside_conditional_rejected():
+    domain = """
+    (define (domain d) (:requirements :strips :conditional-effects :action-costs)
+      (:predicates (p ?x)) (:functions (total-cost))
+      (:action a :parameters (?x) :precondition ()
+               :effect (when (p ?x) (increase (total-cost) 2))))
+    """
+    with pytest.raises(UnsupportedPDDLError) as excinfo:
+        convert_texts(domain, _minimal_problem())
+    assert excinfo.value.reason == "conditional-cost"
+
+
+def test_conditional_effects_visible_to_heuristic():
+    """The relaxed heuristic optimistically assumes conditions hold, so a
+    goal reachable only through a conditional effect gets a finite h."""
+    from railroad.core import ff_heuristic
+
+    domain = """
+    (define (domain d) (:requirements :strips :conditional-effects)
+      (:predicates (fragile ?x) (dropped ?x) (broken ?x))
+      (:action drop :parameters (?x)
+               :precondition ()
+               :effect (and (dropped ?x) (when (fragile ?x) (broken ?x)))))
+    """
+    problem = """
+    (define (problem p) (:domain d) (:objects vase)
+      (:init (fragile vase)) (:goal (broken vase)))
+    """
+    converted = convert_texts(domain, problem)
+    h = ff_heuristic(
+        converted.initial_state, converted.goal, converted.ground_actions()
+    )
+    assert h < float("inf")
+
+
+def test_equality_in_when_condition():
+    """(= ?x ?y) in a when-condition resolves via the seeded eq fluents."""
+    domain = """
+    (define (domain d) (:requirements :strips :conditional-effects :equality)
+      (:predicates (painted ?x ?c) (repaint ?x ?c ?c2))
+      (:action paint :parameters (?x ?old ?new)
+               :precondition ()
+               :effect (and (painted ?x ?new)
+                            (when (not (= ?old ?new)) (not (painted ?x ?old))))))
+    """
+    problem = """
+    (define (problem p) (:domain d) (:objects obj red blue)
+      (:init (painted obj red)) (:goal (painted obj blue)))
+    """
+    converted = convert_texts(domain, problem)
+    assert F("pddl-eq red red") in converted.initial_state.fluents
+
+    changed = _apply(converted, "paint obj red blue")
+    assert F("painted obj blue") in changed.fluents
+    assert F("painted obj red") not in changed.fluents  # condition fired
+
+    same = _apply(converted, "paint obj red red")
+    assert F("painted obj red") in same.fluents  # condition did not fire

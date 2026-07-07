@@ -224,7 +224,26 @@ inline void advance_to_terminal(State state, double prob,
       state.set_time(scheduled_time);
     }
     state.pop_effect();
+
+    // Conditional branches (PDDL `when`) read the state as it is when the
+    // effect fires, BEFORE the effect's own fluents apply. Under relaxation
+    // conditions are optimistically assumed to hold, which also makes
+    // conditional effects visible to the relaxed-plan heuristic via
+    // get_relaxed_successors().
+    std::vector<std::shared_ptr<const GroundedEffect>> triggered;
+    if (effect->is_conditional()) {
+      for (const auto &branch : effect->cond_effects()) {
+        if (relax || branch.holds(state.fluents())) {
+          triggered.insert(triggered.end(), branch.effects().begin(),
+                           branch.effects().end());
+        }
+      }
+    }
+
     any_free_robots = state.update_with_effect(effect, relax);
+    for (const auto &e : triggered) {
+      state.queue_effect(e);
+    }
 
     if (effect->is_probabilistic()) {
       for (const auto &branch : effect->prob_effects()) {
