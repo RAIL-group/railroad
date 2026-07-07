@@ -883,7 +883,7 @@ def _ground_operator(
     def dfs(depth: int) -> None:
         if depth == len(order):
             try:
-                actions.append(op._ground(binding))
+                actions.append(op._ground(binding, objects_by_type))
             except _UndefinedFunctionValue:
                 pass  # duration undefined for this binding -> not a real action
             return

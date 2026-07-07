@@ -7,9 +7,11 @@ Each benchmark here is deliberately tiny: it exists to show how a feature is
 1. ``extra_cost_route_choice`` — per-action scalar costs beyond time
    (``Operator(extra_cost=...)``), charged in the MCTS objective and
    estimated by the FF heuristic.
-2. ``conditional_effects_briefcase`` — native conditional effect branches
-   (``Effect(cond_effects=...)``): sub-effects that fire only when their
-   condition fluents hold at effect-fire time.
+2. ``conditional_effects_briefcase`` — native conditional effect branches:
+   sub-effects that fire only when their condition fluents hold at
+   effect-fire time, quantified over the object universe with
+   ``ForallEffect`` (the native forall+when; per-object branches can also
+   be listed explicitly via ``Effect(cond_effects=...)``).
 3. ``pddl_converter_features`` — converting and solving PDDL/PPDDL problem
    text via ``railroad.pddl_converter`` (action costs, probabilistic
    effects, and conditional effects expressed in PDDL).
@@ -21,7 +23,15 @@ from dataclasses import dataclass
 from typing import Dict, Optional
 
 from railroad.bench import benchmark, BenchmarkCase
-from railroad.core import Effect, Fluent as F, Operator, State, get_action_by_name, transition
+from railroad.core import (
+    Effect,
+    Fluent as F,
+    ForallEffect,
+    Operator,
+    State,
+    get_action_by_name,
+    transition,
+)
 from railroad.planner import MCTSPlanner
 
 
@@ -130,8 +140,8 @@ bench_extra_cost_route_choice.add_cases([
 @benchmark(
     name="conditional_effects_briefcase",
     description="Classic briefcase domain: moving the briefcase also moves "
-                "exactly the objects inside it, via conditional effect "
-                "branches evaluated at effect-fire time.",
+                "exactly the objects inside it, via a ForallEffect "
+                "(native forall+when) expanded per item at grounding time.",
     tags=["feature-example", "conditional-effects"],
     repeat=1,
     timeout=60.0,
@@ -159,9 +169,10 @@ def bench_conditional_effects_briefcase(case: BenchmarkCase):
             Effect(time=1.0, resulting_fluents={F("free briefcase"), F("not in ?obj")}),
         ],
     )
-    # The conditional branches: one per item, applied only if that item is in
-    # the briefcase when the move completes. Each branch is
-    # (condition fluents, sub-effects applied when they hold); conditions are
+    # The universally quantified conditional effect (PDDL forall+when):
+    # at Operator.instantiate() time, ForallEffect expands into one
+    # conditional branch per object of type "item" — each applied only if
+    # that item is in the briefcase when the move completes. Conditions are
     # evaluated against the state BEFORE the effect's own fluents apply.
     move_op = Operator(
         name="move",
@@ -176,16 +187,14 @@ def bench_conditional_effects_briefcase(case: BenchmarkCase):
                     F("at briefcase ?to"),
                     F("not at briefcase ?from"),
                 },
-                cond_effects=[
-                    (
-                        {F(f"in {item}")},
-                        [Effect(time=0, resulting_fluents={
-                            F(f"at {item} ?to"),
-                            F(f"not at {item} ?from"),
-                        })],
-                    )
-                    for item in items
-                ],
+                forall_effects=[ForallEffect(
+                    variables=[("?obj", "item")],
+                    conditions={F("in ?obj")},
+                    effects=[Effect(time=0, resulting_fluents={
+                        F("at ?obj ?to"),
+                        F("not at ?obj ?from"),
+                    })],
+                )],
             ),
         ],
     )
