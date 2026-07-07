@@ -532,3 +532,95 @@ def test_transition_same_fluent_add_and_delete_add_wins():
     ((successor, prob),) = transition(state, action)
     assert prob == pytest.approx(1.0)
     assert F("at r1 loc") in successor.fluents
+
+
+def test_forall_effect_expands_per_object():
+    """ForallEffect grounds into one conditional branch per object of the type.
+
+    Briefcase-style: moving the briefcase relocates exactly the items that
+    are inside it when the move completes.
+    """
+    from railroad.core import ForallEffect
+
+    move_op = Operator(
+        name="move",
+        parameters=[("?from", "location"), ("?to", "location")],
+        preconditions=[F("free briefcase"), F("at briefcase ?from")],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free briefcase")}),
+            Effect(
+                time=2.0,
+                resulting_fluents={
+                    F("free briefcase"),
+                    F("at briefcase ?to"),
+                    F("not at briefcase ?from"),
+                },
+                forall_effects=[ForallEffect(
+                    variables=[("?obj", "item")],
+                    conditions={F("in ?obj")},
+                    effects=[Effect(time=0, resulting_fluents={
+                        F("at ?obj ?to"), F("not at ?obj ?from")})],
+                )],
+            ),
+        ],
+    )
+    actions = move_op.instantiate(
+        {"location": {"home", "office"}, "item": {"doc", "pen"}}
+    )
+    move = get_action_by_name(actions, "move home office")
+
+    branches = move.effects[1].cond_effects
+    assert len(branches) == 2  # one branch per item
+    conditions = {frozenset(b.conditions) for b in branches}
+    assert conditions == {frozenset({F("in doc")}), frozenset({F("in pen")})}
+
+    # Execution: doc is inside, pen is not -> only doc moves.
+    state = State(0.0, {
+        F("free briefcase"), F("at briefcase home"),
+        F("at doc home"), F("at pen home"), F("in doc"),
+    }, [])
+    ((successor, _),) = transition(state, move)
+    assert F("at doc office") in successor.fluents
+    assert F("at doc home") not in successor.fluents
+    assert F("at pen home") in successor.fluents
+    assert F("at pen office") not in successor.fluents
+
+
+def test_forall_effect_empty_conditions_is_universal():
+    """With no conditions, the sub-effects apply for every object."""
+    from railroad.core import ForallEffect
+
+    wipe_op = Operator(
+        name="wipe-all",
+        parameters=[],
+        preconditions=[F("free r1")],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free r1")}),
+            Effect(
+                time=1.0,
+                resulting_fluents={F("free r1")},
+                forall_effects=[ForallEffect(
+                    variables=[("?s", "surface")],
+                    conditions=set(),
+                    effects=[Effect(time=0, resulting_fluents={F("clean ?s")})],
+                )],
+            ),
+        ],
+    )
+    actions = wipe_op.instantiate({"surface": {"table", "desk"}})
+    state = State(0.0, {F("free r1")}, [])
+    ((successor, _),) = transition(state, actions[0])
+    assert F("clean table") in successor.fluents
+    assert F("clean desk") in successor.fluents
+
+
+def test_forall_effect_requires_object_universe():
+    """Grounding a forall effect without objects_by_type is an error."""
+    from railroad.core import ForallEffect
+
+    effect = Effect(
+        time=1.0,
+        forall_effects=[ForallEffect([("?x", "thing")], set(), [])],
+    )
+    with pytest.raises(ValueError, match="forall_effects"):
+        effect._ground({})

@@ -65,6 +65,43 @@ def _make_bindable(opt_expr: OptExpr) -> Bindable:
         return lambda b: fn(*[b.get(arg, arg) for arg in args])
 
 
+class ForallEffect:
+    """Universally quantified conditional sub-effects on an :class:`Effect`.
+
+    The native analogue of PDDL's ``(forall (?x - t) (when <cond> <eff>))``:
+    at grounding time (``Operator.instantiate``), one conditional branch is
+    produced per assignment of the quantified variables to objects of their
+    types. With empty ``conditions`` the sub-effects apply unconditionally
+    for every object (a plain universal effect).
+
+    Quantified variables may appear in ``conditions`` and inside ``effects``;
+    a quantified variable shadows an operator parameter of the same name.
+
+    Example (briefcase: moving relocates exactly the items inside)::
+
+        Effect(
+            time=2.0,
+            resulting_fluents={F("at briefcase ?to"), F("not at briefcase ?from")},
+            forall_effects=[ForallEffect(
+                variables=[("?obj", "item")],
+                conditions={F("in ?obj")},
+                effects=[Effect(time=0, resulting_fluents={
+                    F("at ?obj ?to"), F("not at ?obj ?from")})],
+            )],
+        )
+    """
+
+    def __init__(
+        self,
+        variables: List[Tuple[str, str]],
+        conditions: Set[Fluent],
+        effects: List["Effect"],
+    ):
+        self.variables = variables
+        self.conditions = conditions
+        self.effects = effects
+
+
 class Effect:
     def __init__(
         self,
@@ -72,6 +109,7 @@ class Effect:
         prob_effects: List[Tuple[OptExpr, List["Effect"]]] = list(),
         resulting_fluents: Set[Fluent] = set(),
         cond_effects: List[Tuple[Set[Fluent], List["Effect"]]] = list(),
+        forall_effects: List[ForallEffect] = list(),
     ):
         """A (possibly branching) effect scheduled ``time`` after its action.
 
@@ -80,6 +118,12 @@ class Effect:
         conditions hold in the state at the moment this effect fires,
         evaluated before this effect's own ``resulting_fluents`` apply.
         Negated condition fluents use negation-as-absence.
+
+        ``forall_effects`` are universally quantified conditional branches
+        (PDDL ``forall``+``when``); see :class:`ForallEffect`. They expand
+        into ``cond_effects``-style branches at grounding time, so operators
+        using them must be grounded through ``Operator.instantiate`` (which
+        supplies the object universe).
         """
         self.time = _make_bindable(time)
         self.prob_effects = [
@@ -87,30 +131,62 @@ class Effect:
         ]
         self.resulting_fluents = resulting_fluents
         self.cond_effects = cond_effects
+        self.forall_effects = forall_effects
         self.is_probabilistic = bool(self.prob_effects)
-        self.is_conditional = bool(self.cond_effects)
+        self.is_conditional = bool(self.cond_effects) or bool(self.forall_effects)
 
-    def _ground(self, binding: Binding) -> "GroundedEffect":
-        def ground_fluent(f: Fluent) -> Fluent:
+    def _ground(
+        self,
+        binding: Binding,
+        objects_by_type: Optional[Mapping[str, Collection[str]]] = None,
+    ) -> "GroundedEffect":
+        def ground_fluent(f: Fluent, b: Binding = binding) -> Fluent:
             return Fluent(
-                f.name, *[binding.get(arg, arg) for arg in f.args], negated=f.negated
+                f.name, *[b.get(arg, arg) for arg in f.args], negated=f.negated
             )
 
         if self.is_probabilistic:
             grounded_prob_effects = tuple(
-                (prob(binding), tuple(e._ground(binding) for e in effect_list))
+                (
+                    prob(binding),
+                    tuple(e._ground(binding, objects_by_type) for e in effect_list),
+                )
                 for prob, effect_list in self.prob_effects
             )
         else:
             grounded_prob_effects = tuple()
 
-        grounded_cond_effects = tuple(
+        grounded_cond_effects = [
             (
                 {ground_fluent(f) for f in conditions},
-                tuple(e._ground(binding) for e in effect_list),
+                tuple(e._ground(binding, objects_by_type) for e in effect_list),
             )
             for conditions, effect_list in self.cond_effects
-        )
+        ]
+
+        for forall in self.forall_effects:
+            if objects_by_type is None:
+                raise ValueError(
+                    "Effect has forall_effects, which require the object "
+                    "universe to expand; ground via Operator.instantiate() "
+                    "or pass objects_by_type to _ground()."
+                )
+            domains = [sorted(objects_by_type[typ]) for _, typ in forall.variables]
+            for combo in itertools.product(*domains):
+                # Quantified variables shadow same-named outer parameters.
+                quantified = dict(binding)
+                quantified.update(
+                    {var: obj for (var, _), obj in zip(forall.variables, combo)}
+                )
+                grounded_cond_effects.append(
+                    (
+                        {ground_fluent(f, quantified) for f in forall.conditions},
+                        tuple(
+                            e._ground(quantified, objects_by_type)
+                            for e in forall.effects
+                        ),
+                    )
+                )
 
         grounded_time: float = self.time(binding)
         grounded_resulting_fluents = {
@@ -121,7 +197,7 @@ class Effect:
             grounded_time,
             prob_effects=grounded_prob_effects,
             resulting_fluents=grounded_resulting_fluents,
-            cond_effects=grounded_cond_effects,
+            cond_effects=tuple(grounded_cond_effects),
         )
 
 
@@ -147,17 +223,21 @@ class Operator:
             binding = {var: obj for (var, _), obj in zip(self.parameters, assignment)}
             if len(set(binding.values())) != len(binding):
                 continue
-            grounded_actions.append(self._ground(binding))
+            grounded_actions.append(self._ground(binding, objects_by_type))
         return grounded_actions
 
-    def _ground(self, binding: Dict[str, str]) -> Action:
+    def _ground(
+        self,
+        binding: Dict[str, str],
+        objects_by_type: Optional[Mapping[str, Collection[str]]] = None,
+    ) -> Action:
         def evaluate(value):
             return value(binding) if callable(value) else value
 
         grounded_preconditions = frozenset(
             self._substitute_fluent(f, binding) for f in self.preconditions
         )
-        grounded_effects = [eff._ground(binding) for eff in self.effects]
+        grounded_effects = [eff._ground(binding, objects_by_type) for eff in self.effects]
 
         name_str = " ".join(
             [self.name] + [binding[var] for var, _ in self.parameters]
