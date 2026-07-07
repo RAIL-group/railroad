@@ -7,12 +7,14 @@ Benchmarks are automatically registered when decorated.
 
 # Import all benchmark modules (triggers @benchmark decorators)
 from . import basic_planning
+from . import feature_examples
 from . import movie_night
 from . import multi_object_search
 from . import procthor_search
 
 __all__ = [
     "basic_planning",
+    "feature_examples",
     "movie_night",
     "multi_object_search",
     "procthor_search",
