@@ -5,8 +5,15 @@ Probabilistic PDDL planning system.
 
 ## Files
 
-- **core.hpp**: Core types (Fluent, Action, GroundedEffect, etc.)
-- **state.hpp**: State representation and transition function
+- **core.hpp**: Core types (Fluent, Action, GroundedEffect, plus the
+  `ProbBranchWrapper`/`CondBranchWrapper` effect branches — probabilistic
+  outcomes and PDDL-`when`-style conditional branches)
+- **state.hpp**: State representation and transition function. Effect
+  application resolves branches at fire time: conditional branches are
+  evaluated against the state *before* the effect's own fluents apply (and
+  are optimistically assumed to hold under relaxation); deletes apply
+  before adds (PDDL semantics, so a same-fluent add/delete pair keeps the
+  fluent)
 - **goal.hpp**: Goal representation (LiteralGoal, AndGoal, OrGoal, etc.)
 - **heuristic_types.hpp**: shared FF data types — `Achiever`,
   `FFForwardResult`, `FFCacheKey`/`FFMemory`, and the `HeuristicFn` alias.
@@ -113,7 +120,7 @@ An action that can produce a target fluent in the delete-relaxation:
 struct Achiever {
     const Action* action;
     double wait_cost;    // earliest time positive preconditions are achievable
-    double exec_cost;    // the action's own execution duration
+    double exec_cost;    // the action's execution duration plus its extra_cost
     double probability;  // chance it produces the target fluent (1.0 = det.)
 
     double attempt_cost() const;  // wait_cost + exec_cost

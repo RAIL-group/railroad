@@ -10,7 +10,10 @@ The `railroad` planning framework is meant to support **concurrent multi-robot t
 - **States store both active fluents and upcoming effects**: actions add effects to a queue, which update the active fluents as time advances.
 - **Concurrency**: state transitions advance time until an agent is marked `(free {agent_name})`, letting multiple robots act concurrently.
 - **Probabilistic state transitions**: effects can be probabilistic
+- **Conditional effects**: effects can branch on the state at the moment they fire (PDDL-style `when`), including universally quantified forms (`forall`+`when` via `ForallEffect`)
+- **Action costs beyond time**: `Operator(extra_cost=...)` adds a scalar cost charged in the planning objective (time + Σ cost) and steered by the heuristic
 - **Planning via MCTS**: planning via Monte Carlo Tree Search over joint action spaces
+- **PDDL/PPDDL import**: `railroad pddl` downloads, converts, and runs International Planning Competition problems (see `railroad.pddl_converter`)
 
 #### Multi-Robot Object Search Example
 
@@ -179,8 +182,8 @@ uv run railroad example <name>
 
 - **Fluent** -- A fact about the world: `F("at robot1 kitchen")`, `F("free robot1")`
 - **State** -- The current set of fluents, the time, and any upcoming effects
-- **Operator** -- An action template with typed parameters: `move ?robot ?from ?to`
-- **Effect** -- A state change that happens at a specified time; can be probabilistic
+- **Operator** -- An action template with typed parameters (`move ?robot ?from ?to`), optionally carrying a scalar `extra_cost` added to the planning objective
+- **Effect** -- A state change that happens at a specified time; can be probabilistic and/or conditional (branches that fire only if their condition fluents hold when the effect does)
 - **Goal** -- A target condition to achieve, built from fluents with `&`, `|`, and `~`
 
 ## Goal Expressions
@@ -197,6 +200,77 @@ F("at robot1 kitchen") | F("at robot1 bed")   # OR  -- at least one
 # Combine freely
 goal = (F("found Knife") | F("found Spoon")) & ~F("at Cup table")
 ```
+
+## Conditional Effects
+
+Effects can carry conditional branches (PDDL-style `when`): sub-effects
+applied only if their condition fluents hold at the moment the effect fires,
+evaluated *before* the effect's own fluents apply. Negated conditions use
+negation-as-absence.
+
+```python
+from railroad.core import Effect, Fluent as F, ForallEffect
+
+# Explicit branches: dropping breaks the item -- but only if it's fragile.
+Effect(
+    time=1.0,
+    resulting_fluents={F("free ?r"), F("dropped ?x")},
+    cond_effects=[
+        ({F("fragile ?x"), ~F("padded ?x")},
+         [Effect(time=0, resulting_fluents={F("broken ?x")})]),
+    ],
+)
+
+# Universally quantified (forall+when): moving the briefcase relocates
+# exactly the items inside it. ForallEffect expands into one conditional
+# branch per object of the quantified type at Operator.instantiate() time.
+Effect(
+    time=2.0,
+    resulting_fluents={F("at briefcase ?to"), F("not at briefcase ?from")},
+    forall_effects=[ForallEffect(
+        variables=[("?obj", "item")],
+        conditions={F("in ?obj")},
+        effects=[Effect(time=0, resulting_fluents={
+            F("at ?obj ?to"), F("not at ?obj ?from")})],
+    )],
+)
+```
+
+Conditional branches compose freely with probabilistic ones (a probabilistic
+outcome's sub-effects may themselves be conditional, and vice versa). See the
+`feature_examples` benchmarks for small end-to-end demonstrations.
+
+## Action Costs Beyond Time
+
+Operators may carry a scalar `extra_cost`; the planner minimizes expected
+completion time **plus** accumulated extra cost, and the FF heuristic
+accounts for it when guiding search:
+
+```python
+toll_road = Operator(
+    name="take-toll-road",
+    parameters=[("?r", "robot")],
+    preconditions=[F("free ?r"), F("at ?r start")],
+    effects=[
+        Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?r start")}),
+        Effect(time=2.0, resulting_fluents={F("free ?r"), F("at ?r destination")}),
+    ],
+    extra_cost=10.0,  # fast (2s) but expensive: a free 6s back road wins
+)
+```
+
+## Importing PDDL / PPDDL Problems
+
+International Planning Competition problems (classical PDDL and
+probabilistic PPDDL) can be downloaded, converted, and run directly:
+
+```bash
+uv run railroad pddl check ipc-2000     # per-domain compatibility report
+uv run railroad pddl run --collection ipc-2000 --domain logistics-strips-typed --instance 1
+```
+
+See `packages/railroad/src/railroad/pddl_converter/README.md` for mapping
+semantics and the supported/unsupported feature enumeration.
 
 ## Running via this Repo
 
@@ -219,6 +293,7 @@ packages/railroad/
     _bindings.cpp        # pybind11 bridge
     core.py              # Fluent, State, Action, Operator, Effect, Goal
     planner.py           # MCTSPlanner (wraps C++ MCTS with automatic preprocessing)
+    pddl_converter/      # IPC PDDL/PPDDL download + conversion (see its README)
     operators/           # Helper constructors for move, search, pick, place, wait
     navigation/          # Reusable grid navigation (theta* pathing, occupancy grid mixin)
     environment/

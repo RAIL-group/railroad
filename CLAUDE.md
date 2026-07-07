@@ -21,9 +21,10 @@ The repository is organized as a monorepo with several interdependent packages:
   - State management and action grounding
   - FF-like heuristic for forward planning
 - **Python Layer** (`src/railroad/`):
-  - `core.py`: Main classes (`Fluent`, `State`, `Action`, `Effect`, `Operator`, `Goal`) - re-exports C++ types and adds Python utilities
+  - `core.py`: Main classes (`Fluent`, `State`, `Action`, `Effect`, `ForallEffect`, `Operator`, `Goal`) - re-exports C++ types and adds Python utilities
   - `operators/`: Helper functions to construct common operators (move, search, pick, place, wait)
   - `planner.py`: `MCTSPlanner` wrapper with automatic negative precondition handling
+  - `pddl_converter/`: downloads IPC PDDL/PPDDL problems and converts them into railroad problems; CLI via `railroad pddl list/run/check` (see its README.md for mapping semantics and supported features)
 - **Testing**: Tests in `tests/` including unit tests and integration tests
 
 #### Environment Module (`packages/railroad/src/railroad/environment/`)
@@ -111,6 +112,9 @@ Reusable grid navigation primitives, independent of any specific environment:
 - Actions have preconditions (what must be true) and effects (what changes)
 - Effects can be deterministic or probabilistic with multiple outcomes
 - Effects happen at specified times (e.g., move takes time based on distance)
+- Effects can carry conditional branches (`Effect(cond_effects=[(conditions, sub_effects), ...])`): sub-effects applied only if the condition fluents hold when the effect fires, evaluated before the effect's own fluents apply (PDDL `when`; negated conditions use negation-as-absence)
+- `ForallEffect` is the universally quantified form (PDDL `forall`+`when`): expands into one conditional branch per object of the quantified type at `Operator.instantiate()` time; empty conditions give a plain universal effect
+- Operators may carry a scalar `extra_cost`, charged in the MCTS objective (time + accumulated cost) and folded into the FF heuristic's estimates
 
 #### Goals
 
