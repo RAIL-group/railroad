@@ -423,6 +423,141 @@ def lsp_train_network(
     train_network(config)
 
 
+# =============================================================================
+# PDDL converter command group
+# =============================================================================
+
+
+@main.group()
+def pddl() -> None:
+    """Convert and run IPC PDDL/PPDDL problems (see railroad.pddl_converter)."""
+    pass
+
+
+@pddl.command("list")
+@click.argument("collection")
+def pddl_list(collection: str) -> None:
+    """List domains available in COLLECTION (e.g. ipc-2000, ippc-2008)."""
+    from railroad import pddl_converter as pc
+
+    for domain in pc.list_domains(collection):
+        click.echo(domain)
+
+
+@pddl.command("run")
+@click.option("--collection", default=None,
+              help="Benchmark collection (e.g. ipc-2000, ippc-2008)")
+@click.option("--domain", default=None, help="Domain name within the collection")
+@click.option("--instance", type=int, default=1, show_default=True,
+              help="1-based instance index within the domain")
+@click.option("--domain-file", type=click.Path(exists=True, dir_okay=False),
+              default=None, help="Local domain file (instead of --collection)")
+@click.option("--problem-file", type=click.Path(exists=True, dir_okay=False),
+              default=None, help="Local problem file (instead of --collection)")
+@click.option("--seed", type=int, default=0, show_default=True)
+@click.option("--max-steps", type=int, default=500, show_default=True)
+@click.option("--max-iterations", type=int, default=4000, show_default=True,
+              help="MCTS iterations per planning step")
+@click.option("--verbose", is_flag=True, default=False,
+              help="Print each executed action")
+def pddl_run(collection: str | None, domain: str | None, instance: int,
+             domain_file: str | None, problem_file: str | None,
+             seed: int, max_steps: int, max_iterations: int,
+             verbose: bool) -> None:
+    """Download (if needed), convert, and solve one PDDL instance."""
+    from railroad import pddl_converter as pc
+
+    if domain_file and problem_file:
+        problem = pc.load_problem(domain_file, problem_file)
+        source = problem_file
+    elif collection and domain:
+        fetched = pc.fetch_domain(collection, domain, max_instances=instance)
+        if instance > len(fetched.instances):
+            raise click.ClickException(
+                f"{collection}/{domain} has only {len(fetched.instances)} instances"
+            )
+        instance_path = fetched.instances[instance - 1]
+        problem = pc.load_problem(fetched.domain_for(instance_path), instance_path)
+        source = str(instance_path)
+    else:
+        raise click.ClickException(
+            "Provide either --collection and --domain, or --domain-file and --problem-file"
+        )
+
+    click.echo(f"source:  {source}")
+    click.echo(f"problem: {problem.problem_name} (domain {problem.domain_name})")
+    click.echo(f"metric:  {problem.metric}")
+    click.echo(f"actions: {len(problem.ground_actions())} grounded")
+    result = pc.solve(problem, seed=seed, max_steps=max_steps,
+                      max_iterations=max_iterations, verbose=verbose)
+    if result.success:
+        click.echo(f"SOLVED in {len(result.plan)} actions, "
+                   f"cost/time {result.sim_time:g} "
+                   f"({result.wall_time:.1f}s wall)")
+        if not verbose:
+            for step in result.plan:
+                click.echo(f"  {step}")
+    else:
+        raise click.ClickException(f"FAILED: {result.failure_reason}")
+
+
+@pddl.command("check")
+@click.argument("collection")
+@click.option("--instances", "n_instances", type=int, default=1, show_default=True,
+              help="Instances to try converting per domain")
+@click.option("--ground", is_flag=True, default=False,
+              help="Also ground actions (slower; catches grounding blowups)")
+@click.option("--markdown", is_flag=True, default=False,
+              help="Emit a markdown table (for the README)")
+def pddl_check(collection: str, n_instances: int, ground: bool,
+               markdown: bool) -> None:
+    """Scan a collection and report which domains convert to railroad format."""
+    from railroad import pddl_converter as pc
+
+    rows: list[tuple[str, str, str]] = []
+    for domain_name in pc.list_domains(collection):
+        try:
+            fetched = pc.fetch_domain(collection, domain_name,
+                                      max_instances=n_instances)
+        except Exception as exc:  # noqa: BLE001 - report and continue scanning
+            rows.append((domain_name, "fetch-error", str(exc)[:80]))
+            continue
+        if not fetched.instances:
+            rows.append((domain_name, "fetch-error", "no instances found"))
+            continue
+        status, note = "ok", ""
+        for instance_path in fetched.instances:
+            try:
+                problem = pc.load_problem(
+                    fetched.domain_for(instance_path), instance_path
+                )
+                if ground:
+                    note = f"{len(problem.ground_actions())} actions"
+            except pc.UnsupportedPDDLError as exc:
+                status, note = "unsupported", exc.reason
+                break
+            except pc.PDDLParseError as exc:
+                status, note = "parse-error", str(exc)[:80]
+                break
+            except Exception as exc:  # noqa: BLE001 - report and continue scanning
+                status, note = "error", f"{type(exc).__name__}: {str(exc)[:70]}"
+                break
+        rows.append((domain_name, status, note))
+
+    if markdown:
+        click.echo("| Domain | Status | Notes |")
+        click.echo("|---|---|---|")
+        for name, status, note in rows:
+            click.echo(f"| {name} | {status} | {note} |")
+    else:
+        width = max((len(r[0]) for r in rows), default=10)
+        for name, status, note in rows:
+            click.echo(f"{name:{width}}  {status:12}  {note}")
+    n_ok = sum(1 for _, status, _ in rows if status == "ok")
+    click.echo(f"\n{n_ok}/{len(rows)} domains convert ({collection}, "
+               f"{n_instances} instance(s) each)")
+
+
 def _make_example_command(name: str, info: ExampleInfo) -> None:
     """Create and register a click command for an example."""
     description = info["description"]

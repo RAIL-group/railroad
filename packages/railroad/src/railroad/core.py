@@ -138,8 +138,8 @@ class Operator:
         )
         grounded_effects = [eff._ground(binding) for eff in self.effects]
 
-        name_str = f"{self.name} " + " ".join(
-            binding[var] for var, _ in self.parameters
+        name_str = " ".join(
+            [self.name] + [binding[var] for var, _ in self.parameters]
         )
         return Action(grounded_preconditions, grounded_effects, name=name_str, extra_cost=self.extra_cost)
 
