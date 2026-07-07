@@ -71,9 +71,9 @@ Grounding notes:
   of a combinatorial blowup.
 - Unlike `Operator.instantiate`, the same object may bind several parameters
   (PDDL permits it; domains that need distinctness say `(not (= ?x ?y))`).
-  Same-fluent add/delete pairs created by such bindings are resolved the
-  PDDL way (delete-before-add, so the add wins) — railroad's effect
-  application is add-then-erase and would otherwise destroy the fluent.
+  Same-fluent add/delete pairs created by such bindings (e.g. `fly apt apt`)
+  behave the PDDL way: the railroad core applies deletes before adds, so the
+  add wins and the fluent survives.
 - Groundings whose cost function value is missing from `:init` are treated
   as undefined and skipped.
 

@@ -409,9 +409,11 @@ def test_goal_reward_maximize_metric_reinterpreted():
 def test_self_loop_grounding_preserves_fluent():
     """A binding with ?from == ?to must not destroy the location fluent.
 
-    PDDL applies deletes before adds, so the add wins; railroad's effect
-    application is add-then-erase, so the converter drops the delete.
+    The core applies deletes before adds (PDDL semantics), so an effect that
+    both deletes and adds `at plane apt` leaves the fluent present.
     """
+    from railroad.core import transition
+
     domain = """
     (define (domain d) (:requirements :strips)
       (:predicates (at ?x ?l))
@@ -425,6 +427,6 @@ def test_self_loop_grounding_preserves_fluent():
     """
     converted = convert_texts(domain, problem)
     self_loop = _get_action(converted, "fly plane apt apt")
-    finish = self_loop.effects[1]
-    assert F("at plane apt") in finish.resulting_fluents
-    assert F("not at plane apt") not in finish.resulting_fluents
+    (successor, prob), = transition(converted.initial_state, self_loop)
+    assert prob == pytest.approx(1.0)
+    assert F("at plane apt") in successor.fluents
