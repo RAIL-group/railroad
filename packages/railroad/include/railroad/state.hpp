@@ -52,10 +52,19 @@ public:
 
   State copy() const { return State(time_, fluents_, upcoming_effects_); }
 
+  // Deletes are applied before adds (PDDL semantics), so an effect that both
+  // deletes and adds the same fluent leaves it present. Such effects arise
+  // from grounding an operator with the same object bound to two parameters,
+  // e.g. `move ?from ?to` as `move loc loc`.
   bool
   update_with_effect(const std::shared_ptr<const GroundedEffect> &new_effect,
                      bool relax = false) {
     cached_hash_ = std::nullopt;
+    if (!relax) {
+      for (const auto &f : new_effect->flipped_neg_fluents()) {
+        fluents_.erase(f);
+      }
+    }
     bool freed_robot = false;
     for (const auto &f : new_effect->pos_fluents()) {
       if (f.is_free()) {
@@ -63,24 +72,22 @@ public:
       }
       fluents_.insert(f);
     }
-    if (!relax) {
-      for (const auto &f : new_effect->flipped_neg_fluents()) {
-        fluents_.erase(f);
-      }
-    }
     return freed_robot;
   }
 
   bool update_fluents(const std::unordered_set<Fluent> &new_fluents,
                       bool relax = false) {
     cached_hash_ = std::nullopt;
-    bool freed_robot = false;
-    for (const auto &f : new_fluents) {
-      if (f.is_negated()) {
-        if (!relax) {
+    if (!relax) {
+      for (const auto &f : new_fluents) {
+        if (f.is_negated()) {
           fluents_.erase(f.invert());
         }
-      } else {
+      }
+    }
+    bool freed_robot = false;
+    for (const auto &f : new_fluents) {
+      if (!f.is_negated()) {
         if (f.is_free()) {
           freed_robot = true;
         }

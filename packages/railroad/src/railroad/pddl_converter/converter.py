@@ -31,7 +31,6 @@ from railroad.core import (
     Effect,
     Fluent,
     Goal,
-    GroundedEffect,
     LiteralGoal,
     Operator,
     OrGoal,
@@ -778,7 +777,7 @@ def _ground_operator(
     def dfs(depth: int) -> None:
         if depth == len(order):
             try:
-                actions.append(_sanitize_action(op._ground(binding)))
+                actions.append(op._ground(binding))
             except _UndefinedFunctionValue:
                 pass  # duration undefined for this binding -> not a real action
             return
@@ -793,51 +792,6 @@ def _ground_operator(
     if all(len(d) > 0 for d in domains):
         dfs(0)
     return actions
-
-
-def _sanitize_action(action: Action) -> Action:
-    """Resolve same-fluent add/delete pairs inside one effect: the add wins.
-
-    Duplicate-object bindings can ground e.g. ``(fly ?a ?from ?to)`` with
-    ``?from == ?to``, yielding an effect that both deletes and adds
-    ``at apn apt``. PDDL applies deletes before adds (the fluent survives),
-    but railroad's ``update_with_effect`` adds first and erases second, which
-    would destroy the fluent. Dropping the delete restores PDDL semantics.
-    """
-    if not any(_effect_has_collision(e) for e in action.effects):
-        return action
-    cleaned = [_clean_effect(e) for e in action.effects]
-    return Action(
-        action.preconditions, cleaned, name=action.name, extra_cost=action.extra_cost
-    )
-
-
-def _effect_has_collision(effect: GroundedEffect) -> bool:
-    positives = {f for f in effect.resulting_fluents if not f.negated}
-    for f in effect.resulting_fluents:
-        if f.negated and Fluent(f.name, *f.args) in positives:
-            return True
-    return any(
-        _effect_has_collision(sub)
-        for branch in effect.prob_effects
-        for sub in branch.effects
-    )
-
-
-def _clean_effect(effect: GroundedEffect) -> GroundedEffect:
-    positives = {f for f in effect.resulting_fluents if not f.negated}
-    kept = {
-        f
-        for f in effect.resulting_fluents
-        if not (f.negated and Fluent(f.name, *f.args) in positives)
-    }
-    prob_effects = [
-        (branch.prob, [_clean_effect(sub) for sub in branch.effects])
-        for branch in effect.prob_effects
-    ]
-    return GroundedEffect(
-        effect.time, resulting_fluents=kept, prob_effects=prob_effects
-    )
 
 
 def _order_parameters(

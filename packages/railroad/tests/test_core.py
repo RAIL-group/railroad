@@ -503,3 +503,32 @@ def test_action_extra_cost():
         extra_cost=10.0
     )
     assert direct_action.extra_cost == 10.0
+
+
+def test_update_fluents_same_fluent_add_and_delete_add_wins():
+    """Deletes apply before adds (PDDL semantics), so the add wins."""
+    state = State(0.0, {F("at r1 loc")}, [])
+    state.update_fluents({F("at r1 loc"), ~F("at r1 loc")})
+    assert F("at r1 loc") in state.fluents
+
+
+def test_transition_same_fluent_add_and_delete_add_wins():
+    """An effect that deletes and adds the same fluent leaves it present.
+
+    Such effects arise from grounding an operator with one object bound to
+    two parameters, e.g. `move ?from ?to` grounded as `move loc loc`.
+    """
+    action = Action(
+        {F("at r1 loc"), F("free r1")},
+        [
+            GroundedEffect(
+                time=1.0,
+                resulting_fluents={F("at r1 loc"), ~F("at r1 loc"), F("free r1")},
+            )
+        ],
+        name="self-loop-move",
+    )
+    state = State(0.0, {F("at r1 loc"), F("free r1")}, [])
+    ((successor, prob),) = transition(state, action)
+    assert prob == pytest.approx(1.0)
+    assert F("at r1 loc") in successor.fluents
