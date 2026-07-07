@@ -310,6 +310,50 @@ _PDDL_VARIANTS: Dict[str, _PDDLVariant] = {
         """,
         expected_cost=None,  # stochastic: retries lengthen the plan
     ),
+    # forall+when (miconic-style elevator): a single `stop` action boards
+    # and deboards every matching passenger through universally quantified
+    # conditional effects — the construct that used to be the dominant
+    # blocker across IPC/IPPC domains. The converter expands the forall over
+    # the passengers and attaches one conditional branch each.
+    "forall-when": _PDDLVariant(
+        planner="mcts",
+        domain="""
+            (define (domain mini-miconic)
+              (:requirements :strips :typing :conditional-effects)
+              (:types passenger floor)
+              (:predicates (lift-at ?f - floor)
+                           (origin ?p - passenger ?f - floor)
+                           (destin ?p - passenger ?f - floor)
+                           (boarded ?p - passenger)
+                           (served ?p - passenger))
+              (:action move
+                 :parameters (?from - floor ?to - floor)
+                 :precondition (lift-at ?from)
+                 :effect (and (not (lift-at ?from)) (lift-at ?to)))
+              (:action stop
+                 :parameters (?f - floor)
+                 :precondition (lift-at ?f)
+                 :effect (and
+                    (forall (?p - passenger)
+                      (when (and (boarded ?p) (destin ?p ?f))
+                            (and (not (boarded ?p)) (served ?p))))
+                    (forall (?p - passenger)
+                      (when (and (origin ?p ?f) (not (served ?p)))
+                            (boarded ?p))))))
+        """,
+        problem="""
+            (define (problem mini-miconic-2)
+              (:domain mini-miconic)
+              (:objects p1 p2 - passenger f1 f2 - floor)
+              (:init (lift-at f1)
+                     (origin p1 f1) (destin p1 f2)
+                     (origin p2 f2) (destin p2 f1))
+              (:goal (and (served p1) (served p2))))
+        """,
+        # stop f1 (board p1), move to f2, stop f2 (serve p1, board p2),
+        # move back, stop f1 (serve p2).
+        expected_cost=5.0,
+    ),
     # Conditional effects: dropping breaks exactly the fragile items.
     # Dropping the unpadded vase is an irreversible mistake (the goal needs
     # it unbroken). The greedy planner avoids it because the FF heuristic
@@ -384,5 +428,6 @@ def bench_pddl_converter_features(case: BenchmarkCase):
 bench_pddl_converter_features.add_cases([
     {"variant": "action-costs", "seed": 0},
     {"variant": "probabilistic", "seed": 0},
+    {"variant": "forall-when", "seed": 0},
     {"variant": "conditional-effects", "seed": 0},
 ])
