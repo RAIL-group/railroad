@@ -145,6 +145,14 @@ class Probabilistic:
 
 
 @dataclass
+class When:
+    """A conditional effect ``(when <condition> <effect>)``."""
+
+    condition: ConditionNode
+    effect: "EffectNode"
+
+
+@dataclass
 class Increase:
     """``(increase (<function> <args>) <amount>)``.
 
@@ -157,7 +165,7 @@ class Increase:
     amount: Union[float, Tuple[str, Tuple[str, ...]]]
 
 
-EffectNode = Union[Literal, EffectAnd, EffectForall, Probabilistic, Increase]
+EffectNode = Union[Literal, EffectAnd, EffectForall, Probabilistic, When, Increase]
 
 
 # ============================================================================
@@ -344,8 +352,12 @@ def parse_effect(sexpr: Sexpr, context: str) -> EffectNode:
         variables = _parse_typed_list(sexpr[1], f"forall in {context}")
         return EffectForall(variables, parse_effect(sexpr[2], context))
     if head == "when":
-        raise UnsupportedPDDLError(
-            "conditional-effects", f"(when ...) effect in {context}"
+        assert isinstance(sexpr, list)
+        if len(sexpr) != 3:
+            raise PDDLParseError(f"(when ...) takes condition + effect in {context}")
+        return When(
+            parse_condition(sexpr[1], f"when-condition in {context}"),
+            parse_effect(sexpr[2], context),
         )
     if head == "probabilistic":
         assert isinstance(sexpr, list)

@@ -71,16 +71,31 @@ class Effect:
         time: OptExpr,
         prob_effects: List[Tuple[OptExpr, List["Effect"]]] = list(),
         resulting_fluents: Set[Fluent] = set(),
+        cond_effects: List[Tuple[Set[Fluent], List["Effect"]]] = list(),
     ):
+        """A (possibly branching) effect scheduled ``time`` after its action.
+
+        ``cond_effects`` are conditional branches (PDDL ``when``): each
+        ``(conditions, sub_effects)`` pair applies its sub-effects only if the
+        conditions hold in the state at the moment this effect fires,
+        evaluated before this effect's own ``resulting_fluents`` apply.
+        Negated condition fluents use negation-as-absence.
+        """
         self.time = _make_bindable(time)
         self.prob_effects = [
             (_make_bindable(prob), effects) for prob, effects in prob_effects
         ]
         self.resulting_fluents = resulting_fluents
+        self.cond_effects = cond_effects
         self.is_probabilistic = bool(self.prob_effects)
+        self.is_conditional = bool(self.cond_effects)
 
     def _ground(self, binding: Binding) -> "GroundedEffect":
-        # def evaluate(expr): return expr(binding) if callable(expr) else expr
+        def ground_fluent(f: Fluent) -> Fluent:
+            return Fluent(
+                f.name, *[binding.get(arg, arg) for arg in f.args], negated=f.negated
+            )
+
         if self.is_probabilistic:
             grounded_prob_effects = tuple(
                 (prob(binding), tuple(e._ground(binding) for e in effect_list))
@@ -89,18 +104,24 @@ class Effect:
         else:
             grounded_prob_effects = tuple()
 
-        grounded_time: float = self.time(binding)
-        grounded_resulting_fluents = set(
-            Fluent(
-                f.name, *[binding.get(arg, arg) for arg in f.args], negated=f.negated
+        grounded_cond_effects = tuple(
+            (
+                {ground_fluent(f) for f in conditions},
+                tuple(e._ground(binding) for e in effect_list),
             )
-            for f in self.resulting_fluents
+            for conditions, effect_list in self.cond_effects
         )
+
+        grounded_time: float = self.time(binding)
+        grounded_resulting_fluents = {
+            ground_fluent(f) for f in self.resulting_fluents
+        }
 
         return GroundedEffect(
             grounded_time,
             prob_effects=grounded_prob_effects,
             resulting_fluents=grounded_resulting_fluents,
+            cond_effects=grounded_cond_effects,
         )
 
 
@@ -284,6 +305,65 @@ def create_positive_fluent_mapping(negative_fluents: Set[Fluent]) -> Dict[Fluent
     return mapping
 
 
+def _augment_fluents_for_mapping(
+    fluents: Set[Fluent], neg_to_pos_mapping: Dict[Fluent, Fluent]
+) -> Set[Fluent]:
+    """Augment a fluent set with "not-" bookkeeping fluents.
+
+    Adding F("P") also removes F("not-P"); removing F("P") adds F("not-P").
+    """
+    augmented = set(fluents)
+    for fluent in fluents:
+        if fluent.negated:
+            positive_fluent = ~fluent
+            if positive_fluent in neg_to_pos_mapping:
+                augmented.add(neg_to_pos_mapping[positive_fluent])
+        else:
+            if fluent in neg_to_pos_mapping:
+                augmented.add(~neg_to_pos_mapping[fluent])
+    return augmented
+
+
+def _augment_grounded_effect_for_mapping(
+    effect: GroundedEffect, neg_to_pos_mapping: Dict[Fluent, Fluent]
+) -> GroundedEffect:
+    """Recursively augment a GroundedEffect (and its probabilistic and
+    conditional branches) with "not-" bookkeeping fluents.
+
+    Conditional branch *conditions* are left untouched: they read the state
+    directly with negation-as-absence, so they need no bookkeeping.
+    """
+    augmented_fluents = _augment_fluents_for_mapping(
+        effect.resulting_fluents, neg_to_pos_mapping
+    )
+    converted_prob_effects = [
+        (
+            prob_branch.prob,
+            [
+                _augment_grounded_effect_for_mapping(e, neg_to_pos_mapping)
+                for e in prob_branch.effects
+            ],
+        )
+        for prob_branch in effect.prob_effects
+    ]
+    converted_cond_effects = [
+        (
+            cond_branch.conditions,
+            [
+                _augment_grounded_effect_for_mapping(e, neg_to_pos_mapping)
+                for e in cond_branch.effects
+            ],
+        )
+        for cond_branch in effect.cond_effects
+    ]
+    return GroundedEffect(
+        time=effect.time,
+        resulting_fluents=augmented_fluents,
+        prob_effects=converted_prob_effects,
+        cond_effects=converted_cond_effects,
+    )
+
+
 def convert_state_to_positive_preconditions(
     state: State,
     neg_to_pos_mapping: Dict[Fluent, Fluent]
@@ -304,8 +384,6 @@ def convert_state_to_positive_preconditions(
         For example, if F("hand_full r1") is not in state.fluents,
         adds F("not-hand_full r1") to indicate hand is not full.
     """
-    from railroad._bindings import GroundedEffect
-
     new_fluents = set(state.fluents)
 
     for original_fluent, not_fluent in neg_to_pos_mapping.items():
@@ -313,55 +391,11 @@ def convert_state_to_positive_preconditions(
         if original_fluent not in state.fluents:
             new_fluents.add(not_fluent)
 
-    # Convert upcoming effects using the same logic as convert_action_effects
-    def augment_fluents(fluents: Set[Fluent]) -> Set[Fluent]:
-        """Augment a set of fluents with consistency fluents."""
-        augmented = set(fluents)
-        for fluent in fluents:
-            if fluent.negated:
-                # Fluent is ~F("P") - removing P
-                # Check if F("P") (the positive version) is in mapping
-                positive_fluent = ~fluent  # Invert to get F("P")
-                if positive_fluent in neg_to_pos_mapping:
-                    # Add F("not-P") since P is being removed
-                    augmented.add(neg_to_pos_mapping[positive_fluent])
-            else:
-                # Fluent is F("P") - adding P
-                # Check if this P is in the mapping
-                if fluent in neg_to_pos_mapping:
-                    # Add ~F("not-P") since P is being added
-                    augmented.add(~neg_to_pos_mapping[fluent])
-        return augmented
-
-    def convert_grounded_effect(effect: GroundedEffect) -> GroundedEffect:
-        """Recursively convert a GroundedEffect and its probabilistic branches."""
-        # Augment the immediate resulting fluents
-        augmented_fluents = augment_fluents(effect.resulting_fluents)
-
-        # Recursively convert probabilistic effects
-        if effect.is_probabilistic:
-            converted_prob_effects = []
-            for prob_branch in effect.prob_effects:
-                prob = prob_branch.prob
-                converted_branch_effects = [
-                    convert_grounded_effect(branch_eff)
-                    for branch_eff in prob_branch.effects
-                ]
-                converted_prob_effects.append((prob, converted_branch_effects))
-
-            return GroundedEffect(
-                time=effect.time,
-                resulting_fluents=augmented_fluents,
-                prob_effects=converted_prob_effects
-            )
-        else:
-            return GroundedEffect(
-                time=effect.time,
-                resulting_fluents=augmented_fluents
-            )
-
     # Convert all upcoming effects (which are tuples of (time, effect))
-    converted_effects = [(time, convert_grounded_effect(eff)) for time, eff in state.upcoming_effects]
+    converted_effects = [
+        (time, _augment_grounded_effect_for_mapping(eff, neg_to_pos_mapping))
+        for time, eff in state.upcoming_effects
+    ]
 
     return State(time=state.time, fluents=new_fluents, upcoming_effects=converted_effects)
 
@@ -417,56 +451,10 @@ def convert_action_effects(
     Returns:
         New Action with augmented effects
     """
-    from railroad._bindings import GroundedEffect
-
-    def augment_fluents(fluents: Set[Fluent]) -> Set[Fluent]:
-        """Augment a set of fluents with consistency fluents."""
-        augmented = set(fluents)
-        for fluent in fluents:
-            if fluent.negated:
-                # Fluent is ~F("P") - removing P
-                # Check if F("P") (the positive version) is in mapping
-                positive_fluent = ~fluent  # Invert to get F("P")
-                if positive_fluent in neg_to_pos_mapping:
-                    # Add F("not-P") since P is being removed
-                    augmented.add(neg_to_pos_mapping[positive_fluent])
-            else:
-                # Fluent is F("P") - adding P
-                # Check if this P is in the mapping
-                if fluent in neg_to_pos_mapping:
-                    # Add ~F("not-P") since P is being added
-                    augmented.add(~neg_to_pos_mapping[fluent])
-        return augmented
-
-    def convert_grounded_effect(effect: GroundedEffect) -> GroundedEffect:
-        """Recursively convert a GroundedEffect and its probabilistic branches."""
-        # Augment the immediate resulting fluents
-        augmented_fluents = augment_fluents(effect.resulting_fluents)
-
-        # Recursively convert probabilistic effects
-        if effect.is_probabilistic:
-            converted_prob_effects = []
-            for prob_branch in effect.prob_effects:
-                prob = prob_branch.prob
-                converted_branch_effects = [
-                    convert_grounded_effect(branch_eff)
-                    for branch_eff in prob_branch.effects
-                ]
-                converted_prob_effects.append((prob, converted_branch_effects))
-
-            return GroundedEffect(
-                time=effect.time,
-                resulting_fluents=augmented_fluents,
-                prob_effects=converted_prob_effects
-            )
-        else:
-            return GroundedEffect(
-                time=effect.time,
-                resulting_fluents=augmented_fluents
-            )
-
-    # Convert all effects
-    converted_effects = [convert_grounded_effect(eff) for eff in action.effects]
+    converted_effects = [
+        _augment_grounded_effect_for_mapping(eff, neg_to_pos_mapping)
+        for eff in action.effects
+    ]
 
     # Create new action with converted effects
     return Action(action.preconditions, converted_effects, name=action.name, extra_cost=action.extra_cost)

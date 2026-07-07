@@ -54,6 +54,7 @@ offline once cached.
 | no metric / `minimize (total-time)` | duration 1 per action (PDDL's implicit objective is plan length) |
 | `(:metric maximize (reward))` **with** `(:goal-reward …)` and no reward-bearing effects | reinterpreted as reach-the-goal, minimize expected plan length (IPPC goal-directed convention) |
 | `(probabilistic p₁ e₁ …)` | railroad probabilistic effect branches; probabilities < 1 total get an implicit "nothing happens" remainder branch; nesting and multiple independent `probabilistic` groups per action are supported |
+| `(when c e)` conditional effects | native railroad conditional branches (state-selected analogue of probabilistic branches): the branch fires iff its condition fluents hold when the action's completion effect fires, evaluated **before** the effect's own fluents apply — so conditions see the pre-action state, matching PDDL. `forall`+`when` expands per object; `when` inside probabilistic branches is supported (its condition then sees the state at branch resolution); `(= …)` conditions compile to seeded static `pddl-eq o o` fluents |
 | objective overall | railroad's MCTS maximizes `−(expected completion time + Σ extra_cost)`, so converted problems minimize expected cost/time to goal |
 | `forall` (preconditions, unconditional effects, goals) | expanded over the finite object universe at conversion time |
 | `exists` (preconditions) | the quantified variable is lifted into an extra operator parameter (grounding enumerates witnesses) |
@@ -81,7 +82,11 @@ Grounding notes:
 
 - `:strips`, `:typing` (hierarchies), `:negative-preconditions`, `:equality`
 - `:universal-preconditions`, `:existential-preconditions`,
-  `:quantified-preconditions`, `forall` effects (unconditional bodies)
+  `:quantified-preconditions`, `forall` effects
+- `:conditional-effects` — `(when c e)` with conditions that flatten to a
+  conjunction of (possibly negated) literals, `forall`/`and` in conditions,
+  static `(= …)`/`(not (= …))` conditions, `forall`+`when`, and `when`
+  nested inside probabilistic branches
 - `:action-costs` (`total-cost` only, including per-binding function values)
 - `:probabilistic-effects` (PPDDL), rational probabilities (`1/2`), nested
   and multiple probabilistic groups, `(:goal-reward …)` goal-directed reward
@@ -95,9 +100,9 @@ Grounding notes:
 
 | Slug | Feature | Notes |
 |---|---|---|
-| `conditional-effects` | `(when …)` | **most common blocker** in IPC/IPPC domains; compiling `forall`+`when` into operator variants is the highest-value future work |
 | `disjunctive-preconditions` | `(or …)` in preconditions | intended future work: DNF operator-splitting |
 | `imply-conditions` | `(imply …)` | same compilation as disjunctions |
+| `conditional-effect-condition` | `or`/`exists`/`imply` inside a `when` condition | conjunctive conditions (incl. quantified/equality) are supported |
 | `durative-actions` | PDDL 2.1 temporal actions | ironic for a temporal planner — needs numeric durations + `at start`/`at end` effects; a natural follow-up |
 | `numeric-conditions` / `numeric-effects` | numeric fluents beyond `total-cost` | includes `decrease`, `assign`, arithmetic cost expressions |
 | `rewards` | `(increase (reward) …)` in effects | reward-shaping MDPs don't map to reach-goal planning |
@@ -107,7 +112,7 @@ Grounding notes:
 | `oneof-nondeterminism` | FOND `(oneof …)` | non-probabilistic nondeterminism |
 | `negated-compound-condition` | `(not (and …))` etc. | only literal negation supported |
 | `preferences` / `constraints` | PDDL 3 soft goals / trajectory constraints | |
-| `probabilistic-cost` | `total-cost` increase inside a probabilistic branch | cannot map to a fixed duration |
+| `probabilistic-cost` / `conditional-cost` | `total-cost` increase inside a probabilistic or conditional branch | cannot map to a fixed duration |
 | `timed-initial-literals` | `(at 5 (p))` in `:init` | |
 | `object-fluents` | non-boolean fluents | |
 
@@ -115,37 +120,38 @@ Grounding notes:
 
 `railroad pddl check <collection>` (first instance per domain), 2026-07-07:
 
-**ipc-2000 — 8/12 domains convert**
+**ipc-2000 — 11/12 domains convert**
 
 | Domain | Status | Notes |
 |---|---|---|
 | blocks-strips-{typed,untyped} | ok | 40 actions; solved optimally |
 | elevator-strips-simple-{typed,untyped} | ok | |
+| elevator-adl-simple-typed | ok | forall+when boarding; instance 1 solved optimally |
+| schedule-adl-{typed,untyped} | ok | conditional effects with equality conditions |
 | freecell-strips-{typed,untyped} | ok | 8.4k/34k actions |
 | logistics-strips-{typed,untyped} | ok | instance 1 solved optimally (20 steps) |
 | elevator-adl-full-typed | unsupported | imply-conditions |
-| elevator-adl-simple-typed | unsupported | conditional-effects |
-| schedule-adl-{typed,untyped} | unsupported | conditional-effects |
 
-**ippc-2006 (PPDDL) — 4/10 domains convert**
+**ippc-2006 (PPDDL) — 9/10 domains convert**
 
 | Domain | Status | Notes |
 |---|---|---|
 | blocksworld | ok | solved 5/5 seeds with `--planner greedy` |
-| random | ok | |
+| drive-unrolled, elevators, pitchcatch, random, schedule, zenotravel | ok | conditional effects (some with equality conditions) |
+| ex-blocksworld | ok | converts + executes correctly; solving blocked by dead ends (detonations) |
 | tireworld | ok | converts, but unsolved: dead ends (see below) |
-| zenotravel | ok | |
-| drive, drive-unrolled, elevators, ex-blocksworld, pitchcatch, schedule | unsupported | conditional-effects |
+| drive | unsupported | disjunctive-preconditions |
 
-**ippc-2008 (PPDDL) — 2/10 domains convert**
+**ippc-2008 (PPDDL) — 5/10 domains convert**
 
 | Domain | Status | Notes |
 |---|---|---|
 | blocksworld | ok | bundled domain+problem files |
+| boxworld, ex-blocksworld, schedule | ok | conditional effects |
 | triangle-tireworld | ok | instance 1 solved |
-| boxworld, ex-blocksworld, schedule, sysAdmin-SLP | unsupported | conditional-effects |
 | search-and-rescue | unsupported | imply-conditions |
 | rectangle-tireworld, zenotravel | unsupported | numeric-effects |
+| sysAdmin-SLP | unsupported | rewards |
 | 2-tireworlds | parse-error | source repo ships no domain file for it |
 
 Later deterministic years (spot-checked): `:action-costs` domains convert —
@@ -162,8 +168,12 @@ function-valued costs mapped to durations.
   domains.
 - **Dead ends are not avoided.** The FF heuristic is a delete-relaxation, so
   it cannot see that driving without a spare tire risks an unrecoverable
-  flat (ippc-2006 tireworld). Dead-end-aware planning (penalizing states
-  with no applicable actions) is future planner work, independent of this
-  converter.
+  flat (ippc-2006 tireworld) or that dropping a block may detonate it
+  (ex-blocksworld). Dead-end-aware planning (penalizing states with no
+  applicable actions) is future planner work, independent of this converter.
+- **Conditional effects and the heuristic**: the relaxed-plan heuristic
+  optimistically assumes `when` conditions hold (relaxation fires every
+  conditional branch), so conditionally-achievable goals get finite h values
+  but the heuristic may underestimate when a condition is hard to establish.
 - Competition-scale instances (e.g. IPC-2011 elevators) convert correctly
   but may need far more MCTS iterations than the defaults to solve.

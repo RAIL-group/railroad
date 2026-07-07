@@ -10,6 +10,7 @@ from railroad.pddl_converter.parser import (
     Forall,
     Literal,
     Probabilistic,
+    When,
     parse_domain,
     parse_problem,
     read_sexprs,
@@ -136,10 +137,17 @@ def test_unsupported_preconditions(precondition, reason):
     assert excinfo.value.reason == reason
 
 
+def test_parse_conditional_effect():
+    domain = parse_domain(_action_with(effect="(when (p) (and (q) (not (r))))"))
+    when = domain.actions[0].effect
+    assert isinstance(when, When)
+    assert when.condition == Literal("p", ())
+    assert isinstance(when.effect, EffectAnd)
+
+
 @pytest.mark.parametrize(
     "effect, reason",
     [
-        ("(when (p) (q))", "conditional-effects"),
         ("(oneof (p) (q))", "oneof-nondeterminism"),
         ("(assign (f) 3)", "numeric-effects"),
         ("(decrease (f) 3)", "numeric-effects"),
