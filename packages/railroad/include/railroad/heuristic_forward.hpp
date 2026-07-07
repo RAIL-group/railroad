@@ -94,6 +94,9 @@ inline FFForwardResult ff_forward_phase(
       }
     }
     const std::size_t n_branches = succs.size();
+    // Charge extra_cost alongside duration so the heuristic estimates the
+    // same quantity the MCTS reward penalizes: time + accumulated extra_cost.
+    duration += a->extra_cost();
     result.action_duration[a] = duration;
 
     for (const auto& [f, total_prob] : fluent_prob) {

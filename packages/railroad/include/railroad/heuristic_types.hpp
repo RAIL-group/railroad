@@ -66,7 +66,7 @@ using FFMemory = std::unordered_map<FFCacheKey, double, FFCacheKeyHash>;
 // An action that can produce a target fluent in the delete-relaxation.
 //   wait_cost: earliest time all positive preconditions are achievable
 //              (zero in the forward phase, filled in by compute_optimistic_costs)
-//   exec_cost: the action's own execution duration
+//   exec_cost: the action's own execution duration plus its extra_cost
 //   probability: chance the action actually produces the target fluent
 //                (1.0 = deterministic achiever)
 struct Achiever {
