@@ -398,14 +398,29 @@ def parse_effect(sexpr: Sexpr, context: str) -> EffectNode:
 # ============================================================================
 
 
+def _find_define(top: List[Sexpr], kind: str) -> Optional[List[Sexpr]]:
+    """Find ``(define (<kind> ...) ...)`` among top-level s-expressions.
+
+    Some benchmark files (notably IPPC-2008) bundle a domain define and a
+    problem define in one file, so we match on the header kind rather than
+    taking the first define.
+    """
+    for sexpr in top:
+        if _head(sexpr) != "define" or not isinstance(sexpr, list):
+            continue
+        header = sexpr[1] if len(sexpr) > 1 else None
+        if isinstance(header, list) and _head(header) == kind and len(header) >= 2:
+            return sexpr
+    return None
+
+
 def parse_domain(text: str) -> PDDLDomain:
     top = read_sexprs(text)
-    define = next((s for s in top if _head(s) == "define"), None)
-    if define is None or not isinstance(define, list):
-        raise PDDLParseError("No (define (domain ...)) found")
-    header = define[1] if len(define) > 1 else None
-    if not isinstance(header, list) or _head(header) != "domain" or len(header) < 2:
-        raise PDDLParseError("Expected (domain <name>) header")
+    define = _find_define(top, "domain")
+    if define is None:
+        raise PDDLParseError("No (define (domain <name>) ...) found")
+    header = define[1]
+    assert isinstance(header, list)
     domain = PDDLDomain(name=str(header[1]))
 
     for section in define[2:]:
@@ -497,12 +512,11 @@ def _parse_action(section: List[Sexpr]) -> PDDLActionDef:
 
 def parse_problem(text: str) -> PDDLProblem:
     top = read_sexprs(text)
-    define = next((s for s in top if _head(s) == "define"), None)
-    if define is None or not isinstance(define, list):
-        raise PDDLParseError("No (define (problem ...)) found")
-    header = define[1] if len(define) > 1 else None
-    if not isinstance(header, list) or _head(header) != "problem" or len(header) < 2:
-        raise PDDLParseError("Expected (problem <name>) header")
+    define = _find_define(top, "problem")
+    if define is None:
+        raise PDDLParseError("No (define (problem <name>) ...) found")
+    header = define[1]
+    assert isinstance(header, list)
     problem = PDDLProblem(name=str(header[1]), domain_name="")
 
     for section in define[2:]:

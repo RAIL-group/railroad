@@ -16,6 +16,7 @@ import base64
 import json
 import os
 import re
+import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -28,6 +29,9 @@ CACHE_DIR_ENV = "RAILROAD_PDDL_CACHE_DIR"
 class CollectionSpec:
     repo: str
     root: str  # repo-relative directory whose children are domain directories
+    # Directory holding <domain>/domain.pddl when the domain directory itself
+    # has none (IPPC-2008 keeps some domain files next to the generators).
+    domain_fallback_root: Optional[str] = None
 
 
 COLLECTIONS: Dict[str, CollectionSpec] = {
@@ -36,7 +40,9 @@ COLLECTIONS: Dict[str, CollectionSpec] = {
         for year in (1998, 2000, 2002, 2004, 2006, 2008, 2011, 2014)
     },
     "ippc-2006": CollectionSpec("probfd/ppddl-benchmarks", "ippc06/problems"),
-    "ippc-2008": CollectionSpec("probfd/ppddl-benchmarks", "ippc08/domains"),
+    "ippc-2008": CollectionSpec(
+        "probfd/ppddl-benchmarks", "ippc08/domains", "ippc08/generators"
+    ),
 }
 
 
@@ -52,14 +58,16 @@ class FetchedDomain:
     per_instance_domains: Dict[Path, Path] = field(default_factory=dict)
 
     def domain_for(self, instance: Path) -> Path:
-        """The domain file to use with the given instance file."""
+        """The domain file to use with the given instance file.
+
+        Falls back to the instance file itself when the domain directory has
+        no domain file: several IPPC-2008 domains bundle the domain define
+        inside each problem file (parsing fails cleanly if it is truly absent).
+        """
         if instance in self.per_instance_domains:
             return self.per_instance_domains[instance]
         if self.domain_file is None:
-            raise FileNotFoundError(
-                f"No domain file for instance {instance.name} in "
-                f"{self.collection}/{self.domain}"
-            )
+            return instance
         return self.domain_file
 
 
@@ -167,6 +175,16 @@ def fetch_domain(
         result.domain_file = _fetch_file(
             spec.repo, f"{repo_dir}/domain.pddl", None, local_dir / "domain.pddl"
         )
+    elif spec.domain_fallback_root is not None:
+        try:
+            result.domain_file = _fetch_file(
+                spec.repo,
+                f"{spec.domain_fallback_root}/{domain}/domain.pddl",
+                None,
+                local_dir / "domain.pddl",
+            )
+        except urllib.error.HTTPError:
+            pass  # no fallback domain file either; instances may be bundled
 
     # Instance files: either an instances/ subdirectory (potassco layout) or
     # loose .pddl files next to domain.pddl (ppddl-benchmarks layout).

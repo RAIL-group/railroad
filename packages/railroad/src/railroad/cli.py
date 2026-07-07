@@ -458,12 +458,15 @@ def pddl_list(collection: str) -> None:
 @click.option("--max-steps", type=int, default=500, show_default=True)
 @click.option("--max-iterations", type=int, default=4000, show_default=True,
               help="MCTS iterations per planning step")
+@click.option("--planner", type=click.Choice(["mcts", "greedy"]),
+              default="mcts", show_default=True,
+              help="Action selection: full MCTS or greedy expected-heuristic")
 @click.option("--verbose", is_flag=True, default=False,
               help="Print each executed action")
 def pddl_run(collection: str | None, domain: str | None, instance: int,
              domain_file: str | None, problem_file: str | None,
              seed: int, max_steps: int, max_iterations: int,
-             verbose: bool) -> None:
+             planner: str, verbose: bool) -> None:
     """Download (if needed), convert, and solve one PDDL instance."""
     from railroad import pddl_converter as pc
 
@@ -489,7 +492,8 @@ def pddl_run(collection: str | None, domain: str | None, instance: int,
     click.echo(f"metric:  {problem.metric}")
     click.echo(f"actions: {len(problem.ground_actions())} grounded")
     result = pc.solve(problem, seed=seed, max_steps=max_steps,
-                      max_iterations=max_iterations, verbose=verbose)
+                      max_iterations=max_iterations, planner=planner,
+                      verbose=verbose)
     if result.success:
         click.echo(f"SOLVED in {len(result.plan)} actions, "
                    f"cost/time {result.sim_time:g} "

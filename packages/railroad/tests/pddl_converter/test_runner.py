@@ -46,3 +46,16 @@ def test_solve_reports_unreachable_goal():
     result = solve(problem, seed=0)
     assert not result.success
     assert result.failure_reason == "no grounded actions"
+
+
+def test_greedy_planner_solves_blocks():
+    problem = load_problem(DATA / "blocks-domain.pddl", DATA / "blocks-instance.pddl")
+    result = solve(problem, seed=0, planner="greedy")
+    assert result.success
+    assert len(result.plan) >= 6
+
+
+def test_unknown_planner_rejected():
+    problem = load_problem(DATA / "blocks-domain.pddl", DATA / "blocks-instance.pddl")
+    with pytest.raises(ValueError):
+        solve(problem, planner="astar")

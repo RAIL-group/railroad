@@ -374,3 +374,57 @@ def test_domain_problem_mismatch_rejected():
     domain = "(define (domain d1) (:predicates (p)) (:action a :parameters () :precondition () :effect (p)))"
     with pytest.raises(PDDLParseError):
         convert_texts(domain, _minimal_problem().replace("(:domain d)", "(:domain other)"))
+
+
+def test_bundled_domain_and_problem_in_one_text():
+    """IPPC-2008 style: one file holding both defines converts cleanly."""
+    bundled = """
+    (define (domain d)
+      (:requirements :strips)
+      (:predicates (p ?x))
+      (:action a :parameters (?x) :precondition () :effect (p ?x)))
+    (define (problem prob-1)
+      (:domain d) (:objects x1) (:init) (:goal (p x1)))
+    """
+    converted = convert_texts(bundled, bundled)
+    assert converted.domain_name == "d"
+    assert converted.problem_name == "prob-1"
+
+
+def test_goal_reward_maximize_metric_reinterpreted():
+    domain = """
+    (define (domain d) (:requirements :strips :probabilistic-effects :rewards)
+      (:predicates (p ?x))
+      (:action a :parameters (?x) :precondition () :effect (p ?x)))
+    """
+    problem = """
+    (define (problem p) (:domain d) (:objects x1) (:init)
+      (:goal (p x1)) (:goal-reward 100) (:metric maximize (reward)))
+    """
+    converted = convert_texts(domain, problem)
+    assert "reach-goal" in converted.metric
+    assert _get_action(converted, "a x1").effects[1].time == 1.0
+
+
+def test_self_loop_grounding_preserves_fluent():
+    """A binding with ?from == ?to must not destroy the location fluent.
+
+    PDDL applies deletes before adds, so the add wins; railroad's effect
+    application is add-then-erase, so the converter drops the delete.
+    """
+    domain = """
+    (define (domain d) (:requirements :strips)
+      (:predicates (at ?x ?l))
+      (:action fly :parameters (?x ?from ?to)
+               :precondition (at ?x ?from)
+               :effect (and (not (at ?x ?from)) (at ?x ?to))))
+    """
+    problem = """
+    (define (problem p) (:domain d) (:objects plane apt)
+      (:init (at plane apt)) (:goal (at plane apt)))
+    """
+    converted = convert_texts(domain, problem)
+    self_loop = _get_action(converted, "fly plane apt apt")
+    finish = self_loop.effects[1]
+    assert F("at plane apt") in finish.resulting_fluents
+    assert F("not at plane apt") not in finish.resulting_fluents
