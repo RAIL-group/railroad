@@ -984,3 +984,42 @@ def test_at_implies_found_applies_to_action_preconditions():
     h_off = ff_heuristic(state, goal, actions, at_implies_found=False)
 
     assert h_off < h_on < float("inf")
+
+
+# ============================================================================
+# extra_cost integration
+# ============================================================================
+
+
+def _make_goal_action(name: str, duration: float, extra_cost: float) -> Action:
+    return Action(
+        {F("start")},
+        [GroundedEffect(time=duration, resulting_fluents={F("done")})],
+        name=name,
+        extra_cost=extra_cost,
+    )
+
+
+def test_ff_heuristic_charges_extra_cost():
+    """extra_cost is charged alongside duration in the heuristic estimate."""
+    state = State(0.0, {F("start")}, [])
+    goal = LiteralGoal(F("done"))
+
+    h_free = ff_heuristic(state, goal, [_make_goal_action("cheap", 2.0, 0.0)])
+    h_costly = ff_heuristic(state, goal, [_make_goal_action("costly", 2.0, 10.0)])
+
+    assert h_costly == pytest.approx(h_free + 10.0)
+
+
+def test_ff_heuristic_prefers_cheaper_achiever():
+    """With two achievers of equal duration, the cheaper one sets the estimate."""
+    state = State(0.0, {F("start")}, [])
+    goal = LiteralGoal(F("done"))
+
+    cheap = _make_goal_action("cheap", 2.0, 0.0)
+    costly = _make_goal_action("costly", 2.0, 10.0)
+
+    h_both = ff_heuristic(state, goal, [cheap, costly])
+    h_cheap_only = ff_heuristic(state, goal, [cheap])
+
+    assert h_both == pytest.approx(h_cheap_only)
