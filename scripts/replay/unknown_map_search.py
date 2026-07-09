@@ -224,7 +224,7 @@ def main(seed: int = 1089, num_robots: int = 2) -> None:
     dep_env.scene = scene  # type: ignore[attr-defined]  # expose to dashboard for overhead map
     env_ref[0] = dep_env
     dep_cost = run_planning(
-        dep_env, goal, "Deployment (informed policy)", str(OUT_DIR / "deployment.mp4")
+        dep_env, goal, "Deployment (informed)", str(OUT_DIR / "deployment.mp4")
     )
     print(f"deployment cost={dep_cost:.1f}s found={goal.evaluate(dep_env.state.fluents)}")
 
@@ -264,7 +264,7 @@ def main(seed: int = 1089, num_robots: int = 2) -> None:
     )
     rep_env.scene = scene  # type: ignore[attr-defined]  # expose to dashboard for overhead map
     rep_cost = run_planning(
-        rep_env, goal, "Replay (naive policy)", str(OUT_DIR / "replay.mp4")
+        rep_env, goal, "Replay (naive)", str(OUT_DIR / "replay.mp4")
     )
 
     # ------------------------------------------------------------------

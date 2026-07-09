@@ -25,11 +25,6 @@ import argparse
 from pathlib import Path
 
 OUT_DIR = Path("data/replay/point_goal_nav")
-FPS, DPI = 10, 130
-
-
-def _fluent_filter(f):  # noqa: ANN001
-    return any(kw in f.name for kw in ["at", "explored", "revealed"])
 
 
 # ----------------------------------------------------------------------
@@ -48,27 +43,33 @@ def run_planning(env, goal, label: str, save_video: str, *, max_iterations: int 
     from railroad.dashboard import PlannerDashboard
     from railroad.planner import MCTSPlanner
 
-    with PlannerDashboard(goal, env, fluent_filter=_fluent_filter) as dashboard:
+    def fluent_filter(f):  # noqa: ANN001
+        return any(kw in f.name for kw in ["at", "explored", "revealed"])
+
+    with PlannerDashboard(goal, env, fluent_filter=fluent_filter) as dashboard:
         act_callback = dashboard.make_act_callback()
         dashboard.console.print(f"[bold]{label}[/bold]")
         for iteration in range(max_iterations):
             if goal.evaluate(env.state.fluents):
+                dashboard.console.print("[green]Goal reached![/green]")
                 break
             actions = env.get_actions()
             if not actions:
+                dashboard.console.print("[red]No actions available — stuck.[/red]")
                 break
             mcts = MCTSPlanner(actions)
             action_name = mcts(
                 env.state, goal,
                 max_iterations=2000, c=10, max_depth=20, heuristic_multiplier=5,
             )
-            if action_name in ("NONE", ""):
+            if action_name == "NONE":
+                dashboard.console.print("[yellow]Planner returned NONE — stopping.[/yellow]")
                 break
             action = get_action_by_name(actions, action_name)
             env.act(action, loop_callback_fn=act_callback)
             dashboard.update(mcts, action_name)
 
-    dashboard.show_plots(save_video=save_video, video_fps=FPS, video_dpi=DPI)
+    dashboard.show_plots(save_video=save_video, video_fps=10, video_dpi=130)
     return float(env.state.time)
 
 
@@ -111,8 +112,7 @@ def main(seed: int = 1, num_robots: int = 2, env_name: str = "maze") -> None:
     )
     dep_env, goal = setup.env, setup.goal
     dep_cost = run_planning(
-        dep_env, goal, "Deployment (oracle planner)",
-        str(OUT_DIR / "deployment.mp4"), max_iterations=200,
+        dep_env, goal, "Deployment (oracle planner)", str(OUT_DIR / "deployment.mp4")
     )
 
     # ------------------------------------------------------------------
@@ -170,8 +170,7 @@ def main(seed: int = 1, num_robots: int = 2, env_name: str = "maze") -> None:
         rep_env.scene = setup.scene  # type: ignore[attr-defined]  # expose to dashboard for overhead map
         rep_goal = goal_fluent(log.robots)
         rep_cost = run_planning(
-            rep_env, rep_goal, f"Replay — {best_name}",
-            str(OUT_DIR / "replay.mp4"), max_iterations=120,
+            rep_env, rep_goal, f"Replay — {best_name}", str(OUT_DIR / "replay.mp4")
         )
         bounds = accumulate_bounds(rep_env.replay_commits, rep_cost)
 
