@@ -15,12 +15,13 @@ Demonstrates the real served-vantage panorama pipeline with the *model* faked:
 Both videos use the same dashboard, which colours each frontier by the policy's
 predicted probability and shows the running cost.
 
-Usage:  RAILSIM_GL_BACKEND=egl uv run python scripts/replay/replay_learned_demo.py [seed]
+Usage:  RAILSIM_GL_BACKEND=egl uv run python scripts/replay/replay_learned_demo.py \
+            [--seed S] [--num-robots N] [--env maze|office]
 """
 
 from __future__ import annotations
 
-import sys
+import argparse
 from pathlib import Path
 
 from railroad.core import get_action_by_name
@@ -125,7 +126,7 @@ def replay_with_video(log, setup, estimator, label: str, video: str):
     return accumulate_bounds(env.replay_commits, total), total
 
 
-def main(seed: int = 1, num_robots: int = 1, env_name: str = "maze") -> None:
+def main(seed: int = 1, num_robots: int = 2, env_name: str = "maze") -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     log, setup = deploy_and_record(
         env_name, seed, str(OUT_DIR / "deployment.mp4"), num_robots=num_robots
@@ -170,8 +171,22 @@ def main(seed: int = 1, num_robots: int = 1, env_name: str = "maze") -> None:
         setup.scene.release()
 
 
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Learned-policy offline replay (point-goal) with videos."
+    )
+    parser.add_argument("--seed", type=int, default=1, help="scene seed")
+    parser.add_argument(
+        "--num-robots", type=int, default=2,
+        help="robots deployed (co-located at start; any reaching goal wins)",
+    )
+    parser.add_argument(
+        "--env", dest="env_name", choices=("maze", "office"), default="maze",
+        help="railsim world to deploy in",
+    )
+    return parser.parse_args(argv)
+
+
 if __name__ == "__main__":
-    seed = int(sys.argv[1]) if len(sys.argv) > 1 else 1
-    num_robots = int(sys.argv[2]) if len(sys.argv) > 2 else 1
-    env_name = sys.argv[3] if len(sys.argv) > 3 else "maze"
-    main(seed, num_robots, env_name)
+    args = parse_args()
+    main(seed=args.seed, num_robots=args.num_robots, env_name=args.env_name)

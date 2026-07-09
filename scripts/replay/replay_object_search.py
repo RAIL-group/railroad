@@ -24,13 +24,14 @@ Two runs:
    cost vs the optimistic lower bound (straight to the true container) — both in
    deployment units (seconds), so they compare directly with the deployment.
 
-Usage:  uv run python scripts/replay/replay_object_search.py [seed]
+Usage:  uv run python scripts/replay/replay_object_search.py [--seed S] [--num-robots N]
 """
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
-from typing import Dict, Set
+from typing import Dict, List, Set
 
 import numpy as np
 
@@ -56,6 +57,14 @@ from railroad.replay.cost import accumulate_bounds
 from railroad.replay.search_replay_env import build_search_replay_env
 
 OUT_DIR = Path("data/replay_object_search")
+
+
+def robot_names(num_robots: int) -> List[str]:
+    """``robot1 .. robotN``; all co-located at ``start_loc`` (any finding the
+    object satisfies the goal)."""
+    if num_robots < 1:
+        raise ValueError(f"num_robots must be >= 1, got {num_robots}")
+    return [f"robot{i}" for i in range(1, num_robots + 1)]
 
 
 # ----------------------------------------------------------------------
@@ -178,12 +187,13 @@ def run_planning(env, goal, label, save_video, *, max_iterations=80):
     return float(env.state.time)
 
 
-def main(seed: int = 1089) -> None:
+def main(seed: int = 1089, num_robots: int = 2) -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    robots = robot_names(num_robots)
     scene, true_grid, hidden_sites, true_obj_locs, start, target = setup_scene(seed)
     true_container = next(c for c, objs in true_obj_locs.items() if target in objs)
     print(f"seed={seed} grid={true_grid.shape} target={target} true_container={true_container}")
-    print(f"containers={list(hidden_sites)} start={start}")
+    print(f"containers={list(hidden_sites)} start={start} robots={robots}")
 
     goal = F(f"found {target}")
 
@@ -199,7 +209,7 @@ def main(seed: int = 1089) -> None:
         skill_overrides={"move": NavigationMoveSkill},
         true_grid=true_grid,
         true_object_locations=true_obj_locs,
-        **make_env_kwargs(["robot1"], start, hidden_sites, target),
+        **make_env_kwargs(robots, start, hidden_sites, target),
     )
     dep_env.scene = scene  # type: ignore[attr-defined]
     env_ref[0] = dep_env
@@ -210,7 +220,9 @@ def main(seed: int = 1089) -> None:
     log = build_rollout_log(
         dep_env,
         goal_cell=(int(start[0]), int(start[1])),
-        robot_starts={"robot1": Pose(float(start[0]), float(start[1]), 0.0)},
+        robot_starts={
+            robot: Pose(float(start[0]), float(start[1]), 0.0) for robot in robots
+        },
         env_name="procthor",
         seed=seed,
         problem_class="object-search",
@@ -257,7 +269,18 @@ def main(seed: int = 1089) -> None:
     print(f"saved videos to {OUT_DIR}/deployment.mp4 and {OUT_DIR}/replay.mp4")
 
 
-if __name__ == "__main__":
-    import sys
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Offline-replay demo for object search in an unknown ProcTHOR scene."
+    )
+    parser.add_argument("--seed", type=int, default=1089, help="ProcTHOR scene seed")
+    parser.add_argument(
+        "--num-robots", type=int, default=2,
+        help="robots deployed (co-located at start; any finding the object wins)",
+    )
+    return parser.parse_args(argv)
 
-    main(int(sys.argv[1]) if len(sys.argv) > 1 else 1089)
+
+if __name__ == "__main__":
+    args = parse_args()
+    main(seed=args.seed, num_robots=args.num_robots)

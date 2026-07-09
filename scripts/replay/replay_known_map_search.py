@@ -23,13 +23,14 @@ Pipeline:
 Costs are makespan (``state.time``, seconds), so deployment and replay compare
 directly. ``C_opt`` is the optimal "straight to the true container" cost.
 
-Usage:  uv run python scripts/replay/replay_known_map_search.py [seed]
+Usage:  uv run python scripts/replay/replay_known_map_search.py [--seed S] [--num-robots N]
 """
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
-from typing import Callable, Dict, Set
+from typing import Callable, List, Set
 
 from railroad import operators
 from railroad._bindings import State
@@ -69,14 +70,26 @@ class SearchProcTHOREnvironment(ProcTHOREnvironment):
         ]
 
 
-def build_env(seed: int, target: str, locations: Set[str], prob_fn: ProbFn):
-    fluents = {F("revealed start_loc"), F("at robot1 start_loc"), F("free robot1")}
+def robot_names(num_robots: int) -> List[str]:
+    """``robot1 .. robotN``; all start at ``start_loc`` (any finding the object
+    satisfies the goal)."""
+    if num_robots < 1:
+        raise ValueError(f"num_robots must be >= 1, got {num_robots}")
+    return [f"robot{i}" for i in range(1, num_robots + 1)]
+
+
+def build_env(
+    seed: int, target: str, locations: Set[str], prob_fn: ProbFn, robots: List[str]
+):
+    fluents = {F("revealed start_loc")}
+    for robot in robots:
+        fluents |= {F(f"at {robot} start_loc"), F(f"free {robot}")}
     return SearchProcTHOREnvironment(
         object_find_prob_fn=prob_fn,
         seed=seed,
         state=State(0.0, fluents, []),
         objects_by_type={
-            "robot": {"robot1"},
+            "robot": set(robots),
             "location": set(locations) | {"start_loc"},
             "object": {target},
         },
@@ -110,8 +123,9 @@ def run_planning(env, goal, label, video, *, max_iterations=40) -> float:
     return float(env.state.time)
 
 
-def main(seed: int = 4001) -> None:
+def main(seed: int = 4001, num_robots: int = 2) -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
+    robots = robot_names(num_robots)
 
     # Known map: pick a target and the container that truly holds it. Searchable
     # locations are the scene's object-bearing containers (a realistic domain).
@@ -122,7 +136,7 @@ def main(seed: int = 4001) -> None:
     target = sorted({o for objs in scene.object_locations.values() for o in objs})[0]
     true_location = next(c for c, objs in scene.object_locations.items() if target in objs)
     print(f"seed={seed} grid={scene.grid.shape} #containers={len(containers)} "
-          f"target={target} true_location={true_location}")
+          f"target={target} true_location={true_location} robots={robots}")
 
     goal = F(f"found {target}")
 
@@ -130,7 +144,7 @@ def main(seed: int = 4001) -> None:
     def informed(robot, loc, obj):
         return 0.8 if loc == true_location else 0.1
 
-    dep_env = build_env(seed, target, set(containers), informed)
+    dep_env = build_env(seed, target, set(containers), informed, robots)
     dep_cost = run_planning(dep_env, goal, "Deployment (informed)",
                             str(OUT_DIR / "deployment.mp4"))
     searched = sorted({f.args[0] for f in dep_env.state.fluents if f.name == "searched"})
@@ -141,7 +155,9 @@ def main(seed: int = 4001) -> None:
     start = scene.locations["start_loc"]
     log = build_known_map_search_log(
         dep_env,
-        robot_starts={"robot1": Pose(float(start[0]), float(start[1]), 0.0)},
+        robot_starts={
+            robot: Pose(float(start[0]), float(start[1]), 0.0) for robot in robots
+        },
         env_name="procthor",
         seed=seed,
     )
@@ -178,7 +194,18 @@ def main(seed: int = 4001) -> None:
     print(f"saved videos to {OUT_DIR}/deployment.mp4 and {OUT_DIR}/replay.mp4")
 
 
-if __name__ == "__main__":
-    import sys
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Known-map object-search replay on ProcTHOR."
+    )
+    parser.add_argument("--seed", type=int, default=4001, help="ProcTHOR scene seed")
+    parser.add_argument(
+        "--num-robots", type=int, default=2,
+        help="robots deployed (all start at start_loc; any finding the object wins)",
+    )
+    return parser.parse_args(argv)
 
-    main(int(sys.argv[1]) if len(sys.argv) > 1 else 4001)
+
+if __name__ == "__main__":
+    args = parse_args()
+    main(seed=args.seed, num_robots=args.num_robots)
