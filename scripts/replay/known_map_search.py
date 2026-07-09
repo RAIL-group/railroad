@@ -70,7 +70,8 @@ def run_planning(env, goal, label: str, save_video: str, *, max_iterations: int 
             if action_name == "NONE":
                 dashboard.console.print("[yellow]Planner returned NONE — stopping.[/yellow]")
                 break
-            env.act(get_action_by_name(actions, action_name), loop_callback_fn=act_callback)
+            action = get_action_by_name(actions, action_name)
+            env.act(action, loop_callback_fn=act_callback)
             dashboard.update(mcts, action_name)
 
     dashboard.show_plots(save_video=save_video, video_fps=10, video_dpi=130)
@@ -79,13 +80,7 @@ def run_planning(env, goal, label: str, save_video: str, *, max_iterations: int 
 
 def main(seed: int = 4001, num_robots: int = 2) -> None:
     """Deploy an informed policy on a known map, record it, and replay a naive one."""
-    try:
-        from railroad.environment.procthor import ProcTHOREnvironment, ProcTHORScene
-    except ImportError as e:
-        raise ImportError(
-            "ProcTHOR dependencies not installed. "
-            "Install with: pip install railroad[procthor]"
-        ) from e
+    from railroad.environment.procthor import ProcTHOREnvironment, ProcTHORScene
 
     from railroad import operators
     from railroad._bindings import State

@@ -115,7 +115,8 @@ def run_planning(env, goal, label: str, save_video: str, *, max_iterations: int 
             if action_name == "NONE":
                 dashboard.console.print("[yellow]Planner returned NONE — stopping.[/yellow]")
                 break
-            env.act(get_action_by_name(actions, action_name), loop_callback_fn=act_callback)
+            action = get_action_by_name(actions, action_name)
+            env.act(action, loop_callback_fn=act_callback)
             dashboard.update(mcts, action_name)
 
     dashboard.show_plots(save_video=save_video, video_fps=10, video_dpi=130)
