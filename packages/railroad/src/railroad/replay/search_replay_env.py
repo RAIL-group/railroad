@@ -70,7 +70,7 @@ class SearchReplayEnvironment(ReplayConfinementMixin, UnknownSpaceEnvironment):
         self._search_log: List[Tuple[str, float, bool]] = []
         # One commit per not-found search at a subgoal the deployment did NOT
         # verify (unsearched container or frontier). optimistic_lb = min over
-        # these (design §6/§7).
+        # these.
         self._replay_commits: List[Commit] = []
         super().__init__(true_grid=confinement, **kwargs)
         for robot in self._objects_by_type.get("robot", set()):
@@ -184,7 +184,7 @@ class SearchReplayEnvironment(ReplayConfinementMixin, UnknownSpaceEnvironment):
           beyond the deployment already revealed is *sensed away* when the robot
           reaches it (its free beyond becomes observed → it stops being a
           frontier). So a ``search-frontier`` that actually **executes** is always
-          into genuinely-unseen space (design §7; same reasoning as ``lsp-explore``).
+          into genuinely-unseen space.
         """
         is_container = loc in self._recorded_object_locations
         if is_container and loc in self._searched_sites:

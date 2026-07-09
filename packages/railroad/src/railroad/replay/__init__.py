@@ -9,8 +9,7 @@ whose outcome the deployment never recorded.
 GL-free and torch-free. The bound math lives in
 :mod:`railroad.replay.cost` (pure functions); the replay environment and
 driver in :mod:`railroad.replay.replay_env`; on-disk logs in
-:mod:`railroad.replay.serialization`. See ``replay_design.md`` at the repo
-root for the full design.
+:mod:`railroad.replay.serialization`.
 """
 
 from .cost import (
@@ -38,6 +37,7 @@ from .known_map_search_replay_env import (
     run_known_map_search_replay,
 )
 from .recorder import build_rollout_log
+from .selection import select_policy
 from .replay_env import (
     ReplayEnvironment,
     build_replay_env,
@@ -97,4 +97,5 @@ __all__ = [
     "optimistic_cost_to_goal",
     "run_replay",
     "save_rollout_log",
+    "select_policy",
 ]

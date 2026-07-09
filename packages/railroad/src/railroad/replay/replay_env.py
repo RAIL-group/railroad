@@ -2,21 +2,21 @@
 
 ``ReplayEnvironment`` is a GL-free LSP point-goal environment whose
 "world" is a *recorded* final map rather than a live simulator. It
-realizes the two §5 patches and the §6 intercept:
+realizes the two patches and the intercept:
 
 * **Pessimistic / confinement sensing.** The laser ranges are cast against
   a confinement grid (recorded map with ``UNOBSERVED -> COLLISION``) so the
   robot is structurally confined to known free space, while the *values*
   written into ``_observed_grid`` are corrected against the **pristine**
   recorded map — so masked/behind-frontier cells are never recorded as
-  obstacles (§5.1.1). By construction ``_observed_grid`` only ever holds an
+  obstacles. By construction ``_observed_grid`` only ever holds an
   obstacle where the pristine map does.
 * **Intercept.** ``lsp-explore`` always resolves to its *failure* branch
   (the deployment recorded no map beyond a frontier), which sets
-  ``explored ?f`` so the existing dead-frontier pruning retires it (§5.2).
-  Each commit logs ``cost_accrued + optimistic_cost_to_goal`` for the bound
-  (§6), keyed by frontier signature so a re-extracted frontier is never
-  committed twice (§6.1).
+  ``explored ?f`` so the existing dead-frontier pruning retires it.
+  Each commit logs ``cost_accrued + optimistic_cost_to_goal`` for the
+  bound, keyed by frontier signature so a re-extracted frontier is never
+  committed twice.
 
 ``run_replay`` drives the plan→act loop with an injectable action selector
 (production: MCTS; tests: :func:`frontier_sweep_select`) and reduces the
@@ -130,7 +130,7 @@ class ReplayEnvironment(LSPEnvironmentMixin, ReplayConfinementMixin, UnknownSpac
         # no true map to label from.
         return False
 
-    # -- intercept: lsp-explore always fails (§6) ---------------------
+    # -- intercept: lsp-explore always fails ---------------------
 
     def resolve_probabilistic_effect(
         self,

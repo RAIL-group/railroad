@@ -2,7 +2,7 @@
 
 GL-free and torch-free: a ``FixedPriorFrontierStatistics`` policy needs no
 images, and the deterministic ``explore_first`` selector removes MCTS
-stochasticity. See replay_design.md §14.
+stochasticity.
 """
 
 from __future__ import annotations
@@ -118,7 +118,7 @@ def test_determinism() -> None:
 
 
 # --------------------------------------------------------------------------
-# §5.1.1 sensing quirk: no map corruption, frontiers survive
+# sensing quirk: no map corruption, frontiers survive
 # --------------------------------------------------------------------------
 
 

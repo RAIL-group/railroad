@@ -33,7 +33,7 @@ def _container_subgoals(env: Any, containers: list) -> list:
     deployment observed*, so a revealed-but-uninspected container's true contents
     must never enter the log (they are ground truth the deployment never learned).
     Coordinates are fine — the cell was observed, so the candidate may navigate
-    there; searching it then resolves not-found (design §7). Inspected containers
+    there; searching it then resolves not-found. Inspected containers
     are identified by a ``searched ?loc ?obj`` fluent, set deterministically by
     the search operator on both found and not-found outcomes.
     """

@@ -1,4 +1,4 @@
-"""Known-map object-search replay (design doc §7 / §7.1).
+"""Known-map object-search replay.
 
 The complement of :mod:`~railroad.replay.search_replay_env`: there the map is
 *unknown* (frontier exploration + confinement sensing); here the map is **fully
@@ -10,7 +10,7 @@ optimism in the travel term. Because the deployment revealed the truth (it found
 the target), every alternative policy's cost is computable **exactly**: it
 searches containers in its own order until it hits the true one, and every other
 container's emptiness is known too. So the cost reported here is the
-alternative's *exact* counterfactual cost, not a lower bound (§7.1).
+alternative's *exact* counterfactual cost, not a lower bound.
 
 Consequently the two LSP-style bounds do **not** apply: the optimistic vs.
 simply-connected gap exists only to bracket *unobserved-space* uncertainty (a
@@ -61,7 +61,7 @@ class KnownMapSearchReplayEnvironment(OccupancyGridPathingMixin, SymbolicEnviron
     and logs an optimistic commit (``optimistic_to_goal = 0`` — the object could be
     right here; there is no unobserved space, hence no frontier term). Thus the
     cost is a **commit-based lower bound** (``optimistic_lb`` vs. makespan), not an
-    exact value (design §7.1, updated).
+    exact value.
     """
 
     def __init__(
@@ -355,8 +355,7 @@ def run_known_map_search_replay(
     shortcut-to-goal: the only unknown, which container holds the target, was
     revealed by the deployment). The two LSP-style bounds therefore collapse:
     ``optimistic_lb == simply_connected_lb == total_cost``, the exact cost in
-    deployment units (seconds), comparable to ``log.actual_total_cost``. See
-    ``replay_design.md`` §7.1.
+    deployment units (seconds), comparable to ``log.actual_total_cost``.
     """
     from .domains import MctsParams, replay
     from .policy import CandidatePolicy

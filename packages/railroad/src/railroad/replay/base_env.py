@@ -5,7 +5,7 @@ object-search :class:`~railroad.replay.search_replay_env.SearchReplayEnvironment
 replay a policy over a *recorded* map: the laser is cast against a **confinement
 grid** (recorded map with ``UNOBSERVED -> COLLISION``) so the robot stays in known
 space, while the values written into ``_observed_grid`` are corrected against the
-**pristine** recorded map (design §5.1.1). They also accrue per-robot travel cost
+**pristine** recorded map. They also accrue per-robot travel cost
 and expose the recorded panorama buffer to a learned estimator.
 
 This mixin is placed **before** ``UnknownSpaceEnvironment`` in the MRO so its

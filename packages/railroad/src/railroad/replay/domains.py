@@ -1,4 +1,4 @@
-"""Unified replay driver over pluggable domains (design §9 precursor).
+"""Unified replay driver over pluggable domains.
 
 The three replay flavors — point-goal **navigation** in unknown space,
 **object search** in an unknown map, and **object search** in a known map —
@@ -8,8 +8,9 @@ final env state reduces to a :class:`~railroad.replay.cost.Bounds`. A
 :class:`ReplayDomain` bundles those three seams; :func:`replay` dispatches on
 ``log.problem_class`` and runs the shared loop.
 
-This is the entry point the §9 selection layer builds on: ``for policy in
-candidates: replay(log, policy)`` over one recording. The domain-specific
+This is the entry point the selection layer builds on (see
+:mod:`railroad.replay.selection`): ``for policy in candidates: replay(log,
+policy)`` over one recording. The domain-specific
 ``run_*`` drivers (``run_replay`` etc.) are thin wrappers over :func:`replay`,
 kept for their established signatures.
 """
@@ -118,7 +119,7 @@ class ReplayDomain(ABC):
 
 
 class NavigationDomain(ReplayDomain):
-    """Point-goal navigation in unknown space (design §6): optimistic vs.
+    """Point-goal navigation in unknown space: optimistic vs.
     simply-connected bounds from the alternative's frontier commitments."""
 
     problem_class = "navigation"
@@ -152,7 +153,7 @@ class NavigationDomain(ReplayDomain):
 
 
 class UnknownSearchDomain(ReplayDomain):
-    """Frontier-based object search in an unknown map (design §6/§7).
+    """Frontier-based object search in an unknown map.
 
     Search outcomes resolve from the recorded ground truth. The optimistic bound
     is **commit-based**, exactly as in navigation: each not-found search is a
@@ -161,7 +162,7 @@ class UnknownSearchDomain(ReplayDomain):
     be immediately at/past it). ``optimistic_lb = min`` over those commits; the
     simply-connected bound is the candidate's actual replay makespan. (The old
     "straight to the true container" cost was a *policy-independent oracle*
-    regret baseline, not the candidate's bound — see §7.1.)
+    regret baseline, not the candidate's bound)
     """
 
     problem_class = "object-search"
@@ -215,7 +216,7 @@ class UnknownSearchDomain(ReplayDomain):
 
 
 class KnownMapSearchDomain(ReplayDomain):
-    """Object search in a fully known map (design §7.1, updated).
+    """Object search in a fully known map.
 
     Travel is exact (known map, no unobserved space → no frontier optimism), but
     object *presence* is known only where the deployment searched. Not assuming

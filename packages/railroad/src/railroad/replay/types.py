@@ -1,7 +1,7 @@
 """Serializable records for offline replay.
 
 A :class:`RolloutLog` is everything one real deployment hands to offline
-replay (see ``replay_design.md`` §4). For *navigation* replay the load-
+replay. For *navigation* replay the load-
 bearing fields are ``recorded_grid`` (the final observed map — the replay
 arena), ``goal_cell``, and ``robot_starts`` / ``config``; the rest is
 provenance. :class:`ReplayResult` is what a replay produces: the two
@@ -27,15 +27,15 @@ Pose3 = Tuple[float, float, float]
 class SubgoalRecord:
     """A recorded subgoal (a frontier of the final map, or a container).
 
-    ``signature`` is the replay-stable key (a cell-set hash for frontiers,
-    §6.1). ``contents`` carries per-container observations for the search
-    extension (§4); empty for navigation.
+    ``signature`` is the replay-stable key (a cell-set hash for frontiers).
+    ``contents`` carries per-container observations for the search extension;
+    empty for navigation.
 
     ``searched`` records whether the deployment actually *searched* this
     container (vs. merely revealing its cell). It is load-bearing for the bound:
     a searched container's outcome is known (replay it exactly, no optimism),
     while a revealed-but-unsearched container's outcome is unknown — replay must
-    force not-found and log an optimistic commit there (design §7). We do **not**
+    force not-found and log an optimistic commit there. We do **not**
     infer an unsearched container's emptiness from the object being found
     elsewhere: that would assume an object occupies exactly one container, which
     the bound must not rely on. ``contents`` is empty unless ``searched``.
@@ -82,8 +82,8 @@ class RolloutLog:
     # live env (replay then falls back to a default config).
     config: Dict[str, Any] = field(default_factory=dict)
     # Accumulated panorama buffer from the deployment. Served to a learned
-    # frontier-statistics estimator during replay (best-vantage perception,
-    # design §2.1); empty for non-visual logs. Typed loosely so the replay
+    # frontier-statistics estimator during replay (best-vantage
+    # perception); empty for non-visual logs. Typed loosely so the replay
     # core stays importable without the railsim (GL) extra.
     pano_records: List["PanoRecord"] = field(default_factory=list)
 

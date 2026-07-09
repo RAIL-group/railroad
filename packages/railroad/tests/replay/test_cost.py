@@ -1,7 +1,7 @@
 """Tests for the pure offline-replay cost bounds (``railroad.replay.cost``).
 
 These are the L0 anchor: no environment, no GL, no torch — just grids and
-hand-verified numbers. See replay_design.md §14.5.
+hand-verified numbers.
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ def test_routes_through_unobserved_space(parse_grid) -> None:
         only_return_cost_grid=True,
     )
     assert isinstance(observed_only, np.ndarray)
-    assert not math.isfinite(float(observed_only[point[0], point[1]]))
+    assert not math.isfinite(float(observed_only[point[0]][point[1]]))
 
     # Optimistic (unseen-as-free): the gap opens -> finite path.
     assert math.isfinite(optimistic_cost_to_goal(grid, point, goal))
