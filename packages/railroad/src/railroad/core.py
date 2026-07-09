@@ -1,5 +1,5 @@
 # Re-import required dependencies due to kernel reset
-from typing import Callable, List, Tuple, Dict, Set, Union, Sequence, Collection, Mapping, Optional, cast
+from typing import Callable, List, Tuple, Dict, Set, Union, Sequence, Collection, Mapping, Optional
 import itertools
 
 from railroad._bindings import GroundedEffect, Fluent, Action, State
@@ -157,9 +157,8 @@ def get_action_by_name(actions: List[Action], name: str) -> Action:
 
 def get_next_actions(state: State, all_actions: List[Action]) -> List[Action]:
     # Step 1: Extract all `free(...)` fluents
-    free_robot_fluents: List[Fluent] = cast(
-        List[Fluent],
-        sorted([f for f in state.fluents if f.name == "free"], key=lambda f: str(f)),
+    free_robot_fluents: List[Fluent] = sorted(
+        [f for f in state.fluents if f.name == "free"], key=lambda f: str(f)
     )
     # neg_fluents = {~f for f in free_robot_fluents}
     neg_state = state.copy()
