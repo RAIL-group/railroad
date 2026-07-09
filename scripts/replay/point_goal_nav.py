@@ -76,7 +76,8 @@ def deploy_and_record(env_name: str, seed: int, video: str, num_robots: int = 1)
             )
             if action_name == "NONE":
                 break
-            env.act(get_action_by_name(actions, action_name), loop_callback_fn=act_callback)
+            action = get_action_by_name(actions, action_name)
+            env.act(action, loop_callback_fn=act_callback)
             dashboard.update(mcts, action_name)
     dashboard.show_plots(save_video=video, video_fps=FPS, video_dpi=DPI)
 
@@ -131,7 +132,8 @@ def replay_with_video(log, setup, estimator, label: str, video: str):
             )
             if action_name in ("NONE", ""):
                 break
-            env.act(get_action_by_name(actions, action_name), loop_callback_fn=act_callback)
+            action = get_action_by_name(actions, action_name)
+            env.act(action, loop_callback_fn=act_callback)
             dashboard.update(mcts, action_name)
     dashboard.show_plots(save_video=video, video_fps=FPS, video_dpi=DPI)
 
