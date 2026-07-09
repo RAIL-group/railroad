@@ -1,4 +1,4 @@
-"""Known-map object-search replay on ProcTHOR (design doc §7 / §7.1).
+"""Known-map object-search replay on ProcTHOR.
 
 Unlike scripts/replay/replay_object_search.py (an *unknown* environment: the robot must
 explore frontiers and the observed map is partial), here the **map is fully
@@ -16,7 +16,7 @@ Pipeline:
    SAME known map. Its only knowledge of object presence is the recording —
    realized by restricting the replay env's ``_objects_at_locations`` to the
    recorded contents, so the existing deterministic search resolution becomes
-   exact replay from the recording (§7.1). Travel is exact (map known) and,
+   exact replay from the recording. Travel is exact (map known) and,
    because the deployment revealed the truth, the counterfactual cost is exact —
    not just a lower bound.
 

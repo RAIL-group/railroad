@@ -4,8 +4,9 @@ The three replay domains consume differently-shaped policy knobs (a
 frontier-statistics estimator for navigation; frontier/container find-probability
 callables for object search). :class:`CandidatePolicy` is the single container the
 unified :func:`~railroad.replay.domains.replay` entry accepts, so the driver and
-the forthcoming §9 selection layer can hold and iterate a list of candidates
-uniformly — each domain reads the fields it needs and ignores the rest.
+the deferred selection layer (:mod:`railroad.replay.selection`) can hold and
+iterate a list of candidates uniformly — each domain reads the fields it needs
+and ignores the rest.
 """
 
 from __future__ import annotations

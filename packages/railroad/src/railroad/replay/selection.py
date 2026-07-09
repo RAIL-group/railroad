@@ -1,0 +1,52 @@
+"""Cross-trial policy selection over offline replay — **deferred stub**.
+
+Offline replay reduces *one* deployment plus *one* candidate policy to a
+:class:`~railroad.replay.types.ReplayResult` carrying lower-bound costs
+(:func:`railroad.replay.replay`). *Selection* is the layer on top: replay a set
+of candidates over the same recording — and, across many recordings, aggregate
+their bound evidence — to pick the policy that is data-efficiently justified.
+
+The single-recording comparison already works today with the shipped API: replay
+each candidate over one log and rank by bound. Callers can do that directly, and
+``scripts/replay/replay_learned_demo.py`` demonstrates it::
+
+    ranked = sorted(
+        ((p, replay(log, p)) for p in candidates),
+        key=lambda kv: kv[1].bounds.simply_connected_lb,
+    )
+
+What is **not** implemented is the *cross-trial* aggregator that decides a winner
+from bound evidence spanning many recordings (the accept/reject rule and its
+bulk-run harness). :func:`select_policy` is a placeholder that raises
+:class:`NotImplementedError` so the seam is explicit rather than silently missing;
+it will be filled in when the selection work lands.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Iterable, Sequence
+
+if TYPE_CHECKING:
+    from .policy import CandidatePolicy
+    from .types import RolloutLog
+
+
+def select_policy(
+    logs: "Iterable[RolloutLog]",
+    candidates: "Sequence[CandidatePolicy]",
+    **replay_kwargs: object,
+) -> "CandidatePolicy":
+    """Pick the best candidate from bound evidence across many recordings.
+
+    **Not implemented.** This is the cross-trial selection layer: replay every
+    *candidate* over every recording in *logs*, aggregate the resulting bounds,
+    and return the policy whose lower-bound evidence dominates. Deferred to a
+    later change; for now, compare candidates over a single recording by calling
+    :func:`railroad.replay.replay` per candidate and ranking by bound (see this
+    module's docstring and ``replay_learned_demo.py``).
+    """
+    raise NotImplementedError(
+        "cross-trial policy selection is not implemented yet; replay each "
+        "candidate over one recording with railroad.replay.replay() and rank by "
+        "bound (see railroad.replay.selection docstring)."
+    )

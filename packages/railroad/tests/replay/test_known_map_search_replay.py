@@ -1,4 +1,4 @@
-"""Tests for known-map object-search replay (design §7 / §7.1).
+"""Tests for known-map object-search replay.
 
 GL-free and procthor-free: a hand-drawn ASCII floorplan is the known map, the
 container coordinates are markers, and outcomes resolve from recorded contents.

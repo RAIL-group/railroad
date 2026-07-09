@@ -1,7 +1,7 @@
 """Pure cost-bound computation for offline replay.
 
 Two lower bounds on what an alternative policy would have cost, computed
-from recorded deployment data (see ``replay_design.md`` §6, §14.5):
+from recorded deployment data:
 
 - **optimistic** — ``min`` over the alternative's subgoal commitments of
   ``cost_accrued + optimistic_cost_to_goal(committed subgoal)``, where the
@@ -81,7 +81,7 @@ class Commit:
     subgoal — both in the deployment's cost unit (seconds / makespan), so the
     resulting bounds compare directly with the recorded ``actual_total_cost``.
     ``robot`` / ``frontier_signature`` are provenance (the signature is the
-    replay-stable subgoal key, §6.1).
+    replay-stable subgoal key).
     """
 
     cost_accrued: float
