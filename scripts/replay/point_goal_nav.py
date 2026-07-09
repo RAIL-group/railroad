@@ -15,7 +15,7 @@ Demonstrates the real served-vantage panorama pipeline with the *model* faked:
 Both videos use the same dashboard, which colours each frontier by the policy's
 predicted probability and shows the running cost.
 
-Usage:  RAILSIM_GL_BACKEND=egl uv run python scripts/replay/replay_learned_demo.py \
+Usage:  RAILSIM_GL_BACKEND=egl uv run python scripts/replay/point_goal_nav.py \
             [--seed S] [--num-robots N] [--env maze|office]
 """
 
@@ -44,7 +44,7 @@ from railroad.replay import (
     save_rollout_log,
 )
 
-OUT_DIR = Path("data/replay_learned")
+OUT_DIR = Path("data/replay/point_goal_nav")
 FPS, DPI = 10, 130
 
 

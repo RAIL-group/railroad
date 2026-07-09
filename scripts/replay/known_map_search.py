@@ -1,6 +1,6 @@
 """Known-map object-search replay on ProcTHOR.
 
-Unlike scripts/replay/replay_object_search.py (an *unknown* environment: the robot must
+Unlike scripts/replay/unknown_map_search.py (an *unknown* environment: the robot must
 explore frontiers and the observed map is partial), here the **map is fully
 known** — the ProcTHOR floorplan is given — and only the objects' *presence in
 containers* is unknown. This mirrors examples/procthor_search.py (a
@@ -23,7 +23,7 @@ Pipeline:
 Costs are makespan (``state.time``, seconds), so deployment and replay compare
 directly. ``C_opt`` is the optimal "straight to the true container" cost.
 
-Usage:  uv run python scripts/replay/replay_known_map_search.py [--seed S] [--num-robots N]
+Usage:  uv run python scripts/replay/known_map_search.py [--seed S] [--num-robots N]
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ from railroad.replay import (
     build_known_map_search_replay_env,
 )
 
-OUT_DIR = Path("data/replay_known_map_search")
+OUT_DIR = Path("data/replay/known_map_search")
 
 ProbFn = Callable[[str, str, str], float]
 

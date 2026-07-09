@@ -57,7 +57,7 @@ from railroad.lsp.model import load_frontier_statistics_model
 estimator = LearnedFrontierStatistics(load_frontier_statistics_model("LSPFrontierNet.pt"))
 ```
 
-See `scripts/replay/replay_learned_demo.py` for the full record → serialize →
+See `scripts/replay/point_goal_nav.py` for the full record → serialize →
 serve → compare pipeline (with videos).
 
 ## How it works
@@ -107,4 +107,4 @@ all robots in the log).
 Deferred: the cross-trial policy-**selection** layer (`selection.py` is an
 explicit stub) and training real networks. Single-recording candidate comparison
 is available today by calling `replay()` per candidate and ranking by bound (see
-`replay_learned_demo.py`).
+`point_goal_nav.py`).
