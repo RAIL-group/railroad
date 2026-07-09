@@ -55,10 +55,10 @@ def mcts_selector(config: MctsConfig) -> ActionSelector:
             max_depth=config.max_depth,
             heuristic_multiplier=config.heuristic_multiplier,
         )
-        select.last_planner = planner  # type: ignore[attr-defined]
+        select.last_planner = planner  # ty: ignore[unresolved-attribute]
         return name
 
-    select.last_planner = None  # type: ignore[attr-defined]
+    select.last_planner = None  # ty: ignore[unresolved-attribute]
     return select
 
 
