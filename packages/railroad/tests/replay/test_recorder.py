@@ -5,13 +5,10 @@ from __future__ import annotations
 import numpy as np
 
 from railroad.environment.types import Pose
-from railroad.lsp.frontier_statistics import FixedPriorFrontierStatistics
-from railroad.replay.recorder import build_rollout_log
-from railroad.replay.replay_env import build_replay_env
+from railroad.replay import build_replay_env, build_rollout_log, goal_fluent
 from railroad.replay.serialization import load_rollout_log, save_rollout_log
 
 from railroad.core import get_action_by_name
-from railroad.replay.replay_env import goal_fluent
 
 from .conftest import build_log_from_ascii, explore_first_select
 
@@ -25,7 +22,7 @@ MAP = """
 
 def _live_env():
     log = build_log_from_ascii(MAP)
-    env = build_replay_env(log, FixedPriorFrontierStatistics(prob_feasible=0.8))
+    env = build_replay_env(log)
     return log, env
 
 

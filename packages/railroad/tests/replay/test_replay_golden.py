@@ -14,8 +14,13 @@ import numpy as np
 import pytest
 
 from railroad.lsp.frontier_statistics import FixedPriorFrontierStatistics
-from railroad.replay.cost import accumulate_bounds
-from railroad.replay.replay_env import run_replay
+from railroad.replay import (
+    CandidatePolicy,
+    MctsConfig,
+    accumulate_bounds,
+    build_replay_env,
+    run_replay,
+)
 
 from .conftest import build_log_from_ascii, explore_first_select
 
@@ -41,14 +46,16 @@ MAPS = {
 }
 
 
-def _estimator() -> FixedPriorFrontierStatistics:
-    return FixedPriorFrontierStatistics(prob_feasible=0.8)
+def _policy() -> CandidatePolicy:
+    return CandidatePolicy(frontier_statistics=FixedPriorFrontierStatistics(prob_feasible=0.8))
 
 
 @pytest.mark.parametrize("name", sorted(MAPS))
 def test_golden_replay(name: str) -> None:
     log = build_log_from_ascii(MAPS[name])
-    result = run_replay(log, _estimator(), select_action=explore_first_select)
+    result = run_replay(
+        build_replay_env(log), _policy(), select_action=explore_first_select
+    )
 
     assert result.goal_reached
     assert result.commits, "explore-first must commit to at least one frontier"
@@ -69,7 +76,9 @@ def test_golden_replay(name: str) -> None:
 @pytest.mark.parametrize("name", sorted(MAPS))
 def test_golden_no_double_commit(name: str) -> None:
     log = build_log_from_ascii(MAPS[name])
-    result = run_replay(log, _estimator(), select_action=explore_first_select)
+    result = run_replay(
+        build_replay_env(log), _policy(), select_action=explore_first_select
+    )
     signatures = [c.frontier_signature for c in result.commits]
     assert len(signatures) == len(set(signatures))
 
@@ -78,10 +87,10 @@ def test_mcts_production_path_runs() -> None:
     """run_replay with the default MCTS selector reaches a clean terminal."""
     log = build_log_from_ascii(MAPS["one_frontier"])
     result = run_replay(
-        log,
-        _estimator(),
+        build_replay_env(log),
+        _policy(),
         max_planning_iterations=60,
-        mcts_iterations=800,
+        mcts=MctsConfig(iterations=800, c=10.0, max_depth=20, heuristic_multiplier=5.0),
     )
     assert result.termination in {"goal_reached", "no_actions", "planner_none"}
     assert np.isfinite(result.bounds.simply_connected_lb)

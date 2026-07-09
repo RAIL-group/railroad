@@ -14,8 +14,12 @@ import numpy as np
 
 from railroad.core import Fluent
 from railroad.lsp.frontier_statistics import FixedPriorFrontierStatistics
-from railroad.replay import CandidatePolicy, replay
-from railroad.replay.replay_env import build_replay_env, goal_fluent
+from railroad.replay import (
+    CandidatePolicy,
+    build_replay_env,
+    goal_fluent,
+    run_replay,
+)
 from railroad.replay.types import RolloutLog, SubgoalRecord
 
 from .conftest import REPLAY_TEST_CONFIG, parse_ascii_grid
@@ -53,7 +57,7 @@ def test_arena_spans_all_robots() -> None:
     """Both robots get initial ``at``/``free`` fluents and are grounded objects."""
     log = _two_robot_log()
     assert log.robots == ["robot1", "robot2"]
-    env = build_replay_env(log, _estimator())
+    env = build_replay_env(log)
 
     assert env.objects_by_type["robot"] == {"robot1", "robot2"}
     for robot in log.robots:
@@ -81,7 +85,7 @@ def test_multi_robot_replay_reaches_goal_with_sound_bounds() -> None:
     """
     log = _two_robot_log()
     policy = CandidatePolicy(name="prior-0.8", frontier_statistics=_estimator())
-    result = replay(log, policy, max_planning_iterations=200)
+    result = run_replay(build_replay_env(log), policy, max_planning_iterations=200)
 
     assert result.goal_reached, "two robots must be able to reach the goal"
     assert result.termination == "goal_reached"
@@ -123,7 +127,7 @@ def test_multi_robot_object_search_finds_target() -> None:
             "robot2": (float(s2[0]), float(s2[1]), 0.0),
         },
         problem_class="object-search",
-        target_object="obj",
+        goal=Fluent("found obj"),
         subgoals=[
             _container("box_A", markers["A"][0], ()),
             _container("box_E", markers["E"][0], ("obj",)),
@@ -138,7 +142,7 @@ def test_multi_robot_object_search_finds_target() -> None:
         frontier_find_prob=lambda r, f, o: 0.5,
         container_find_prob=lambda r, l, o: 0.8,
     )
-    result = replay(log, policy, max_planning_iterations=60)
+    result = run_replay(build_replay_env(log), policy, max_planning_iterations=60)
 
     assert result.goal_reached
     assert any(loc == "box_E" and found for loc, _, found in result.search_log)

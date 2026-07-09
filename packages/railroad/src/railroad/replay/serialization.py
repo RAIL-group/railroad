@@ -24,6 +24,56 @@ _META_FILE = "meta.json"
 _PANOS_FILE = "panos.npz"
 
 
+def _goal_to_json(goal: Any) -> Optional[dict]:
+    """Serialize a ``Goal`` tree (LITERAL / AND / OR / TRUE / FALSE) to a dict.
+
+    Compound goals (``found book & found plate``) round-trip; a literal stores its
+    fluent as ``[name, args, negated]``. ``None`` (no recorded goal) maps to ``None``.
+    """
+    if goal is None:
+        return None
+    from railroad._bindings import Fluent, GoalType
+
+    # A bare Fluent goal (not yet wrapped in a LiteralGoal) is a single literal.
+    if isinstance(goal, Fluent):
+        return {"type": "literal", "fluent": [goal.name, list(goal.args), goal.negated]}
+
+    goal_type = goal.get_type()
+    if goal_type == GoalType.LITERAL:
+        (fluent,) = tuple(goal.get_all_literals())
+        return {"type": "literal", "fluent": [fluent.name, list(fluent.args), fluent.negated]}
+    if goal_type == GoalType.AND:
+        return {"type": "and", "children": [_goal_to_json(c) for c in goal.children()]}
+    if goal_type == GoalType.OR:
+        return {"type": "or", "children": [_goal_to_json(c) for c in goal.children()]}
+    if goal_type == GoalType.TRUE_GOAL:
+        return {"type": "true"}
+    if goal_type == GoalType.FALSE_GOAL:
+        return {"type": "false"}
+    raise ValueError(f"cannot serialize goal of type {goal_type!r}")
+
+
+def _goal_from_json(data: Optional[dict]) -> Any:
+    """Rebuild a ``Goal`` from :func:`_goal_to_json` output (``None`` -> ``None``)."""
+    if data is None:
+        return None
+    from railroad._bindings import AndGoal, FalseGoal, Fluent, LiteralGoal, OrGoal, TrueGoal
+
+    kind = data["type"]
+    if kind == "literal":
+        name, args, negated = data["fluent"]
+        return LiteralGoal(Fluent(name, *args, negated=negated))
+    if kind == "and":
+        return AndGoal([_goal_from_json(c) for c in data["children"]])
+    if kind == "or":
+        return OrGoal([_goal_from_json(c) for c in data["children"]])
+    if kind == "true":
+        return TrueGoal()
+    if kind == "false":
+        return FalseGoal()
+    raise ValueError(f"cannot deserialize goal of type {kind!r}")
+
+
 @dataclass
 class LoadedPanoRecord:
     """A deserialized panorama record (duck-types railsim ``PanoRecord``).
@@ -147,7 +197,7 @@ def save_rollout_log(log: RolloutLog, directory: str | Path) -> Path:
         "problem_class": log.problem_class,
         "env_name": log.env_name,
         "seed": log.seed,
-        "target_object": log.target_object,
+        "goal": _goal_to_json(log.goal),
         "pano_robots": pano_robots,
         "goal_cell": [int(log.goal_cell[0]), int(log.goal_cell[1])],
         "robot_starts": {
@@ -232,7 +282,7 @@ def load_rollout_log(directory: str | Path) -> RolloutLog:
         problem_class=meta["problem_class"],
         env_name=meta["env_name"],
         seed=meta["seed"],
-        target_object=meta.get("target_object", ""),
+        goal=_goal_from_json(meta.get("goal")),
         subgoals=subgoals,
         steps=steps,
         actual_total_cost=float(meta["actual_total_cost"]),

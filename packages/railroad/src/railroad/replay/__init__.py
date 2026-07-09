@@ -1,15 +1,21 @@
 """Offline replay: counterfactual cost bounds from a single deployment.
 
-From one real deployment of a chosen policy, *offline replay* computes a
-lower bound on what an alternative policy would have cost — without
-deploying it — by replaying the alternative over the recorded
-observations and bounding its cost the moment it commits to a subgoal
-whose outcome the deployment never recorded.
+From one real deployment of a chosen policy, *offline replay* computes a lower
+bound on what an alternative policy would have cost — without deploying it — by
+replaying the alternative over the recorded observations and bounding its cost
+the moment it commits to a subgoal whose outcome the deployment never recorded.
 
-GL-free and torch-free. The bound math lives in
-:mod:`railroad.replay.cost` (pure functions); the replay environment and
-driver in :mod:`railroad.replay.replay_env`; on-disk logs in
-:mod:`railroad.replay.serialization`.
+The flow is three calls, one per stage::
+
+    log    = build_rollout_log(deployment_env, ...)   # record (no ground truth)
+    env    = build_replay_env(log)                     # reconstruct the world
+    result = run_replay(env, candidate_policy, ...)    # replay -> cost bounds
+
+Change the policy, hold everything else constant: that is the whole idea. GL-free
+and torch-free at the core (the dashboard/render path imports lazily). The bound
+math lives in :mod:`railroad.replay.cost`; the recorder in
+:mod:`railroad.replay.recorder`; the replay environments in
+:mod:`railroad.replay.environments`; the driver in :mod:`railroad.replay.driver`.
 """
 
 from .cost import (
@@ -19,38 +25,20 @@ from .cost import (
     optimistic_cost_grid_from_goal,
     optimistic_cost_to_goal,
 )
-from .domains import (
-    DOMAINS,
-    KnownMapSearchDomain,
-    MctsParams,
-    NavigationDomain,
-    ReplayDomain,
-    UnknownSearchDomain,
-    get_domain,
-    replay,
-)
-from .policy import CandidatePolicy
-from .known_map_search_replay_env import (
-    KnownMapSearchReplayEnvironment,
-    build_known_map_search_log,
-    build_known_map_search_replay_env,
-    run_known_map_search_replay,
-)
-from .recorder import build_rollout_log
-from .selection import select_policy
-from .replay_env import (
-    ReplayEnvironment,
-    build_replay_env,
+from .driver import build_replay_env, run_replay
+from .environments import (
+    ReplayKnownMapSearchEnvironment,
+    ReplayPointGoalNavEnvironment,
+    ReplayUnknownSearchEnvironment,
     frontier_sweep_select,
     goal_fluent,
-    run_replay,
-)
-from .search_replay_env import (
-    SearchReplayEnvironment,
-    build_search_replay_env,
     learned_frontier_search_prob,
-    run_search_replay,
+    navigation_config_from_log,
 )
+from .loop import MctsConfig, mcts_selector, plan_act_loop, run_dashboard_loop
+from .policy import CandidatePolicy
+from .recorder import build_rollout_log
+from .selection import select_policy
 from .serialization import load_rollout_log, save_rollout_log
 from .stub_model import (
     PresetFrontierStatisticsModel,
@@ -60,42 +48,40 @@ from .stub_model import (
 from .types import ReplayResult, RolloutLog, StepRecord, SubgoalRecord
 
 __all__ = [
-    "Bounds",
-    "CandidatePolicy",
-    "Commit",
-    "DOMAINS",
-    "KnownMapSearchDomain",
-    "KnownMapSearchReplayEnvironment",
-    "MctsParams",
-    "NavigationDomain",
-    "ReplayDomain",
-    "UnknownSearchDomain",
-    "get_domain",
-    "replay",
-    "PresetFrontierStatisticsModel",
-    "PresetSearchModel",
-    "ReplayEnvironment",
-    "ReplayResult",
+    # Records + bounds
     "RolloutLog",
-    "SearchReplayEnvironment",
-    "StepRecord",
     "SubgoalRecord",
-    "build_known_map_search_log",
-    "build_known_map_search_replay_env",
-    "build_search_replay_env",
-    "run_known_map_search_replay",
-    "learned_frontier_search_prob",
-    "preset_model",
-    "run_search_replay",
+    "StepRecord",
+    "ReplayResult",
+    "Bounds",
+    "Commit",
     "accumulate_bounds",
-    "build_replay_env",
-    "build_rollout_log",
-    "frontier_sweep_select",
-    "goal_fluent",
-    "load_rollout_log",
     "optimistic_cost_grid_from_goal",
     "optimistic_cost_to_goal",
-    "run_replay",
-    "save_rollout_log",
+    # Policy + selection
+    "CandidatePolicy",
     "select_policy",
+    # The three-call flow
+    "build_rollout_log",
+    "save_rollout_log",
+    "load_rollout_log",
+    "build_replay_env",
+    "run_replay",
+    # Loop / planner config (shared by deployment and replay)
+    "MctsConfig",
+    "mcts_selector",
+    "plan_act_loop",
+    "run_dashboard_loop",
+    # Replay environments + helpers
+    "ReplayPointGoalNavEnvironment",
+    "ReplayUnknownSearchEnvironment",
+    "ReplayKnownMapSearchEnvironment",
+    "goal_fluent",
+    "frontier_sweep_select",
+    "learned_frontier_search_prob",
+    "navigation_config_from_log",
+    # Faked-model helpers for examples/tests (real net drops in at the same site)
+    "preset_model",
+    "PresetFrontierStatisticsModel",
+    "PresetSearchModel",
 ]
