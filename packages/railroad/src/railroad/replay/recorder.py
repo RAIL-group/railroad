@@ -16,6 +16,7 @@ from typing import Any, Collection, Dict, Iterable, List, Mapping, Tuple
 
 import numpy as np
 
+from railroad._bindings import Fluent, Goal, LiteralGoal
 from railroad.lsp.oracle import frontier_cells_hash
 
 from .types import Pose3, RolloutLog, SubgoalRecord
@@ -94,7 +95,7 @@ def build_rollout_log(
     env_name: str = "",
     seed: int | None = None,
     problem_class: str = "navigation",
-    goal: Any = None,
+    goal: Goal | Fluent | None = None,
 ) -> RolloutLog:
     """Snapshot a deployment *env* into a :class:`RolloutLog` — the one recorder.
 
@@ -173,11 +174,8 @@ def build_rollout_log(
     }
 
     # Normalize a bare Fluent goal to a Goal so the log always holds a Goal.
-    if goal is not None:
-        from railroad._bindings import Fluent, LiteralGoal
-
-        if isinstance(goal, Fluent):
-            goal = LiteralGoal(goal)
+    if isinstance(goal, Fluent):
+        goal = LiteralGoal(goal)
 
     # The deployed policy's realized cost = makespan (final sim time, seconds).
     state = getattr(env, "state", None)
