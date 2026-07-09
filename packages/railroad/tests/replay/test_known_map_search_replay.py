@@ -11,13 +11,15 @@ import math
 
 import numpy as np
 
-from railroad._bindings import Fluent as RF, State
+from railroad._bindings import State
 from railroad.core import Fluent as F, get_action_by_name
 from railroad.environment.symbolic import LocationRegistry
-from railroad.replay.known_map_search_replay_env import (
-    KnownMapSearchReplayEnvironment,
-    build_known_map_search_log,
-    run_known_map_search_replay,
+from railroad.replay import (
+    CandidatePolicy,
+    ReplayKnownMapSearchEnvironment,
+    build_replay_env,
+    build_rollout_log,
+    run_replay,
 )
 
 from .conftest import parse_ascii_grid
@@ -48,12 +50,14 @@ def _grid():
 
 
 def _env(contents, target, prob=lambda r, l, o: 0.5):
+    """A known-map search env standing in for a deployment (drives searches over
+    a known floorplan). The candidate ``prob`` only steers MCTS belief."""
     coords = _coords()
     fluents = {F("revealed start_loc"), F("at robot1 start_loc"), F("free robot1")}
-    return KnownMapSearchReplayEnvironment(
+    env = ReplayKnownMapSearchEnvironment(
         known_grid=_grid(),
         recorded_object_locations=contents,
-        container_find_prob=prob,
+        goal=F(f"found {target}"),
         state=State(0.0, fluents, []),
         objects_by_type={
             "robot": {"robot1"},
@@ -63,6 +67,29 @@ def _env(contents, target, prob=lambda r, l, o: 0.5):
         location_registry=LocationRegistry(
             {k: np.array(v, dtype=float) for k, v in coords.items()}
         ),
+    )
+    env.apply_policy(CandidatePolicy(container_find_prob=prob))
+    return env
+
+
+def _record_log(dep, target="ring"):
+    """Snapshot a known-map deployment into a self-describing RolloutLog."""
+    start = _coords()["start_loc"]
+    return build_rollout_log(
+        dep,
+        goal_cell=(int(start[0]), int(start[1])),
+        robot_starts={"robot1": (float(start[0]), float(start[1]), 0.0)},
+        problem_class="known-map-search",
+        goal=F(f"found {target}"),
+    )
+
+
+def _replay(log, prob=lambda r, l, o: 0.5, select=None):
+    """Replay a candidate over a fresh arena built from *log*."""
+    return run_replay(
+        build_replay_env(log),
+        CandidatePolicy(container_find_prob=prob),
+        select_action=select or scripted_search,
     )
 
 
@@ -141,10 +168,7 @@ def test_recorder_captures_searched_contents_only() -> None:
     _drive(dep, target)
     assert F(f"found {target}").evaluate(dep.state.fluents)
 
-    log = build_known_map_search_log(
-        dep, robot_starts={"robot1": (float(_coords()["start_loc"][0]),
-                                      float(_coords()["start_loc"][1]), 0.0)},
-    )
+    log = _record_log(dep, target=target)
     assert log.problem_class == "known-map-search"
     assert log.actual_total_cost > 0
     by_sig = {s.signature: s for s in log.subgoals}
@@ -165,16 +189,9 @@ def test_replay_finds_target_from_recorded_truth() -> None:
     dep = _env({"container_c": {target}}, target,
                prob=lambda r, l, o: 1.0 if l == "container_c" else 0.0)
     _drive(dep, target)
-    log = build_known_map_search_log(
-        dep, robot_starts={"robot1": (float(_coords()["start_loc"][0]),
-                                      float(_coords()["start_loc"][1]), 0.0)},
-    )
+    log = _record_log(dep, target=target)
 
-    arena = KnownMapSearchReplayEnvironment.from_log(log, target_object=target)
-    res = run_known_map_search_replay(
-        arena, container_find_prob=lambda r, l, o: 0.5,
-        select_action=scripted_search,
-    )
+    res = _replay(log)
     assert res.goal_reached
     # A wrong container the deployment never searched resolves not-found...
     outcomes = {loc: found for loc, _, found in res.search_log}
@@ -189,15 +206,8 @@ def test_replay_bounds_are_seconds_and_admissible() -> None:
     dep = _env({"container_c": {target}}, target,
                prob=lambda r, l, o: 1.0 if l == "container_c" else 0.0)
     _drive(dep, target)
-    log = build_known_map_search_log(
-        dep, robot_starts={"robot1": (float(_coords()["start_loc"][0]),
-                                      float(_coords()["start_loc"][1]), 0.0)},
-    )
-    arena = KnownMapSearchReplayEnvironment.from_log(log, target_object=target)
-    res = run_known_map_search_replay(
-        arena, container_find_prob=lambda r, l, o: 0.5,
-        select_action=scripted_search,
-    )
+    log = _record_log(dep, target=target)
+    res = _replay(log)
     # This deployment (scripted_search) searched EVERY container, so replay has
     # no unverified subgoal → no commits → exact replay: both bounds collapse
     # onto the realized cost. (A partial-search deployment does not — see
@@ -222,19 +232,12 @@ def test_replay_logs_commits_for_unsearched_containers() -> None:
                     if f.name == "searched" and not f.negated and f.args}
     assert dep_searched == {"container_c"}, "deployment should search only the true container"
 
-    log = build_known_map_search_log(
-        dep, robot_starts={"robot1": (float(_coords()["start_loc"][0]),
-                                      float(_coords()["start_loc"][1]), 0.0)},
-        target_object=target,
-    )
+    log = _record_log(dep, target=target)
     by_sig = {s.signature: s for s in log.subgoals}
     assert by_sig["container_a"].searched is False and by_sig["container_a"].contents == ()
     assert by_sig["container_c"].searched is True and target in by_sig["container_c"].contents
 
-    arena = KnownMapSearchReplayEnvironment.from_log(log, target_object=target)
-    res = run_known_map_search_replay(
-        arena, container_find_prob=lambda r, l, o: 0.5, select_action=scripted_search,
-    )
+    res = _replay(log)
     assert res.goal_reached
     commit_sigs = {c.frontier_signature for c in res.commits}
     # Unsearched containers the candidate searched → commits; the searched true
@@ -252,19 +255,9 @@ def test_replay_is_deterministic() -> None:
     dep = _env({"container_c": {target}}, target,
                prob=lambda r, l, o: 1.0 if l == "container_c" else 0.0)
     _drive(dep, target)
-    log = build_known_map_search_log(
-        dep, robot_starts={"robot1": (float(_coords()["start_loc"][0]),
-                                      float(_coords()["start_loc"][1]), 0.0)},
-    )
-    arena = KnownMapSearchReplayEnvironment.from_log(log, target_object=target)
+    log = _record_log(dep, target=target)
 
-    def go():
-        return run_known_map_search_replay(
-            arena, container_find_prob=lambda r, l, o: 0.5,
-            select_action=scripted_search,
-        )
-
-    a, b = go(), go()
+    a, b = _replay(log), _replay(log)
     assert a.bounds == b.bounds
     assert a.total_cost == b.total_cost
     assert [s[0] for s in a.search_log] == [s[0] for s in b.search_log]

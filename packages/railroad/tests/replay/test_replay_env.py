@@ -1,8 +1,9 @@
-"""Tests for the ReplayEnvironment intercept, sensing, and the run_replay driver.
+"""Tests for the navigation replay env intercept, sensing, and run_replay.
 
 GL-free and torch-free: a ``FixedPriorFrontierStatistics`` policy needs no
 images, and the deterministic ``explore_first`` selector removes MCTS
-stochasticity.
+stochasticity. The arena is built policy-agnostic with ``build_replay_env`` and a
+candidate is applied by ``run_replay``.
 """
 
 from __future__ import annotations
@@ -12,7 +13,7 @@ import pytest
 
 from railroad.navigation.constants import OBSTACLE_THRESHOLD
 from railroad.lsp.frontier_statistics import FixedPriorFrontierStatistics
-from railroad.replay.replay_env import build_replay_env, goal_fluent, run_replay
+from railroad.replay import CandidatePolicy, build_replay_env, goal_fluent, run_replay
 
 from .conftest import build_log_from_ascii, explore_first_select
 
@@ -35,6 +36,16 @@ MAP_TWO_FRONTIERS = """
 
 def _estimator() -> FixedPriorFrontierStatistics:
     return FixedPriorFrontierStatistics(prob_feasible=0.8)
+
+
+def _run(log, **kwargs):
+    """Replay the fixed-prior candidate over a fresh arena built from *log*."""
+    kwargs.setdefault("select_action", explore_first_select)
+    return run_replay(
+        build_replay_env(log),
+        CandidatePolicy(frontier_statistics=_estimator()),
+        **kwargs,
+    )
 
 
 def _corruption_mask(env) -> np.ndarray:
@@ -72,7 +83,7 @@ def _drive(env, robots, select, max_iter=120) -> str:
 
 def test_intercept_records_commits() -> None:
     log = build_log_from_ascii(MAP_ONE_FRONTIER)
-    result = run_replay(log, _estimator(), select_action=explore_first_select)
+    result = _run(log)
     assert result.commits, "exploring a frontier must record a commit"
     commit = result.commits[0]
     assert commit.robot == "robot1"
@@ -83,7 +94,7 @@ def test_intercept_records_commits() -> None:
 
 def test_retirement_is_per_signature() -> None:
     log = build_log_from_ascii(MAP_TWO_FRONTIERS)
-    result = run_replay(log, _estimator(), select_action=explore_first_select)
+    result = _run(log)
     signatures = [c.frontier_signature for c in result.commits]
     assert len(signatures) == len(set(signatures)), "no frontier committed twice"
     assert len(result.commits) >= 2
@@ -91,7 +102,7 @@ def test_retirement_is_per_signature() -> None:
 
 def test_reaches_goal_and_bounds_are_finite() -> None:
     log = build_log_from_ascii(MAP_ONE_FRONTIER)
-    result = run_replay(log, _estimator(), select_action=explore_first_select)
+    result = _run(log)
     assert result.goal_reached
     assert np.isfinite(result.bounds.optimistic_lb)
     assert np.isfinite(result.bounds.simply_connected_lb)
@@ -101,15 +112,15 @@ def test_reaches_goal_and_bounds_are_finite() -> None:
 def test_lower_bound_soundness() -> None:
     """When the policy reaches the goal, optimistic_lb <= its actual cost."""
     log = build_log_from_ascii(MAP_TWO_FRONTIERS)
-    result = run_replay(log, _estimator(), select_action=explore_first_select)
+    result = _run(log)
     assert result.goal_reached
     assert result.bounds.optimistic_lb <= result.total_cost + 1e-6
 
 
 def test_determinism() -> None:
     log = build_log_from_ascii(MAP_TWO_FRONTIERS)
-    a = run_replay(log, _estimator(), select_action=explore_first_select)
-    b = run_replay(log, _estimator(), select_action=explore_first_select)
+    a = _run(log)
+    b = _run(log)
     assert a.bounds == b.bounds
     assert a.total_cost == b.total_cost
     assert [c.frontier_signature for c in a.commits] == [
@@ -125,13 +136,13 @@ def test_determinism() -> None:
 def test_no_corruption_after_construction() -> None:
     """Initial sensing must not paint any non-obstacle cell as an obstacle."""
     log = build_log_from_ascii(MAP_ONE_FRONTIER)
-    env = build_replay_env(log, _estimator())
+    env = build_replay_env(log)
     assert not _corruption_mask(env).any()
 
 
 def test_no_corruption_after_full_replay() -> None:
     log = build_log_from_ascii(MAP_TWO_FRONTIERS)
-    env = build_replay_env(log, _estimator())
+    env = build_replay_env(log)
     _drive(env, log.robots, explore_first_select)
     assert not _corruption_mask(env).any()
 
@@ -152,7 +163,7 @@ def test_replay_uses_recorded_config_from_log() -> None:
             move_execution_use_theta_star=False,
         )
     )
-    env = build_replay_env(log, _estimator())
+    env = build_replay_env(log)
     assert env.config.sensor_range == 23.0
     assert env.config.sensor_num_rays == 91
     assert env.config.move_execution_use_theta_star is False
@@ -164,7 +175,7 @@ def test_missing_recorded_config_raises() -> None:
     log = build_log_from_ascii(MAP_ONE_FRONTIER)
     log.config = {}
     with pytest.raises(ValueError, match="no recorded config"):
-        build_replay_env(log, _estimator())
+        build_replay_env(log)
 
 
 def test_missing_config_accepts_explicit_override() -> None:
@@ -173,16 +184,14 @@ def test_missing_config_accepts_explicit_override() -> None:
 
     log = build_log_from_ascii(MAP_ONE_FRONTIER)
     log.config = {}
-    env = build_replay_env(
-        log, _estimator(), config=NavigationConfig(sensor_range=42.0)
-    )
+    env = build_replay_env(log, config=NavigationConfig(sensor_range=42.0))
     assert env.config.sensor_range == 42.0
 
 
 def test_frontier_survives_confinement_sensing() -> None:
     """An unobserved pocket adjacent to free space yields a (surviving) frontier."""
     log = build_log_from_ascii(MAP_ONE_FRONTIER)
-    env = build_replay_env(log, _estimator())
+    env = build_replay_env(log)
     assert env.frontiers, "the '?' pocket must be detected as a frontier"
 
 
@@ -191,7 +200,7 @@ def test_observed_grid_is_value_subset_of_pristine() -> None:
     from railroad.navigation.constants import UNOBSERVED_VAL
 
     log = build_log_from_ascii(MAP_TWO_FRONTIERS)
-    env = build_replay_env(log, _estimator())
+    env = build_replay_env(log)
     _drive(env, log.robots, explore_first_select)
     observed_mask = env.observed_grid != UNOBSERVED_VAL
     np.testing.assert_array_equal(
@@ -207,7 +216,5 @@ def test_observed_grid_is_value_subset_of_pristine() -> None:
 def test_terminates_without_hang() -> None:
     """A bounded loop always returns a definite termination reason."""
     log = build_log_from_ascii(MAP_TWO_FRONTIERS)
-    result = run_replay(
-        log, _estimator(), select_action=explore_first_select, max_planning_iterations=200
-    )
+    result = _run(log, max_planning_iterations=200)
     assert result.termination in {"goal_reached", "no_actions", "planner_none"}

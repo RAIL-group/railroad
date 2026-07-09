@@ -1,22 +1,23 @@
-"""Shared replay-environment machinery (confinement sensing + cost accrual).
+"""Shared machinery for the replay environments.
 
-Both the navigation :class:`~railroad.replay.replay_env.ReplayEnvironment` and the
-object-search :class:`~railroad.replay.search_replay_env.SearchReplayEnvironment`
-replay a policy over a *recorded* map: the laser is cast against a **confinement
-grid** (recorded map with ``UNOBSERVED -> COLLISION``) so the robot stays in known
-space, while the values written into ``_observed_grid`` are corrected against the
-**pristine** recorded map. They also accrue per-robot travel cost
-and expose the recorded panorama buffer to a learned estimator.
+Two mixins, both mixed in *before* the concrete environment base so their
+overrides win:
 
-This mixin is placed **before** ``UnknownSpaceEnvironment`` in the MRO so its
-``observe_from_pose`` / ``set_robot_pose`` override the base ones.
+* :class:`ReplayConfinementMixin` — confinement sensing + pristine correction +
+  net-motion + served panos. Used by the two *unknown-map* replays (navigation
+  and unknown-map search); the known-map replay needs none of it.
+* :class:`ReplayArenaMixin` — the policy/goal/finalize contract that lets
+  :func:`~railroad.replay.driver.run_replay` drive any replay env uniformly. A
+  replay env is *policy-agnostic* until :meth:`~ReplayArenaMixin.apply_policy`
+  swaps in a candidate; its operators read the current policy through
+  ``self._policy`` (so a new policy takes effect without rebuilding the arena).
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, fields
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Collection, Dict, List, Mapping, Optional, Sequence
 
 import numpy as np
 import scipy.ndimage
@@ -29,6 +30,16 @@ from railroad.navigation.constants import (
     OBSTACLE_THRESHOLD,
     UNOBSERVED_VAL,
 )
+
+from ..cost import Commit, accumulate_bounds
+from ..loop import MctsConfig
+from ..policy import CandidatePolicy
+from ..types import ReplayResult
+
+if TYPE_CHECKING:
+    from railroad._bindings import Fluent, Goal, GroundedEffect
+    from railroad.environment.environment import Environment
+    from railroad.experimental.unknown_search import UnknownSpaceEnvironment
 
 
 def navigation_config_from_log(log_config: Mapping[str, Any]) -> NavigationConfig:
@@ -44,7 +55,7 @@ def navigation_config_from_log(log_config: Mapping[str, Any]) -> NavigationConfi
 
     Raises :class:`ValueError` if the log carries no config (it must come from
     the deployment; record it via ``build_rollout_log``, which captures
-    ``env.config``, or pass an explicit ``config=`` to the builder).
+    ``env.config``, or pass an explicit ``config=`` to ``build_replay_env``).
     """
     if not log_config:
         raise ValueError(
@@ -54,6 +65,49 @@ def navigation_config_from_log(log_config: Mapping[str, Any]) -> NavigationConfi
         )
     valid = {f.name for f in fields(NavigationConfig)}
     return NavigationConfig(**{k: v for k, v in log_config.items() if k in valid})
+
+
+def robot_from_free(
+    effects: "Sequence[GroundedEffect]", robots: Optional[Collection[str]] = None
+) -> str:
+    """The robot named by a ``free ?robot`` effect among *effects* (provenance).
+
+    When *robots* is given, only a ``free`` on one of them counts and the
+    lowest-id robot is the fallback; otherwise the first ``free`` wins and the
+    fallback is ``""``.
+    """
+    for effect in effects:
+        for fluent in effect.resulting_fluents:
+            if fluent.name == "free" and not fluent.negated and fluent.args:
+                if robots is None or fluent.args[0] in robots:
+                    return fluent.args[0]
+    return next(iter(sorted(robots)), "") if robots else ""
+
+
+def require_goal(log: Any) -> "Goal | Fluent":
+    """The log's recorded planning goal, or a clear error if unset.
+
+    Recorders capture it (pass ``goal=`` to ``build_rollout_log``); a search
+    replay cannot plan without the goal the deployment pursued.
+    """
+    if log.goal is None:
+        raise ValueError(
+            f"{log.problem_class!r} replay needs a goal; record it by passing "
+            "goal= to build_rollout_log."
+        )
+    return log.goal
+
+
+def objects_in_goal(goal: "Goal | Fluent", exclude: Collection[str]) -> set:
+    """Object names a search *goal* references (its literal args minus *exclude*).
+
+    Search goals are over the objects being found (``found ?object``), so the
+    args of the goal's literals — minus the robots and locations in *exclude* —
+    are exactly the objects the search operators must ground over. Handles
+    compound goals uniformly (``get_all_literals`` flattens the tree).
+    """
+    excluded = set(exclude)
+    return {arg for lit in goal.get_all_literals() for arg in lit.args} - excluded
 
 
 @dataclass
@@ -77,14 +131,12 @@ class ServedPano:
 # base attributes/methods resolve), while at runtime it is a plain mixin whose
 # concrete subclasses supply the base via MRO — the same pattern LSPEnvironmentMixin uses.
 if TYPE_CHECKING:
-    from railroad.experimental.unknown_search import UnknownSpaceEnvironment
-
-    _Base = UnknownSpaceEnvironment
+    _ConfinementBase = UnknownSpaceEnvironment
 else:
-    _Base = object
+    _ConfinementBase = object
 
 
-class ReplayConfinementMixin(_Base):
+class ReplayConfinementMixin(_ConfinementBase):
     """Confinement sensing, pristine correction, net-motion, served panos."""
 
     _pristine_grid: np.ndarray
@@ -245,3 +297,77 @@ class ReplayConfinementMixin(_Base):
         self._serve_pano(robot, pose, time)
 
         return newly_observed
+
+
+if TYPE_CHECKING:
+    _ArenaBase = Environment
+else:
+    _ArenaBase = object
+
+
+class ReplayArenaMixin(_ArenaBase):
+    """The policy / goal / finalize contract shared by every replay env.
+
+    Bundles everything the driver needs beyond the env itself: default planner
+    knobs, how to apply a candidate policy, what the planning goal is, and how the
+    terminal state reduces to a :class:`~railroad.replay.types.ReplayResult`.
+    Mixed in first so these win.
+    """
+
+    # Planner defaults for this flavor (overridden per env). run_replay reads
+    # them when the caller does not pass mcts= / max_planning_iterations=.
+    default_mcts: MctsConfig
+    default_max_planning_iterations: int
+    # Fluent-name substrings the dashboard shows for this flavor.
+    dashboard_fluent_keywords: tuple
+
+    # The current candidate policy; operators/estimators read through it, so
+    # apply_policy() swaps behavior without rebuilding the arena.
+    _policy: CandidatePolicy
+    _refresh_estimators: list
+
+    # Provided by each concrete env (annotated here so finalize() type-checks).
+    replay_commits: List[Commit]
+
+    def _init_policy(self) -> None:
+        """Install the neutral (policy-agnostic) policy. Call first in __init__."""
+        self._policy = CandidatePolicy()
+        self._refresh_estimators = []
+
+    def apply_policy(self, policy: CandidatePolicy) -> None:
+        """Swap in *policy* so subsequent planning uses its probabilities.
+
+        The base handles the fields every flavor may carry (the find-probability
+        callables its operators read through ``self._policy``, and the
+        served-vantage ``refresh_estimators``); the navigation env extends this
+        to also install the frontier-statistics estimator.
+        """
+        self._policy = policy
+        self._refresh_estimators = list(policy.refresh_estimators)
+
+    @property
+    def goal(self) -> "Goal | Fluent":
+        """The planning goal for this replay (implemented per flavor)."""
+        raise NotImplementedError
+
+    @property
+    def search_log(self) -> List:
+        """Per-search provenance; empty for navigation (search envs override)."""
+        return []
+
+    def finalize(self, termination: str) -> ReplayResult:
+        """Reduce the terminal state + commits to a :class:`ReplayResult`.
+
+        Uniform across flavors: the two bounds come from the recorded commits and
+        the replay makespan, and ``goal_reached`` is read straight off the state.
+        """
+        total_cost = float(self.state.time)
+        return ReplayResult(
+            bounds=accumulate_bounds(self.replay_commits, total_cost),
+            commits=list(self.replay_commits),
+            termination=termination,
+            total_cost=total_cost,
+            sim_time=total_cost,
+            goal_reached=self.goal.evaluate(self.state.fluents),
+            search_log=list(self.search_log),
+        )

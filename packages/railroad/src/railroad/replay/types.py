@@ -18,6 +18,7 @@ import numpy as np
 from .cost import Bounds, Commit
 
 if TYPE_CHECKING:
+    from railroad._bindings import Fluent, Goal
     from railroad.environment.railsim import PanoRecord
 
 Pose3 = Tuple[float, float, float]
@@ -68,11 +69,12 @@ class RolloutLog:
     problem_class: str = "navigation"
     env_name: str = ""
     seed: int | None = None
-    # The object being searched for (object-search domains). Empty for
-    # navigation. Recorded so a search log is self-describing: the unified
-    # ``replay(log, policy)`` entry can read the target off the log instead of
-    # threading it separately (an explicit ``target_object=`` still overrides).
-    target_object: str = ""
+    # The deployment's planning goal — a full ``Goal`` (or ``Fluent``), so it may
+    # be compound (e.g. ``found book & found plate``), not just one object.
+    # Recorded so the log is self-describing: build_replay_env reads the goal off
+    # the log and replays toward it (search flavors require it; navigation falls
+    # back to the point-goal derived from ``robot_starts`` when absent).
+    goal: "Goal | Fluent | None" = None
     subgoals: List[SubgoalRecord] = field(default_factory=list)
     steps: List[StepRecord] = field(default_factory=list)
     actual_total_cost: float = 0.0

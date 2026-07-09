@@ -17,13 +17,19 @@ import pytest
 from railroad.environment.types import Pose
 from railroad.lsp.frontier_statistics import (
     DEFAULT_FRONTIER_STATISTICS,
-    FixedPriorFrontierStatistics,
     LearnedFrontierStatistics,
 )
-from railroad.replay.replay_env import build_replay_env
+from railroad.replay import CandidatePolicy, build_replay_env
 from railroad.replay.stub_model import preset_model
 
 from .conftest import build_log_from_ascii
+
+
+def _arena(log, estimator):
+    """A replay arena with *estimator* applied as the candidate policy."""
+    env = build_replay_env(log)
+    env.apply_policy(CandidatePolicy(frontier_statistics=estimator))
+    return env
 
 MAP = """
 ##########
@@ -68,7 +74,7 @@ def test_replay_serves_recorded_panos_to_learned_estimator() -> None:
     log.pano_records = [_covering_record(log.recorded_grid)]
 
     estimator = LearnedFrontierStatistics(preset_model("optimistic"))
-    env = build_replay_env(log, estimator)
+    env = _arena(log, estimator)
 
     assert env.pano_records, "replay env must expose the recorded pano buffer"
     assert env.frontiers, "the '?' pocket should yield a frontier"
@@ -81,7 +87,7 @@ def test_replay_serves_recorded_panos_to_learned_estimator() -> None:
 def test_learned_estimator_falls_back_without_panos() -> None:
     log = build_log_from_ascii(MAP)  # no pano_records
     estimator = LearnedFrontierStatistics(preset_model("optimistic"))
-    env = build_replay_env(log, estimator)
+    env = _arena(log, estimator)
 
     assert env.pano_records == []
     fid = next(iter(env.frontiers))
@@ -119,7 +125,7 @@ def test_env_serves_recorded_pano_nearest_each_pose() -> None:
         _record_at(grid, (1, 8), tag=20),  # far end
     ]
 
-    env = build_replay_env(log, FixedPriorFrontierStatistics())
+    env = build_replay_env(log)
     # Initial sense at the start pose serves the nearest recorded pano (tag 10).
     assert env.pano_records, "an onboard observation should be served at the start"
     assert int(env.pano_records[-1].image[0, 0, 0]) == 10
@@ -140,8 +146,8 @@ def test_different_preset_models_yield_different_stats() -> None:
     log = build_log_from_ascii(MAP)
     log.pano_records = [_covering_record(log.recorded_grid)]
 
-    opt = build_replay_env(log, LearnedFrontierStatistics(preset_model("optimistic")))
-    cau = build_replay_env(log, LearnedFrontierStatistics(preset_model("cautious")))
+    opt = _arena(log, LearnedFrontierStatistics(preset_model("optimistic")))
+    cau = _arena(log, LearnedFrontierStatistics(preset_model("cautious")))
     fid_opt = next(iter(opt.frontiers))
     fid_cau = next(iter(cau.frontiers))
 

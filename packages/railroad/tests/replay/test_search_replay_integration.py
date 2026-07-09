@@ -2,10 +2,10 @@
 
 Drives the whole package pipeline — deploy an informed search policy, record it
 with ``build_rollout_log`` (which captures revealed containers + their true
-contents), rebuild the arena with ``SearchReplayEnvironment.from_log``, and
-replay a candidate with ``run_search_replay`` — then asserts the load-bearing
-properties: the truth is recorded, outcomes resolve from it, and the bounds are
-admissible and in deployment units (seconds).
+contents), rebuild the arena with ``build_replay_env``, and replay a candidate
+with ``run_replay`` — then asserts the load-bearing properties: the truth is
+recorded, outcomes resolve from it, and the bounds are admissible and in
+deployment units (seconds).
 
 Slow + procthor-gated (the package ``conftest`` skips when the extra is absent).
 """
@@ -32,9 +32,11 @@ from railroad.experimental.unknown_search.operators import (
 from railroad.operators import construct_no_op_operator
 from railroad.planner import MCTSPlanner
 from railroad.replay import (
-    SearchReplayEnvironment,
+    CandidatePolicy,
+    MctsConfig,
+    build_replay_env,
     build_rollout_log,
-    run_search_replay,
+    run_replay,
 )
 
 pytestmark = pytest.mark.slow
@@ -132,6 +134,7 @@ def test_procthor_object_search_replay_end_to_end() -> None:
         goal_cell=(int(start[0]), int(start[1])),
         robot_starts={"robot1": Pose(float(start[0]), float(start[1]), 0.0)},
         problem_class="object-search",
+        goal=F(f"found {target}"),
     )
     assert log.actual_total_cost > 0  # deployment makespan recorded (seconds)
     tc = next((s for s in log.subgoals if s.signature == true_container), None)
@@ -159,12 +162,13 @@ def test_procthor_object_search_replay_end_to_end() -> None:
     )
 
     # --- Replay: an informed candidate beelines to the true container. ---
-    arena = SearchReplayEnvironment.from_log(log, target_object=target)
-    res = run_search_replay(
-        arena,
-        frontier_find_prob=lambda r, f, o: 0.5,
-        container_find_prob=lambda r, loc, o: 1.0 if loc == true_container else 0.05,
-        mcts_iterations=2000,
+    res = run_replay(
+        build_replay_env(log),
+        CandidatePolicy(
+            frontier_find_prob=lambda r, f, o: 0.5,
+            container_find_prob=lambda r, loc, o: 1.0 if loc == true_container else 0.05,
+        ),
+        mcts=MctsConfig(iterations=2000, c=300.0, max_depth=20, heuristic_multiplier=2.0),
     )
 
     assert res.goal_reached, "replay should resolve found=True from recorded truth"

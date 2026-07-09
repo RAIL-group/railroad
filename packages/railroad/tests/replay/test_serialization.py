@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
+from railroad.core import Fluent as F
 from railroad.environment.types import Pose
 from railroad.replay.serialization import (
     LoadedPanoRecord,
@@ -36,6 +38,31 @@ def test_round_trip_minimal(tmp_path) -> None:
     assert loaded.steps == []
 
 
+@pytest.mark.parametrize(
+    "goal, satisfying, unsatisfying",
+    [
+        (F("found Knife"), {F("found Knife")}, set()),                 # literal
+        (~F("at Knife table"), set(), {F("at Knife table")}),          # negated literal
+        (F("found a") | F("found b"), {F("found b")}, set()),          # OR
+        ((F("found a") & F("found b")) | F("found c"),                 # nested AND-of-OR
+         {F("found a"), F("found b")}, {F("found a")}),
+    ],
+)
+def test_goal_round_trips(tmp_path, goal, satisfying, unsatisfying) -> None:
+    """Literal (incl. negated), OR, and nested compound goals all round-trip."""
+    log = RolloutLog(
+        recorded_grid=_grid(),
+        goal_cell=(0, 0),
+        robot_starts={"robot1": (0.0, 0.0, 0.0)},
+        goal=goal,
+    )
+    save_rollout_log(log, tmp_path)
+    loaded = load_rollout_log(tmp_path)
+    assert loaded.goal is not None
+    assert loaded.goal.evaluate(satisfying)
+    assert not loaded.goal.evaluate(unsatisfying)
+
+
 def test_round_trip_with_subgoals_and_steps(tmp_path) -> None:
     log = RolloutLog(
         recorded_grid=_grid(),
@@ -44,7 +71,7 @@ def test_round_trip_with_subgoals_and_steps(tmp_path) -> None:
         env_name="maze",
         seed=7,
         problem_class="object-search",
-        target_object="Knife",
+        goal=F("found Knife") & F("found Fork"),
         actual_total_cost=42.5,
         config={"sensor_range": 60.0, "speed_cells_per_sec": 2.0},
         subgoals=[
@@ -76,7 +103,10 @@ def test_round_trip_with_subgoals_and_steps(tmp_path) -> None:
     assert loaded.seed == 7
     assert loaded.env_name == "maze"
     assert loaded.problem_class == "object-search"
-    assert loaded.target_object == "Knife"
+    # The compound goal round-trips: satisfied only when BOTH objects are found.
+    assert loaded.goal is not None
+    assert loaded.goal.evaluate({F("found Knife"), F("found Fork")})
+    assert not loaded.goal.evaluate({F("found Knife")})
     assert loaded.actual_total_cost == 42.5
     assert loaded.config == {"sensor_range": 60.0, "speed_cells_per_sec": 2.0}
     assert loaded.robot_starts["robot2"] == (2.0, 2.0, 1.0)

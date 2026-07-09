@@ -2,16 +2,17 @@
 
 Offline replay reduces *one* deployment plus *one* candidate policy to a
 :class:`~railroad.replay.types.ReplayResult` carrying lower-bound costs
-(:func:`railroad.replay.replay`). *Selection* is the layer on top: replay a set
-of candidates over the same recording — and, across many recordings, aggregate
-their bound evidence — to pick the policy that is data-efficiently justified.
+(:func:`railroad.replay.run_replay`). *Selection* is the layer on top: replay a
+set of candidates over the same recording — and, across many recordings,
+aggregate their bound evidence — to pick the policy that is data-efficiently
+justified.
 
 The single-recording comparison already works today with the shipped API: replay
 each candidate over one log and rank by bound. Callers can do that directly, and
 ``scripts/replay/point_goal_nav.py`` demonstrates it::
 
     ranked = sorted(
-        ((p, replay(log, p)) for p in candidates),
+        ((p, run_replay(build_replay_env(log), p)) for p in candidates),
         key=lambda kv: kv[1].bounds.simply_connected_lb,
     )
 
@@ -42,11 +43,12 @@ def select_policy(
     *candidate* over every recording in *logs*, aggregate the resulting bounds,
     and return the policy whose lower-bound evidence dominates. Deferred to a
     later change; for now, compare candidates over a single recording by calling
-    :func:`railroad.replay.replay` per candidate and ranking by bound (see this
+    :func:`railroad.replay.run_replay` on a per-candidate
+    :func:`railroad.replay.build_replay_env` arena and ranking by bound (see this
     module's docstring and ``point_goal_nav.py``).
     """
     raise NotImplementedError(
         "cross-trial policy selection is not implemented yet; replay each "
-        "candidate over one recording with railroad.replay.replay() and rank by "
-        "bound (see railroad.replay.selection docstring)."
+        "candidate over one recording with run_replay(build_replay_env(log), p) "
+        "and rank by bound (see railroad.replay.selection docstring)."
     )
