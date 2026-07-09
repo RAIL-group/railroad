@@ -24,7 +24,7 @@ Two runs:
    cost vs the optimistic lower bound (straight to the true container) — both in
    deployment units (seconds), so they compare directly with the deployment.
 
-Usage:  uv run python scripts/replay/replay_object_search.py [--seed S] [--num-robots N]
+Usage:  uv run python scripts/replay/unknown_map_search.py [--seed S] [--num-robots N]
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ from railroad.replay import build_rollout_log
 from railroad.replay.cost import accumulate_bounds
 from railroad.replay.search_replay_env import build_search_replay_env
 
-OUT_DIR = Path("data/replay_object_search")
+OUT_DIR = Path("data/replay/unknown_map_search")
 
 
 def robot_names(num_robots: int) -> List[str]:

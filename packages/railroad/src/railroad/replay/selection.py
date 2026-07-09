@@ -8,7 +8,7 @@ their bound evidence — to pick the policy that is data-efficiently justified.
 
 The single-recording comparison already works today with the shipped API: replay
 each candidate over one log and rank by bound. Callers can do that directly, and
-``scripts/replay/replay_learned_demo.py`` demonstrates it::
+``scripts/replay/point_goal_nav.py`` demonstrates it::
 
     ranked = sorted(
         ((p, replay(log, p)) for p in candidates),
@@ -43,7 +43,7 @@ def select_policy(
     and return the policy whose lower-bound evidence dominates. Deferred to a
     later change; for now, compare candidates over a single recording by calling
     :func:`railroad.replay.replay` per candidate and ranking by bound (see this
-    module's docstring and ``replay_learned_demo.py``).
+    module's docstring and ``point_goal_nav.py``).
     """
     raise NotImplementedError(
         "cross-trial policy selection is not implemented yet; replay each "
