@@ -12,10 +12,12 @@ list of candidates uniformly — each replay environment reads the fields it nee
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Optional, Sequence
+from typing import Callable, Optional, Sequence
 
-if TYPE_CHECKING:
-    from railroad.lsp.frontier_statistics import FrontierStatisticsEstimator
+from railroad.lsp.frontier_statistics import (
+    FixedPriorFrontierStatistics,
+    FrontierStatisticsEstimator,
+)
 
 # (robot, subgoal, object) -> probability. Shared by both search operators.
 ProbFn = Callable[[str, str, str], float]
@@ -45,7 +47,7 @@ class CandidatePolicy:
     """
 
     name: str = ""
-    frontier_statistics: "FrontierStatisticsEstimator | None" = None
+    frontier_statistics: Optional[FrontierStatisticsEstimator] = None
     frontier_find_prob: Optional[ProbFn] = None
     container_find_prob: Optional[ProbFn] = None
     refresh_estimators: Sequence = ()
@@ -58,10 +60,8 @@ class CandidatePolicy:
         """The container find-probability, or the neutral prior if unset."""
         return self.container_find_prob or _neutral_find_prob
 
-    def resolve_frontier_statistics(self) -> "FrontierStatisticsEstimator":
+    def resolve_frontier_statistics(self) -> FrontierStatisticsEstimator:
         """The frontier-statistics estimator, or a neutral fixed prior if unset."""
         if self.frontier_statistics is not None:
             return self.frontier_statistics
-        from railroad.lsp.frontier_statistics import FixedPriorFrontierStatistics
-
         return FixedPriorFrontierStatistics()

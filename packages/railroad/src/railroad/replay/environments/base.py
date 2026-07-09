@@ -17,13 +17,20 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, fields
-from typing import TYPE_CHECKING, Any, Collection, Dict, List, Mapping, Optional, Sequence
+from typing import Any, Collection, Dict, List, Mapping, Optional, Sequence
 
 import numpy as np
 import scipy.ndimage
 
+from railroad._bindings import Fluent, Goal, GroundedEffect
+from railroad.environment.environment import Environment
 from railroad.environment.types import Pose
-from railroad.experimental.unknown_search import NavigationConfig, laser, mapping
+from railroad.experimental.unknown_search import (
+    NavigationConfig,
+    UnknownSpaceEnvironment,
+    laser,
+    mapping,
+)
 from railroad.lsp.pano import roll_pano_to_bearing
 from railroad.navigation.constants import (
     COLLISION_VAL,
@@ -35,11 +42,6 @@ from ..cost import Commit, accumulate_bounds
 from ..loop import MctsConfig
 from ..policy import CandidatePolicy
 from ..types import ReplayResult
-
-if TYPE_CHECKING:
-    from railroad._bindings import Fluent, Goal, GroundedEffect
-    from railroad.environment.environment import Environment
-    from railroad.experimental.unknown_search import UnknownSpaceEnvironment
 
 
 def navigation_config_from_log(log_config: Mapping[str, Any]) -> NavigationConfig:
@@ -68,7 +70,7 @@ def navigation_config_from_log(log_config: Mapping[str, Any]) -> NavigationConfi
 
 
 def robot_from_free(
-    effects: "Sequence[GroundedEffect]", robots: Optional[Collection[str]] = None
+    effects: Sequence[GroundedEffect], robots: Optional[Collection[str]] = None
 ) -> str:
     """The robot named by a ``free ?robot`` effect among *effects* (provenance).
 
@@ -84,7 +86,7 @@ def robot_from_free(
     return next(iter(sorted(robots)), "") if robots else ""
 
 
-def require_goal(log: Any) -> "Goal | Fluent":
+def require_goal(log: Any) -> Goal | Fluent:
     """The log's recorded planning goal, or a clear error if unset.
 
     Recorders capture it (pass ``goal=`` to ``build_rollout_log``); a search
@@ -98,7 +100,7 @@ def require_goal(log: Any) -> "Goal | Fluent":
     return log.goal
 
 
-def objects_in_goal(goal: "Goal | Fluent", exclude: Collection[str]) -> set:
+def objects_in_goal(goal: Goal | Fluent, exclude: Collection[str]) -> set:
     """Object names a search *goal* references (its literal args minus *exclude*).
 
     Search goals are over the objects being found (``found ?object``), so the
@@ -127,16 +129,7 @@ class ServedPano:
     visibility_polygon: Optional[np.ndarray] = None
 
 
-# Treat the mixin as if it inherits UnknownSpaceEnvironment for type-checking (so
-# base attributes/methods resolve), while at runtime it is a plain mixin whose
-# concrete subclasses supply the base via MRO — the same pattern LSPEnvironmentMixin uses.
-if TYPE_CHECKING:
-    _ConfinementBase = UnknownSpaceEnvironment
-else:
-    _ConfinementBase = object
-
-
-class ReplayConfinementMixin(_ConfinementBase):
+class ReplayConfinementMixin(UnknownSpaceEnvironment):
     """Confinement sensing, pristine correction, net-motion, served panos."""
 
     _pristine_grid: np.ndarray
@@ -299,13 +292,7 @@ class ReplayConfinementMixin(_ConfinementBase):
         return newly_observed
 
 
-if TYPE_CHECKING:
-    _ArenaBase = Environment
-else:
-    _ArenaBase = object
-
-
-class ReplayArenaMixin(_ArenaBase):
+class ReplayArenaMixin(Environment):
     """The policy / goal / finalize contract shared by every replay env.
 
     Bundles everything the driver needs beyond the env itself: default planner
@@ -346,7 +333,7 @@ class ReplayArenaMixin(_ArenaBase):
         self._refresh_estimators = list(policy.refresh_estimators)
 
     @property
-    def goal(self) -> "Goal | Fluent":
+    def goal(self) -> Goal | Fluent:
         """The planning goal for this replay (implemented per flavor)."""
         raise NotImplementedError
 

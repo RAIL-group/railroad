@@ -11,15 +11,13 @@ bounds plus the commits and termination reason.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import numpy as np
 
-from .cost import Bounds, Commit
+from railroad._bindings import Fluent, Goal
 
-if TYPE_CHECKING:
-    from railroad._bindings import Fluent, Goal
-    from railroad.environment.railsim import PanoRecord
+from .cost import Bounds, Commit
 
 Pose3 = Tuple[float, float, float]
 
@@ -74,7 +72,7 @@ class RolloutLog:
     # Recorded so the log is self-describing: build_replay_env reads the goal off
     # the log and replays toward it (search flavors require it; navigation falls
     # back to the point-goal derived from ``robot_starts`` when absent).
-    goal: "Goal | Fluent | None" = None
+    goal: Goal | Fluent | None = None
     subgoals: List[SubgoalRecord] = field(default_factory=list)
     steps: List[StepRecord] = field(default_factory=list)
     actual_total_cost: float = 0.0
@@ -84,10 +82,12 @@ class RolloutLog:
     # live env (replay then falls back to a default config).
     config: Dict[str, Any] = field(default_factory=dict)
     # Accumulated panorama buffer from the deployment. Served to a learned
-    # frontier-statistics estimator during replay (best-vantage
-    # perception); empty for non-visual logs. Typed loosely so the replay
-    # core stays importable without the railsim (GL) extra.
-    pano_records: List["PanoRecord"] = field(default_factory=list)
+    # frontier-statistics estimator during replay (best-vantage perception); empty
+    # for non-visual logs. Held as ``Any`` because it is genuinely heterogeneous —
+    # a railsim ``PanoRecord`` from a real deploy, a ``ServedPano`` during replay,
+    # or a ``LoadedPanoRecord`` after load — and importing railsim's ``PanoRecord``
+    # would pull the GL extra the replay core stays free of.
+    pano_records: List[Any] = field(default_factory=list)
 
     @property
     def robots(self) -> List[str]:
