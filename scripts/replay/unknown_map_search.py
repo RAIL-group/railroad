@@ -31,40 +31,13 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import TYPE_CHECKING
 
-import numpy as np
-
-from railroad._bindings import Fluent, State
-from railroad.core import Fluent as F, get_action_by_name
-from railroad.dashboard import PlannerDashboard
-from railroad.environment.symbolic import LocationRegistry
-from railroad.environment.skill import NavigationMoveSkill
-from railroad.environment.types import Pose
-from railroad.experimental.unknown_search import (
-    NavigationConfig,
-    UnknownSpaceEnvironment,
-)
-from railroad.experimental.unknown_search.operators import (
-    construct_move_navigable_operator,
-    construct_search_at_site_operator,
-    construct_search_frontier_operator,
-)
-from railroad.operators import construct_no_op_operator
-from railroad.planner import MCTSPlanner
-from railroad.replay import build_rollout_log
-from railroad.replay.cost import accumulate_bounds
-from railroad.replay.search_replay_env import build_search_replay_env
+if TYPE_CHECKING:
+    import numpy as np
+    from railroad.environment.procthor import ProcTHORScene
 
 OUT_DIR = Path("data/replay/unknown_map_search")
-
-
-def robot_names(num_robots: int) -> List[str]:
-    """``robot1 .. robotN``; all co-located at ``start_loc`` (any finding the
-    object satisfies the goal)."""
-    if num_robots < 1:
-        raise ValueError(f"num_robots must be >= 1, got {num_robots}")
-    return [f"robot{i}" for i in range(1, num_robots + 1)]
 
 
 # ----------------------------------------------------------------------
@@ -72,8 +45,24 @@ def robot_names(num_robots: int) -> List[str]:
 # ----------------------------------------------------------------------
 
 
-def setup_scene(seed: int, target_object: str | None = None):
-    from railroad.environment.procthor import ProcTHORScene
+def setup_scene(seed: int, target_object: str | None = None) -> tuple[
+    "ProcTHORScene",
+    "np.ndarray",
+    dict[str, tuple[int, int]],
+    dict[str, set[str]],
+    tuple[int, int],
+    str,
+]:
+    """Load a ProcTHOR scene and extract grid, hidden sites, and the target."""
+    import numpy as np
+
+    try:
+        from railroad.environment.procthor import ProcTHORScene
+    except ImportError as e:
+        raise ImportError(
+            "ProcTHOR dependencies not installed. "
+            "Install with: pip install railroad[procthor]"
+        ) from e
 
     scene = ProcTHORScene(seed=seed)
     true_grid = np.asarray(scene.grid, dtype=float)
@@ -88,61 +77,141 @@ def setup_scene(seed: int, target_object: str | None = None):
     if target_object is None:
         # Pick an object that sits in a container away from the start, so the
         # search is non-trivial.
-        all_objs = sorted(
-            {o for objs in true_object_locations.values() for o in objs}
-        )
+        all_objs = sorted({o for objs in true_object_locations.values() for o in objs})
         target_object = all_objs[0]
     return scene, true_grid, hidden_sites, true_object_locations, start_coord, target_object
 
 
 # ----------------------------------------------------------------------
-# Operators (standard unknown-search operators)
+# Planning loop (standard MCTS loop with PlannerDashboard) — example pattern
 # ----------------------------------------------------------------------
 
 
-def build_operators(env_ref, site_prob_fn):
-    def move_time_fn(robot, loc_from, loc_to):
+def run_planning(env, goal, label: str, save_video: str, *, max_iterations: int = 80) -> float:
+    """Drive one MCTS plan->act loop with a dashboard; return the makespan."""
+    from railroad.core import get_action_by_name
+    from railroad.dashboard import PlannerDashboard
+    from railroad.planner import MCTSPlanner
+
+    def fluent_filter(f):  # noqa: ANN001
+        return any(kw in f.name for kw in ["at", "found", "searched"])
+
+    with PlannerDashboard(goal, env, fluent_filter=fluent_filter) as dashboard:
+        act_callback = dashboard.make_act_callback()
+        dashboard.console.print(f"[bold]{label}[/bold]")
+        for iteration in range(max_iterations):
+            if goal.evaluate(env.state.fluents):
+                dashboard.console.print("[green]Object found![/green]")
+                break
+            actions = env.get_actions()
+            if not actions:
+                dashboard.console.print("[red]No actions available — stuck.[/red]")
+                break
+            mcts = MCTSPlanner(actions)
+            action_name = mcts(
+                env.state, goal,
+                max_iterations=4000, c=300, max_depth=20, heuristic_multiplier=2,
+            )
+            if action_name == "NONE":
+                dashboard.console.print("[yellow]Planner returned NONE — stopping.[/yellow]")
+                break
+            env.act(get_action_by_name(actions, action_name), loop_callback_fn=act_callback)
+            dashboard.update(mcts, action_name)
+
+    dashboard.show_plots(save_video=save_video, video_fps=10, video_dpi=130)
+    return float(env.state.time)
+
+
+def main(seed: int = 1089, num_robots: int = 2) -> None:
+    """Deploy an informed policy, record it, and replay a naive policy."""
+    import numpy as np
+
+    from railroad._bindings import State
+    from railroad.core import Fluent as F
+    from railroad.environment.symbolic import LocationRegistry
+    from railroad.environment.skill import NavigationMoveSkill
+    from railroad.environment.types import Pose
+    from railroad.experimental.unknown_search import (
+        NavigationConfig,
+        UnknownSpaceEnvironment,
+    )
+    from railroad.experimental.unknown_search.operators import (
+        construct_move_navigable_operator,
+        construct_search_at_site_operator,
+        construct_search_frontier_operator,
+    )
+    from railroad.operators import construct_no_op_operator
+    from railroad.replay import build_rollout_log
+    from railroad.replay.cost import accumulate_bounds
+    from railroad.replay.search_replay_env import build_search_replay_env
+
+    # ------------------------------------------------------------------
+    # Setup: scene, robots, target
+    # ------------------------------------------------------------------
+
+    if num_robots < 1:
+        raise ValueError("num_robots must be >= 1")
+
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    robots = [f"robot{i + 1}" for i in range(num_robots)]
+    scene, true_grid, hidden_sites, true_obj_locs, start, target = setup_scene(seed)
+    true_container = next(c for c, objs in true_obj_locs.items() if target in objs)
+    goal = F(f"found {target}")
+
+    print(f"Grid: {true_grid.shape[0]}x{true_grid.shape[1]}  target={target}  "
+          f"true_container={true_container}")
+    print(f"Containers: {list(hidden_sites)}  start={start}  robots={robots}")
+
+    # ------------------------------------------------------------------
+    # Deployment: informed policy (knows where the object likely is)
+    # ------------------------------------------------------------------
+
+    # Decisive (1/0) so the deployment finds the object only at its true
+    # container — no false positives that would skip revealing it.
+    def informed_prob(robot: str, loc: str, obj: str) -> float:
+        return 1.0 if obj in true_obj_locs.get(loc, set()) else 0.0
+
+    # The move operator's time function needs the env, which doesn't exist yet;
+    # defer the binding through env_ref and use the env's safe estimator.
+    env_ref: list = [None]
+
+    def move_time_fn(robot: str, loc_from: str, loc_to: str) -> float:
         if env_ref[0] is None:
             return 5.0
         return env_ref[0].estimate_move_time_safe(robot, loc_from, loc_to)
 
-    def frontier_prob_fn(robot, frontier, obj):
-        # A generic "the object may lie beyond this frontier" prior; keeps the
-        # goal reachable in the relaxed graph and drives exploration (as in
-        # examples/frontier_search.py).
-        return 0.5
-
-    return [
+    operators = [
         construct_move_navigable_operator(move_time_fn),
         construct_search_frontier_operator(
-            object_find_prob=frontier_prob_fn, search_time=20.0
+            object_find_prob=lambda r, f, o: 0.5, search_time=20.0
         ),
         construct_search_at_site_operator(
-            site_prob_fn, search_time=20.0, container_type="container"
+            informed_prob, search_time=20.0, container_type="container"
         ),
         construct_no_op_operator(no_op_time=300.0, extra_cost=100.0),
     ]
 
-
-def make_env_kwargs(robots, start_coord, hidden_sites, target_object):
-    fluents: Set[Fluent] = set()
-    poses: Dict[str, Pose] = {}
+    fluents: set = set()
+    robot_initial_poses: dict = {}
     for robot in robots:
         fluents |= {F(f"at {robot} start_loc"), F(f"free {robot}"), F("revealed start_loc")}
-        poses[robot] = Pose(float(start_coord[0]), float(start_coord[1]), 0.0)
-    return dict(
+        robot_initial_poses[robot] = Pose(float(start[0]), float(start[1]), 0.0)
+
+    dep_env = UnknownSpaceEnvironment(
         state=State(0.0, fluents, []),
         objects_by_type={
             "robot": set(robots),
             "location": {"start_loc"},
             "container": set(),
             "frontier": set(),
-            "object": {target_object},
+            "object": {target},
         },
-        robot_initial_poses=poses,
-        location_registry=LocationRegistry(
-            {"start_loc": np.array(start_coord, dtype=float)}
-        ),
+        operators=operators,
+        skill_overrides={"move": NavigationMoveSkill},
+        true_grid=true_grid,
+        true_object_locations=true_obj_locs,
+        robot_initial_poses=robot_initial_poses,
+        location_registry=LocationRegistry({"start_loc": np.array(start, dtype=float)}),
         hidden_sites=hidden_sites,
         config=NavigationConfig(
             sensor_range=60.0,
@@ -151,72 +220,17 @@ def make_env_kwargs(robots, start_coord, hidden_sites, target_object):
             interrupt_min_dt=30000.0,
         ),
     )
-
-
-# ----------------------------------------------------------------------
-# Planning loop (standard MCTS loop with PlannerDashboard) — example pattern
-# ----------------------------------------------------------------------
-
-
-def run_planning(env, goal, label, save_video, *, max_iterations=80):
-    def fluent_filter(f):
-        return any(kw in f.name for kw in ["at", "found", "searched"])
-
-    with PlannerDashboard(goal, env, fluent_filter=fluent_filter) as dashboard:
-        act_callback = dashboard.make_act_callback()
-        dashboard.console.print(f"[bold]{label}[/bold]")
-        for _ in range(max_iterations):
-            if goal.evaluate(env.state.fluents):
-                dashboard.console.print("[green]Object found![/green]")
-                break
-            actions = env.get_actions()
-            if not actions:
-                dashboard.console.print("[red]No actions — stuck.[/red]")
-                break
-            mcts = MCTSPlanner(actions)
-            action_name = mcts(
-                env.state, goal, max_iterations=4000, c=300, max_depth=20, heuristic_multiplier=2
-            )
-            if action_name == "NONE":
-                dashboard.console.print("[yellow]Planner returned NONE.[/yellow]")
-                break
-            print(f"  [{label}] step {_}: {action_name} (t={env.state.time:.1f})", flush=True)
-            env.act(get_action_by_name(actions, action_name), loop_callback_fn=act_callback)
-            dashboard.update(mcts, action_name)
-        dashboard.show_plots(save_video=save_video, video_fps=10, video_dpi=130)
-    return float(env.state.time)
-
-
-def main(seed: int = 1089, num_robots: int = 2) -> None:
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    robots = robot_names(num_robots)
-    scene, true_grid, hidden_sites, true_obj_locs, start, target = setup_scene(seed)
-    true_container = next(c for c, objs in true_obj_locs.items() if target in objs)
-    print(f"seed={seed} grid={true_grid.shape} target={target} true_container={true_container}")
-    print(f"containers={list(hidden_sites)} start={start} robots={robots}")
-
-    goal = F(f"found {target}")
-
-    # ---- Deployment: informed policy (knows where the object likely is) ----
-    # Decisive (1/0) so the deployment finds the object only at its true
-    # container — no false positives that would skip revealing it.
-    def informed_prob(robot, loc, obj):
-        return 1.0 if obj in true_obj_locs.get(loc, set()) else 0.0
-
-    env_ref: list = [None]
-    dep_env = UnknownSpaceEnvironment(
-        operators=build_operators(env_ref, informed_prob),
-        skill_overrides={"move": NavigationMoveSkill},
-        true_grid=true_grid,
-        true_object_locations=true_obj_locs,
-        **make_env_kwargs(robots, start, hidden_sites, target),
-    )
-    dep_env.scene = scene  # type: ignore[attr-defined]
+    dep_env.scene = scene  # type: ignore[attr-defined]  # expose to dashboard for overhead map
     env_ref[0] = dep_env
-    dep_cost = run_planning(dep_env, goal, "Deployment (informed policy)", str(OUT_DIR / "deployment.mp4"))
-    print(f"deployment cost={dep_cost:.1f} found={goal.evaluate(dep_env.state.fluents)}")
+    dep_cost = run_planning(
+        dep_env, goal, "Deployment (informed policy)", str(OUT_DIR / "deployment.mp4")
+    )
+    print(f"deployment cost={dep_cost:.1f}s found={goal.evaluate(dep_env.state.fluents)}")
 
-    # ---- Record via the package recorder (captures map + container contents) ----
+    # ------------------------------------------------------------------
+    # Record via the package recorder (captures map + container contents)
+    # ------------------------------------------------------------------
+
     log = build_rollout_log(
         dep_env,
         goal_cell=(int(start[0]), int(start[1])),
@@ -230,27 +244,32 @@ def main(seed: int = 1089, num_robots: int = 2) -> None:
     print(f"recorded: containers={[s.signature for s in log.subgoals]} "
           f"actual_total_cost={log.actual_total_cost:.1f}s")
 
-    # ---- Replay: naive policy (uniform belief), exact outcomes from record ----
+    # ------------------------------------------------------------------
+    # Replay: naive policy (uniform belief), exact outcomes from the record
+    # ------------------------------------------------------------------
+
     # Built with the package SearchReplayEnvironment: hidden_sites + recorded
     # contents come straight from the log's container subgoals.
     hidden = {s.signature: (int(s.centroid[0]), int(s.centroid[1])) for s in log.subgoals}
     recorded = {s.signature: set(s.contents) for s in log.subgoals}
 
-    def naive_prob(robot, loc, obj):
-        return 0.5
-
     rep_env = build_search_replay_env(
         log,
         frontier_find_prob=lambda r, f, o: 0.5,
-        container_find_prob=naive_prob,
+        container_find_prob=lambda r, l, o: 0.5,
         hidden_sites=hidden,
         target_object=target,
         recorded_object_locations=recorded,
     )
-    rep_env.scene = scene  # type: ignore[attr-defined]
-    rep_cost = run_planning(rep_env, goal, "Replay (naive policy)", str(OUT_DIR / "replay.mp4"))
+    rep_env.scene = scene  # type: ignore[attr-defined]  # expose to dashboard for overhead map
+    rep_cost = run_planning(
+        rep_env, goal, "Replay (naive policy)", str(OUT_DIR / "replay.mp4")
+    )
 
-    # ---- Bounds (all in deployment units: seconds / makespan) ----
+    # ------------------------------------------------------------------
+    # Bounds (all in deployment units: seconds / makespan)
+    # ------------------------------------------------------------------
+
     # Commit-based, exactly as in navigation: each not-found search is a commit
     # to a subgoal the deployment never verified; optimistically the object is
     # immediately at/past it, so optimistic_lb = min over those commit times.
