@@ -195,14 +195,14 @@ class ParallelExecutor:
         mlflow_uri: str | None = getattr(self.tracker, 'tracking_uri', None)
 
         # Get include_files from plan metadata for worker processes
-        include_files: list[str] | None = plan.metadata.get("include_files")  # type: ignore[assignment]
+        include_files: list[str] | None = plan.metadata.get("include_files")
 
         try:
             with ProcessPoolExecutor(max_workers=self.num_workers) as executor:
                 # Submit all tasks at once
                 futures = {}
                 for task in plan.tasks:
-                    future = executor.submit(_execute_task_worker, task, mlflow_uri, include_files)  # type: ignore[arg-type]
+                    future = executor.submit(_execute_task_worker, task, mlflow_uri, include_files)
                     futures[future] = task
 
                 # Mark first batch as running (up to num_workers)
