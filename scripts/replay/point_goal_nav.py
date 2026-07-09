@@ -33,93 +33,25 @@ def _fluent_filter(f):  # noqa: ANN001
 
 
 # ----------------------------------------------------------------------
-# Deployment (records panoramas) + recording — example planning pattern
+# Planning loop (standard MCTS loop with PlannerDashboard) — example pattern
 # ----------------------------------------------------------------------
 
 
-def deploy_and_record(env_name: str, seed: int, video: str, num_robots: int = 1):
-    """Oracle deployment (records panos) → deployment video + RolloutLog + setup."""
-    from railroad.core import get_action_by_name
-    from railroad.dashboard import PlannerDashboard
-    from railroad.environment.types import Pose
-    from railroad.planner import MCTSPlanner
-    from railroad.replay import build_rollout_log
+def run_planning(env, goal, label: str, save_video: str, *, max_iterations: int = 200) -> float:
+    """Drive one MCTS plan->act loop with a dashboard; return the makespan.
 
-    try:
-        from railroad.lsp.rollout import build_point_goal_setup
-    except ImportError as e:
-        raise ImportError(
-            "railsim dependencies not installed. "
-            "Install with: pip install railroad[railsim]"
-        ) from e
-
-    setup = build_point_goal_setup(
-        env_name, seed, frontier_statistics_name="oracle", num_robots=num_robots
-    )
-    env, goal = setup.env, setup.goal
-    with PlannerDashboard(goal, env, fluent_filter=_fluent_filter) as dashboard:
-        act_callback = dashboard.make_act_callback()
-        dashboard.console.print("[bold]Deployment (oracle planner)[/bold]")
-        for iteration in range(200):
-            if goal.evaluate(env.state.fluents):
-                break
-            actions = env.get_actions()
-            if not actions:
-                break
-            mcts = MCTSPlanner(
-                actions, prune_top_n=4, prune_cheapest_m=2,
-                frontier_objects=set(env.frontiers),
-            )
-            action_name = mcts(
-                env.state, goal,
-                max_iterations=5000, c=300, max_depth=10, heuristic_multiplier=1.5,
-            )
-            if action_name == "NONE":
-                break
-            action = get_action_by_name(actions, action_name)
-            env.act(action, loop_callback_fn=act_callback)
-            dashboard.update(mcts, action_name)
-    dashboard.show_plots(save_video=video, video_fps=FPS, video_dpi=DPI)
-
-    start = setup.scene.locations["start_loc"]
-    start_pose = Pose(float(start[0]), float(start[1]), 0.0)
-    robots = sorted(setup.env.objects_by_type["robot"])
-    log = build_rollout_log(
-        env,
-        goal_cell=setup.goal_cell,
-        robot_starts={robot: start_pose for robot in robots},
-        env_name=env_name,
-        seed=seed,
-    )
-    print(f"deployment: reached={goal.evaluate(env.state.fluents)} "
-          f"panos={len(log.pano_records)} grid={log.recorded_grid.shape}")
-    return log, setup
-
-
-# ----------------------------------------------------------------------
-# Replay one candidate over the recording — example planning pattern
-# ----------------------------------------------------------------------
-
-
-def replay_with_video(log, setup, estimator, label: str, video: str):
-    """Replay one candidate over the recording, rendering a dashboard video.
-
-    The replay env serves each onboard observation from the robot's pose out of
-    the recorded panoramas, so the dashboard's onboard pane tracks the robot's
-    actual trajectory.
+    Deployment and replay share this loop *and* its MCTS configuration — the
+    counterfactual must hold the planner fixed and vary only the policy (the
+    frontier-statistics estimator baked into the env).
     """
     from railroad.core import get_action_by_name
     from railroad.dashboard import PlannerDashboard
     from railroad.planner import MCTSPlanner
-    from railroad.replay import ReplayEnvironment, accumulate_bounds, goal_fluent
 
-    env = ReplayEnvironment.from_log(log, estimator)
-    env.scene = setup.scene  # type: ignore[attr-defined]  # expose to dashboard for overhead map
-    goal = goal_fluent(log.robots)
     with PlannerDashboard(goal, env, fluent_filter=_fluent_filter) as dashboard:
         act_callback = dashboard.make_act_callback()
-        dashboard.console.print(f"[bold]Replay — {label}[/bold]")
-        for iteration in range(120):
+        dashboard.console.print(f"[bold]{label}[/bold]")
+        for iteration in range(max_iterations):
             if goal.evaluate(env.state.fluents):
                 break
             actions = env.get_actions()
@@ -135,38 +67,71 @@ def replay_with_video(log, setup, estimator, label: str, video: str):
             action = get_action_by_name(actions, action_name)
             env.act(action, loop_callback_fn=act_callback)
             dashboard.update(mcts, action_name)
-    dashboard.show_plots(save_video=video, video_fps=FPS, video_dpi=DPI)
 
-    # Makespan (seconds), same unit as the deployment's actual_total_cost.
-    total = float(env.state.time)
-    return accumulate_bounds(env.replay_commits, total), total
+    dashboard.show_plots(save_video=save_video, video_fps=FPS, video_dpi=DPI)
+    return float(env.state.time)
 
 
 def main(seed: int = 1, num_robots: int = 2, env_name: str = "maze") -> None:
     """Deploy + record, then replay candidate learned policies and rank by bound."""
+    from railroad.environment.types import Pose
     from railroad.lsp.frontier_statistics import (
         FixedPriorFrontierStatistics,
         LearnedFrontierStatistics,
     )
     from railroad.replay import (
         ReplayEnvironment,
+        accumulate_bounds,
+        build_rollout_log,
+        goal_fluent,
         load_rollout_log,
         preset_model,
         run_replay,
         save_rollout_log,
     )
 
+    try:
+        from railroad.lsp.rollout import build_point_goal_setup
+    except ImportError as e:
+        raise ImportError(
+            "railsim dependencies not installed. "
+            "Install with: pip install railroad[railsim]"
+        ) from e
+
     # ------------------------------------------------------------------
-    # Deployment + recording
+    # Deployment: oracle policy records panoramas + the rollout
     # ------------------------------------------------------------------
 
     if num_robots < 1:
         raise ValueError("num_robots must be >= 1")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-    log, setup = deploy_and_record(
-        env_name, seed, str(OUT_DIR / "deployment.mp4"), num_robots=num_robots
+    setup = build_point_goal_setup(
+        env_name, seed, frontier_statistics_name="oracle", num_robots=num_robots
     )
+    dep_env, goal = setup.env, setup.goal
+    dep_cost = run_planning(
+        dep_env, goal, "Deployment (oracle planner)",
+        str(OUT_DIR / "deployment.mp4"), max_iterations=200,
+    )
+
+    # ------------------------------------------------------------------
+    # Record the rollout (carries the panoramas)
+    # ------------------------------------------------------------------
+
+    start = setup.scene.locations["start_loc"]
+    start_pose = Pose(float(start[0]), float(start[1]), 0.0)
+    robots = sorted(dep_env.objects_by_type["robot"])
+    log = build_rollout_log(
+        dep_env,
+        goal_cell=setup.goal_cell,
+        robot_starts={robot: start_pose for robot in robots},
+        env_name=env_name,
+        seed=seed,
+    )
+    print(f"deployment: reached={goal.evaluate(dep_env.state.fluents)} cost={dep_cost:.1f}s "
+          f"panos={len(log.pano_records)} grid={log.recorded_grid.shape}")
+
     try:
         # Persist + reload the log (panoramas survive the round-trip).
         save_rollout_log(log, OUT_DIR / f"seed_{seed}")
@@ -198,17 +163,24 @@ def main(seed: int = 1, num_robots: int = 2, env_name: str = "maze") -> None:
         # Render a replay video for the top candidate + report
         # --------------------------------------------------------------
 
+        # The replay env serves each onboard observation from the robot's pose out
+        # of the recorded panoramas, so the dashboard's onboard pane tracks it.
         best_name = ranked[0][0]
-        bounds, total = replay_with_video(
-            log, setup, policies[best_name], best_name, str(OUT_DIR / "replay.mp4")
+        rep_env = ReplayEnvironment.from_log(log, policies[best_name])
+        rep_env.scene = setup.scene  # type: ignore[attr-defined]  # expose to dashboard for overhead map
+        rep_goal = goal_fluent(log.robots)
+        rep_cost = run_planning(
+            rep_env, rep_goal, f"Replay — {best_name}",
+            str(OUT_DIR / "replay.mp4"), max_iterations=120,
         )
+        bounds = accumulate_bounds(rep_env.replay_commits, rep_cost)
 
         print("\n========== POLICY COMPARISON (replayed over one deployment) ==========")
         for name, result in ranked:
             print(f"  {name:22s}  C_sc={result.total_cost:7.1f}  "
                   f"C_opt={result.bounds.optimistic_lb:7.1f}  reached={result.goal_reached}")
         print(f"\nvideo: deployment.mp4 (oracle) + replay.mp4 ({best_name}, "
-              f"C_sc={total:.1f} C_opt={bounds.optimistic_lb:.1f})")
+              f"C_sc={rep_cost:.1f} C_opt={bounds.optimistic_lb:.1f})")
         print(f"saved to {OUT_DIR}/")
     finally:
         setup.scene.release()
