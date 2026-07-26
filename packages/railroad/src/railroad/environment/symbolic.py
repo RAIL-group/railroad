@@ -200,7 +200,9 @@ class SymbolicEnvironment(Environment):
             {k: set(v) for k, v in true_object_locations.items()}
             if true_object_locations else {}
         )
-        self._skill_overrides = skill_overrides or {}
+        self._skill_overrides: Dict[str, Callable[..., ActiveSkill]] = dict(
+            skill_overrides or {}
+        )
         self._location_registry = location_registry
 
         super().__init__(state=state, operators=operators)
