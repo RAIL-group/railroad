@@ -1,42 +1,49 @@
-"""Offline-replay demonstration for OBJECT SEARCH in an unknown environment.
+"""Offline replay for object search in an *unknown* ProcTHOR environment.
 
-Built on the example pattern (see ``examples/frontier_search.py``): the
-planning task is run the standard way — ``UnknownSpaceEnvironment`` + the
-unknown-search operators + an ``MCTSPlanner`` loop + ``PlannerDashboard`` for
-the video. Nothing about *running the planner* is bespoke.
+The robot must explore frontiers and search containers for a two-object goal;
+the observed map is partial throughout. (See known_map_search.py for the
+fully-known-map counterpart.)
 
-This drives the **real replay package API** end to end on a ProcTHOR scene:
+The eight steps are the shared shape of all three replay scripts; only scene
+setup and ``problem_class`` differ.
 
-    build_rollout_log(dep_env)      # records map + searched container contents
-        -> build_replay_env(log)    # reconstruct the policy-agnostic arena
-        -> run_replay(env, policy)  # replay a candidate -> cost bounds
+1. Build the scene and the deployment environment.
+2. Build the policies this run can choose from (``build_policies``); only the
+   oracle takes the scene, so this is the one place ground truth enters.
+3. Pick the ``--deploy-policy``; the env reads it live through
+   ``object_find_statistics``, so it can be chosen after the env exists.
+4. Deploy: run the plan->act loop; the trajectory plus the contents of every
+   container inspected are recorded into a ``RolloutLog``.
+5. Pick the ``--replay-policy`` candidates.
+6. Build a fresh replay arena per candidate — it confines the robot to the
+   observed map and resolves every search outcome from the recording.
+7. Replay each candidate.
+8. Report the simply-connected (actual makespan) cost vs the optimistic lower
+   bound — both in deployment units (seconds), so they compare directly.
 
-Runs:
-
-1. Deployment (``deployment.mp4``): an *informed* policy (decisive find-prob at
-   the container that truly holds each object) searches the unknown ProcTHOR
-   scene for a two-object goal (``found A & found B``, objects in distinct
-   containers) and finds both. Its trajectory + the contents of every container
-   it inspected are recorded into a ``RolloutLog`` by ``build_rollout_log``.
-2. Replay (``replay_<policy>.mp4``): three candidate policies (uniform vs.
-   optimistic vs. cautious belief) are each replayed over that recording with the
-   package replay env, which confines the robot to the observed map and resolves
-   every search outcome from the recorded ground truth. Each renders its own video
-   and reports its simply-connected (actual makespan) cost vs the optimistic lower
-   bound — both in deployment units (seconds), so they compare with the deployment.
+Every policy works in both roles. ``oracle`` is a *full* oracle here: decisive
+ground-truth container belief, plus a frontier oracle that asks whether a
+still-hidden target container lies behind each frontier (``compute_oracle_frontier_labels``
+run per target container). It is a black box to the bound — the replayed cost
+accounting still reads only what the deployment recorded.
 
 Deployment and replay share one plan->act loop and one ``MctsConfig`` (``MCTS``).
 
-Usage:  uv run python scripts/replay/unknown_map_search.py [--seed S] [--num-robots N]
+Usage:  uv run python scripts/replay/unknown_map_search.py \\
+            [--deploy-policy P] [--replay-policy P[,P...]] [--seed S] [--num-robots N]
 """
 
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Sequence
 
-from railroad.replay import MctsConfig
+from railroad.experimental.unknown_search import (
+    FixedObjectFind,
+    ObjectFindEstimator,
+)
+from railroad.replay import MctsConfig, oracle_object_find
 
 if TYPE_CHECKING:
     import numpy as np
@@ -44,9 +51,49 @@ if TYPE_CHECKING:
 
 OUT_DIR = Path("data/replay/unknown_map_search")
 
-# One planner config shared by the deployment and the replay.
-MCTS = MctsConfig(iterations=4000, c=300.0, max_depth=20, heuristic_multiplier=2.0)
-MAX_ITERS = 80
+# One planner config shared by the deployment and every replay.
+MCTS = MctsConfig(iterations=10000, c=300.0, max_depth=20, heuristic_multiplier=2.0)
+MAX_ITERS = 100
+
+# ----------------------------------------------------------------------
+# Policies this experiment compares
+# ----------------------------------------------------------------------
+#
+# For object search a policy IS an ``ObjectFindEstimator``: "is the object
+# beyond this frontier / inside this container?". Nothing about point-goal
+# navigation appears here — no frontier exploration costs, no goal cell —
+# because none of it applies.
+#
+# The library supplies the belief models; *which* of them this study compares,
+# under what names and tuning, is an experiment choice and lives here so it is
+# visible where it is varied. One built estimator per name, shared by both roles:
+# safe because every refresh() *replaces* its cache rather than accumulating, and
+# the deployment finishes before any replay begins.
+
+POLICY_NAMES = ("cautious", "optimistic", "oracle", "uniform")
+
+
+def build_policies(
+    scene: Any, *, target_objects: Sequence[str] = ()
+) -> dict[str, ObjectFindEstimator]:
+    """The object-search policies this run offers, by name.
+
+    No ``learned`` entry: a learned frontier belief predicts from panoramas, and
+    this pipeline records none — the deployment env has no ``pano_records``, so
+    the log carries none and replay has nothing to serve. Offering it would load
+    a network and then silently plan on the default prior. Point-goal navigation
+    does have a panorama pipeline (railsim), so ``learned`` lives there.
+    """
+    policies: dict[str, ObjectFindEstimator] = {
+        # Perfect knowledge: decisive container truth (plus frontier truth where
+        # the map is unknown). The only entry that needs the scene.
+        "oracle": oracle_object_find(scene, target_objects=target_objects),
+        # Flat beliefs over containers and frontiers alike.
+        "optimistic": FixedObjectFind(0.9),
+        "cautious": FixedObjectFind(0.3),
+        "uniform": FixedObjectFind(0.5),
+    }
+    return policies
 
 
 # ----------------------------------------------------------------------
@@ -100,43 +147,36 @@ def pick_two_objects(object_locations: dict[str, set[str]]) -> list[str]:
     return targets
 
 
-def main(seed: int = 1089, num_robots: int = 2) -> None:
-    """Deploy an informed policy, record it, and replay a naive policy."""
+def main(
+    seed: int = 1089,
+    num_robots: int = 2,
+    deploy_policy: str = "oracle",
+    replay_policies: tuple[str, ...] = ("optimistic",),
+) -> None:
+    """Deploy one policy, record it, and replay candidates over the recording."""
     import numpy as np
 
     from railroad._bindings import State
     from railroad.core import Fluent as F
-    from railroad.environment.symbolic import LocationRegistry
     from railroad.environment.skill import NavigationMoveSkill
+    from railroad.environment.symbolic import LocationRegistry
     from railroad.environment.types import Pose
     from railroad.experimental.unknown_search import (
         NavigationConfig,
-        UnknownSpaceEnvironment,
+        UnknownSpaceSearchEnvironment,
     )
-    from railroad.experimental.unknown_search.operators import (
-        construct_move_navigable_operator,
-        construct_search_at_site_operator,
-        construct_search_frontier_operator,
-    )
-    from railroad.operators import construct_no_op_operator
     from railroad.replay import (
-        CandidatePolicy,
         build_replay_env,
-        build_rollout_log,
-        mcts_selector,
-        run_dashboard_loop,
+        run_deployment,
         run_replay,
     )
 
-    # ------------------------------------------------------------------
-    # Setup: scene, robots, target
-    # ------------------------------------------------------------------
-
     if num_robots < 1:
         raise ValueError("num_robots must be >= 1")
-
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     robots = [f"robot{i + 1}" for i in range(num_robots)]
+
+    # -- 1. scene + deployment environment ----------------------------
     scene, true_grid, hidden_sites, true_obj_locs, start = setup_scene(seed)
     targets = pick_two_objects(true_obj_locs)
     goal = F(f"found {targets[0]}") & F(f"found {targets[1]}")
@@ -144,46 +184,13 @@ def main(seed: int = 1089, num_robots: int = 2) -> None:
         o: next(c for c, objs in true_obj_locs.items() if o in objs) for o in targets
     }
 
-    print(f"Grid: {true_grid.shape[0]}x{true_grid.shape[1]}  targets={targets}  "
-          f"true_containers={true_containers}")
-    print(f"Containers: {list(hidden_sites)}  start={start}  robots={robots}")
-
-    # ------------------------------------------------------------------
-    # Deployment: informed policy (knows where the object likely is)
-    # ------------------------------------------------------------------
-
-    # Decisive (1/0) so the deployment finds the object only at its true
-    # container — no false positives that would skip revealing it.
-    def informed_prob(robot: str, loc: str, obj: str) -> float:
-        return 1.0 if obj in true_obj_locs.get(loc, set()) else 0.0
-
-    # The move operator's time function needs the env, which doesn't exist yet;
-    # defer the binding through env_ref and use the env's safe estimator.
-    env_ref: list = [None]
-
-    def move_time_fn(robot: str, loc_from: str, loc_to: str) -> float:
-        if env_ref[0] is None:
-            return 5.0
-        return env_ref[0].estimate_move_time_safe(robot, loc_from, loc_to)
-
-    operators = [
-        construct_move_navigable_operator(move_time_fn),
-        construct_search_frontier_operator(
-            object_find_prob=lambda r, f, o: 0.5, search_time=20.0
-        ),
-        construct_search_at_site_operator(
-            informed_prob, search_time=20.0, container_type="container"
-        ),
-        construct_no_op_operator(no_op_time=300.0, extra_cost=100.0),
-    ]
-
     fluents: set = set()
     robot_initial_poses: dict = {}
     for robot in robots:
         fluents |= {F(f"at {robot} start_loc"), F(f"free {robot}"), F("revealed start_loc")}
         robot_initial_poses[robot] = Pose(float(start[0]), float(start[1]), 0.0)
 
-    dep_env = UnknownSpaceEnvironment(
+    dep_env = UnknownSpaceSearchEnvironment(
         state=State(0.0, fluents, []),
         objects_by_type={
             "robot": set(robots),
@@ -192,7 +199,6 @@ def main(seed: int = 1089, num_robots: int = 2) -> None:
             "frontier": set(),
             "object": set(targets),
         },
-        operators=operators,
         skill_overrides={"move": NavigationMoveSkill},
         true_grid=true_grid,
         true_object_locations=true_obj_locs,
@@ -206,104 +212,120 @@ def main(seed: int = 1089, num_robots: int = 2) -> None:
             interrupt_min_dt=30000.0,
         ),
     )
-    env_ref[0] = dep_env
-    run_dashboard_loop(
+
+    print(f"Grid: {true_grid.shape[0]}x{true_grid.shape[1]}  targets={targets}  "
+          f"true_containers={true_containers}")
+    print(f"Containers: {list(hidden_sites)}  start={start}  robots={robots}")
+
+    # -- 2. the policies this run can choose from ---------------------
+    # Only the oracle takes the scene — it is the only one that consults ground
+    # truth. The rest need nothing, or just the weights path.
+    policies = build_policies(scene, target_objects=targets)
+
+    missing = sorted({deploy_policy, *replay_policies} - set(policies))
+    if missing:
+        raise SystemExit(
+            f"policies {missing} are unavailable in this run; "
+            "'learned' needs --network-file"
+        )
+
+
+    # -- 3. pick a policy to deploy and install it --------------------
+    dep_env.object_find_statistics = policies[deploy_policy]
+    print(f"deploy-policy={deploy_policy}  replay-policies={list(replay_policies)}")
+
+    # -- 4. deploy and record -----------------------------------------
+    deployment = run_deployment(
         dep_env,
         goal,
-        select=mcts_selector(MCTS),
-        max_iterations=MAX_ITERS,
-        fluent_keywords=("at", "found", "searched"),
-        scene=scene,
-        save_video=str(OUT_DIR / "deployment.mp4"),
-        label="Deployment (informed)",
-    )
-    dep_cost = float(dep_env.state.time)
-    print(f"deployment cost={dep_cost:.1f}s found={goal.evaluate(dep_env.state.fluents)}")
-
-    # ------------------------------------------------------------------
-    # Record via the package recorder (captures map + searched contents)
-    # ------------------------------------------------------------------
-
-    log = build_rollout_log(
-        dep_env,
         goal_cell=(int(start[0]), int(start[1])),
         robot_starts={
             robot: Pose(float(start[0]), float(start[1]), 0.0) for robot in robots
         },
+        problem_class="object-search",
+        mcts=MCTS,
+        max_planning_iterations=MAX_ITERS,
+        dashboard=True,
+        scene=scene,
+        save_video=str(OUT_DIR / f"deployment_{deploy_policy}.mp4"),
+        label=f"Deployment ({deploy_policy})",
+        fluent_keywords=("at", "found", "searched"),
         env_name="procthor",
         seed=seed,
-        problem_class="object-search",
-        goal=goal,
     )
+    log = deployment.log
+    print(f"deployment: found={deployment.goal_reached} "
+          f"cost={deployment.total_cost:.1f}s")
     print(f"recorded: containers={[s.signature for s in log.subgoals]} "
           f"actual_total_cost={log.actual_total_cost:.1f}s")
 
-    # ------------------------------------------------------------------
-    # Replay three candidate policies (uniform vs. optimistic vs. cautious belief)
-    # ------------------------------------------------------------------
-
+    # -- 5-8. replay each candidate over a fresh arena ----------------
     # build_replay_env reconstructs the arena (hidden_sites + recorded contents +
     # goal come straight from the log); run_replay applies the candidate. The
     # find-probabilities only steer MCTS belief — outcomes resolve from the record.
-    def _policy(name: str, prob: float) -> CandidatePolicy:
-        return CandidatePolicy(
-            name=name,
-            frontier_find_prob=lambda r, f, o: prob,
-            container_find_prob=lambda r, l, o: prob,
-        )
-
-    policies = {
-        "uniform": _policy("uniform", 0.5),
-        "optimistic": _policy("optimistic", 0.9),
-        "cautious": _policy("cautious", 0.1),
-    }
-
-    # A fresh arena per candidate, same MCTS; each renders its own replay video.
-    results = {
-        name: run_replay(
+    results = {}
+    for name in replay_policies:
+        results[name] = run_replay(
             build_replay_env(log),
-            policy,
+            policies[name],
             dashboard=True,
             scene=scene,
-            save_video=str(OUT_DIR / f"replay_{name}.mp4"),
+            save_video=str(OUT_DIR / f"replay_{name}_from_{deploy_policy}.mp4"),
             label=f"Replay ({name})",
             mcts=MCTS,
             max_planning_iterations=MAX_ITERS,
         )
-        for name, policy in policies.items()
-    }
-    ranked = sorted(results.items(), key=lambda kv: kv[1].bounds.simply_connected_lb)
 
-    # ------------------------------------------------------------------
-    # Bounds (all in deployment units: seconds / makespan)
-    # ------------------------------------------------------------------
-
-    # Commit-based, exactly as in navigation: each not-found search is a commit
-    # to a subgoal the deployment never verified; optimistically the object is
-    # immediately at/past it, so C_opt = min over those commit times.
+    # Bounds (all in deployment units: seconds / makespan). Each not-found search
+    # in replay is a commit to a subgoal the deployment never verified;
+    # optimistically the object is immediately at/past it, so C_opt = min over
+    # those commit times.
     print("\n================ RESULTS ================")
-    print(f"deployment (informed) cost/time = {dep_cost:.1f}s")
-    print("========== POLICY COMPARISON (replayed over one deployment) ==========")
-    for name, res in ranked:
-        print(f"  {name:12s}  C_sc={res.bounds.simply_connected_lb:7.1f}  "
-              f"C_opt={res.bounds.optimistic_lb:7.1f}  found={res.goal_reached}")
-    print("\nvideos: deployment.mp4 + "
-          + ", ".join(f"replay_{n}.mp4" for n in policies))
+    print(f"deployment ({deploy_policy}) cost = {deployment.total_cost:.1f}s")
+    print("========== REPLAY (over one deployment) ==========")
+    for name, result in sorted(
+        results.items(), key=lambda kv: kv[1].bounds.simply_connected_lb
+    ):
+        print(f"  {name:14s}  C_sc={result.bounds.simply_connected_lb:7.1f}  "
+              f"C_opt={result.bounds.optimistic_lb:7.1f}  found={result.goal_reached}")
+    print(f"\nvideos: deployment_{deploy_policy}.mp4 + "
+          + ", ".join(f"replay_{n}_from_{deploy_policy}.mp4" for n in results))
     print(f"saved to {OUT_DIR}/")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Offline-replay demo for object search in an unknown ProcTHOR scene."
-    )
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seed", type=int, default=1089, help="ProcTHOR scene seed")
     parser.add_argument(
         "--num-robots", type=int, default=2,
         help="robots deployed (co-located at start; any finding the object wins)",
     )
-    return parser.parse_args(argv)
+    parser.add_argument(
+        "--deploy-policy", choices=POLICY_NAMES, default="oracle",
+        help="policy that runs the live deployment (generates the recording)",
+    )
+    parser.add_argument(
+        "--replay-policy", dest="replay_policies", default="optimistic",
+        help=(
+            "policy replayed over the recording; comma-separate several to "
+            f"rank them over one deployment. One of: {', '.join(POLICY_NAMES)}"
+        ),
+    )
+    args = parser.parse_args(argv)
+    args.replay_policies = tuple(
+        name.strip() for name in args.replay_policies.split(",") if name.strip()
+    )
+    unknown = sorted(set(args.replay_policies) - set(POLICY_NAMES))
+    if unknown:
+        parser.error(f"unknown --replay-policy {unknown}; choose from {POLICY_NAMES}")
+    return args
 
 
 if __name__ == "__main__":
     args = parse_args()
-    main(seed=args.seed, num_robots=args.num_robots)
+    main(
+        seed=args.seed,
+        num_robots=args.num_robots,
+        deploy_policy=args.deploy_policy,
+        replay_policies=args.replay_policies,
+    )

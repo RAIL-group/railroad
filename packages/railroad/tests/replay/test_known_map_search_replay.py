@@ -14,8 +14,8 @@ import numpy as np
 from railroad._bindings import State
 from railroad.core import Fluent as F, get_action_by_name
 from railroad.environment.symbolic import LocationRegistry
+from railroad.experimental.unknown_search import CallableObjectFind
 from railroad.replay import (
-    CandidatePolicy,
     ReplayKnownMapSearchEnvironment,
     build_replay_env,
     build_rollout_log,
@@ -49,7 +49,7 @@ def _grid():
     return grid
 
 
-def _env(contents, target, prob=lambda r, l, o: 0.5):
+def _env(contents, target, prob=lambda r, loc, o: 0.5):
     """A known-map search env standing in for a deployment (drives searches over
     a known floorplan). The candidate ``prob`` only steers MCTS belief."""
     coords = _coords()
@@ -68,7 +68,7 @@ def _env(contents, target, prob=lambda r, l, o: 0.5):
             {k: np.array(v, dtype=float) for k, v in coords.items()}
         ),
     )
-    env.apply_policy(CandidatePolicy(container_find_prob=prob))
+    env.apply_policy(CallableObjectFind(prob))
     return env
 
 
@@ -84,11 +84,11 @@ def _record_log(dep, target="ring"):
     )
 
 
-def _replay(log, prob=lambda r, l, o: 0.5, select=None):
+def _replay(log, prob=lambda r, loc, o: 0.5, select=None):
     """Replay a candidate over a fresh arena built from *log*."""
     return run_replay(
         build_replay_env(log),
-        CandidatePolicy(container_find_prob=prob),
+        CallableObjectFind(prob),
         select_action=select or scripted_search,
     )
 
@@ -164,7 +164,7 @@ def test_recorder_captures_searched_contents_only() -> None:
     # Deployment 'truth': ring truly in container_c; the deployment (informed)
     # searches only container_c.
     dep = _env({"container_c": {target}}, target,
-               prob=lambda r, l, o: 1.0 if l == "container_c" else 0.0)
+               prob=lambda r, loc, o: 1.0 if loc == "container_c" else 0.0)
     _drive(dep, target)
     assert F(f"found {target}").evaluate(dep.state.fluents)
 
@@ -187,7 +187,7 @@ def test_recorder_captures_searched_contents_only() -> None:
 def test_replay_finds_target_from_recorded_truth() -> None:
     target = "ring"
     dep = _env({"container_c": {target}}, target,
-               prob=lambda r, l, o: 1.0 if l == "container_c" else 0.0)
+               prob=lambda r, loc, o: 1.0 if loc == "container_c" else 0.0)
     _drive(dep, target)
     log = _record_log(dep, target=target)
 
@@ -204,7 +204,7 @@ def test_replay_finds_target_from_recorded_truth() -> None:
 def test_replay_bounds_are_seconds_and_admissible() -> None:
     target = "ring"
     dep = _env({"container_c": {target}}, target,
-               prob=lambda r, l, o: 1.0 if l == "container_c" else 0.0)
+               prob=lambda r, loc, o: 1.0 if loc == "container_c" else 0.0)
     _drive(dep, target)
     log = _record_log(dep, target=target)
     res = _replay(log)
@@ -226,7 +226,7 @@ def test_replay_logs_commits_for_unsearched_containers() -> None:
     real lower bound below the makespan, not the collapsed exact cost."""
     target = "ring"
     dep = _env({"container_c": {target}}, target,
-               prob=lambda r, l, o: 1.0 if l == "container_c" else 0.0)
+               prob=lambda r, loc, o: 1.0 if loc == "container_c" else 0.0)
     _drive(dep, target, select=_beeline_search("container_c"))
     dep_searched = {f.args[0] for f in dep.state.fluents
                     if f.name == "searched" and not f.negated and f.args}
@@ -253,7 +253,7 @@ def test_replay_logs_commits_for_unsearched_containers() -> None:
 def test_replay_is_deterministic() -> None:
     target = "ring"
     dep = _env({"container_c": {target}}, target,
-               prob=lambda r, l, o: 1.0 if l == "container_c" else 0.0)
+               prob=lambda r, loc, o: 1.0 if loc == "container_c" else 0.0)
     _drive(dep, target)
     log = _record_log(dep, target=target)
 

@@ -35,11 +35,14 @@ from railroad.experimental.unknown_search import (
     UnknownSpaceEnvironment,
 )
 from railroad.lsp.env_mixin import LSPEnvironmentMixin
+from railroad.lsp.frontier_statistics import (
+    FixedPriorFrontierStatistics,
+    FrontierStatisticsEstimator,
+)
 from railroad.lsp.oracle import frontier_cells_hash
 
-from ..cost import Commit, optimistic_cost_to_goal
+from ..cost import Commit, cost_at_cell, optimistic_cost_grid_from_goal
 from ..loop import MctsConfig
-from ..policy import CandidatePolicy
 from ..types import RolloutLog
 from .base import (
     ReplayArenaMixin,
@@ -83,18 +86,22 @@ class ReplayPointGoalNavEnvironment(
     ) -> None:
         # Confinement/pristine grids + served panos + net-motion (shared base).
         confinement = self._setup_replay_grids(recorded_grid, pano_records)
-        # Neutral policy until apply_policy() swaps in a candidate.
-        self._init_policy()
 
         # Optional recorded goal; None -> derive the point-goal from the robots.
         self._goal: "Goal | Fluent | None" = None
         self._lsp_goal_cell = (int(goal_cell[0]), int(goal_cell[1]))
-        self._lsp_frontier_statistics = self._policy.resolve_frontier_statistics()
+        # Neutral until apply_policy() installs a candidate.
+        self._lsp_frontier_statistics = FixedPriorFrontierStatistics()
 
         robots = objects_by_type.get("robot", set())
         self._net_motion = {r: 0.0 for r in robots}
         self._replay_commits: List[Commit] = []
         self._retired_signatures: Set[str] = set()
+        # Both inputs are fixed for the arena's lifetime, so the optimistic
+        # cost-to-goal grid is built once instead of per commit.
+        self._optimistic_cost_grid = optimistic_cost_grid_from_goal(
+            self._pristine_grid, self._lsp_goal_cell
+        )
 
         super().__init__(
             state=state,
@@ -155,13 +162,11 @@ class ReplayPointGoalNavEnvironment(
 
     # -- policy / goal / bookkeeping ----------------------------------
 
-    def apply_policy(self, policy: CandidatePolicy) -> None:
-        super().apply_policy(policy)
-        self._lsp_frontier_statistics = policy.resolve_frontier_statistics()
-        # Refresh now (the arena is already constructed and has served its panos)
-        # so predictions are available before planning — mirroring the per-step
-        # refresh the plan->act loop does.
-        self._lsp_frontier_statistics.refresh(self)
+    def apply_policy(self, policy: FrontierStatisticsEstimator) -> None:
+        """Install the navigation belief. The mixin's setter also refreshes it,
+        and lsp-explore reads it live, so the candidate takes effect on this
+        already-built arena without rebuilding operators."""
+        self.frontier_statistics = policy
 
     @property
     def goal(self) -> "Goal | Fluent":
@@ -176,8 +181,17 @@ class ReplayPointGoalNavEnvironment(
 
     @property
     def oracle_available(self) -> bool:
-        # Replay resolves explore outcomes itself (always failure); there is
-        # no true map to label from.
+        """No ground truth here, so ``oracle_labels`` must stay empty.
+
+        ``_true_grid`` is the *confinement* grid (unobserved -> wall), not the
+        real world. The inherited ``oracle_labels`` would label against it and
+        report a frontier the goal genuinely lies beyond as infeasible —
+        silently-wrong ground truth wearing the oracle's name. Returning False
+        makes ``oracle_labels`` return ``{}`` instead.
+
+        An oracle *candidate* is unaffected: it carries the scene's true map
+        itself rather than reading one off the environment.
+        """
         return False
 
     # -- intercept: lsp-explore always fails ---------------------
@@ -213,10 +227,9 @@ class ReplayPointGoalNavEnvironment(
         # (cells) and is converted to seconds with the same speed the env charges
         # for motion (estimate_move_time = cells / speed_cells_per_sec).
         speed = self._config.speed_cells_per_sec
-        optimistic = optimistic_cost_to_goal(
-            self._pristine_grid,
+        optimistic = cost_at_cell(
+            self._optimistic_cost_grid,
             (frontier.centroid_row, frontier.centroid_col),
-            self._lsp_goal_cell,
         ) / speed
         accrued = float(self._time)
         self._replay_commits.append(

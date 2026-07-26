@@ -12,8 +12,8 @@ from __future__ import annotations
 import numpy as np
 
 from railroad.core import Fluent as F
+from railroad.experimental.unknown_search import CallableObjectFind
 from railroad.replay import (
-    CandidatePolicy,
     MctsConfig,
     build_replay_env,
     run_replay,
@@ -42,11 +42,8 @@ ROOM3 = """
 """
 
 
-def _policy(container_prob=0.8) -> CandidatePolicy:
-    return CandidatePolicy(
-        frontier_find_prob=lambda r, f, o: 0.5,
-        container_find_prob=lambda r, l, o: container_prob,
-    )
+def _policy(container_prob=0.8) -> CallableObjectFind:
+    return CallableObjectFind(lambda r, loc, o: container_prob)
 
 
 def _search_mcts(iterations: int) -> MctsConfig:

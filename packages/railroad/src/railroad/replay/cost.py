@@ -60,10 +60,17 @@ def optimistic_cost_to_goal(
     Unseen-as-free path length (see :func:`optimistic_cost_grid_from_goal`).
     Returns ``inf`` when *point* is out of bounds or unreachable.
     """
-    return _lookup(optimistic_cost_grid_from_goal(recorded_grid, goal_cell), point)
+    return cost_at_cell(optimistic_cost_grid_from_goal(recorded_grid, goal_cell), point)
 
 
-def _lookup(cost_grid: np.ndarray, point: Cell) -> float:
+def cost_at_cell(cost_grid: np.ndarray, point: Cell) -> float:
+    """Read *point* out of a cost grid; ``inf`` if out of bounds or unreachable.
+
+    Public so a caller that queries one fixed grid repeatedly can build it once
+    with :func:`optimistic_cost_grid_from_goal` and look up many points, rather
+    than paying for a fresh Dijkstra per query via
+    :func:`optimistic_cost_to_goal`.
+    """
     row = int(round(float(point[0])))
     col = int(round(float(point[1])))
     if not (0 <= row < cost_grid.shape[0] and 0 <= col < cost_grid.shape[1]):

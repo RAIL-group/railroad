@@ -16,8 +16,8 @@ import pytest
 
 from railroad.core import Fluent
 from railroad.lsp.frontier_statistics import FixedPriorFrontierStatistics
+from railroad.experimental.unknown_search import CallableObjectFind
 from railroad.replay import (
-    CandidatePolicy,
     MctsConfig,
     build_replay_env,
     run_replay,
@@ -25,7 +25,6 @@ from railroad.replay import (
 
 from .conftest import build_log_from_ascii, explore_first_select, parse_ascii_grid
 from .test_known_map_search_replay import (
-    _coords,
     _drive,
     _env,
     _record_log,
@@ -51,7 +50,7 @@ def _ffp(r, f, o) -> float:  # frontier-search probability
     return 0.5
 
 
-def _cfp(r, l, o) -> float:  # container-search probability
+def _cfp(r, loc, o) -> float:  # container-search probability
     return 0.8
 
 
@@ -68,7 +67,7 @@ def _search_log():
 def _known_map_log(target="ring"):
     dep = _env(
         {"container_c": {target}}, target,
-        prob=lambda r, l, o: 1.0 if l == "container_c" else 0.0,
+        prob=lambda r, loc, o: 1.0 if loc == "container_c" else 0.0,
     )
     _drive(dep, target)
     return _record_log(dep, target=target)
@@ -106,7 +105,7 @@ def test_navigation_replay_commits_and_is_sound() -> None:
     log = build_log_from_ascii(NAV_MAP)
     res = run_replay(
         build_replay_env(log),
-        CandidatePolicy(frontier_statistics=FixedPriorFrontierStatistics(prob_feasible=0.8)),
+        FixedPriorFrontierStatistics(prob_feasible=0.8),
         select_action=explore_first_select,
     )
     # The frontier was committed, so the intercept + bound machinery ran.
@@ -130,7 +129,7 @@ def test_object_search_runs_and_bounds_are_commit_based() -> None:
     log = _search_log()
     res = run_replay(
         build_replay_env(log),
-        CandidatePolicy(frontier_find_prob=_ffp, container_find_prob=_cfp),
+        CallableObjectFind(_cfp),
         max_planning_iterations=40,
         mcts=SEARCH_MCTS,
     )
@@ -159,7 +158,7 @@ def test_known_map_reads_goal_from_self_describing_log() -> None:
 
     res = run_replay(
         build_replay_env(log),
-        CandidatePolicy(container_find_prob=lambda r, l, o: 0.5),
+        CallableObjectFind(lambda r, loc, o: 0.5),
         select_action=scripted_search,
     )
     assert res.goal_reached

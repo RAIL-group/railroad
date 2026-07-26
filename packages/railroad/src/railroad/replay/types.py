@@ -1,11 +1,10 @@
 """Serializable records for offline replay.
 
-A :class:`RolloutLog` is everything one real deployment hands to offline
-replay. For *navigation* replay the load-
-bearing fields are ``recorded_grid`` (the final observed map — the replay
-arena), ``goal_cell``, and ``robot_starts`` / ``config``; the rest is
-provenance. :class:`ReplayResult` is what a replay produces: the two
-bounds plus the commits and termination reason.
+A :class:`RolloutLog` is everything one real deployment hands to offline replay.
+For *navigation* replay the load-bearing fields are ``recorded_grid`` (the final
+observed map — the replay arena), ``goal_cell``, and ``robot_starts`` /
+``config``; the rest is provenance. :class:`ReplayResult` is what a replay
+produces: the two bounds plus the commits and termination reason.
 """
 
 from __future__ import annotations

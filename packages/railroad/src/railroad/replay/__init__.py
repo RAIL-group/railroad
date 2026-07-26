@@ -22,9 +22,11 @@ from .cost import (
     Bounds,
     Commit,
     accumulate_bounds,
+    cost_at_cell,
     optimistic_cost_grid_from_goal,
     optimistic_cost_to_goal,
 )
+from .deployment import DeploymentResult, run_deployment
 from .driver import build_replay_env, run_replay
 from .environments import (
     ReplayKnownMapSearchEnvironment,
@@ -32,19 +34,23 @@ from .environments import (
     ReplayUnknownSearchEnvironment,
     frontier_sweep_select,
     goal_fluent,
-    learned_frontier_search_prob,
     navigation_config_from_log,
 )
 from .loop import MctsConfig, mcts_selector, plan_act_loop, run_dashboard_loop
-from .policy import CandidatePolicy
+from .policy import (
+    ConstantFrontierStatisticsModel,
+    OracleObjectFind,
+    constant_frontier_statistics,
+    learned_container_find,
+    learned_frontier_statistics,
+    oracle_frontier_statistics,
+    oracle_object_find,
+    scene_goal_cell,
+    target_container_cells,
+)
 from .recorder import build_rollout_log
 from .selection import select_policy
 from .serialization import load_rollout_log, save_rollout_log
-from .stub_model import (
-    PresetFrontierStatisticsModel,
-    PresetSearchModel,
-    preset_model,
-)
 from .types import ReplayResult, RolloutLog, StepRecord, SubgoalRecord
 
 __all__ = [
@@ -58,10 +64,23 @@ __all__ = [
     "accumulate_bounds",
     "optimistic_cost_grid_from_goal",
     "optimistic_cost_to_goal",
-    # Policy + selection
-    "CandidatePolicy",
+    "cost_at_cell",
+    # Selection
     "select_policy",
-    # The three-call flow
+    # Policies. A policy IS an estimator, and which one depends on the problem
+    # class; these builders come in navigation/search pairs. The *registry* of
+    # which policies a study compares lives with the experiment, not here.
+    "oracle_frontier_statistics",
+    "oracle_object_find",
+    "constant_frontier_statistics",
+    "learned_frontier_statistics",
+    "learned_container_find",
+    "scene_goal_cell",
+    "target_container_cells",
+    "OracleObjectFind",
+    # The deploy -> record -> replay flow
+    "run_deployment",
+    "DeploymentResult",
     "build_rollout_log",
     "save_rollout_log",
     "load_rollout_log",
@@ -78,10 +97,7 @@ __all__ = [
     "ReplayKnownMapSearchEnvironment",
     "goal_fluent",
     "frontier_sweep_select",
-    "learned_frontier_search_prob",
     "navigation_config_from_log",
-    # Faked-model helpers for examples/tests (real net drops in at the same site)
-    "preset_model",
-    "PresetFrontierStatisticsModel",
-    "PresetSearchModel",
+    # Stand-in for a trained net: fakes only the numbers, runs the real pipeline
+    "ConstantFrontierStatisticsModel",
 ]

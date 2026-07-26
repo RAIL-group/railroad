@@ -24,11 +24,11 @@ deployment (OpenGL).
 Three calls, one per stage — record, reconstruct, replay:
 
 ```python
-from railroad.replay import build_rollout_log, build_replay_env, run_replay, CandidatePolicy
+from railroad.replay import build_rollout_log, build_replay_env, run_replay
 
 log    = build_rollout_log(deployment_env, goal_cell=..., robot_starts=..., goal=deployment_goal)
 env    = build_replay_env(log)             # policy-agnostic arena (dispatch on problem_class)
-result = run_replay(env, CandidatePolicy())  # neutral priors; returns cost bounds
+result = run_replay(env, policy)            # policy = the estimator; returns bounds
 
 result.bounds.optimistic_lb        # C^{lb,opt}
 result.bounds.simply_connected_lb  # C^{lb,s.c.}
@@ -45,18 +45,23 @@ compare candidates over one recording, build a fresh arena per candidate and
 replay each:
 
 ```python
-from railroad.lsp.frontier_statistics import LearnedFrontierStatistics
-from railroad.replay import CandidatePolicy, build_replay_env, preset_model, run_replay
+from railroad.replay import build_replay_env, run_replay
 
 for policy in candidates:
     env    = build_replay_env(log)
     result = run_replay(env, policy)          # silent; pass dashboard=True to render
 ```
 
-A `CandidatePolicy` carries whatever the target flavor consumes (a
-frontier-statistics estimator for navigation; find-probability callables for
-search); the env reads the fields it needs via `apply_policy` and ignores the
-rest. `run_replay` holds the planner fixed at the env's per-flavor defaults;
+A *policy* is an estimator, and which kind depends on the problem class: a
+`FrontierStatisticsEstimator` for point-goal navigation, an `ObjectFindEstimator`
+for object search (containers only, on a known map). `apply_policy` installs it;
+passing the wrong family fails rather than silently degrading to a neutral prior.
+Build them with the per-family helpers — `oracle_frontier_statistics(scene)` /
+`oracle_object_find(scene, ...)`, `constant_frontier_statistics(p)` /
+`FixedObjectFind(p)`, `learned_frontier_statistics(path)` (navigation, from a
+trained `LSPFrontierNet`) / `learned_container_find(scene)` (known-map search,
+from ProcTHOR's packaged `FCNNforObjectSearch`). *Which* policies a study compares is an experiment
+choice and lives in `scripts/replay/*.py`, not here. `run_replay` holds the planner fixed at the env's per-flavor defaults;
 pass `mcts=MctsConfig(...)` / `max_planning_iterations=...` to match a specific
 deployment, and `dashboard=True` (with `scene=`/`save_video=`) to render.
 
@@ -64,14 +69,13 @@ deployment, and `dashboard=True` (with `scene=`/`save_video=`) to render.
 
 The deployment records panoramas; the `RolloutLog` carries them; replay serves
 them to a learned estimator via best-vantage selection — the same path used live
-and at training time. During development only the *model output* is faked
-(`preset_model(...)`); a trained network is a drop-in at the same call site:
+and at training time. `constant_frontier_statistics(p)` fakes only the *model
+output*, via a `ConstantFrontierStatisticsModel`; the real observations still
+flow through it, so a trained network is a drop-in:
 
 ```python
-# SWAP preset_model(...) for a trained net:
-from railroad.lsp.model import load_frontier_statistics_model
-estimator = LearnedFrontierStatistics(load_frontier_statistics_model("LSPFrontierNet.pt"))
-policy = CandidatePolicy(name="learned", frontier_statistics=estimator)
+policy = constant_frontier_statistics(0.9)             # fakes only the numbers
+policy = learned_frontier_statistics("LSPFrontierNet.pt")  # same pipeline, trained net
 ```
 
 See `scripts/replay/point_goal_nav.py` for the full record → serialize →
@@ -111,18 +115,18 @@ ProcTHOR integration test.
 
 | File | Responsibility |
 | --- | --- |
+| `deployment.py` | `run_deployment` — drives the loop over a live env and returns the `RolloutLog` replay consumes (+ `DeploymentResult`); the mirror image of `driver.py`. |
 | `driver.py` | `build_replay_env` (dispatch on `problem_class`) + `run_replay` (apply policy, drive loop, return bounds). |
 | `loop.py` | The shared plan→act loop (silent or dashboard) + `MctsConfig` / `mcts_selector` (shared by deployment and replay). |
 | `cost.py` | Pure bound math: `optimistic_cost_to_goal`, `accumulate_bounds`, `Commit`, `Bounds`. |
 | `types.py` | Serializable `RolloutLog` (incl. `pano_records`) / `StepRecord` / `SubgoalRecord` / `ReplayResult`. |
 | `serialization.py` | `RolloutLog` ↔ disk (`grid.npz` + `panos.npz` + `meta.json`). |
 | `recorder.py` | `build_rollout_log` — the one recorder; snapshots a live env (map, frontiers/containers, panos) into a log for any flavor. |
-| `policy.py` | `CandidatePolicy` — the flavor-agnostic candidate container + neutral-prior resolvers. |
+| `policy.py` | Per-family policy builders (`oracle_*`, `constant_frontier_statistics`, `learned_*`), the object-find estimators, and `ConstantFrontierStatisticsModel`. |
 | `environments/base.py` | `ReplayConfinementMixin` (confinement sensing + net-motion + served panos) and `ReplayArenaMixin` (policy/goal/finalize contract); `navigation_config_from_log`. |
 | `environments/point_goal_nav.py` | `ReplayPointGoalNavEnvironment` (navigation) + `goal_fluent`, `frontier_sweep_select`. |
-| `environments/unknown_search.py` | `ReplayUnknownSearchEnvironment` (unknown-map object search) + `learned_frontier_search_prob`. |
+| `environments/unknown_search.py` | `ReplayUnknownSearchEnvironment` (unknown-map object search). |
 | `environments/known_map_search.py` | `ReplayKnownMapSearchEnvironment` (known-map object search). |
-| `stub_model.py` | Faked `FrontierStatisticsModel` (preset output); drop-in for a trained net. |
 | `selection.py` | Cross-trial policy-selection layer — **deferred stub** (see below). |
 
 ## Status

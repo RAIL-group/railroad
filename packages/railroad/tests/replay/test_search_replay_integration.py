@@ -21,6 +21,7 @@ from railroad.environment.skill import NavigationMoveSkill
 from railroad.environment.symbolic import LocationRegistry
 from railroad.environment.types import Pose
 from railroad.experimental.unknown_search import (
+    CallableObjectFind,
     NavigationConfig,
     UnknownSpaceEnvironment,
 )
@@ -32,7 +33,6 @@ from railroad.experimental.unknown_search.operators import (
 from railroad.operators import construct_no_op_operator
 from railroad.planner import MCTSPlanner
 from railroad.replay import (
-    CandidatePolicy,
     MctsConfig,
     build_replay_env,
     build_rollout_log,
@@ -164,10 +164,9 @@ def test_procthor_object_search_replay_end_to_end() -> None:
     # --- Replay: an informed candidate beelines to the true container. ---
     res = run_replay(
         build_replay_env(log),
-        CandidatePolicy(
-            frontier_find_prob=lambda r, f, o: 0.5,
-            container_find_prob=lambda r, loc, o: 1.0 if loc == true_container else 0.05,
-        ),
+        CallableObjectFind(
+                lambda r, loc, o: 1.0 if loc == true_container else 0.05
+            ),
         mcts=MctsConfig(iterations=2000, c=300.0, max_depth=20, heuristic_multiplier=2.0),
     )
 

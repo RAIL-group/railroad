@@ -6,8 +6,8 @@ Two calls make up the public flow:
   for a recorded :class:`~railroad.replay.types.RolloutLog`, dispatching on
   ``log.problem_class``. The returned arena carries only the deployment-observed
   world (recorded map, subgoals, panoramas) — no candidate policy yet.
-* :func:`run_replay` applies a :class:`~railroad.replay.policy.CandidatePolicy` to
-  that arena and drives the shared plan->act loop, returning the counterfactual
+* :func:`run_replay` applies a *policy* — the estimator this problem class
+  consumes — to that arena and drives the shared plan->act loop, returning the counterfactual
   :class:`~railroad.replay.types.ReplayResult` (cost bounds + provenance). It is
   silent by default; pass ``dashboard=True`` for the same rendered dashboard the
   deployment used.
@@ -31,7 +31,6 @@ from .loop import (
     plan_act_loop,
     run_dashboard_loop,
 )
-from .policy import CandidatePolicy
 from .types import ReplayResult, RolloutLog
 
 
@@ -70,7 +69,7 @@ def build_replay_env(log: RolloutLog, *, config: Optional[Any] = None) -> Any:
 
 def run_replay(
     env: Any,
-    policy: Optional[CandidatePolicy] = None,
+    policy: Optional[Any] = None,
     *,
     dashboard: bool = False,
     scene: Optional[Any] = None,
@@ -82,8 +81,9 @@ def run_replay(
 ) -> ReplayResult:
     """Replay *policy* over the arena *env*; return its cost bounds.
 
-    Applies *policy* (a bare :class:`CandidatePolicy` if ``None`` → neutral
-    priors), then runs the shared plan->act loop and reduces the terminal state
+    Applies *policy* — the estimator this arena's problem class consumes (a
+    ``FrontierStatisticsEstimator`` for navigation, an ``ObjectFindEstimator``
+    for search); ``None`` leaves the arena's neutral prior in place. Then runs the shared plan->act loop and reduces the terminal state
     to a :class:`ReplayResult`. The planner is held fixed at the env's per-flavor
     defaults unless *mcts* / *max_planning_iterations* / *select_action* override
     them — pass the deployment's :class:`MctsConfig` so the counterfactual varies
@@ -94,7 +94,8 @@ def run_replay(
     the overhead map) — the same loop the deployment ran, so the reported bounds
     match either way.
     """
-    env.apply_policy(policy or CandidatePolicy())
+    if policy is not None:
+        env.apply_policy(policy)
     goal = env.goal
     select = select_action or mcts_selector(mcts or env.default_mcts)
     max_iterations = (
