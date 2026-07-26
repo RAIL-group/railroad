@@ -18,7 +18,6 @@ from railroad.lsp import (
     LearnedFrontierStatistics,
     OracleFrontierLabel,
     OracleFrontierStatistics,
-    frontier_cells_hash,
 )
 
 
@@ -34,13 +33,19 @@ class _FakeRecord:
 
 @dataclass
 class _FakeEnv:
-    """Just enough environment for estimator refresh."""
+    """Just enough environment for estimator refresh.
 
-    oracle_available: bool = True
-    oracle_labels: Dict[str, OracleFrontierLabel] = field(default_factory=dict)
+    Exactly the ``FrontierStatisticsEnvironment`` protocol (plus pano_records):
+    what the robot has *observed*, never ground truth. An estimator that needs
+    to know more than the robot carries that knowledge itself.
+    """
+
     frontiers: Dict[str, Frontier] = field(default_factory=dict)
     pano_records: List[Any] = field(default_factory=list)
     goal_cell: tuple = (50, 50)
+    observed_grid: np.ndarray = field(
+        default_factory=lambda: np.zeros((4, 4), dtype=float)
+    )
 
 
 def _frontier(fid: str, cells: list[tuple[int, int]]) -> Frontier:
@@ -62,33 +67,36 @@ def test_fixed_prior_is_constant() -> None:
     assert estimator.get("robot1", "anything") == FrontierStatistics(0.7, 1.0, 12.0)
 
 
-def test_oracle_estimator_maps_labels() -> None:
-    env = _FakeEnv(oracle_labels={
-        "f_yes": OracleFrontierLabel("f_yes", 1.0, 30.0, 25.0, None, "h1"),
-        "f_no": OracleFrontierLabel("f_no", 0.0, None, None, 8.0, "h2"),
-        "f_degenerate": OracleFrontierLabel("f_degenerate", 0.0, None, None, None, "h3"),
-    })
-    estimator = OracleFrontierStatistics()
-    estimator.refresh(env)
+def test_oracle_label_maps_to_statistics() -> None:
+    """The label -> planner-statistics conversion, the estimator's only arithmetic."""
+    from_label = OracleFrontierStatistics.statistics_from_label
 
-    stats_yes = estimator.get("robot1", "f_yes")
-    assert stats_yes.prob_feasible == 1.0
+    feasible = from_label(OracleFrontierLabel("f_yes", 1.0, 30.0, 25.0, None, "h1"))
+    assert feasible.prob_feasible == 1.0
     # Delta success cost = true cost - optimistic cost.
-    assert stats_yes.delta_success_cost == pytest.approx(5.0)
+    assert feasible.delta_success_cost == pytest.approx(5.0)
 
-    stats_no = estimator.get("robot1", "f_no")
-    assert stats_no.prob_feasible == 0.0
-    assert stats_no.exploration_cost == 8.0
+    infeasible = from_label(OracleFrontierLabel("f_no", 0.0, None, None, 8.0, "h2"))
+    assert infeasible.prob_feasible == 0.0
+    assert infeasible.exploration_cost == 8.0
 
     # Missing or degenerate labels fall back to the default.
-    assert estimator.get("robot1", "f_missing") == DEFAULT_FRONTIER_STATISTICS
-    assert estimator.get("robot1", "f_degenerate") == DEFAULT_FRONTIER_STATISTICS
+    assert from_label(None) == DEFAULT_FRONTIER_STATISTICS
+    assert (
+        from_label(OracleFrontierLabel("f_degenerate", 0.0, None, None, None, "h3"))
+        == DEFAULT_FRONTIER_STATISTICS
+    )
 
 
-def test_oracle_estimator_requires_oracle() -> None:
-    estimator = OracleFrontierStatistics()
-    with pytest.raises(RuntimeError, match="FixedPrior"):
-        estimator.refresh(_FakeEnv(oracle_available=False))
+def test_oracle_estimator_requires_its_own_true_map() -> None:
+    """Ground truth is carried, never read off the environment.
+
+    An environment's "true grid" means whatever it simulates against, which is
+    not always the real world (offline replay hands its arena a confinement
+    grid). Requiring the map up front makes the mistake unwritable.
+    """
+    with pytest.raises(TypeError):
+        OracleFrontierStatistics()  # ty: ignore[missing-argument]
 
 
 def test_learned_estimator_predicts_from_observations() -> None:

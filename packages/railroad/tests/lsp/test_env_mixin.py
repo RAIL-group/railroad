@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from typing import Any
 
 import numpy as np
 import pytest
@@ -25,9 +26,6 @@ from railroad.navigation.constants import COLLISION_VAL, FREE_VAL
 F = Fluent
 
 GOAL_CELL = (5, 25)
-
-
-from typing import Any
 
 
 class _Env(LSPEnvironmentMixin, UnknownSpaceEnvironment):
@@ -58,7 +56,7 @@ def _make_env(
 ) -> _Env:
     return _Env(
         goal_cell=goal_cell,
-        frontier_statistics=OracleFrontierStatistics(),
+        frontier_statistics=OracleFrontierStatistics(grid, goal_cell=goal_cell),
         state=State(0.0, {
             F("at robot1 start"),
             F("free robot1"),

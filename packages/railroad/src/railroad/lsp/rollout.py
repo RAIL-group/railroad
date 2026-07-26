@@ -57,10 +57,20 @@ class PointGoalSetup:
 
 
 def _make_frontier_statistics(
-    name: str, prior_prob: float, network_file: str | Path | None = None
+    name: str,
+    prior_prob: float,
+    network_file: str | Path | None = None,
+    *,
+    true_grid: np.ndarray | None = None,
+    goal_cell: tuple[int, int] | None = None,
 ) -> FrontierStatisticsEstimator:
     if name == "oracle":
-        return OracleFrontierStatistics()
+        if true_grid is None:
+            raise ValueError(
+                "the 'oracle' frontier statistics estimator carries its own "
+                "ground truth; pass true_grid= (the scene's occupancy grid)"
+            )
+        return OracleFrontierStatistics(true_grid, goal_cell=goal_cell)
     if name == "fixed-prior":
         return FixedPriorFrontierStatistics(
             prob_feasible=prior_prob,
@@ -101,6 +111,11 @@ def build_point_goal_setup(
 
     With ``num_robots`` > 1, all robots start co-located at ``start_loc``;
     the goal is satisfied as soon as *any* robot reaches it.
+
+    To deploy an estimator this helper cannot name (a preset, or an oracle
+    carrying its own true map), build the setup with any name and then assign
+    it: ``setup.env.frontier_statistics = estimator``. That takes effect on the
+    already-built environment, so the scene is not rebuilt per policy.
     """
     robots = _robot_names(num_robots)
     if env_name == "maze":
@@ -119,8 +134,14 @@ def build_point_goal_setup(
     goal_coord = scene.locations["goal_loc"]
     goal_cell = (int(goal_coord[0]), int(goal_coord[1]))
 
+    # The oracle carries the scene's true map itself; it is never read off the
+    # environment (see OracleFrontierStatistics).
     frontier_statistics = _make_frontier_statistics(
-        frontier_statistics_name, prior_prob, network_file
+        frontier_statistics_name,
+        prior_prob,
+        network_file,
+        true_grid=scene.grid,
+        goal_cell=goal_cell,
     )
 
     if allow_move_interruptions:
