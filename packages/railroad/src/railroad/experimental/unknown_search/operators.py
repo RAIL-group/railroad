@@ -3,6 +3,8 @@
 from railroad.core import Fluent, Operator, Effect
 from railroad.operators._utils import OptNumeric, _to_numeric
 
+from .statistics import ObjectFindLike, as_find_probability
+
 F = Fluent
 
 
@@ -56,7 +58,7 @@ def construct_move_navigable_operator(move_time: OptNumeric) -> Operator:
 
 
 def construct_search_at_site_operator(
-    object_find_prob: OptNumeric,
+    object_find_prob: ObjectFindLike,
     search_time: OptNumeric,
     *,
     container_type: str | None = None,
@@ -67,8 +69,11 @@ def construct_search_at_site_operator(
     hidden-object candidate locations.
 
     Args:
-        object_find_prob: Probability or function for finding the object.
-            Function signature: (robot, location, object) -> float
+        object_find_prob: An
+            :class:`~railroad.experimental.unknown_search.statistics.ObjectFindEstimator`
+            (whose ``container_probability`` is read per grounding, so the
+            estimator can be swapped on a built environment), or — as before —
+            a constant or a ``(robot, location, object) -> float`` callable.
         search_time: Time or function for search duration.
             Function signature: (robot, location, object) -> float
         container_type: If set, use this as the parameter type for the
@@ -78,7 +83,7 @@ def construct_search_at_site_operator(
     Returns:
         Operator for searching a candidate site.
     """
-    prob_fn = _to_numeric(object_find_prob)
+    prob_fn = _to_numeric(as_find_probability(object_find_prob, kind="container"))
     time_fn = _to_numeric(search_time)
 
     loc_param_type = container_type or "location"
@@ -182,7 +187,7 @@ def construct_explore_frontier_operator(
 
 
 def construct_search_frontier_operator(
-    object_find_prob: OptNumeric,
+    object_find_prob: ObjectFindLike,
     search_time: OptNumeric,
 ) -> Operator:
     """Construct ``(search-frontier ?robot ?frontier ?object)``.
@@ -192,15 +197,18 @@ def construct_search_frontier_operator(
     planning purposes.
 
     Args:
-        object_find_prob: Probability or function for finding the object.
-            Function signature: (robot, frontier, object) -> float
+        object_find_prob: An
+            :class:`~railroad.experimental.unknown_search.statistics.ObjectFindEstimator`
+            (whose ``frontier_probability`` is read per grounding, so the
+            estimator can be swapped on a built environment), or — as before —
+            a constant or a ``(robot, frontier, object) -> float`` callable.
         search_time: Time or function for search duration.
             Function signature: (robot, frontier, object) -> float
 
     Returns:
         Operator for searching an object from a frontier.
     """
-    prob_fn = _to_numeric(object_find_prob)
+    prob_fn = _to_numeric(as_find_probability(object_find_prob, kind="frontier"))
     time_fn = _to_numeric(search_time)
 
     return Operator(
