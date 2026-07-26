@@ -15,6 +15,7 @@ from railroad.experimental.unknown_search.operators import (
     construct_move_navigable_operator,
     construct_search_at_site_operator,
 )
+from railroad.environment.environment import ActiveSkill
 from railroad.environment.skill import InterruptibleNavigationMoveSkill, NavigationMoveSkill
 from railroad.operators import construct_no_op_operator
 
@@ -56,7 +57,7 @@ def _make_environment(
     config: NavigationConfig | None = None,
     two_robots: bool = True,
     include_no_op: bool = False,
-    move_skill: type = InterruptibleNavigationMoveSkill,
+    move_skill: type[ActiveSkill] = InterruptibleNavigationMoveSkill,
 ) -> UnknownSpaceEnvironment:
     """Create a test UnknownSpaceEnvironment with the branching corridor grid."""
     true_grid = _make_branching_grid()

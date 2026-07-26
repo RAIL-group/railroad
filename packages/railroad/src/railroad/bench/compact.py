@@ -72,7 +72,7 @@ def _fingerprint_diff(cached: object, current: dict) -> str:
     """Human-readable explanation of why two fingerprints differ."""
     if not isinstance(cached, dict):
         return f"cached fingerprint is not a dict ({type(cached).__name__})"
-    keys = sorted(set(cached) | set(current))
+    keys = sorted(set(cached) | set(current), key=str)
     parts = []
     for k in keys:
         old = cached.get(k, "<absent>")

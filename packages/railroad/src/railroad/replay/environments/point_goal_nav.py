@@ -23,11 +23,12 @@ The candidate policy is the frontier-statistics estimator; it is applied via
 
 from __future__ import annotations
 
-from typing import Dict, List, Sequence, Set, Tuple
+from typing import Dict, List, Sequence, Set, Tuple, Type
 
 import numpy as np
 
 from railroad._bindings import Fluent, Goal, GroundedEffect, State
+from railroad.environment.environment import ActiveSkill
 from railroad.environment.symbolic import LocationRegistry
 from railroad.environment.types import Pose
 from railroad.experimental.unknown_search import (
@@ -80,7 +81,7 @@ class ReplayPointGoalNavEnvironment(
         location_registry: LocationRegistry,
         state: State,
         objects_by_type: Dict[str, Set[str]],
-        skill_overrides: Dict[str, type],
+        skill_overrides: Dict[str, Type[ActiveSkill]],
         config: NavigationConfig | None = None,
         pano_records: Sequence = (),
     ) -> None:
@@ -120,7 +121,7 @@ class ReplayPointGoalNavEnvironment(
         log: RolloutLog,
         *,
         config: NavigationConfig | None = None,
-        move_skill: type | None = None,
+        move_skill: Type[ActiveSkill] | None = None,
     ) -> "ReplayPointGoalNavEnvironment":
         """Build a policy-agnostic navigation replay arena from a recorded *log*."""
         if move_skill is None:
