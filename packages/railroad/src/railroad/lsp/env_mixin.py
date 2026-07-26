@@ -65,6 +65,30 @@ else:
     _Base = object
 
 
+class _LiveFrontierStatistics(FrontierStatisticsEstimator):
+    """Indirection handed to ``lsp-explore`` so the estimator stays swappable.
+
+    Operators are built **once** (``Environment.__init__`` resolves them and
+    ``get_actions`` re-grounds those same objects every step), and
+    ``construct_lsp_explore_operator`` closes over whatever estimator it is
+    given. Passing the estimator *object* would therefore freeze the policy for
+    the life of the environment: reassigning ``_lsp_frontier_statistics``
+    afterwards would change what the dashboard reports while the planner kept
+    using the original. Forwarding through the environment instead makes
+    :attr:`LSPEnvironmentMixin.frontier_statistics` a live setter — which is what
+    lets offline replay swap a candidate policy onto an already-built arena.
+    """
+
+    def __init__(self, environment: "LSPEnvironmentMixin") -> None:
+        self._environment = environment
+
+    def refresh(self, environment) -> None:
+        self._environment._lsp_frontier_statistics.refresh(environment)
+
+    def get(self, robot: str, frontier_id: str):
+        return self._environment._lsp_frontier_statistics.get(robot, frontier_id)
+
+
 class LSPEnvironmentMixin(_Base):
     """Operators, oracle labels, goal revelation, and explore execution."""
 
@@ -81,13 +105,31 @@ class LSPEnvironmentMixin(_Base):
         """The estimator parameterizing lsp-explore actions."""
         return self._lsp_frontier_statistics
 
+    @frontier_statistics.setter
+    def frontier_statistics(self, estimator: FrontierStatisticsEstimator) -> None:
+        """Swap the estimator on an already-constructed environment.
+
+        Takes effect immediately: ``lsp-explore`` reads the estimator through
+        :class:`_LiveFrontierStatistics`, so no operator rebuild is needed. The
+        new estimator is refreshed at once (frontiers already exist by the time
+        anyone can call this), so predictions are available before the next
+        planning step rather than one refresh late.
+
+        This is how a *policy* is chosen after the environment is built — the
+        deployment counterpart of the replay envs' ``apply_policy``.
+        """
+        self._lsp_frontier_statistics = estimator
+        estimator.refresh(self)
+
     def define_operators(self) -> List[Operator]:
         """LSP point-goal operators; override to customize the set."""
         return [
             construct_move_navigable_operator(self.estimate_move_time_safe),
             construct_move_to_goal_operator(self.estimate_goal_move_time),
             construct_lsp_explore_operator(
-                self._lsp_frontier_statistics,
+                # NOT the estimator itself: the operator closes over this for
+                # good, so hand it the live indirection (see the class docstring).
+                _LiveFrontierStatistics(self),
                 self.optimistic_goal_cost,
                 speed_cells_per_sec=self._config.speed_cells_per_sec,
                 goal_name=self._lsp_goal_name,

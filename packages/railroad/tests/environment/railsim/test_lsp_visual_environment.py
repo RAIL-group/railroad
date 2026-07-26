@@ -50,7 +50,7 @@ def _make_env(
     start = scene.locations["start_loc"]
     return LSPVisualEnvironment(
         scene=scene,
-        frontier_statistics=frontier_statistics or OracleFrontierStatistics(),
+        frontier_statistics=frontier_statistics or OracleFrontierStatistics(scene.grid),
         data_writer=data_writer,
         state=State(0.0, {
             F("at robot1 start_loc"),
