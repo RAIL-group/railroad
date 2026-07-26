@@ -7,18 +7,22 @@ confines the robot to the recorded map (shared :class:`ReplayConfinementMixin`)
 and resolves every search outcome from the **recorded ground truth** — so an
 alternative search policy's cost is reproduced without redeploying it.
 
-The find-probabilities that drive planner belief are read through the current
-candidate policy (``self._policy``), so :func:`~railroad.replay.driver.run_replay`
-can swap policies on a reused arena. The frontier find-probability
-("is the object beyond this frontier?") is the learned, served-vantage knob: it
-is driven by a :class:`~railroad.lsp.frontier_statistics.LearnedFrontierStatistics`
-fed the recorded panoramas (best-vantage per frontier); a trained network drops
-in at the same call site as in navigation (see :mod:`railroad.replay.stub_model`).
+Everything about *running* the search — the operator set and the swappable
+:class:`~railroad.experimental.unknown_search.statistics.ObjectFindEstimator`
+that parameterizes it — comes from
+:class:`~railroad.experimental.unknown_search.search_environment.UnknownSpaceSearchEnvironment`,
+the same base a live deployment uses. This subclass adds only what *replay*
+means: confinement to the recorded map, outcomes resolved from the recording,
+and the commit bookkeeping behind the cost bounds.
+
+``apply_policy`` assigns the candidate's estimator to ``object_find_statistics``;
+the base refreshes it on every frontier change, so an oracle re-labels as the map
+grows rather than working from the map as it stood when the policy was installed.
 """
 
 from __future__ import annotations
 
-from typing import Callable, Collection, Dict, List, Sequence, Set, Tuple
+from typing import Collection, Dict, List, Sequence, Set, Tuple
 
 import numpy as np
 
@@ -27,19 +31,12 @@ from railroad.environment.symbolic import LocationRegistry
 from railroad.environment.types import Pose
 from railroad.experimental.unknown_search import (
     NavigationConfig,
-    UnknownSpaceEnvironment,
+    ObjectFindEstimator,
+    UnknownSpaceSearchEnvironment,
 )
-from railroad.experimental.unknown_search.operators import (
-    construct_move_navigable_operator,
-    construct_search_at_site_operator,
-    construct_search_frontier_operator,
-)
-from railroad.lsp.frontier_statistics import LearnedFrontierStatistics
-from railroad.operators import construct_no_op_operator
 
 from ..cost import Commit
 from ..loop import MctsConfig
-from ..policy import ProbFn
 from ..types import RolloutLog
 from .base import (
     ReplayArenaMixin,
@@ -55,7 +52,7 @@ DEFAULT_SEARCH_TIME = 20.0
 
 
 class ReplayUnknownSearchEnvironment(
-    ReplayArenaMixin, ReplayConfinementMixin, UnknownSpaceEnvironment
+    ReplayArenaMixin, ReplayConfinementMixin, UnknownSpaceSearchEnvironment
 ):
     """Replay an object-search policy over a recorded unknown-map deployment."""
 
@@ -82,8 +79,6 @@ class ReplayUnknownSearchEnvironment(
         search_time: float = DEFAULT_SEARCH_TIME,
     ) -> None:
         confinement = self._setup_replay_grids(recorded_grid, pano_records)
-        # Neutral policy until apply_policy() swaps in a candidate.
-        self._init_policy()
 
         self._recorded_object_locations = recorded_object_locations
         # Containers the deployment actually searched: their outcome is known, so
@@ -100,10 +95,12 @@ class ReplayUnknownSearchEnvironment(
         # verify (unsearched container or frontier). optimistic_lb = min over these.
         self._replay_commits: List[Commit] = []
 
+        # The base owns the operator set and the swappable estimator; apply_policy
+        # just assigns to object_find_statistics.
         super().__init__(
             state=state,
             objects_by_type=objects_by_type,
-            operators=self._build_operators(search_time),
+            search_time=search_time,
             true_grid=confinement,
             true_object_locations=recorded_object_locations,
             robot_initial_poses=robot_initial_poses,
@@ -114,32 +111,6 @@ class ReplayUnknownSearchEnvironment(
         )
         for robot in self._objects_by_type.get("robot", set()):
             self._net_motion.setdefault(robot, 0.0)
-
-    def _build_operators(self, search_time: float) -> list:
-        # Operators read the find-probabilities through self._policy, so the
-        # candidate can be swapped without rebuilding the arena. move-time is the
-        # env's own safe navigable estimate (self exists by the time it's called).
-        return [
-            construct_move_navigable_operator(self._move_time),
-            construct_search_frontier_operator(
-                object_find_prob=self._frontier_find_prob, search_time=search_time
-            ),
-            construct_search_at_site_operator(
-                self._container_find_prob,
-                search_time=search_time,
-                container_type="container",
-            ),
-            construct_no_op_operator(no_op_time=300.0, extra_cost=100.0),
-        ]
-
-    def _move_time(self, robot: str, loc_from: str, loc_to: str) -> float:
-        return self.estimate_move_time_safe(robot, loc_from, loc_to)
-
-    def _frontier_find_prob(self, robot: str, frontier: str, obj: str) -> float:
-        return self._policy.resolve_frontier_find_prob()(robot, frontier, obj)
-
-    def _container_find_prob(self, robot: str, loc: str, obj: str) -> float:
-        return self._policy.resolve_container_find_prob()(robot, loc, obj)
 
     @classmethod
     def from_log(
@@ -224,8 +195,8 @@ class ReplayUnknownSearchEnvironment(
         """Reference cell for egocentric features in served observations.
 
         Object search has no point goal; a fixed reference (the start) keeps
-        ``compute_frontier_views`` well-defined. A learned model is trained with
-        the same convention; the stub model ignores it.
+        ``compute_frontier_views`` well-defined for any estimator that asks for
+        served vantages. The estimators this flavor ships with ignore it.
         """
         return self._reference_cell
 
@@ -238,19 +209,11 @@ class ReplayUnknownSearchEnvironment(
         """One commit per not-found search (drives the optimistic bound)."""
         return self._replay_commits
 
-    @property
-    def oracle_available(self) -> bool:
-        return False
-
-    @property
-    def oracle_labels(self) -> Dict:
-        # No oracle in replay; satisfies the FrontierStatisticsEnvironment protocol.
-        return {}
-
-    def refresh_frontiers(self) -> None:
-        super().refresh_frontiers()
-        for estimator in self._refresh_estimators:
-            estimator.refresh(self)
+    def apply_policy(self, policy: ObjectFindEstimator) -> None:
+        """Install the object-search belief. The base's setter also refreshes it,
+        and the search operators read it live, so the candidate takes effect on
+        this already-built arena."""
+        self.object_find_statistics = policy
 
     # -- intercept: resolve search outcomes from the recording --------
 
@@ -339,28 +302,3 @@ class ReplayUnknownSearchEnvironment(
         if success is None or failure is None or obj is None or loc is None:
             return None
         return obj, loc, success, failure
-
-
-# ----------------------------------------------------------------------
-# Learned served-vantage frontier-search probability
-# ----------------------------------------------------------------------
-
-
-def learned_frontier_search_prob(
-    model,
-) -> Tuple[LearnedFrontierStatistics, ProbFn]:
-    """A served-vantage frontier-search probability backed by a learned model.
-
-    Returns ``(estimator, prob_fn)``: put ``estimator`` in the policy's
-    ``refresh_estimators`` (so it is fed the recorded panoramas), and use
-    ``prob_fn`` as the policy's ``frontier_find_prob``. The object beyond a
-    frontier is predicted from that frontier's best-vantage panorama — exactly
-    the navigation learned pipeline, reused for search.
-    """
-    estimator = LearnedFrontierStatistics(model)
-
-    def prob_fn(robot: str, frontier: str, obj: str) -> float:
-        del obj
-        return float(estimator.get(robot, frontier).prob_feasible)
-
-    return estimator, prob_fn

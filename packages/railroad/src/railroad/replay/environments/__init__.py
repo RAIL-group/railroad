@@ -25,7 +25,6 @@ from .point_goal_nav import (
 )
 from .unknown_search import (
     ReplayUnknownSearchEnvironment,
-    learned_frontier_search_prob,
 )
 
 __all__ = [
@@ -37,7 +36,6 @@ __all__ = [
     "ServedPano",
     "frontier_sweep_select",
     "goal_fluent",
-    "learned_frontier_search_prob",
     "navigation_config_from_log",
     "objects_in_goal",
     "require_goal",

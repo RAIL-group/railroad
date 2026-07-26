@@ -15,7 +15,6 @@ import pytest
 
 from railroad.lsp.frontier_statistics import FixedPriorFrontierStatistics
 from railroad.replay import (
-    CandidatePolicy,
     MctsConfig,
     accumulate_bounds,
     build_replay_env,
@@ -46,8 +45,8 @@ MAPS = {
 }
 
 
-def _policy() -> CandidatePolicy:
-    return CandidatePolicy(frontier_statistics=FixedPriorFrontierStatistics(prob_feasible=0.8))
+def _policy() -> FixedPriorFrontierStatistics:
+    return FixedPriorFrontierStatistics(prob_feasible=0.8)
 
 
 @pytest.mark.parametrize("name", sorted(MAPS))

@@ -35,6 +35,7 @@ from railroad import operators as _operators
 from railroad._bindings import Fluent, Goal, GroundedEffect, State
 from railroad.core import Operator
 from railroad.environment.symbolic import LocationRegistry, SymbolicEnvironment
+from railroad.experimental.unknown_search import FixedObjectFind, ObjectFindEstimator
 from railroad.navigation import OccupancyGridPathingMixin
 
 from ..cost import Commit
@@ -56,9 +57,9 @@ class ReplayKnownMapSearchEnvironment(
 
     Search outcomes resolve from *recorded_object_locations* (the deployment's
     revealed contents) via the inherited deterministic resolution. The candidate
-    policy's ``container_find_prob`` only drives MCTS belief, never the outcome;
-    it is read through ``self._policy`` so :func:`~railroad.replay.driver.run_replay`
-    can swap policies on a reused arena.
+    policy's container belief only drives MCTS belief, never the outcome; it is
+    read through ``self._object_find_statistics`` so
+    :func:`~railroad.replay.driver.run_replay` can swap policies on a reused arena.
     """
 
     default_mcts = MctsConfig(iterations=4000, c=300.0, max_depth=20, heuristic_multiplier=2.0)
@@ -78,8 +79,8 @@ class ReplayKnownMapSearchEnvironment(
         search_time: float = DEFAULT_SEARCH_TIME,
         speed_cells_per_sec: float = DEFAULT_SPEED,
     ) -> None:
-        # Neutral policy until apply_policy() swaps in a candidate.
-        self._init_policy()
+        # Neutral until apply_policy() installs a candidate.
+        self._object_find_statistics: ObjectFindEstimator = FixedObjectFind()
         self._known_grid = np.asarray(known_grid, dtype=float).copy()
         self._speed = float(speed_cells_per_sec)
         self._search_time = float(search_time)
@@ -102,16 +103,24 @@ class ReplayKnownMapSearchEnvironment(
         )
 
     def _build_operators(self, search_time: float) -> List[Operator]:
-        # search reads container_find_prob through self._policy, so the candidate
-        # can be swapped without rebuilding the arena.
+        # search reads the estimator through self._object_find_statistics, so
+        # the candidate can be swapped without rebuilding the arena.
         return [
             _operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0),
             _operators.construct_move_operator_blocking(self.estimate_move_time),
             _operators.construct_search_operator(self._container_find_prob, search_time),
         ]
 
+    def apply_policy(self, policy: ObjectFindEstimator) -> None:
+        """Install the object-search belief.
+
+        Only ``container_probability`` is ever read: a known map has no
+        frontiers, so this flavor consumes the narrowest slice of the three.
+        """
+        self._object_find_statistics = policy
+
     def _container_find_prob(self, robot: str, loc: str, obj: str) -> float:
-        return self._policy.resolve_container_find_prob()(robot, loc, obj)
+        return self._object_find_statistics.container_probability(robot, loc, obj)
 
     @classmethod
     def from_log(
@@ -154,7 +163,7 @@ class ReplayKnownMapSearchEnvironment(
             state=State(0.0, fluents, []),
             objects_by_type={
                 "robot": set(robots),
-                "location": {START_NAME} | set(coords) - {START_NAME} | set(recorded),
+                "location": {START_NAME} | set(coords) | set(recorded),
                 "object": objects,
             },
             location_registry=LocationRegistry(coords),

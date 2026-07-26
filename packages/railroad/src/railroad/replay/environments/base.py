@@ -6,11 +6,12 @@ overrides win:
 * :class:`ReplayConfinementMixin` — confinement sensing + pristine correction +
   net-motion + served panos. Used by the two *unknown-map* replays (navigation
   and unknown-map search); the known-map replay needs none of it.
-* :class:`ReplayArenaMixin` — the policy/goal/finalize contract that lets
+* :class:`ReplayArenaMixin` — the goal/finalize contract that lets
   :func:`~railroad.replay.driver.run_replay` drive any replay env uniformly. A
   replay env is *policy-agnostic* until :meth:`~ReplayArenaMixin.apply_policy`
-  swaps in a candidate; its operators read the current policy through
-  ``self._policy`` (so a new policy takes effect without rebuilding the arena).
+  installs the estimator its problem class consumes; the operators read that
+  estimator through a live indirection, so a policy takes effect without
+  rebuilding the arena.
 """
 
 from __future__ import annotations
@@ -40,7 +41,6 @@ from railroad.navigation.constants import (
 
 from ..cost import Commit, accumulate_bounds
 from ..loop import MctsConfig
-from ..policy import CandidatePolicy
 from ..types import ReplayResult
 
 
@@ -181,12 +181,14 @@ class ReplayConfinementMixin(UnknownSpaceEnvironment):
         """
         if not self._recorded_panos:
             return
-        nearest = min(
-            self._recorded_panos,
-            key=lambda r: math.hypot(
-                r.pose_cells.x - pose.x, r.pose_cells.y - pose.y
+        nearest_index = min(
+            range(len(self._recorded_panos)),
+            key=lambda i: math.hypot(
+                self._recorded_panos[i].pose_cells.x - pose.x,
+                self._recorded_panos[i].pose_cells.y - pose.y,
             ),
         )
+        nearest = self._recorded_panos[nearest_index]
         recorded_pose = nearest.pose_cells
         relative_yaw = float(pose.yaw) - float(recorded_pose.yaw)
         # De-dup on the rolled image, not just the recorded vantage: a robot that
@@ -196,7 +198,7 @@ class ReplayConfinementMixin(UnknownSpaceEnvironment):
         # visual env's (time, x, y, yaw) capture key.
         width = nearest.image.shape[1]
         shift = int(round(width * relative_yaw / (2.0 * math.pi))) % width
-        served_key = (id(nearest), shift)
+        served_key = (nearest_index, shift)
         if self._last_served.get(robot) == served_key:
             return
         self._last_served[robot] = served_key
@@ -308,29 +310,20 @@ class ReplayArenaMixin(Environment):
     # Fluent-name substrings the dashboard shows for this flavor.
     dashboard_fluent_keywords: tuple
 
-    # The current candidate policy; operators/estimators read through it, so
-    # apply_policy() swaps behavior without rebuilding the arena.
-    _policy: CandidatePolicy
-    _refresh_estimators: list
-
     # Provided by each concrete env (annotated here so finalize() type-checks).
     replay_commits: List[Commit]
 
-    def _init_policy(self) -> None:
-        """Install the neutral (policy-agnostic) policy. Call first in __init__."""
-        self._policy = CandidatePolicy()
-        self._refresh_estimators = []
+    def apply_policy(self, policy: Any) -> None:
+        """Install *policy* — the estimator this problem class consumes.
 
-    def apply_policy(self, policy: CandidatePolicy) -> None:
-        """Swap in *policy* so subsequent planning uses its probabilities.
-
-        The base handles the fields every flavor may carry (the find-probability
-        callables its operators read through ``self._policy``, and the
-        served-vantage ``refresh_estimators``); the navigation env extends this
-        to also install the frontier-statistics estimator.
+        A policy IS an estimator here, and which kind depends on the problem: a
+        ``FrontierStatisticsEstimator`` for point-goal navigation, an
+        ``ObjectFindEstimator`` for object search. Each flavor overrides this to
+        assign to the property its operators actually read, whose setter refreshes
+        the estimator against this environment. Passing the wrong family fails
+        here rather than silently degrading to a neutral prior.
         """
-        self._policy = policy
-        self._refresh_estimators = list(policy.refresh_estimators)
+        raise NotImplementedError
 
     @property
     def goal(self) -> Goal | Fluent:

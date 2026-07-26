@@ -19,8 +19,8 @@ from railroad.lsp.frontier_statistics import (
     DEFAULT_FRONTIER_STATISTICS,
     LearnedFrontierStatistics,
 )
-from railroad.replay import CandidatePolicy, build_replay_env
-from railroad.replay.stub_model import preset_model
+from railroad.replay import build_replay_env
+from railroad.replay import ConstantFrontierStatisticsModel
 
 from .conftest import build_log_from_ascii
 
@@ -28,7 +28,7 @@ from .conftest import build_log_from_ascii
 def _arena(log, estimator):
     """A replay arena with *estimator* applied as the candidate policy."""
     env = build_replay_env(log)
-    env.apply_policy(CandidatePolicy(frontier_statistics=estimator))
+    env.apply_policy(estimator)
     return env
 
 MAP = """
@@ -73,7 +73,7 @@ def test_replay_serves_recorded_panos_to_learned_estimator() -> None:
     log = build_log_from_ascii(MAP)
     log.pano_records = [_covering_record(log.recorded_grid)]
 
-    estimator = LearnedFrontierStatistics(preset_model("optimistic"))
+    estimator = LearnedFrontierStatistics(ConstantFrontierStatisticsModel(prob_feasible=0.9, exploration_cost=8.0))
     env = _arena(log, estimator)
 
     assert env.pano_records, "replay env must expose the recorded pano buffer"
@@ -86,7 +86,7 @@ def test_replay_serves_recorded_panos_to_learned_estimator() -> None:
 
 def test_learned_estimator_falls_back_without_panos() -> None:
     log = build_log_from_ascii(MAP)  # no pano_records
-    estimator = LearnedFrontierStatistics(preset_model("optimistic"))
+    estimator = LearnedFrontierStatistics(ConstantFrontierStatisticsModel(prob_feasible=0.9, exploration_cost=8.0))
     env = _arena(log, estimator)
 
     assert env.pano_records == []
@@ -142,12 +142,12 @@ def test_env_serves_recorded_pano_nearest_each_pose() -> None:
     assert any(r.time == 5.0 for r in env.pano_records)
 
 
-def test_different_preset_models_yield_different_stats() -> None:
+def test_different_constant_models_yield_different_stats() -> None:
     log = build_log_from_ascii(MAP)
     log.pano_records = [_covering_record(log.recorded_grid)]
 
-    opt = _arena(log, LearnedFrontierStatistics(preset_model("optimistic")))
-    cau = _arena(log, LearnedFrontierStatistics(preset_model("cautious")))
+    opt = _arena(log, LearnedFrontierStatistics(ConstantFrontierStatisticsModel(prob_feasible=0.9, exploration_cost=8.0)))
+    cau = _arena(log, LearnedFrontierStatistics(ConstantFrontierStatisticsModel(prob_feasible=0.3, exploration_cost=20.0)))
     fid_opt = next(iter(opt.frontiers))
     fid_cau = next(iter(cau.frontiers))
 

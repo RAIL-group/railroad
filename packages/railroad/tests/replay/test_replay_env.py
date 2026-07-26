@@ -13,7 +13,7 @@ import pytest
 
 from railroad.navigation.constants import OBSTACLE_THRESHOLD
 from railroad.lsp.frontier_statistics import FixedPriorFrontierStatistics
-from railroad.replay import CandidatePolicy, build_replay_env, goal_fluent, run_replay
+from railroad.replay import build_replay_env, goal_fluent, run_replay
 
 from .conftest import build_log_from_ascii, explore_first_select
 
@@ -43,7 +43,7 @@ def _run(log, **kwargs):
     kwargs.setdefault("select_action", explore_first_select)
     return run_replay(
         build_replay_env(log),
-        CandidatePolicy(frontier_statistics=_estimator()),
+        _estimator(),
         **kwargs,
     )
 

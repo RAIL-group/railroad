@@ -14,8 +14,8 @@ import numpy as np
 
 from railroad.core import Fluent
 from railroad.lsp.frontier_statistics import FixedPriorFrontierStatistics
+from railroad.experimental.unknown_search import CallableObjectFind
 from railroad.replay import (
-    CandidatePolicy,
     build_replay_env,
     goal_fluent,
     run_replay,
@@ -84,7 +84,7 @@ def test_multi_robot_replay_reaches_goal_with_sound_bounds() -> None:
     exceed the realized cost.
     """
     log = _two_robot_log()
-    policy = CandidatePolicy(name="prior-0.8", frontier_statistics=_estimator())
+    policy = _estimator()
     result = run_replay(build_replay_env(log), policy, max_planning_iterations=200)
 
     assert result.goal_reached, "two robots must be able to reach the goal"
@@ -137,11 +137,7 @@ def test_multi_robot_object_search_finds_target() -> None:
     )
     assert log.robots == ["robot1", "robot2"]
 
-    policy = CandidatePolicy(
-        name="search",
-        frontier_find_prob=lambda r, f, o: 0.5,
-        container_find_prob=lambda r, l, o: 0.8,
-    )
+    policy = CallableObjectFind(lambda r, loc, o: 0.8)
     result = run_replay(build_replay_env(log), policy, max_planning_iterations=60)
 
     assert result.goal_reached

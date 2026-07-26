@@ -25,17 +25,16 @@ it will be filled in when the selection work lands.
 
 from __future__ import annotations
 
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
-from .policy import CandidatePolicy
 from .types import RolloutLog
 
 
 def select_policy(
     logs: Iterable[RolloutLog],
-    candidates: Sequence[CandidatePolicy],
+    candidates: Sequence[Any],
     **replay_kwargs: object,
-) -> CandidatePolicy:
+) -> Any:
     """Pick the best candidate from bound evidence across many recordings.
 
     **Not implemented.** This is the cross-trial selection layer: replay every
