@@ -56,7 +56,7 @@ additions or renames stay invisible until you run
 | no metric / `minimize (total-time)` | duration 1 per action (PDDL's implicit objective is plan length) |
 | `(:metric maximize (reward))` **with** `(:goal-reward …)` and no reward-bearing effects | reinterpreted as reach-the-goal, minimize expected plan length (IPPC goal-directed convention) |
 | `(probabilistic p₁ e₁ …)` | railroad probabilistic effect branches; probabilities < 1 total get an implicit "nothing happens" remainder branch; nesting and multiple independent `probabilistic` groups per action are supported |
-| `(when c e)` conditional effects | native railroad conditional branches (state-selected analogue of probabilistic branches): the branch fires iff its condition fluents hold when the action's completion effect fires, evaluated **before** the effect's own fluents apply — so conditions see the pre-action state, matching PDDL. `forall`+`when` expands per object; `when` inside probabilistic branches is supported (its condition then sees the state at branch resolution); `(= …)` conditions compile to seeded static `pddl-eq o o` fluents. Triggered sub-effects apply **after** the parent effect's own fluents — see the branching-effect ordering note under "Grounding notes" |
+| `(when c e)` conditional effects | native railroad conditional branches (state-selected analogue of probabilistic branches): the branch fires iff its condition fluents hold when the action's completion effect fires, evaluated **before** the effect's own fluents apply — so conditions see the pre-action state, matching PDDL. `forall`+`when` expands per object; `when` inside probabilistic branches is supported (its condition then sees the state at branch resolution); `(= …)` conditions are evaluated away at grounding time (a false equality drops that grounding's branch; a true one is removed from the condition). Triggered sub-effects apply **after** the parent effect's own fluents — see the branching-effect ordering note under "Grounding notes" |
 | objective overall | railroad's MCTS maximizes `−(expected completion time + Σ extra_cost)`, so converted problems minimize expected cost/time to goal |
 | `forall` (preconditions, unconditional effects, goals) | expanded over the finite object universe at conversion time |
 | `exists` (preconditions) | the quantified variable is lifted into an extra operator parameter (grounding enumerates witnesses) |
@@ -67,11 +67,17 @@ additions or renames stay invisible until you run
 
 Grounding notes:
 
-- Grounding uses a backtracking enumerator with **static-precondition
-  pruning** (preconditions on predicates no effect ever touches are checked
-  against `:init` as soon as their variables are bound). This keeps large
-  domains tractable — e.g. IPC-2000 freecell grounds to ~34k actions instead
-  of a combinatorial blowup.
+- Grounding uses `railroad.core.ground_operators`, a backtracking enumerator
+  with **static-precondition pruning** (preconditions on predicates no effect
+  ever touches are checked against `:init` as soon as their variables are
+  bound). This keeps large domains tractable — e.g. IPC-2000 freecell grounds
+  to ~34k actions instead of a combinatorial blowup.
+- **Static material is compiled away** (see `docs/design/static-grounding.md`):
+  verified static preconditions are stripped from grounded actions, static
+  conjuncts of `when` conditions are evaluated per grounding, and static
+  facts nothing references at runtime (only goal-referenced ones survive)
+  are dropped from the initial state. Plans and reachability are unchanged —
+  states just stop carrying immutable facts through every hash and copy.
 - Unlike `Operator.instantiate`, the same object may bind several parameters
   (PDDL permits it; domains that need distinctness say `(not (= ?x ?y))`).
   Same-fluent add/delete pairs created by such bindings (e.g. `fly apt apt`)

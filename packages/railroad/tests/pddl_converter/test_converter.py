@@ -350,14 +350,17 @@ def test_reserved_predicates_renamed():
     """
     converted = convert_texts(domain, problem)
     fluents = converted.initial_state.fluents
+    # `free` is dynamic (the action deletes it), so its renamed form stays in
+    # the runtime state and preconditions. The only real `free` fluent is the
+    # synthetic agent's.
     assert F("pddl-free x1") in fluents
-    assert F("pddl-waiting x1") in fluents
-    assert F("pddl-not-here x1") in fluents
-    # The only real `free` fluent is the synthetic agent's.
     free_fluents = [f for f in fluents if f.name == "free"]
     assert free_fluents == [F("free agent")]
     action = _get_action(converted, "use x1")
     assert F("pddl-free x1") in action.preconditions
+    # `waiting`/`not-here` are static and goal-irrelevant, so grounding
+    # eliminates them entirely — and the reserved names never leak through.
+    assert not any(f.name in ("waiting", "not-here") for f in fluents)
 
 
 def test_unbound_variable_rejected():
@@ -607,7 +610,8 @@ def test_equality_in_when_condition():
       (:init (painted obj red)) (:goal (painted obj blue)))
     """
     converted = convert_texts(domain, problem)
-    assert F("pddl-eq red red") in converted.initial_state.fluents
+    # Equality is evaluated away at grounding; no pddl-eq fluents at runtime.
+    assert not any(f.name == "pddl-eq" for f in converted.initial_state.fluents)
 
     changed = _apply(converted, "paint obj red blue")
     assert F("painted obj blue") in changed.fluents

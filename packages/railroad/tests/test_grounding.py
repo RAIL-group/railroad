@@ -63,8 +63,11 @@ def test_equality_constraints():
     )
     universe = {"item": {"x", "y"}}
     # `ready` is static (no effect touches it) so it needs a fact to hold.
+    # eliminate_static is pinned off: this test is about grounded structure
+    # (Neq must never appear as a runtime precondition, `ready` must).
     result = ground_operators(
-        [op], universe, {F("ready")}, allow_duplicate_bindings=True
+        [op], universe, {F("ready")}, allow_duplicate_bindings=True,
+        eliminate_static=False,
     )
     assert {a.name for a in result.actions} == {"pair x y", "pair y x"}
     # Neq is a grounding constraint, not a runtime precondition.
@@ -126,6 +129,10 @@ def test_static_inference_scans_branch_effects():
         effects=[
             Effect(
                 time=1.0,
+                # `go` is made dynamic below so the branch condition stays
+                # runtime; the point here is that branch *effect* predicates
+                # are dynamic while conditions only read.
+                resulting_fluents={~F("go")},
                 prob_effects=[(1.0, [Effect(time=0, resulting_fluents={F("in-prob ?x")})])],
                 cond_effects=[({F("go")}, [Effect(time=0, resulting_fluents={F("in-cond ?x")})])],
                 forall_effects=[ForallEffect(
@@ -174,3 +181,67 @@ def test_stats_show_early_pruning():
     assert result.stats.actions_kept == n - 3  # the n-3 length-3 chain walks
     assert result.stats.nominal_bindings == n**4
     assert result.stats.visited_bindings < result.stats.nominal_bindings / 10
+
+
+def test_condition_simplification():
+    """Static conjuncts of `when` conditions are evaluated at grounding."""
+    op = Operator(
+        name="drop",
+        parameters=[("?x", "item")],
+        preconditions=[F("holding ?x")],
+        effects=[Effect(
+            time=1.0,
+            resulting_fluents={~F("holding ?x")},
+            cond_effects=[(
+                {F("fragile ?x"), F("armed")},
+                [Effect(time=0, resulting_fluents={F("broken ?x")})],
+            )],
+        )],
+    )
+    # `fragile` is static; `armed` is dynamic (touched below via a second op).
+    arm_op = Operator(
+        name="arm", parameters=[], preconditions=[],
+        effects=[Effect(time=1.0, resulting_fluents={F("armed")})],
+    )
+    result = ground_operators(
+        [op, arm_op],
+        {"item": {"vase", "brick"}},
+        {F("holding vase"), F("holding brick"), F("fragile vase")},
+    )
+    by_name = {a.name: a for a in result.actions}
+    # vase: fragile conjunct verified true and removed; dynamic conjunct stays.
+    (vase_branch,) = by_name["drop vase"].effects[0].cond_effects
+    assert set(vase_branch.conditions) == {F("armed")}
+    # brick: fragile is false, so the branch is gone entirely.
+    assert not by_name["drop brick"].effects[0].cond_effects
+
+
+def test_negated_static_check_prunes_bindings():
+    """Bindings violating a negated static precondition are never grounded."""
+    op = _move_op(preconditions_extra=[~F("blocked ?to")])
+    result = ground_operators(
+        [op],
+        {**ROBOTS, "location": {"a", "b"}},
+        {F("at r1 a"), F("free r1"), F("blocked b")},
+    )
+    assert {a.name for a in result.actions} == {"move r1 b a"}
+
+
+def test_eliminate_static_strips_and_reports():
+    """Static preconditions are stripped; unreferenced facts are eliminable."""
+    op = _move_op(preconditions_extra=[F("connected ?from ?to")])
+    facts = {
+        F("at r1 a"), F("free r1"),
+        F("connected a b"), F("landmark b"),
+    }
+    result = ground_operators(
+        [op], {**ROBOTS, "location": {"a", "b"}}, facts,
+        runtime_referenced={"landmark"},  # e.g. read by the goal
+    )
+    (action,) = result.actions
+    assert action.name == "move r1 a b"
+    # The verified static precondition is gone; dynamic ones remain.
+    assert set(action.preconditions) == {F("at r1 a"), F("free r1")}
+    # `connected` facts are dead weight at runtime; `landmark` is referenced.
+    assert result.eliminable_fluents == {F("connected a b")}
+    assert result.eliminated_predicates == {"connected"}
