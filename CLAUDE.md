@@ -55,7 +55,7 @@ Provides abstractions for planning execution:
 - **`procthor/`**: ProcTHOR simulator interface (optional dependency)
   - `ThorInterface`: Main underlying interface to AI2-THOR/ProcTHOR scenes
   - `ProcTHORScene`: User-facing data provider for ProcTHOR, wrapping ThorInterface
-  - `ProcTHOREnvironment`: Subclass of `SymbolicEnvironment` + `OccupancyGridPathingMixin`; subclasses must override `define_operators()`
+  - `ProcTHOREnvironment`: Subclass of `ObjectSearchEnvironment` + `OccupancyGridPathingMixin`; subclasses must override `define_operators()`
   - `SceneGraph`: Scene graph representation
 
 - **`railsim/`**: OpenGL visual simulator with procedural maze/office worlds (optional dependency, `railroad[railsim]`)
@@ -92,7 +92,7 @@ Reusable grid navigation primitives, independent of any specific environment:
 
 #### Creating a New Planning Problem
 1. Define objects by type: `{"robot": {"r1"}, "location": {"kitchen", "bedroom"}, "object": {"Knife"}}`
-2. Define operators — either by subclassing `Environment`/`SymbolicEnvironment` and overriding `define_operators()` (preferred), or by passing `operators=` to the constructor (deprecated)
+2. Define operators — either by subclassing `Environment`/`SymbolicEnvironment` (or `ObjectSearchEnvironment` for robot search domains) and overriding `define_operators()` (preferred), or by passing `operators=` to the constructor (deprecated)
 3. Create the environment with initial state and ground truth object locations
 4. Define goal: `goal = F("found Knife")`
 5. Run planner: `action_name = planner(env.state, goal, max_iterations=1000)`
