@@ -1,9 +1,14 @@
 from typing import List, Dict, Union, SupportsFloat, SupportsInt
 from collections.abc import Set
-from railroad._bindings import get_usable_actions
+from railroad._bindings import get_usable_actions, seed_planner_rng
 from railroad._action_pruning import prune_probabilistic_achievers
 
-__all__ = ["MCTSPlanner", "get_usable_actions", "prune_probabilistic_achievers"]
+__all__ = [
+    "MCTSPlanner",
+    "get_usable_actions",
+    "prune_probabilistic_achievers",
+    "seed_planner_rng",
+]
 from railroad._bindings import MCTSPlanner as _MCTSPlannerCpp
 from railroad._bindings import Action, State, Fluent
 from railroad._bindings import Goal, LiteralGoal

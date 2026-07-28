@@ -444,12 +444,31 @@ def pddl_list(collection: str) -> None:
         click.echo(domain)
 
 
+@pddl.command("clear-cache")
+def pddl_clear_cache() -> None:
+    """Delete cached downloads (directory listings and PDDL files).
+
+    Listings are cached indefinitely, so upstream additions or renames are
+    invisible until the cache is cleared.
+    """
+    import shutil
+
+    from railroad.pddl_converter.download import cache_dir
+
+    target = cache_dir()
+    if target.exists():
+        shutil.rmtree(target)
+        click.echo(f"Removed {target}")
+    else:
+        click.echo(f"Nothing to remove ({target} does not exist)")
+
+
 @pddl.command("run")
 @click.option("--collection", default=None,
               help="Benchmark collection (e.g. ipc-2000, ippc-2008)")
 @click.option("--domain", default=None, help="Domain name within the collection")
-@click.option("--instance", type=int, default=1, show_default=True,
-              help="1-based instance index within the domain")
+@click.option("--instance", type=click.IntRange(min=1), default=1,
+              show_default=True, help="1-based instance index within the domain")
 @click.option("--domain-file", type=click.Path(exists=True, dir_okay=False),
               default=None, help="Local domain file (instead of --collection)")
 @click.option("--problem-file", type=click.Path(exists=True, dir_okay=False),
@@ -507,8 +526,8 @@ def pddl_run(collection: str | None, domain: str | None, instance: int,
 
 @pddl.command("check")
 @click.argument("collection")
-@click.option("--instances", "n_instances", type=int, default=1, show_default=True,
-              help="Instances to try converting per domain")
+@click.option("--instances", "n_instances", type=click.IntRange(min=1), default=1,
+              show_default=True, help="Instances to try converting per domain")
 @click.option("--ground", is_flag=True, default=False,
               help="Also ground actions (slower; catches grounding blowups)")
 @click.option("--markdown", is_flag=True, default=False,
@@ -552,6 +571,7 @@ def pddl_check(collection: str, n_instances: int, ground: bool,
         click.echo("| Domain | Status | Notes |")
         click.echo("|---|---|---|")
         for name, status, note in rows:
+            note = note.replace("|", "\\|")
             click.echo(f"| {name} | {status} | {note} |")
     else:
         width = max((len(r[0]) for r in rows), default=10)

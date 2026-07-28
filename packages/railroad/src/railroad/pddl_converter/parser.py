@@ -3,7 +3,7 @@
 The parser is deliberately permissive about *structure* — conditions and
 effects are kept as small AST nodes — so that the converter, not the parser,
 decides what railroad can represent. Features that cannot even be represented
-in the AST (durative actions, derived predicates, conditional effects, ...)
+in the AST (durative actions, derived predicates, numeric effects, ...)
 raise :class:`UnsupportedPDDLError` here with a machine-readable reason.
 
 PDDL is case-insensitive; all symbols are normalized to lowercase.
@@ -475,7 +475,13 @@ def parse_domain(text: str) -> PDDLDomain:
             raise UnsupportedPDDLError(
                 "constraints", f":constraints in domain {domain.name}"
             )
-        # Unknown sections (e.g. PPDDL extensions we can ignore) fall through.
+        else:
+            # An unrecognized section may carry semantics we would silently
+            # drop, which violates the package's convert-or-error contract.
+            raise UnsupportedPDDLError(
+                f"domain-section:{head}",
+                f"unrecognized section {head} in domain {domain.name}",
+            )
     return domain
 
 

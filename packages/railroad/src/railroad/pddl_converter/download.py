@@ -101,6 +101,14 @@ def _api_request(url: str) -> dict | list:
         return json.loads(response.read().decode())
 
 
+def _atomic_write(dest: Path, content: bytes) -> None:
+    """Write via a per-process temp file so concurrent fetches cannot publish
+    a partially-written file into the (permanent) cache."""
+    tmp = dest.with_suffix(dest.suffix + f".{os.getpid()}.tmp")
+    tmp.write_bytes(content)
+    tmp.replace(dest)
+
+
 def _list_dir(repo: str, path: str, cache_file: Path) -> List[dict]:
     """List a repo directory, caching the (name, type, url) listing locally."""
     if cache_file.exists():
@@ -112,9 +120,7 @@ def _list_dir(repo: str, path: str, cache_file: Path) -> List[dict]:
         for e in entries
     ]
     cache_file.parent.mkdir(parents=True, exist_ok=True)
-    tmp = cache_file.with_suffix(".tmp")
-    tmp.write_text(json.dumps(slim))
-    tmp.replace(cache_file)
+    _atomic_write(cache_file, json.dumps(slim).encode())
     return slim
 
 
@@ -135,9 +141,7 @@ def _fetch_file(repo: str, path: str, git_url: Optional[str], dest: Path) -> Pat
         assert isinstance(blob, dict)
         content = base64.b64decode(blob["content"])
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(dest.suffix + ".tmp")
-    tmp.write_bytes(content)
-    tmp.replace(dest)
+    _atomic_write(dest, content)
     return dest
 
 

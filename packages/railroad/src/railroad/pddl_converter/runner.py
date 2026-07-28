@@ -24,7 +24,7 @@ from railroad.core import (
     get_next_actions,
     transition,
 )
-from railroad.planner import MCTSPlanner
+from railroad.planner import MCTSPlanner, seed_planner_rng
 
 from .converter import ConvertedProblem
 
@@ -67,6 +67,9 @@ def solve(
         return RunResult(False, failure_reason="no grounded actions")
     if planner not in ("mcts", "greedy"):
         raise ValueError(f"Unknown planner {planner!r}; use 'mcts' or 'greedy'")
+    # ``seed`` covers both the MCTS search and the outcome sampling below,
+    # so runs are reproducible end-to-end.
+    seed_planner_rng(seed)
     mcts = MCTSPlanner(actions) if planner == "mcts" else None
     heuristic = (
         _GreedyHeuristic(actions, problem.goal) if planner == "greedy" else None
@@ -100,14 +103,21 @@ def solve(
             action = get_action_by_name(actions, action_name)
         else:
             assert heuristic is not None
-            action = _greedy_action(state, heuristic, actions)
-            if action is None:
+            applicable = get_next_actions(state, actions)
+            if not applicable:
                 return finish(False, "no applicable action (dead end)")
+            action = _greedy_action(state, heuristic, applicable)
+            if action is None:
+                return finish(
+                    False, "all applicable actions have infinite heuristic (dead end)"
+                )
         if verbose:
             print(f"  t={state.time:8.3f}  {action.name}")
         state = _apply(state, action, rng)
         plan.append(action.name)
 
+    if problem.goal.evaluate(state.fluents):
+        return finish(True)
     return finish(False, f"goal not reached within {max_steps} steps")
 
 
@@ -143,11 +153,17 @@ class _GreedyHeuristic:
         return ff_heuristic(state, self._goal, self._actions)
 
 
-def _greedy_action(state: State, heuristic: _GreedyHeuristic, actions):
-    """The applicable action minimizing expected FF heuristic over outcomes."""
+def _greedy_action(state: State, heuristic: _GreedyHeuristic, applicable):
+    """The applicable action minimizing expected FF heuristic over outcomes.
+
+    Returns None if every applicable action has an infinite expected value.
+    """
     best_action, best_value = None, float("inf")
-    for action in get_next_actions(state, actions):
-        expected = 0.0
+    for action in applicable:
+        # successor.time excludes the action's own extra_cost, and the FF
+        # heuristic only charges extra_cost of future actions, so it must be
+        # added here to match the MCTS objective (time + accumulated cost).
+        expected = action.extra_cost
         for successor, prob in transition(state, action):
             expected += prob * (successor.time + heuristic(successor))
         if expected < best_value:

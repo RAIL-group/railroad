@@ -693,6 +693,10 @@ PYBIND11_MODULE(_bindings, m) {
       .def("get_trace_from_last_mcts_tree", &MCTSPlanner::get_trace_from_last_mcts_tree,
            "Get the tree trace from the most recent MCTS planning call");
 
+  m.def("seed_planner_rng", &seed_mcts_rng, py::arg("seed"),
+        "Seed the MCTS outcome-sampling RNG for reproducible planning "
+        "(thread-local: applies to planner calls from the calling thread)");
+
   // ff_heuristic with Goal object
   m.def("ff_heuristic",
         [](const State &state, const GoalPtr &goal,

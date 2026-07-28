@@ -106,10 +106,10 @@ class Effect:
     def __init__(
         self,
         time: OptExpr,
-        prob_effects: List[Tuple[OptExpr, List["Effect"]]] = list(),
-        resulting_fluents: Set[Fluent] = set(),
-        cond_effects: List[Tuple[Set[Fluent], List["Effect"]]] = list(),
-        forall_effects: List[ForallEffect] = list(),
+        prob_effects: Optional[List[Tuple[OptExpr, List["Effect"]]]] = None,
+        resulting_fluents: Optional[Set[Fluent]] = None,
+        cond_effects: Optional[List[Tuple[Set[Fluent], List["Effect"]]]] = None,
+        forall_effects: Optional[List[ForallEffect]] = None,
     ):
         """A (possibly branching) effect scheduled ``time`` after its action.
 
@@ -134,11 +134,11 @@ class Effect:
         """
         self.time = _make_bindable(time)
         self.prob_effects = [
-            (_make_bindable(prob), effects) for prob, effects in prob_effects
+            (_make_bindable(prob), effects) for prob, effects in prob_effects or []
         ]
-        self.resulting_fluents = resulting_fluents
-        self.cond_effects = cond_effects
-        self.forall_effects = forall_effects
+        self.resulting_fluents = resulting_fluents if resulting_fluents is not None else set()
+        self.cond_effects = cond_effects if cond_effects is not None else []
+        self.forall_effects = forall_effects if forall_effects is not None else []
         self.is_probabilistic = bool(self.prob_effects)
         self.is_conditional = bool(self.cond_effects) or bool(self.forall_effects)
 
@@ -178,6 +178,13 @@ class Effect:
                     "universe to expand; ground via Operator.instantiate() "
                     "or pass objects_by_type to _ground()."
                 )
+            for _, typ in forall.variables:
+                if typ not in objects_by_type:
+                    raise ValueError(
+                        f"forall_effects quantify over type {typ!r}, which is "
+                        f"missing from objects_by_type "
+                        f"(known types: {sorted(objects_by_type)})."
+                    )
             domains = [sorted(objects_by_type[typ]) for _, typ in forall.variables]
             for combo in itertools.product(*domains):
                 # Quantified variables shadow same-named outer parameters.

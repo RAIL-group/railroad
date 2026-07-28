@@ -619,6 +619,29 @@ def test_forall_effect_empty_conditions_is_universal():
     assert F("clean desk") in successor.fluents
 
 
+def test_grounded_effect_conditional_pickle_roundtrip():
+    """Conditional branches survive pickling (conditions, nesting, negation)."""
+    import pickle
+
+    effect = GroundedEffect(
+        time=1.0,
+        resulting_fluents={F("moved")},
+        cond_effects=[
+            (
+                {F("in doc"), ~F("locked")},
+                [GroundedEffect(0.0, {F("at doc office")})],
+            )
+        ],
+    )
+    restored = pickle.loads(pickle.dumps(effect))
+    assert restored.time == 1.0
+    assert set(restored.resulting_fluents) == {F("moved")}
+    (branch,) = restored.cond_effects
+    assert set(branch.conditions) == {F("in doc"), ~F("locked")}
+    (sub_effect,) = branch.effects
+    assert set(sub_effect.resulting_fluents) == {F("at doc office")}
+
+
 def test_forall_effect_requires_object_universe():
     """Grounding a forall effect without objects_by_type is an error."""
     from railroad.core import ForallEffect
