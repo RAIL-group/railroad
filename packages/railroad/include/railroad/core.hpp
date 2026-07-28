@@ -332,6 +332,48 @@ private:
   mutable std::optional<std::size_t> cached_hash_;
 };
 
+// The single implementation of effect firing, shared by the planner's
+// transition (advance_to_terminal) and environment execution. Conditional
+// branches read `fluents` as they are when the effect fires, BEFORE the
+// effect's own fluents apply, so collect_triggered_effects must be called
+// before apply_effect_fluents.
+inline std::vector<std::shared_ptr<const GroundedEffect>>
+collect_triggered_effects(const GroundedEffect &effect,
+                          const std::unordered_set<Fluent> &fluents,
+                          bool relax = false) {
+  std::vector<std::shared_ptr<const GroundedEffect>> triggered;
+  if (effect.is_conditional()) {
+    for (const auto &branch : effect.cond_effects()) {
+      if (relax || branch.holds(fluents)) {
+        triggered.insert(triggered.end(), branch.effects().begin(),
+                         branch.effects().end());
+      }
+    }
+  }
+  return triggered;
+}
+
+// Deletes are applied before adds (PDDL semantics), so an effect that both
+// deletes and adds the same fluent leaves it present. Returns whether the
+// effect freed a robot.
+inline bool apply_effect_fluents(std::unordered_set<Fluent> &fluents,
+                                 const GroundedEffect &effect,
+                                 bool relax = false) {
+  if (!relax) {
+    for (const auto &f : effect.flipped_neg_fluents()) {
+      fluents.erase(f);
+    }
+  }
+  bool freed_robot = false;
+  for (const auto &f : effect.pos_fluents()) {
+    if (f.is_free()) {
+      freed_robot = true;
+    }
+    fluents.insert(f);
+  }
+  return freed_robot;
+}
+
 inline bool operator==(const ProbBranchWrapper &a, const ProbBranchWrapper &b) {
   return a.prob() == b.prob() && a.effects() == b.effects();
 }

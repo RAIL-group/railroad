@@ -6,7 +6,13 @@ from typing import Any, Callable, Dict, List, Set, Tuple, Type
 
 import numpy as np
 
-from railroad._bindings import Action, Fluent, GroundedEffect, State
+from railroad._bindings import (
+    Action,
+    Fluent,
+    GroundedEffect,
+    State,
+    apply_effect_deterministic,
+)
 from railroad.core import Operator
 
 from .environment import ActiveSkill, Environment
@@ -308,21 +314,12 @@ class SymbolicEnvironment(Environment):
         """
         delayed_effects: List[Tuple[float, GroundedEffect]] = []
 
-        # Conditional branches (PDDL `when`) read the state as it is when the
-        # effect fires, before the effect's own fluents apply.
-        triggered: List[GroundedEffect] = []
-        for branch in effect.cond_effects:
-            if branch.holds(self._fluents):
-                triggered.extend(branch.effects)
-
-        # Apply deterministic resulting_fluents, deletes before adds (PDDL
-        # semantics), matching the C++ core's update_with_effect.
-        for fluent in effect.resulting_fluents:
-            if fluent.negated:
-                self._fluents.discard(~fluent)
-        for fluent in effect.resulting_fluents:
-            if not fluent.negated:
-                self._fluents.add(fluent)
+        # The deterministic part (conditional-branch evaluation against the
+        # pre-effect state, then deletes-before-adds) is delegated to the C++
+        # core, so execution semantics cannot drift from the planner's.
+        self._fluents, triggered = apply_effect_deterministic(
+            self._fluents, effect
+        )
 
         for sub_effect in triggered:
             if sub_effect.time > 1e-9:
