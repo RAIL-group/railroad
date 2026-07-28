@@ -2,7 +2,7 @@
 
 import inspect
 import random
-from typing import Any, Callable, Dict, List, Set, Tuple, Type
+from typing import Any, Callable, Collection, Dict, List, Set, Tuple, Type
 
 import numpy as np
 
@@ -218,6 +218,9 @@ class SymbolicEnvironment(Environment):
     @property
     def fluents(self) -> Set[Fluent]:
         return self._fluents
+
+    def _remove_fluents(self, fluents: "Collection[Fluent]") -> None:
+        self._fluents -= set(fluents)
 
     @property
     def objects_by_type(self) -> Dict[str, Set[str]]:

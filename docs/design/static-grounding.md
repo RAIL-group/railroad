@@ -1,7 +1,13 @@
 # Design: First-Class Static Preconditions and a Shared Grounder
 
-**Status:** proposed (v2 — revised after code review against the converter's
-actual grounder; see §8 for what changed and why)
+**Status:** implemented (phases 1a/1b/2; phases 3–4 remain per-setting
+follow-ups). Notable deltas from this document as written: the
+`goal=` parameter became `runtime_referenced=` (a predicate set — Goal
+objects are not introspectable from Python); `free`/`waiting` are always
+treated dynamic by `Environment` (the C++ core mutates them outside operator
+effects); and `invalidate_grounding()` was reinstated for the one case
+compare-on-call keys cannot see — mutable state captured inside operator
+callables (e.g. replay policy swaps).
 **Scope:** `railroad.core` (grounding), `railroad.environment` (integration),
 `railroad.pddl_converter` (adoption)
 

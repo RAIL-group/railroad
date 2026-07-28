@@ -67,6 +67,11 @@ class ObjectSearchEnvironment(SymbolicEnvironment):
             seed=seed,
         )
 
+    def runtime_mutated_predicates(self) -> Set[str]:
+        """Revelation mutates these outside operator effects (must stay
+        dynamic for grounding's static inference)."""
+        return {"revealed", "found", "at"}
+
     def _grounding_objects(self) -> Dict[str, Collection[str]]:
         """Add robot intermediate locations (robot_loc) to the location set."""
         objects = super()._grounding_objects()
