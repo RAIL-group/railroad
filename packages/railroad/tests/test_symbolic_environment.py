@@ -296,6 +296,99 @@ def test_symbolic_environment_apply_effect_add():
     assert F("free", "robot1") in env.fluents
 
 
+def test_symbolic_environment_apply_effect_deletes_before_adds():
+    """An effect that deletes and adds the same fluent leaves it present."""
+    env = SymbolicEnvironment(
+        state=State(0.0, {F("at", "robot1", "kitchen")}, []),
+        objects_by_type={},
+        operators=[],
+    )
+
+    effect = GroundedEffect(
+        time=0.0,
+        resulting_fluents={
+            F("at", "robot1", "kitchen"),
+            ~F("at", "robot1", "kitchen"),
+        },
+    )
+    env.apply_effect(effect)
+
+    assert F("at", "robot1", "kitchen") in env.fluents
+
+
+def test_symbolic_environment_apply_effect_conditional():
+    """Conditional branches fire iff their conditions hold pre-effect."""
+    env = SymbolicEnvironment(
+        state=State(0.0, {F("in", "doc")}, []),
+        objects_by_type={},
+        operators=[],
+    )
+
+    # The effect deletes its own condition fluent; the branch must still fire
+    # because conditions read the state as it was when the effect fired.
+    effect = GroundedEffect(
+        time=0.0,
+        resulting_fluents={~F("in", "doc")},
+        cond_effects=[
+            ({F("in", "doc")}, [GroundedEffect(0.0, {F("moved", "doc")})]),
+            ({F("in", "pen")}, [GroundedEffect(0.0, {F("moved", "pen")})]),
+        ],
+    )
+    env.apply_effect(effect)
+
+    assert F("moved", "doc") in env.fluents
+    assert F("moved", "pen") not in env.fluents
+    assert F("in", "doc") not in env.fluents
+
+
+def test_symbolic_environment_act_conditional_effects():
+    """env.act() applies conditional branches, matching the planner's model.
+
+    Briefcase-style: moving relocates exactly the items inside when the move
+    completes (mirrors test_forall_effect_expands_per_object in test_core).
+    """
+    from railroad.core import ForallEffect, get_action_by_name
+
+    move_op = Operator(
+        name="move",
+        parameters=[("?from", "location"), ("?to", "location")],
+        preconditions=[F("free briefcase"), F("at briefcase ?from")],
+        effects=[
+            Effect(time=0, resulting_fluents={~F("free briefcase")}),
+            Effect(
+                time=2.0,
+                resulting_fluents={
+                    F("free briefcase"),
+                    F("at briefcase ?to"),
+                    ~F("at briefcase ?from"),
+                },
+                forall_effects=[ForallEffect(
+                    variables=[("?obj", "item")],
+                    conditions={F("in ?obj")},
+                    effects=[Effect(time=0, resulting_fluents={
+                        F("at ?obj ?to"), ~F("at ?obj ?from")})],
+                )],
+            ),
+        ],
+    )
+    env = SymbolicEnvironment(
+        state=State(0.0, {
+            F("free briefcase"), F("at briefcase home"),
+            F("at doc home"), F("at pen home"), F("in doc"),
+        }, []),
+        objects_by_type={"location": {"home", "office"}, "item": {"doc", "pen"}},
+        operators=[move_op],
+    )
+    move = get_action_by_name(env.get_actions(), "move home office")
+    env.act(move)
+
+    assert F("at briefcase office") in env.state.fluents
+    assert F("at doc office") in env.state.fluents
+    assert F("at doc home") not in env.state.fluents
+    assert F("at pen home") in env.state.fluents
+    assert F("at pen office") not in env.state.fluents
+
+
 # =============================================================================
 # Skill Creation Tests
 # =============================================================================

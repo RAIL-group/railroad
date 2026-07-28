@@ -267,7 +267,14 @@ class SymbolicEnvironment(Environment):
     ) -> SymbolicSkill:
         """Create a SymbolicSkill from initial upcoming effects."""
         relative_effects = [
-            GroundedEffect(abs_time - start_time, effect.resulting_fluents)
+            GroundedEffect(
+                abs_time - start_time,
+                effect.resulting_fluents,
+                cond_effects=[
+                    (branch.conditions, branch.effects)
+                    for branch in effect.cond_effects
+                ],
+            )
             for abs_time, effect in upcoming_effects
         ]
         action = Action(set(), relative_effects, name="_initial_effects")
@@ -301,12 +308,28 @@ class SymbolicEnvironment(Environment):
         """
         delayed_effects: List[Tuple[float, GroundedEffect]] = []
 
-        # Apply deterministic resulting_fluents
+        # Conditional branches (PDDL `when`) read the state as it is when the
+        # effect fires, before the effect's own fluents apply.
+        triggered: List[GroundedEffect] = []
+        for branch in effect.cond_effects:
+            if branch.holds(self._fluents):
+                triggered.extend(branch.effects)
+
+        # Apply deterministic resulting_fluents, deletes before adds (PDDL
+        # semantics), matching the C++ core's update_with_effect.
         for fluent in effect.resulting_fluents:
             if fluent.negated:
                 self._fluents.discard(~fluent)
-            else:
+        for fluent in effect.resulting_fluents:
+            if not fluent.negated:
                 self._fluents.add(fluent)
+
+        for sub_effect in triggered:
+            if sub_effect.time > 1e-9:
+                # Schedule for later - time is relative to when parent fired
+                delayed_effects.append((sub_effect.time, sub_effect))
+            else:
+                delayed_effects.extend(self.apply_effect(sub_effect))
 
         # Handle probabilistic branches if present
         if effect.is_probabilistic:

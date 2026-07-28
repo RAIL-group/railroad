@@ -113,6 +113,7 @@ Reusable grid navigation primitives, independent of any specific environment:
 - Effects can be deterministic or probabilistic with multiple outcomes
 - Effects happen at specified times (e.g., move takes time based on distance)
 - Effects can carry conditional branches (`Effect(cond_effects=[(conditions, sub_effects), ...])`): sub-effects applied only if the condition fluents hold when the effect fires, evaluated before the effect's own fluents apply (PDDL `when`; negated conditions use negation-as-absence)
+- Branching sub-effects (conditional and probabilistic) apply *after* their parent effect's own fluents, even at the same timestamp — deletes-before-adds holds within one effect, not across an effect and its branches
 - `ForallEffect` is the universally quantified form (PDDL `forall`+`when`): expands into one conditional branch per object of the quantified type at `Operator.instantiate()` time; empty conditions give a plain universal effect
 - Operators may carry a scalar `extra_cost`, charged in the MCTS objective (time + accumulated cost) and folded into the FF heuristic's estimates
 

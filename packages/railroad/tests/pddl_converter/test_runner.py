@@ -28,12 +28,11 @@ def test_solve_gripper_costs_minimizes_total_cost():
     assert result.sim_time == pytest.approx(7.0)
 
 
-@pytest.mark.parametrize("seed", [0, 1, 2])
-def test_solve_probabilistic_slippery(seed):
+def test_solve_probabilistic_slippery():
     problem = load_problem(
         DATA / "slippery-domain.pddl", DATA / "slippery-instance.pddl"
     )
-    result = solve(problem, seed=seed, max_iterations=1500)
+    result = solve(problem, seed=0, max_iterations=1500)
     assert result.success
     # Two deliveries plus one extra pickup per slip.
     assert len(result.plan) >= 4

@@ -13,7 +13,9 @@ Probabilistic PDDL planning system.
   evaluated against the state *before* the effect's own fluents apply (and
   are optimistically assumed to hold under relaxation); deletes apply
   before adds (PDDL semantics, so a same-fluent add/delete pair keeps the
-  fluent)
+  fluent). Triggered/branched sub-effects are queued and applied *after*
+  their parent effect's fluents, so deletes-before-adds is per-effect, not
+  across an effect and its branches
 - **goal.hpp**: Goal representation (LiteralGoal, AndGoal, OrGoal, etc.)
 - **heuristic_types.hpp**: shared FF data types — `Achiever`,
   `FFForwardResult`, `FFCacheKey`/`FFMemory`, and the `HeuristicFn` alias.
