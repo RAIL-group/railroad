@@ -1,6 +1,7 @@
 # Re-import required dependencies due to kernel reset
 from typing import Callable, List, Tuple, Dict, Set, Union, Sequence, Collection, Mapping, Optional
 import itertools
+import math
 
 from railroad._bindings import GroundedEffect, Fluent, Action, State
 from railroad._bindings import transition
@@ -215,22 +216,69 @@ class Effect:
         )
 
 
+class Eq:
+    """Grounding-time equality constraint (PDDL ``(= ?x ?y)``).
+
+    Placed in an Operator's ``preconditions`` list alongside Fluents; each
+    term is a variable (``?x``) or an object name. Evaluated while grounding
+    (see :func:`ground_operators`) and never appears on the grounded Action.
+    ``Operator.instantiate`` has no machinery for constraints and raises if
+    an operator carries one.
+    """
+
+    __slots__ = ("left", "right", "negated")
+
+    def __init__(self, left: str, right: str, negated: bool = False):
+        self.left = left
+        self.right = right
+        self.negated = negated
+
+    def __repr__(self) -> str:
+        op = "!=" if self.negated else "=="
+        return f"<{type(self).__name__} {self.left} {op} {self.right}>"
+
+    def __eq__(self, other: object) -> bool:
+        return (
+            isinstance(other, Eq)
+            and (self.left, self.right, self.negated)
+            == (other.left, other.right, other.negated)
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.left, self.right, self.negated))
+
+
+def Neq(left: str, right: str) -> Eq:
+    """PDDL ``(not (= ?x ?y))``: the terms must bind different objects."""
+    return Eq(left, right, negated=True)
+
+
 class Operator:
     def __init__(
         self,
         name: str,
         parameters: List[Tuple[str, str]],
-        preconditions: List[Fluent],
+        preconditions: Sequence[Union[Fluent, Eq]],
         effects: Sequence[Effect],
         extra_cost: float = 0.0,
     ):
         self.name = name
         self.parameters = parameters
-        self.preconditions = preconditions
+        # Grounding-time constraints (Eq/Neq) live beside ordinary fluent
+        # preconditions in the input list, PDDL-style, but are split out:
+        # they constrain which bindings exist rather than when actions apply.
+        self.preconditions = [p for p in preconditions if isinstance(p, Fluent)]
+        self.grounding_constraints = [p for p in preconditions if isinstance(p, Eq)]
         self.effects = effects
         self.extra_cost = extra_cost
 
     def instantiate(self, objects_by_type: Mapping[str, Collection[str]]) -> List[Action]:
+        if self.grounding_constraints:
+            raise TypeError(
+                f"Operator {self.name!r} has grounding constraints (Eq/Neq), "
+                "which Operator.instantiate does not evaluate; ground it via "
+                "ground_operators() instead."
+            )
         grounded_actions = []
         domains = [objects_by_type[typ] for _, typ in self.parameters]
         for assignment in itertools.product(*domains):
@@ -268,6 +316,261 @@ def get_action_by_name(actions: List[Action], name: str) -> Action:
         if action.name == name:
             return action
     raise ValueError(f"No action found with name: {name}")
+
+
+# ============================================================================
+#  Grounding with static-precondition pruning
+#  (design: docs/design/static-grounding.md)
+# ============================================================================
+
+
+def _is_var(term: str) -> bool:
+    return term.startswith("?")
+
+
+def _collect_dynamic_predicates(effect: Effect, out: Set[str]) -> None:
+    for fluent in effect.resulting_fluents:
+        out.add(fluent.name)
+    for _, sub_effects in effect.prob_effects:
+        for sub in sub_effects:
+            _collect_dynamic_predicates(sub, out)
+    # Conditional branches: only the effect side writes; conditions read.
+    for _, sub_effects in effect.cond_effects:
+        for sub in sub_effects:
+            _collect_dynamic_predicates(sub, out)
+    for forall in effect.forall_effects:
+        for sub in forall.effects:
+            _collect_dynamic_predicates(sub, out)
+
+
+def dynamic_predicates(operators: Sequence[Operator]) -> Set[str]:
+    """Predicates touched by some effect of some operator (all others are
+    static: their truth is fixed for the lifetime of the problem)."""
+    dynamic: Set[str] = set()
+    for op in operators:
+        for effect in op.effects:
+            _collect_dynamic_predicates(effect, dynamic)
+    return dynamic
+
+
+class GroundingStats:
+    """Enumeration counters from one ground_operators() call."""
+
+    __slots__ = ("nominal_bindings", "visited_bindings", "actions_kept")
+
+    def __init__(self) -> None:
+        self.nominal_bindings = 0
+        self.visited_bindings = 0
+        self.actions_kept = 0
+
+    def __repr__(self) -> str:
+        return (
+            f"<GroundingStats nominal={self.nominal_bindings} "
+            f"visited={self.visited_bindings} kept={self.actions_kept}>"
+        )
+
+
+class GroundingResult:
+    __slots__ = ("actions", "static_predicates", "stats")
+
+    def __init__(
+        self,
+        actions: List[Action],
+        static_predicates: Collection[str],
+        stats: GroundingStats,
+    ) -> None:
+        self.actions = actions
+        self.static_predicates = frozenset(static_predicates)
+        self.stats = stats
+
+
+def ground_operators(
+    operators: Sequence[Operator],
+    objects_by_type: Mapping[str, Collection[str]],
+    initial_fluents: Collection[Fluent],
+    *,
+    allow_duplicate_bindings: bool = False,
+    skip_on: Tuple[type[BaseException], ...] = (),
+    assert_static: Optional[Collection[str]] = None,
+    treat_dynamic: Optional[Collection[str]] = None,
+) -> GroundingResult:
+    """Ground operators via backtracking with static-precondition pruning.
+
+    A predicate is *static* if no effect of any operator in ``operators``
+    touches it (see :func:`dynamic_predicates`); positive preconditions on
+    static predicates, and Eq/Neq constraints, are evaluated against
+    ``initial_fluents`` as soon as their variables are bound, pruning the
+    enumeration early. Negated static preconditions are left as runtime
+    preconditions (they rarely prune).
+
+    Args:
+        allow_duplicate_bindings: if True, the same object may bind several
+            parameters (PDDL semantics; express distinctness with Neq). If
+            False, replicates ``Operator.instantiate``'s all-distinct rule.
+        skip_on: exception types that, when raised while grounding one
+            binding (e.g. by a duration callable), skip that binding only.
+        assert_static: predicates the caller believes are static; raises
+            ValueError if some effect touches one (catching mis-assumptions
+            loudly instead of silently mis-pruning).
+        treat_dynamic: predicates to force dynamic even though no operator
+            effect touches them — required when the execution environment
+            mutates them out-of-band (e.g. ObjectSearchEnvironment's
+            revelation adds ``revealed``/``found``/``at`` fluents).
+
+    Actions with non-finite effect times are dropped (an ``inf`` duration
+    marks a statically impossible action, e.g. a move between unknown
+    locations).
+    """
+    dynamic = dynamic_predicates(operators)
+    if treat_dynamic:
+        dynamic |= set(treat_dynamic)
+    if assert_static:
+        violations = sorted(set(assert_static) & dynamic)
+        if violations:
+            raise ValueError(
+                f"assert_static predicates are touched by effects: {violations}"
+            )
+
+    precondition_predicates = {
+        f.name for op in operators for f in op.preconditions
+    }
+    static_predicates = precondition_predicates - dynamic
+
+    # Fact index for O(1) static checks: predicate -> set of arg tuples.
+    facts: Dict[str, Set[Tuple[str, ...]]] = {}
+    for fluent in initial_fluents:
+        if fluent.name in static_predicates and not fluent.negated:
+            facts.setdefault(fluent.name, set()).add(tuple(fluent.args))
+
+    stats = GroundingStats()
+    actions: List[Action] = []
+    for op in operators:
+        actions.extend(
+            _ground_one_operator(
+                op,
+                objects_by_type,
+                facts,
+                static_predicates,
+                allow_duplicate_bindings,
+                skip_on,
+                stats,
+            )
+        )
+
+    actions = [
+        a
+        for a in actions
+        if all(math.isfinite(eff.time) for eff in a.effects)
+    ]
+    stats.actions_kept = len(actions)
+    return GroundingResult(actions, static_predicates, stats)
+
+
+def _ground_one_operator(
+    op: Operator,
+    objects_by_type: Mapping[str, Collection[str]],
+    facts: Dict[str, Set[Tuple[str, ...]]],
+    static_predicates: Set[str],
+    allow_duplicate_bindings: bool,
+    skip_on: Tuple[type[BaseException], ...],
+    stats: GroundingStats,
+) -> List[Action]:
+    """Backtracking enumeration for one operator (see ground_operators)."""
+    params = op.parameters
+    domains = [sorted(objects_by_type.get(typ, set())) for _, typ in params]
+    stats.nominal_bindings += math.prod(len(d) for d in domains)
+
+    # Checks as (needed_vars, check) where check is an Eq or a static Fluent.
+    checks: List[Tuple[Set[str], Union[Eq, Fluent]]] = []
+    for eq in op.grounding_constraints:
+        checks.append(({t for t in (eq.left, eq.right) if _is_var(t)}, eq))
+    for fluent in op.preconditions:
+        if fluent.name in static_predicates and not fluent.negated:
+            checks.append(({a for a in fluent.args if _is_var(a)}, fluent))
+
+    order = _order_parameters(params, [needed for needed, _ in checks])
+
+    # Assign each check to the earliest depth at which all its variables are
+    # bound; variable-free checks are evaluated once up front.
+    bound_after: List[Set[str]] = []
+    acc: Set[str] = set()
+    for pos in order:
+        acc.add(params[pos][0])
+        bound_after.append(set(acc))
+    checks_at: List[List[Union[Eq, Fluent]]] = [[] for _ in order]
+    always: List[Union[Eq, Fluent]] = []
+    for needed, check in checks:
+        if not needed:
+            always.append(check)
+            continue
+        for depth, bound in enumerate(bound_after):
+            if needed <= bound:
+                checks_at[depth].append(check)
+                break
+
+    def satisfied(check: Union[Eq, Fluent], binding: Dict[str, str]) -> bool:
+        if isinstance(check, Eq):
+            left = binding.get(check.left, check.left)
+            right = binding.get(check.right, check.right)
+            return (left == right) != check.negated
+        grounded = tuple(binding.get(a, a) for a in check.args)
+        return grounded in facts.get(check.name, ())
+
+    if not all(satisfied(c, {}) for c in always):
+        return []
+
+    actions: List[Action] = []
+    binding: Dict[str, str] = {}
+    bound_objects: Set[str] = set()
+
+    def dfs(depth: int) -> None:
+        if depth == len(order):
+            try:
+                actions.append(op._ground(binding, objects_by_type))
+            except skip_on:
+                pass  # this binding is not a real action (e.g. undefined cost)
+            return
+        pos = order[depth]
+        var = params[pos][0]
+        for obj in domains[pos]:
+            if not allow_duplicate_bindings:
+                if obj in bound_objects:
+                    continue
+                bound_objects.add(obj)
+            stats.visited_bindings += 1
+            binding[var] = obj
+            if all(satisfied(c, binding) for c in checks_at[depth]):
+                dfs(depth + 1)
+            if not allow_duplicate_bindings:
+                bound_objects.discard(obj)
+        binding.pop(var, None)
+
+    if all(len(d) > 0 for d in domains):
+        dfs(0)
+    return actions
+
+
+def _order_parameters(
+    params: List[Tuple[str, str]], constraint_vars: List[Set[str]]
+) -> List[int]:
+    """Greedy ordering: bind next the parameter completing the most checks."""
+    remaining = list(range(len(params)))
+    order: List[int] = []
+    bound: Set[str] = set()
+    while remaining:
+        def gain(pos: int) -> int:
+            would_bind = bound | {params[pos][0]}
+            return sum(
+                1
+                for needed in constraint_vars
+                if needed and needed <= would_bind and not needed <= bound
+            )
+
+        best = max(remaining, key=lambda pos: (gain(pos), -pos))
+        order.append(best)
+        bound.add(params[best][0])
+        remaining.remove(best)
+    return order
 
 
 def get_next_actions(state: State, all_actions: List[Action]) -> List[Action]:
