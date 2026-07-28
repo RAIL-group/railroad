@@ -13,18 +13,11 @@ from typing import List, Optional
 
 from railroad.core import (
     State,
-    convert_action_effects,
-    convert_action_to_positive_preconditions,
-    convert_goal_to_positive_preconditions,
-    convert_state_to_positive_preconditions,
-    create_positive_fluent_mapping,
-    extract_all_negative_fluents,
-    ff_heuristic,
     get_action_by_name,
     get_next_actions,
     transition,
 )
-from railroad.planner import MCTSPlanner, seed_planner_rng
+from railroad.planner import GreedyPlanner, MCTSPlanner, seed_planner_rng
 
 from .converter import ConvertedProblem
 
@@ -71,9 +64,7 @@ def solve(
     # so runs are reproducible end-to-end.
     seed_planner_rng(seed)
     mcts = MCTSPlanner(actions) if planner == "mcts" else None
-    heuristic = (
-        _GreedyHeuristic(actions, problem.goal) if planner == "greedy" else None
-    )
+    greedy = GreedyPlanner(actions) if planner == "greedy" else None
     rng = random.Random(seed)
     state = problem.initial_state
     plan: List[str] = []
@@ -102,12 +93,11 @@ def solve(
                 return finish(False, "planner returned NONE")
             action = get_action_by_name(actions, action_name)
         else:
-            assert heuristic is not None
-            applicable = get_next_actions(state, actions)
-            if not applicable:
-                return finish(False, "no applicable action (dead end)")
-            action = _greedy_action(state, heuristic, applicable)
+            assert greedy is not None
+            action = greedy.select_action(state, problem.goal)
             if action is None:
+                if not get_next_actions(state, actions):
+                    return finish(False, "no applicable action (dead end)")
                 return finish(
                     False, "all applicable actions have infinite heuristic (dead end)"
                 )
@@ -119,56 +109,6 @@ def solve(
     if problem.goal.evaluate(state.fluents):
         return finish(True)
     return finish(False, f"goal not reached within {max_steps} steps")
-
-
-class _GreedyHeuristic:
-    """FF heuristic evaluator that handles negative preconditions and goals.
-
-    ``ff_heuristic`` reasons over positive literals only, so negated fluents
-    (in goals like ``(not (broken vase))`` or in preconditions) must first be
-    rewritten to positive ``not-*`` bookkeeping fluents — the same
-    preprocessing ``MCTSPlanner`` applies internally.
-    """
-
-    def __init__(self, actions, goal):
-        negatives = extract_all_negative_fluents(actions, goal)
-        if negatives:
-            self._mapping = create_positive_fluent_mapping(negatives)
-            self._actions = [
-                convert_action_effects(
-                    convert_action_to_positive_preconditions(a, self._mapping),
-                    self._mapping,
-                )
-                for a in actions
-            ]
-            self._goal = convert_goal_to_positive_preconditions(goal, self._mapping)
-        else:
-            self._mapping = None
-            self._actions = actions
-            self._goal = goal
-
-    def __call__(self, state: State) -> float:
-        if self._mapping is not None:
-            state = convert_state_to_positive_preconditions(state, self._mapping)
-        return ff_heuristic(state, self._goal, self._actions)
-
-
-def _greedy_action(state: State, heuristic: _GreedyHeuristic, applicable):
-    """The applicable action minimizing expected FF heuristic over outcomes.
-
-    Returns None if every applicable action has an infinite expected value.
-    """
-    best_action, best_value = None, float("inf")
-    for action in applicable:
-        # successor.time excludes the action's own extra_cost, and the FF
-        # heuristic only charges extra_cost of future actions, so it must be
-        # added here to match the MCTS objective (time + accumulated cost).
-        expected = action.extra_cost
-        for successor, prob in transition(state, action):
-            expected += prob * (successor.time + heuristic(successor))
-        if expected < best_value:
-            best_action, best_value = action, expected
-    return best_action
 
 
 def _apply(state: State, action, rng: random.Random) -> State:

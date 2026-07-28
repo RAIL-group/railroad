@@ -16,7 +16,7 @@ with no unobserved space there is no frontier term). So the reported cost is a
 **commit-based lower bound** (``optimistic_lb`` vs. makespan), collapsing onto
 the exact makespan only when the deployment searched every container.
 
-The key simplification: :class:`~railroad.environment.symbolic.SymbolicEnvironment`
+The key simplification: :class:`~railroad.environment.object_search.ObjectSearchEnvironment`
 already resolves a ``search`` deterministically from ``_objects_at_locations``.
 So replay needs no bespoke resolution intercept — it restricts that map to the
 **recorded** contents and lets the existing resolution run, adding only
@@ -34,7 +34,8 @@ import numpy as np
 from railroad import operators as _operators
 from railroad._bindings import Fluent, Goal, GroundedEffect, State
 from railroad.core import Operator
-from railroad.environment.symbolic import LocationRegistry, SymbolicEnvironment
+from railroad.environment.object_search import ObjectSearchEnvironment
+from railroad.environment.symbolic import LocationRegistry
 from railroad.experimental.unknown_search import FixedObjectFind, ObjectFindEstimator
 from railroad.navigation import OccupancyGridPathingMixin
 
@@ -51,7 +52,7 @@ from .base import (
 
 
 class ReplayKnownMapSearchEnvironment(
-    ReplayArenaMixin, OccupancyGridPathingMixin, SymbolicEnvironment
+    ReplayArenaMixin, OccupancyGridPathingMixin, ObjectSearchEnvironment
 ):
     """Known-map object-search replay: ``move`` + ``search`` over a known grid.
 

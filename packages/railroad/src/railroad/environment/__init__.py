@@ -5,10 +5,11 @@ used in PDDL planning and simulation.
 
 Usage:
     from railroad.environment import (
-        Environment,           # Abstract base class for environments
-        SymbolicEnvironment,   # Environment for symbolic execution
-        ActiveSkill,           # Protocol for skill execution
-        SymbolicSkill,         # Symbolic skill implementation
+        Environment,             # Abstract base class for environments
+        SymbolicEnvironment,     # Generic symbolic execution
+        ObjectSearchEnvironment, # Object-search domain conventions
+        ActiveSkill,             # Protocol for skill execution
+        SymbolicSkill,           # Symbolic skill implementation
     )
 
 Legacy classes have been moved to railroad.experimental.environment:
@@ -28,6 +29,7 @@ from .symbolic import (
     SymbolicEnvironment,
     SymbolicSkill,
 )
+from .object_search import ObjectSearchEnvironment
 
 __all__ = [
     # Core classes
@@ -37,6 +39,7 @@ __all__ = [
     "LocationRegistry",
     "MotionSkill",
     "NavigationMoveSkill",
+    "ObjectSearchEnvironment",
     "Pose",
     "PoseLike",
     "SymbolicEnvironment",
