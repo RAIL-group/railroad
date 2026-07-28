@@ -60,19 +60,7 @@ public:
   update_with_effect(const std::shared_ptr<const GroundedEffect> &new_effect,
                      bool relax = false) {
     cached_hash_ = std::nullopt;
-    if (!relax) {
-      for (const auto &f : new_effect->flipped_neg_fluents()) {
-        fluents_.erase(f);
-      }
-    }
-    bool freed_robot = false;
-    for (const auto &f : new_effect->pos_fluents()) {
-      if (f.is_free()) {
-        freed_robot = true;
-      }
-      fluents_.insert(f);
-    }
-    return freed_robot;
+    return apply_effect_fluents(fluents_, *new_effect, relax);
   }
 
   bool update_fluents(const std::unordered_set<Fluent> &new_fluents,
@@ -230,15 +218,7 @@ inline void advance_to_terminal(State state, double prob,
     // conditions are optimistically assumed to hold, which also makes
     // conditional effects visible to the relaxed-plan heuristic via
     // get_relaxed_successors().
-    std::vector<std::shared_ptr<const GroundedEffect>> triggered;
-    if (effect->is_conditional()) {
-      for (const auto &branch : effect->cond_effects()) {
-        if (relax || branch.holds(state.fluents())) {
-          triggered.insert(triggered.end(), branch.effects().begin(),
-                           branch.effects().end());
-        }
-      }
-    }
+    auto triggered = collect_triggered_effects(*effect, state.fluents(), relax);
 
     any_free_robots = state.update_with_effect(effect, relax);
     for (const auto &e : triggered) {

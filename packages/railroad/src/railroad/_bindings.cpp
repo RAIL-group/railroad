@@ -693,6 +693,20 @@ PYBIND11_MODULE(_bindings, m) {
       .def("get_trace_from_last_mcts_tree", &MCTSPlanner::get_trace_from_last_mcts_tree,
            "Get the tree trace from the most recent MCTS planning call");
 
+  m.def(
+      "apply_effect_deterministic",
+      [](std::unordered_set<Fluent> fluents, const GroundedEffect &effect) {
+        auto triggered = collect_triggered_effects(effect, fluents);
+        apply_effect_fluents(fluents, effect);
+        return py::make_tuple(std::move(fluents), std::move(triggered));
+      },
+      py::arg("fluents"), py::arg("effect"),
+      "Apply one effect's deterministic part to a fluent set, sharing the "
+      "core's implementation: conditional branches are evaluated against the "
+      "pre-effect fluents, then deletes apply before adds. Returns "
+      "(new_fluents, triggered_sub_effects); probabilistic branches are left "
+      "to the caller.");
+
   m.def("seed_planner_rng", &seed_mcts_rng, py::arg("seed"),
         "Seed the MCTS outcome-sampling RNG for reproducible planning "
         "(thread-local: applies to planner calls from the calling thread)");
