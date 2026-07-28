@@ -8,15 +8,16 @@ import numpy as np
 from railroad._bindings import State
 from railroad.core import Operator
 from railroad.navigation import OccupancyGridPathingMixin
-from ..symbolic import LocationRegistry, SymbolicEnvironment
+from ..object_search import ObjectSearchEnvironment
+from ..symbolic import LocationRegistry
 
 from .scene import ProcTHORScene
 
 
-class ProcTHOREnvironment(OccupancyGridPathingMixin, SymbolicEnvironment, ABC):
+class ProcTHOREnvironment(OccupancyGridPathingMixin, ObjectSearchEnvironment, ABC):
     """Symbolic environment backed by a ProcTHOR scene.
 
-    Subclass of SymbolicEnvironment that provides:
+    Subclass of ObjectSearchEnvironment that provides:
     - Internal scene creation from a seed
     - Direct access to the ProcTHOR scene via ``self.scene``
     - Optional validation that objects/locations exist
@@ -73,7 +74,7 @@ class ProcTHOREnvironment(OccupancyGridPathingMixin, SymbolicEnvironment, ABC):
         )
 
         # Bootstrap for define_operators(): make pathing helpers available
-        # before SymbolicEnvironment.__init__ runs.
+        # before ObjectSearchEnvironment.__init__ runs.
         self._location_registry = location_registry
 
         if validate:

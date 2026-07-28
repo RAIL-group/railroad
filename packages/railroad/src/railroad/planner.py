@@ -4,6 +4,7 @@ from railroad._bindings import get_usable_actions, seed_planner_rng
 from railroad._action_pruning import prune_probabilistic_achievers
 
 __all__ = [
+    "GreedyPlanner",
     "MCTSPlanner",
     "get_usable_actions",
     "prune_probabilistic_achievers",
@@ -15,12 +16,35 @@ from railroad._bindings import Goal, LiteralGoal
 from railroad.core import (
     extract_negative_preconditions,
     extract_negative_goal_fluents,
+    extract_all_negative_fluents,
     create_positive_fluent_mapping,
     convert_action_to_positive_preconditions,
     convert_action_effects,
     convert_state_to_positive_preconditions,
     convert_goal_to_positive_preconditions,
+    ff_heuristic,
+    get_next_actions,
+    transition,
 )
+
+
+def _convert_actions_with_mapping(
+    actions: List[Action], mapping: Dict[Fluent, Fluent]
+) -> List[Action]:
+    """Rewrite actions' negative preconditions/effects as positive `not-*`
+    bookkeeping fluents. Shared by MCTSPlanner and GreedyPlanner."""
+    converted_actions = []
+    for action in actions:
+        # First convert preconditions
+        action_with_preconds = convert_action_to_positive_preconditions(
+            action, mapping
+        )
+        # Then convert effects
+        action_with_effects = convert_action_effects(
+            action_with_preconds, mapping
+        )
+        converted_actions.append(action_with_effects)
+    return converted_actions
 
 
 def _normalize_goal(goal: Union[Goal, Fluent]) -> Goal:
@@ -145,18 +169,7 @@ class MCTSPlanner:
         self, actions: List[Action], mapping: Dict[Fluent, Fluent]
     ) -> List[Action]:
         """Convert actions using the given mapping."""
-        converted_actions = []
-        for action in actions:
-            # First convert preconditions
-            action_with_preconds = convert_action_to_positive_preconditions(
-                action, mapping
-            )
-            # Then convert effects
-            action_with_effects = convert_action_effects(
-                action_with_preconds, mapping
-            )
-            converted_actions.append(action_with_effects)
-        return converted_actions
+        return _convert_actions_with_mapping(actions, mapping)
 
     def _ensure_mapping_includes_goal(self, goal: Goal) -> None:
         """Extend mapping if goal contains new negative fluents.
@@ -312,6 +325,86 @@ class MCTSPlanner:
             lambda_max=self._lambda_max,
             lambda_ff=self._lambda_ff,
         )
+
+
+class GreedyPlanner:
+    """One-step-lookahead policy over the FF heuristic.
+
+    Selects the applicable action minimizing the expected value of
+    ``extra_cost + successor.time + h_ff(successor)`` over the action's
+    outcome distribution — the same objective MCTS optimizes, evaluated
+    greedily. Fast and robust on probabilistic domains with many degenerate
+    actions, where per-step MCTS can wander; used as the ``greedy`` policy
+    for converted PDDL/PPDDL problems.
+
+    Negative preconditions and goals are converted to positive ``not-*``
+    equivalents for heuristic evaluation only (the same preprocessing
+    MCTSPlanner applies). Applicability checks and transitions use the
+    original actions: the C++ core handles negative preconditions natively
+    via negation-as-absence.
+
+    Usage:
+        greedy = GreedyPlanner(all_actions)
+        action_name = greedy(state, goal)  # "NONE" if no viable action
+    """
+
+    def __init__(self, actions: List[Action]):
+        self._actions = actions
+        self._cached_goal: Goal | None = None
+        self._h_actions: List[Action] = actions
+        self._h_goal: Goal | None = None
+        self._mapping: Dict[Fluent, Fluent] | None = None
+
+    def _prepare(self, goal: Goal) -> None:
+        """(Re)build the converted heuristic actions/goal for this goal."""
+        if goal is self._cached_goal:
+            return
+        negatives = extract_all_negative_fluents(self._actions, goal)
+        if negatives:
+            self._mapping = create_positive_fluent_mapping(negatives)
+            self._h_actions = _convert_actions_with_mapping(
+                self._actions, self._mapping
+            )
+            self._h_goal = convert_goal_to_positive_preconditions(
+                goal, self._mapping
+            )
+        else:
+            self._mapping = None
+            self._h_actions = self._actions
+            self._h_goal = goal
+        self._cached_goal = goal
+
+    def _heuristic(self, state: State) -> float:
+        assert self._h_goal is not None  # _prepare always runs first
+        if self._mapping is not None:
+            state = convert_state_to_positive_preconditions(state, self._mapping)
+        return ff_heuristic(state, self._h_goal, self._h_actions)
+
+    def select_action(
+        self, state: State, goal: Union[Goal, Fluent]
+    ) -> Action | None:
+        """The applicable action minimizing expected cost, or None.
+
+        None means either no action is applicable or every applicable action
+        has an infinite expected heuristic (a dead end either way).
+        """
+        self._prepare(_normalize_goal(goal))
+        best_action, best_value = None, float("inf")
+        for action in get_next_actions(state, self._actions):
+            # successor.time excludes the action's own extra_cost, and the FF
+            # heuristic only charges extra_cost of future actions, so it must
+            # be added here to match the MCTS objective (time + total cost).
+            expected = action.extra_cost
+            for successor, prob in transition(state, action):
+                expected += prob * (successor.time + self._heuristic(successor))
+            if expected < best_value:
+                best_action, best_value = action, expected
+        return best_action
+
+    def __call__(self, state: State, goal: Union[Goal, Fluent]) -> str:
+        """Return the selected action's name, or "NONE" (MCTSPlanner parity)."""
+        action = self.select_action(state, goal)
+        return action.name if action is not None else "NONE"
 
 
 def reconstruct_path(came_from, current):

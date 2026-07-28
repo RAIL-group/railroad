@@ -195,24 +195,11 @@ class Environment(ABC):
 
     def get_actions(self) -> List[Action]:
         """Instantiate available actions from operators."""
-        objects_by_type = self.objects_by_type
-
-        # Add robot intermediate locations (robot_loc) to location set
-        robot_locs = {
-            f"{rob}_loc"
-            for rob in objects_by_type.get("robot", set())
-            if Fluent("at", rob, f"{rob}_loc") in self.fluents
-        }
-        objects_with_rloc: Dict[str, Collection[str]] = {
-            k: set(v) for k, v in objects_by_type.items()
-        }
-        objects_with_rloc["location"] = (
-            set(objects_with_rloc.get("location", set())) | robot_locs
-        )
+        grounding_objects = self._grounding_objects()
 
         all_actions: List[Action] = list(
             itertools.chain.from_iterable(
-                op.instantiate(objects_with_rloc) for op in self._operators
+                op.instantiate(grounding_objects) for op in self._operators
             )
         )
 
@@ -237,29 +224,24 @@ class Environment(ABC):
 
         return valid_actions
 
+    def _grounding_objects(self) -> Dict[str, Collection[str]]:
+        """Hook: the object universe used to ground operators.
+
+        Subclasses may extend this (e.g. ObjectSearchEnvironment adds robot
+        intermediate ``{robot}_loc`` locations created by interrupted moves).
+        """
+        return {k: set(v) for k, v in self.objects_by_type.items()}
+
     def _is_valid_action(self, action: Action) -> bool:
-        """Filter actions with infinite effects or invalid destinations."""
+        """Filter actions that can never execute.
+
+        The base filter is domain-agnostic (finite effect times, nonempty
+        name); subclasses layer on domain conventions (see
+        ObjectSearchEnvironment).
+        """
         if any(math.isinf(eff.time) or math.isnan(eff.time) for eff in action.effects):
             return False
-
-        parts = action.name.split()
-        if not parts:
-            return False
-
-        if parts[0].startswith("move"):  # "move" and variants e.g. "move-to-goal"
-            if len(parts) > 3 and parts[2] == parts[3]:
-                return False
-            if action.effects and all(eff.time <= 1e-9 for eff in action.effects):
-                return False
-            if len(parts) > 3 and parts[3].endswith("_loc"):
-                return False
-
-        if parts[0] == "place" and len(parts) > 2 and parts[2].endswith("_loc"):
-            return False
-        if parts[0] == "search" and len(parts) > 2 and parts[2].endswith("_loc"):
-            return False
-
-        return True
+        return bool(action.name.split())
 
     def is_goal_reached(self, goal_fluents: Collection[Fluent]) -> bool:
         """Check if all goal fluents are satisfied."""

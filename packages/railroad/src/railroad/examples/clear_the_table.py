@@ -18,7 +18,7 @@ from railroad.core import Fluent as F, get_action_by_name
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
 from railroad import operators
-from railroad.environment import SymbolicEnvironment
+from railroad.environment import ObjectSearchEnvironment
 from railroad._bindings import State
 
 
@@ -90,7 +90,7 @@ def main(
 
     # Initialize symbolic environment with initial state
     initial_state = State(0.0, initial_fluents, [])
-    env = SymbolicEnvironment(
+    env = ObjectSearchEnvironment(
         state=initial_state,
         objects_by_type=objects_by_type,
         operators=[pick_op, place_op, move_op],

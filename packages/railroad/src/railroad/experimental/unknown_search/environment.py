@@ -14,7 +14,8 @@ from railroad.environment.skill import (
     MotionSkill,
     NavigationMoveSkill,
 )
-from railroad.environment.symbolic import LocationRegistry, SymbolicEnvironment
+from railroad.environment.object_search import ObjectSearchEnvironment
+from railroad.environment.symbolic import LocationRegistry
 from railroad.environment.types import Pose
 from railroad.navigation.constants import FREE_VAL, OBSTACLE_THRESHOLD, UNOBSERVED_VAL
 from railroad.navigation import OccupancyGridPathingMixin
@@ -24,10 +25,10 @@ from .frontiers import extract_frontiers, filter_reachable_frontiers
 from .types import Frontier, NavigationConfig
 
 
-class UnknownSpaceEnvironment(OccupancyGridPathingMixin, SymbolicEnvironment):
+class UnknownSpaceEnvironment(OccupancyGridPathingMixin, ObjectSearchEnvironment):
     """Environment for multi-robot exploration of an unknown occupancy grid.
 
-    Extends :class:`SymbolicEnvironment` with:
+    Extends :class:`ObjectSearchEnvironment` with:
 
     - Observed/true occupancy grids and laser-based sensing.
     - Frontier extraction and dynamic symbolic synchronisation.
@@ -484,7 +485,7 @@ class UnknownSpaceEnvironment(OccupancyGridPathingMixin, SymbolicEnvironment):
         self._sync_hidden_sites()
 
     # ------------------------------------------------------------------
-    # Skill creation (override SymbolicEnvironment)
+    # Skill creation (override ObjectSearchEnvironment)
     # ------------------------------------------------------------------
 
     def _is_valid_action(self, action: Action) -> bool:

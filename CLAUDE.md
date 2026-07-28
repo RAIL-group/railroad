@@ -40,9 +40,11 @@ Provides abstractions for planning execution:
   - Subclass hooks: `define_operators()`, `set_robot_pose()`, `_should_interrupt_skills()`, `_cap_next_advance_time()`, `_after_skills_advanced()`
 
 - **`symbolic.py`**: `SymbolicEnvironment` and skill implementations
-  - `SymbolicEnvironment`: Concrete environment for symbolic execution
+  - `SymbolicEnvironment`: Concrete, domain-agnostic environment for symbolic execution; probabilistic branches sample from a seedable RNG (`seed=`), no fluent or action name has special meaning
   - `SymbolicSkill`: Standard skill implementation (non-interruptible)
   - `LocationRegistry`: Coordinates robot locations during interruptible moves
+
+- **`object_search.py`**: `ObjectSearchEnvironment(SymbolicEnvironment)` — railroad's object-search domain conventions: ground-truth resolution of search effects (`true_object_locations`), revelation (`searched` → `revealed`/`found`/`at`), robot intermediate `{robot}_loc` locations, and move/place/search action hygiene filters. Use this (not the base) for robot search domains
 
 - **`skill/`**: Skill protocols and navigation skill implementations
   - `protocols.py`: `MotionSkill` protocol, `SupportsMovePathEnvironment` contract
