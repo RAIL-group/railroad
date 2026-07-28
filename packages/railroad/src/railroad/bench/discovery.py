@@ -56,5 +56,11 @@ def discover_benchmarks(include_files: Sequence[str | Path] | None = None):
             ep.load()  # Imports module, triggering @benchmark decorators
         except Exception as e:
             import warnings
-            warnings.warn(f"Failed to load benchmark entry point {ep.name}: {e}")
+            dist = ep.dist.name if ep.dist is not None else "unknown distribution"
+            warnings.warn(
+                f"Failed to load benchmark entry point {ep.name} "
+                f"({ep.value!r}, registered by {dist}): {e}. If that package "
+                f"was moved or deleted, `uv pip uninstall {dist}` clears the "
+                "stale registration."
+            )
     return get_all_benchmarks()
