@@ -99,14 +99,13 @@ def _is_var(term: str) -> bool:
 
 @dataclass
 class CompiledOperator:
-    """A railroad Operator plus grounding-time-only constraints."""
+    """A railroad Operator compiled from one PDDL action.
+
+    Grounding-time constraints (equality, static preconditions) live on the
+    Operator itself and are handled by :func:`railroad.core.ground_operators`.
+    """
 
     operator: Operator
-    # (=)/(not (=)) preconditions, evaluated per binding while grounding.
-    equality_constraints: List[Equals]
-    # Preconditions over static predicates (never in any effect); evaluated
-    # against the initial state per binding while grounding.
-    static_preconditions: List[Literal]
 
 
 @dataclass
@@ -171,13 +170,6 @@ def convert(domain: PDDLDomain, problem: PDDLProblem) -> ConvertedProblem:
     init_fluents = {
         _make_fluent(lit, rename) for lit in problem.init_literals
     }
-    static_predicates = _find_static_predicates(domain, rename)
-    for comp in compiled_operators:
-        comp.static_preconditions = [
-            lit
-            for lit in comp.static_preconditions
-            if lit.predicate in static_predicates
-        ]
 
     initial_fluents = set(init_fluents)
     initial_fluents.add(Fluent("free", agent))
@@ -295,34 +287,6 @@ def _resolve_metric(problem: PDDLProblem) -> Tuple[str, str]:
 def _make_fluent(lit: Literal, rename: Dict[str, str]) -> Fluent:
     name = rename.get(lit.predicate, lit.predicate)
     return Fluent(name, *lit.args, negated=lit.negated)
-
-
-def _find_static_predicates(
-    domain: PDDLDomain, rename: Dict[str, str]
-) -> Set[str]:
-    """Predicates that never appear in any effect (so their truth is fixed)."""
-    dynamic: Set[str] = set()
-
-    def visit(node: EffectNode) -> None:
-        if isinstance(node, Literal):
-            dynamic.add(rename.get(node.predicate, node.predicate))
-        elif isinstance(node, EffectAnd):
-            for c in node.children:
-                visit(c)
-        elif isinstance(node, EffectForall):
-            visit(node.body)
-        elif isinstance(node, Probabilistic):
-            for _, branch in node.branches:
-                visit(branch)
-        elif isinstance(node, When):
-            # Only the effect side writes; the condition merely reads.
-            visit(node.effect)
-        # Increase nodes carry no predicates.
-
-    for action in domain.actions:
-        visit(action.effect)
-    all_preds = {rename.get(p, p) for p in domain.predicates}
-    return all_preds - dynamic
 
 
 # ============================================================================
@@ -693,13 +657,7 @@ def _compile_action(
         preconditions=preconditions,
         effects=effects,
     )
-    # Every precondition literal is a static-check candidate; convert() prunes
-    # this list down to genuinely static predicates afterwards.
-    static_candidates = [
-        Literal(rename.get(l.predicate, l.predicate), l.args, l.negated)
-        for l in pre.literals
-    ]
-    return CompiledOperator(operator, pre.equalities, static_candidates)
+    return CompiledOperator(operator)
 
 
 def _group_to_prob_effects(
@@ -842,109 +800,3 @@ def _compile_goal(
 # ============================================================================
 
 
-def _ground_operator(
-    comp: CompiledOperator,
-    objects_by_type: Dict[str, Set[str]],
-    static_fluents: FrozenSet[Fluent],
-) -> List[Action]:
-    """Enumerate bindings via backtracking with early constraint pruning.
-
-    Unlike ``Operator.instantiate`` this allows the same object to bind
-    multiple parameters (PDDL permits it; domains that need distinctness use
-    ``(not (= ?x ?y))``), and it evaluates equality constraints plus static
-    preconditions as soon as their variables are bound, which keeps the
-    enumeration tractable for large IPC instances.
-    """
-    op = comp.operator
-    params = op.parameters
-    domains = [sorted(objects_by_type.get(typ, set())) for _, typ in params]
-
-    # Constraints as (needed_vars, check_fn(binding) -> bool).
-    constraints: List[Tuple[Set[str], object]] = []
-    for eq in comp.equality_constraints:
-        needed = {t for t in (eq.left, eq.right) if _is_var(t)}
-        constraints.append((needed, eq))
-    for lit in comp.static_preconditions:
-        if lit.negated:
-            continue  # a negative static precondition rarely prunes; skip
-        needed = {a for a in lit.args if _is_var(a)}
-        constraints.append((needed, lit))
-
-    order = _order_parameters(params, [needed for needed, _ in constraints])
-
-    # Assign each constraint to the earliest depth at which all its variables
-    # are bound; variable-free constraints are checked once up front.
-    bound_after: List[Set[str]] = []
-    acc: Set[str] = set()
-    for pos in order:
-        acc.add(params[pos][0])
-        bound_after.append(set(acc))
-    checks_at: List[List[object]] = [[] for _ in order]
-    always: List[object] = []
-    for needed, check in constraints:
-        if not needed:
-            always.append(check)
-            continue
-        for depth, bound in enumerate(bound_after):
-            if needed <= bound:
-                checks_at[depth].append(check)
-                break
-
-    def satisfied(check, binding: Dict[str, str]) -> bool:
-        if isinstance(check, Equals):
-            left = binding.get(check.left, check.left)
-            right = binding.get(check.right, check.right)
-            return (left == right) != check.negated
-        assert isinstance(check, Literal)
-        fluent = Fluent(
-            check.predicate, *[binding.get(a, a) for a in check.args]
-        )
-        return fluent in static_fluents
-
-    if not all(satisfied(c, {}) for c in always):
-        return []
-
-    actions: List[Action] = []
-    binding: Dict[str, str] = {}
-
-    def dfs(depth: int) -> None:
-        if depth == len(order):
-            try:
-                actions.append(op._ground(binding, objects_by_type))
-            except _UndefinedFunctionValue:
-                pass  # duration undefined for this binding -> not a real action
-            return
-        pos = order[depth]
-        var = params[pos][0]
-        for obj in domains[pos]:
-            binding[var] = obj
-            if all(satisfied(c, binding) for c in checks_at[depth]):
-                dfs(depth + 1)
-        del binding[var]
-
-    if all(len(d) > 0 for d in domains):
-        dfs(0)
-    return actions
-
-
-def _order_parameters(
-    params: TypedVars, constraint_vars: List[Set[str]]
-) -> List[int]:
-    """Greedy ordering: bind next the parameter completing the most constraints."""
-    remaining = list(range(len(params)))
-    bound: Set[str] = set()
-    order: List[int] = []
-    while remaining:
-        def score(i: int) -> int:
-            var = params[i][0]
-            return sum(
-                1
-                for needed in constraint_vars
-                if var in needed and needed <= (bound | {var})
-            )
-
-        best = max(remaining, key=score)
-        order.append(best)
-        remaining.remove(best)
-        bound.add(params[best][0])
-    return order
