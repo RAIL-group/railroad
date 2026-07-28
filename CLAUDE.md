@@ -90,6 +90,10 @@ Reusable grid navigation primitives, independent of any specific environment:
 
 ### Key Concepts
 
+#### Static Preconditions and Grounding
+
+Constraints on predicates no operator effect touches (e.g. `F("connected ?from ?to")`) are *static*: `railroad.core.ground_operators` checks them against the initial facts while enumerating bindings (backtracking with early pruning — this is what keeps IPC-scale domains tractable), then compiles them away by default: verified static preconditions are stripped from grounded actions, static conjuncts of conditional-branch conditions are evaluated per grounding, and unreferenced static facts leave the runtime state (available via `Environment.static_facts`). `Eq`/`Neq` in an operator's preconditions are PDDL's `=` — grounding-time constraints, never runtime preconditions. `Environment.get_actions()` grounds through this path with caching; environments that mutate predicates outside operator effects must declare them via `runtime_mutated_predicates()`, and state captured inside operator callables (policies, registries) requires `invalidate_grounding()` after mutation. Design rationale: `docs/design/static-grounding.md`.
+
 #### Creating a New Planning Problem
 1. Define objects by type: `{"robot": {"r1"}, "location": {"kitchen", "bedroom"}, "object": {"Knife"}}`
 2. Define operators — either by subclassing `Environment`/`SymbolicEnvironment` (or `ObjectSearchEnvironment` for robot search domains) and overriding `define_operators()` (preferred), or by passing `operators=` to the constructor (deprecated)

@@ -119,6 +119,8 @@ class ReplayKnownMapSearchEnvironment(
         frontiers, so this flavor consumes the narrowest slice of the three.
         """
         self._object_find_statistics = policy
+        # Grounded actions bake in probabilities read from the policy.
+        self.invalidate_grounding()
 
     def _container_find_prob(self, robot: str, loc: str, obj: str) -> float:
         return self._object_find_statistics.container_probability(robot, loc, obj)

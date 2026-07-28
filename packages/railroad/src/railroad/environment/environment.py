@@ -1,13 +1,12 @@
 """Base Environment class for planning environments."""
 
-import itertools
 import math
 import warnings
 from abc import ABC, abstractmethod
 from typing import Callable, Collection, Dict, List, Optional, Protocol, Set, Tuple, runtime_checkable
 
 from railroad._bindings import Action, Fluent, GroundedEffect, State
-from railroad.core import Operator
+from railroad.core import Operator, dynamic_predicates, ground_operators
 
 
 @runtime_checkable
@@ -75,6 +74,20 @@ class Environment(ABC):
         self._operators = self._resolve_operators(operators, _from_init=True)
         self._time: float = state.time
         self._active_skills: List[ActiveSkill] = []
+
+        # Grounding state (see get_actions): predicates the operators or the
+        # environment mutate, static facts moved out of the runtime fluent
+        # set, and the cached grounding keyed on (objects, static facts).
+        # `free`/`waiting` are always dynamic: the C++ core's concurrency
+        # machinery mutates them outside any operator effect (e.g.
+        # waiting-resolution frees robots at the end of transition()).
+        self._grounding_dynamic: Set[str] = (
+            dynamic_predicates(self._operators)
+            | set(self.runtime_mutated_predicates())
+            | {"free", "waiting"}
+        )
+        self._static_facts: Set[Fluent] = set()
+        self._grounding_cache: Optional[Tuple[object, List[Action]]] = None
 
         # Convert initial upcoming effects to a skill
         if state.upcoming_effects:
@@ -193,17 +206,78 @@ class Environment(ABC):
             skill.advance(self._time, self)
         self._active_skills = [s for s in self._active_skills if not s.is_done]
 
+    def runtime_mutated_predicates(self) -> Set[str]:
+        """Hook: predicates this environment mutates outside operator effects.
+
+        Static inference during grounding treats every predicate no operator
+        effect touches as immutable. An environment that adds or removes such
+        fluents out-of-band (e.g. ObjectSearchEnvironment's revelation) must
+        declare those predicates here so they stay dynamic. Must return a
+        constant set (it is read once at construction).
+        """
+        return set()
+
+    @property
+    def static_facts(self) -> Set[Fluent]:
+        """Static facts compiled out of the runtime state by grounding.
+
+        Grounding verifies and strips the preconditions/conditions that read
+        them, so they no longer ride along in planner states; they remain
+        available here for ground-truth queries and inspection.
+        """
+        return set(self._static_facts)
+
+    def _remove_fluents(self, fluents: Collection[Fluent]) -> None:
+        """Hook: drop fluents from the environment's runtime fluent storage."""
+        del fluents
+
+    def invalidate_grounding(self) -> None:
+        """Force the next get_actions() to reground.
+
+        The grounding cache tracks the object universe and static facts, but
+        cannot see mutable state captured inside operator callables (duration
+        or probability functions). Call this after mutating such state — e.g.
+        swapping a belief/policy that operator probabilities read.
+        """
+        self._grounding_cache = None
+
     def get_actions(self) -> List[Action]:
-        """Instantiate available actions from operators."""
+        """Ground available actions from operators (cached).
+
+        Grounds via :func:`railroad.core.ground_operators` with
+        static-precondition pruning; static facts nothing references at
+        runtime move from the fluent set to :attr:`static_facts`. The
+        grounding is cached on (grounding objects, static facts) and
+        recomputed automatically when either changes (e.g. revelation adding
+        objects, or an interrupted move registering a ``robot_loc``).
+        """
         grounding_objects = self._grounding_objects()
-
-        all_actions: List[Action] = list(
-            itertools.chain.from_iterable(
-                op.instantiate(grounding_objects) for op in self._operators
-            )
+        current_fluents = set(self.fluents)
+        static_snapshot = frozenset(
+            f for f in current_fluents if f.name not in self._grounding_dynamic
+        ) | frozenset(self._static_facts)
+        cache_key = (
+            frozenset(
+                (typ, frozenset(objs)) for typ, objs in grounding_objects.items()
+            ),
+            static_snapshot,
         )
+        if self._grounding_cache is not None and self._grounding_cache[0] == cache_key:
+            return list(self._grounding_cache[1])
 
-        valid_actions = [a for a in all_actions if self._is_valid_action(a)]
+        result = ground_operators(
+            self._operators,
+            grounding_objects,
+            current_fluents | self._static_facts,
+            allow_duplicate_bindings=False,
+            treat_dynamic=self._grounding_dynamic,
+        )
+        newly_eliminable = result.eliminable_fluents - self._static_facts
+        if newly_eliminable:
+            self._static_facts |= newly_eliminable
+            self._remove_fluents(newly_eliminable)
+
+        valid_actions = [a for a in result.actions if self._is_valid_action(a)]
 
         # Action names must be unique: the planner and get_action_by_name both
         # identify actions by name, so two distinct groundings sharing a name
@@ -222,7 +296,8 @@ class Environment(ABC):
                 )
             seen[action.name] = action
 
-        return valid_actions
+        self._grounding_cache = (cache_key, valid_actions)
+        return list(valid_actions)
 
     def _grounding_objects(self) -> Dict[str, Collection[str]]:
         """Hook: the object universe used to ground operators.
@@ -244,8 +319,13 @@ class Environment(ABC):
         return bool(action.name.split())
 
     def is_goal_reached(self, goal_fluents: Collection[Fluent]) -> bool:
-        """Check if all goal fluents are satisfied."""
-        return all(f in self.state.fluents for f in goal_fluents)
+        """Check if all goal fluents are satisfied.
+
+        Evaluated against runtime fluents plus :attr:`static_facts`, so goals
+        over static predicates still read correctly after elimination.
+        """
+        fluents = self.state.fluents | self._static_facts
+        return all(f in fluents for f in goal_fluents)
 
     def _any_robot_free(self) -> bool:
         """Check if any robot is free."""

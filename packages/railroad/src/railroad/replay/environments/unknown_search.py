@@ -214,6 +214,8 @@ class ReplayUnknownSearchEnvironment(
         and the search operators read it live, so the candidate takes effect on
         this already-built arena."""
         self.object_find_statistics = policy
+        # Grounded actions bake in probabilities read from the policy.
+        self.invalidate_grounding()
 
     # -- intercept: resolve search outcomes from the recording --------
 

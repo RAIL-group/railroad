@@ -518,3 +518,65 @@ def test_symbolic_environment_seeded_probabilistic_sampling():
         return result
 
     assert outcomes(make_env(seed=7)) == outcomes(make_env(seed=7))
+
+# =============================================================================
+# Grounding Integration (static preconditions, caching)
+# =============================================================================
+
+
+def test_grounding_cache_regrounds_on_universe_change():
+    """get_actions() reflects objects revealed after construction."""
+    from railroad.environment import ObjectSearchEnvironment
+    from railroad import operators
+
+    pick_op = operators.construct_pick_operator_blocking(pick_time=2.0)
+    env = ObjectSearchEnvironment(
+        state=State(0.0, {F("at r1 kitchen"), F("free r1")}, []),
+        objects_by_type={"robot": {"r1"}, "location": {"kitchen"}, "object": set()},
+        operators=[pick_op],
+        true_object_locations={"kitchen": {"Knife"}},
+    )
+    assert env.get_actions() == []  # no objects known yet
+
+    # Revelation discovers the Knife (mutating objects_by_type out-of-band);
+    # the cached grounding must pick it up on the next call.
+    env.apply_effect(GroundedEffect(0.0, {F("searched kitchen")}))
+    names = {a.name for a in env.get_actions()}
+    assert "pick r1 kitchen Knife" in names
+
+
+def test_environment_static_preconditions_end_to_end():
+    """Connected-domain exemplar: static facts constrain grounding, are
+    compiled out of planner states, and remain available as static_facts."""
+    from railroad.core import get_action_by_name
+
+    move_op = Operator(
+        name="move",
+        parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F("at ?r ?from"), F("free ?r"), F("connected ?from ?to")],
+        effects=[
+            Effect(time=0.0, resulting_fluents={~F("free ?r"), ~F("at ?r ?from")}),
+            Effect(time=2.0, resulting_fluents={F("free ?r"), F("at ?r ?to")}),
+        ],
+    )
+    env = SymbolicEnvironment(
+        state=State(0.0, {
+            F("at r1 kitchen"), F("free r1"),
+            F("connected kitchen hall"), F("connected hall office"),
+        }, []),
+        objects_by_type={"robot": {"r1"},
+                         "location": {"kitchen", "hall", "office"}},
+        operators=[move_op],
+    )
+
+    names = {a.name for a in env.get_actions()}
+    assert names == {"move r1 kitchen hall", "move r1 hall office"}
+
+    # Static facts are compiled out of the runtime state but stay queryable.
+    assert F("connected kitchen hall") not in env.state.fluents
+    assert F("connected kitchen hall") in env.static_facts
+
+    env.act(get_action_by_name(env.get_actions(), "move r1 kitchen hall"))
+    env.act(get_action_by_name(env.get_actions(), "move r1 hall office"))
+    assert F("at r1 office") in env.state.fluents
+    assert env.is_goal_reached([F("at r1 office"), F("connected hall office")])

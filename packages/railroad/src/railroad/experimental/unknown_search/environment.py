@@ -281,6 +281,10 @@ class UnknownSpaceEnvironment(OccupancyGridPathingMixin, ObjectSearchEnvironment
 
     def refresh_frontiers(self) -> None:
         """Re-extract frontiers and update symbolic object sets."""
+        # Frontier centroids/statistics are read by operator callables at
+        # grounding; the cache cannot see them change (frontier ids may stay
+        # identical while centroids drift), so reground unconditionally.
+        self.invalidate_grounding()
         raw_frontiers = extract_frontiers(self._observed_grid)
 
         robot_positions = [
@@ -341,6 +345,12 @@ class UnknownSpaceEnvironment(OccupancyGridPathingMixin, ObjectSearchEnvironment
     # ------------------------------------------------------------------
     # Dynamic target sync
     # ------------------------------------------------------------------
+
+    def runtime_mutated_predicates(self) -> Set[str]:
+        """Laser/frontier updates mutate these outside operator effects."""
+        return super().runtime_mutated_predicates() | {
+            "at", "exploration-complete", "navigable", "just-moved"
+        }
 
     def sync_dynamic_targets(self) -> None:
         """Prune stale target-tracking fluents after frontier/location updates."""

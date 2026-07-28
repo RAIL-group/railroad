@@ -168,6 +168,8 @@ class ReplayPointGoalNavEnvironment(
         and lsp-explore reads it live, so the candidate takes effect on this
         already-built arena without rebuilding operators."""
         self.frontier_statistics = policy
+        # Grounded actions bake in probabilities read from the policy.
+        self.invalidate_grounding()
 
     @property
     def goal(self) -> "Goal | Fluent":
