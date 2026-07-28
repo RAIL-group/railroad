@@ -59,7 +59,7 @@ Two robots concurrently move and search to find a Knife and a Cup in a five-room
 import numpy as np
 from railroad.core import Fluent as F, get_action_by_name, State, Operator, Effect
 import railroad.operators
-from railroad.environment import SymbolicEnvironment
+from railroad.environment import ObjectSearchEnvironment
 from railroad.planner import MCTSPlanner
 from railroad.dashboard import PlannerDashboard
 
@@ -122,7 +122,7 @@ initial_state = State(0.0, {
 
 goal = F("found Knife") & F("found Cup")
 
-env = SymbolicEnvironment(
+env = ObjectSearchEnvironment(
     state=initial_state, objects_by_type=objects_by_type,
     operators=[move, search],
     true_object_locations=true_object_locations,
@@ -298,7 +298,8 @@ packages/railroad/
     navigation/          # Reusable grid navigation (theta* pathing, occupancy grid mixin)
     environment/
       environment.py     # Abstract Environment base class (subclass & override define_operators())
-      symbolic.py        # SymbolicEnvironment for simulation and testing
+      symbolic.py        # SymbolicEnvironment: generic symbolic execution
+      object_search.py   # ObjectSearchEnvironment: search-domain conventions
       skill/             # Skill protocols + navigation skill implementations
       procthor/          # Optional AI2-THOR/ProcTHOR 3D simulator integration
     experimental/        # Frontier-based unknown-space exploration

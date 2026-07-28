@@ -1,9 +1,12 @@
 """Plan/act loop for converted PDDL problems.
 
-Uses ``MCTSPlanner`` for action selection and the C++ ``transition`` function
-for execution, sampling probabilistic outcomes with a seeded RNG. This
-deliberately bypasses ``SymbolicEnvironment``, whose action filters and skill
-machinery assume railroad's robot/location domains.
+Uses ``MCTSPlanner`` or ``GreedyPlanner`` for action selection and the C++
+``transition`` function for execution, sampling probabilistic outcomes with a
+seeded RNG. This bypasses the environment layer because converted problems
+carry a pre-grounded action set (``Environment.get_actions`` grounds via
+``Operator.instantiate``, which cannot reproduce the converter's grounding —
+duplicate bindings, static-precondition pruning) and need none of the skill
+machinery.
 """
 
 import random

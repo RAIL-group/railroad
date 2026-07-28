@@ -54,7 +54,7 @@ def test_symbolic_skill_move_not_interruptible_by_default():
 def test_interruptible_navigation_move_skill_interrupt_behavior():
     """Test that InterruptibleNavigationMoveSkill.interrupt() rewrites fluents correctly."""
     import numpy as np
-    from railroad.environment import InterruptibleNavigationMoveSkill, LocationRegistry, SymbolicEnvironment
+    from railroad.environment import InterruptibleNavigationMoveSkill, LocationRegistry, ObjectSearchEnvironment
     from railroad._bindings import Fluent as F, State
     from railroad.core import Effect, Operator
 
@@ -75,7 +75,7 @@ def test_interruptible_navigation_move_skill_interrupt_behavior():
         "kitchen": np.array([0.0, 0.0]),
         "bedroom": np.array([10.0, 0.0]),
     })
-    env = SymbolicEnvironment(
+    env = ObjectSearchEnvironment(
         state=initial_state,
         objects_by_type={"robot": {"r1"}, "location": {"kitchen", "bedroom"}},
         operators=[move_op],
@@ -161,7 +161,7 @@ def test_location_registry_move_time_fn():
 def test_location_registry_interrupt_registers_coords():
     """Test that interrupt registers intermediate location coordinates."""
     import numpy as np
-    from railroad.environment import InterruptibleNavigationMoveSkill, LocationRegistry, SymbolicEnvironment
+    from railroad.environment import InterruptibleNavigationMoveSkill, LocationRegistry, ObjectSearchEnvironment
     from railroad._bindings import Fluent as F, State
     from railroad.core import Effect, Operator
 
@@ -185,7 +185,7 @@ def test_location_registry_interrupt_registers_coords():
 
     # Create environment with registry
     initial_state = State(0.0, {F("at", "r1", "kitchen"), F("free", "r1")})
-    env = SymbolicEnvironment(
+    env = ObjectSearchEnvironment(
         state=initial_state,
         objects_by_type={"robot": {"r1"}, "location": {"kitchen", "bedroom"}},
         operators=[move_op],
@@ -219,11 +219,11 @@ def test_location_registry_interrupt_registers_coords():
 
 
 def test_skill_overrides_mapping():
-    """Test that SymbolicEnvironment respects skill_overrides."""
+    """Test that the environment respects skill_overrides."""
     from railroad.environment import (
         InterruptibleNavigationMoveSkill,
         LocationRegistry,
-        SymbolicEnvironment,
+        ObjectSearchEnvironment,
         SymbolicSkill,
     )
     from railroad._bindings import Fluent as F, State
@@ -233,7 +233,7 @@ def test_skill_overrides_mapping():
     registry = LocationRegistry({"kitchen": np.array([0, 0]), "bedroom": np.array([10, 0])})
 
     # Create environment with skill override for move actions
-    env = SymbolicEnvironment(
+    env = ObjectSearchEnvironment(
         state=State(0.0, {F("at", "r1", "kitchen"), F("free", "r1")}, []),
         objects_by_type={"robot": {"r1"}, "location": {"kitchen", "bedroom"}},
         operators=[],
