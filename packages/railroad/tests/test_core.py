@@ -521,17 +521,22 @@ def test_transition_same_fluent_add_and_delete_add_wins():
     action = Action(
         {F("at r1 loc"), F("free r1")},
         [
+            # Consume `free r1` at t=0 so transition advances to the t=1.0
+            # effect instead of returning early with a free robot.
+            GroundedEffect(time=0.0, resulting_fluents={~F("free r1")}),
             GroundedEffect(
                 time=1.0,
                 resulting_fluents={F("at r1 loc"), ~F("at r1 loc"), F("free r1")},
-            )
+            ),
         ],
         name="self-loop-move",
     )
     state = State(0.0, {F("at r1 loc"), F("free r1")}, [])
     ((successor, prob),) = transition(state, action)
     assert prob == pytest.approx(1.0)
+    assert successor.time == pytest.approx(1.0)
     assert F("at r1 loc") in successor.fluents
+    assert F("free r1") in successor.fluents
 
 
 def test_forall_effect_expands_per_object():

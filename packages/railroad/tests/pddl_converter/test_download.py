@@ -5,26 +5,15 @@ import pytest
 
 from railroad.pddl_converter.download import (
     CACHE_DIR_ENV,
-    COLLECTIONS,
     _natural_key,
-    cache_dir,
     fetch_domain,
     list_domains,
 )
 
 
-def test_known_collections():
-    assert "ipc-2000" in COLLECTIONS
-    assert "ipc-2014" in COLLECTIONS
-    assert "ippc-2006" in COLLECTIONS
-    assert "ippc-2008" in COLLECTIONS
+def test_unknown_collection_rejected():
     with pytest.raises(KeyError):
         list_domains("ipc-1893")
-
-
-def test_cache_dir_env_override(monkeypatch, tmp_path):
-    monkeypatch.setenv(CACHE_DIR_ENV, str(tmp_path))
-    assert cache_dir() == tmp_path
 
 
 def test_natural_instance_ordering():

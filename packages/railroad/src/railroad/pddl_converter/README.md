@@ -54,7 +54,7 @@ offline once cached.
 | no metric / `minimize (total-time)` | duration 1 per action (PDDL's implicit objective is plan length) |
 | `(:metric maximize (reward))` **with** `(:goal-reward …)` and no reward-bearing effects | reinterpreted as reach-the-goal, minimize expected plan length (IPPC goal-directed convention) |
 | `(probabilistic p₁ e₁ …)` | railroad probabilistic effect branches; probabilities < 1 total get an implicit "nothing happens" remainder branch; nesting and multiple independent `probabilistic` groups per action are supported |
-| `(when c e)` conditional effects | native railroad conditional branches (state-selected analogue of probabilistic branches): the branch fires iff its condition fluents hold when the action's completion effect fires, evaluated **before** the effect's own fluents apply — so conditions see the pre-action state, matching PDDL. `forall`+`when` expands per object; `when` inside probabilistic branches is supported (its condition then sees the state at branch resolution); `(= …)` conditions compile to seeded static `pddl-eq o o` fluents |
+| `(when c e)` conditional effects | native railroad conditional branches (state-selected analogue of probabilistic branches): the branch fires iff its condition fluents hold when the action's completion effect fires, evaluated **before** the effect's own fluents apply — so conditions see the pre-action state, matching PDDL. `forall`+`when` expands per object; `when` inside probabilistic branches is supported (its condition then sees the state at branch resolution); `(= …)` conditions compile to seeded static `pddl-eq o o` fluents. Triggered sub-effects apply **after** the parent effect's own fluents — see the branching-effect ordering note under "Grounding notes" |
 | objective overall | railroad's MCTS maximizes `−(expected completion time + Σ extra_cost)`, so converted problems minimize expected cost/time to goal |
 | `forall` (preconditions, unconditional effects, goals) | expanded over the finite object universe at conversion time |
 | `exists` (preconditions) | the quantified variable is lifted into an extra operator parameter (grounding enumerates witnesses) |
@@ -75,6 +75,16 @@ Grounding notes:
   Same-fluent add/delete pairs created by such bindings (e.g. `fly apt apt`)
   behave the PDDL way: the railroad core applies deletes before adds, so the
   add wins and the fluent survives.
+
+  This holds **within a single effect**. Branching sub-effects (`when` and
+  `probabilistic`) are separate effects applied **after** their parent, even
+  at the same timestamp, so a triggered branch that deletes a fluent the
+  parent adds leaves it absent. PDDL leaves add/delete conflicts across an
+  `and`-effect's components undefined in practice (planners disagree);
+  railroad resolves them by sequencing branches after their predecessors,
+  which keeps effect application local to one effect at a time. Domains that
+  rely on whole-effect simultaneity (an unconditional add "winning" over a
+  conditional delete of the same fluent) will diverge here.
 - Groundings whose cost function value is missing from `:init` are treated
   as undefined and skipped.
 

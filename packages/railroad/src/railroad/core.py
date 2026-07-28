@@ -119,6 +119,13 @@ class Effect:
         evaluated before this effect's own ``resulting_fluents`` apply.
         Negated condition fluents use negation-as-absence.
 
+        Branching sub-effects (conditional and probabilistic) are applied
+        *after* this effect's own ``resulting_fluents``, even when scheduled
+        at the same time. Deletes-before-adds therefore holds within a single
+        effect's ``resulting_fluents`` but not across an effect and its
+        branches: a triggered sub-effect that deletes a fluent this effect
+        adds leaves it absent.
+
         ``forall_effects`` are universally quantified conditional branches
         (PDDL ``forall``+``when``); see :class:`ForallEffect`. They expand
         into ``cond_effects``-style branches at grounding time, so operators
