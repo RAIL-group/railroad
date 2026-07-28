@@ -29,12 +29,14 @@ from railroad.core import (
     Action,
     AndGoal,
     Effect,
+    Eq,
     Fluent,
     Goal,
     LiteralGoal,
     Operator,
     OrGoal,
     State,
+    ground_operators,
 )
 
 from .errors import PDDLParseError, UnsupportedPDDLError
@@ -127,11 +129,14 @@ class ConvertedProblem:
     def ground_actions(self) -> List[Action]:
         """Ground all operators (cached). May be large for big instances."""
         if self._actions is None:
-            self._actions = []
-            for comp in self.compiled_operators:
-                self._actions.extend(
-                    _ground_operator(comp, self.objects_by_type, self._static_fluents)
-                )
+            result = ground_operators(
+                self.operators,
+                self.objects_by_type,
+                self._static_fluents,
+                allow_duplicate_bindings=True,
+                skip_on=(_UndefinedFunctionValue,),
+            )
+            self._actions = result.actions
         return self._actions
 
 
@@ -652,9 +657,13 @@ def _compile_action(
         eff.cost_terms, problem.init_function_values, duration_mode, context
     )
 
-    preconditions = [Fluent("free", agent)] + [
-        _make_fluent(lit, rename) for lit in pre.literals
-    ]
+    preconditions: List[Union[Fluent, Eq]] = [Fluent("free", agent)]
+    preconditions.extend(_make_fluent(lit, rename) for lit in pre.literals)
+    # PDDL (=)/(not (=)) become core grounding constraints on the operator,
+    # evaluated by ground_operators while enumerating bindings.
+    preconditions.extend(
+        Eq(eq.left, eq.right, negated=eq.negated) for eq in pre.equalities
+    )
 
     completion_fluents = {_make_fluent(lit, rename) for lit in eff.literals}
     completion_fluents.add(Fluent("free", agent))
