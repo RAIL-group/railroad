@@ -81,7 +81,8 @@ def get_sentence_embedding(sentence: str) -> np.ndarray:
     global _SENTENCE_MODEL
     if _SENTENCE_MODEL is None:
         _SENTENCE_MODEL = SentenceTransformer(model_dir.as_posix())
-    sentence_embedding = _SENTENCE_MODEL.encode([sentence])[0]
+    # encode() is typed as returning a Tensor though it yields numpy by default.
+    sentence_embedding = np.asarray(_SENTENCE_MODEL.encode([sentence])[0])
     file_path = _get_embedding_cache_dir() / f"{sentence}.npy"
     np.save(file_path, sentence_embedding)
     return sentence_embedding

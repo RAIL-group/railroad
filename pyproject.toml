@@ -15,8 +15,12 @@ dependencies = [
     # Testing and formatting (monorepo-level)
     "pytest-html",
     "pytest-xdist>=3.8.0",
-    "ruff",
-    "ty>=0.0.12",
+    # ruff has no [tool.ruff] config here, so it runs on defaults; 0.16 widened the
+    # default rule set enough to surface ~1400 new findings. Pin until configured.
+    "ruff>=0.15.10,<0.16",
+    # uv.lock is gitignored, so CI re-resolves every run; without a ceiling a new
+    # ty release can break main on an unrelated commit. Bump deliberately.
+    "ty>=0.0.64,<0.0.65",
 ]
 
 [tool.uv.sources]
