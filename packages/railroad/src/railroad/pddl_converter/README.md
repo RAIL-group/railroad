@@ -43,7 +43,9 @@ rate-limited to 60/hour; set `GITHUB_TOKEN` to raise the limit.
 
 **Caching**: files land in `$RAILROAD_PDDL_CACHE_DIR` (default
 `~/.cache/railroad/pddl`) and are never re-downloaded; everything works
-offline once cached.
+offline once cached. Directory listings are cached too, so upstream
+additions or renames stay invisible until you run
+`railroad pddl clear-cache`.
 
 ## Mapping semantics
 
@@ -61,7 +63,7 @@ offline once cached.
 | goals: `and`/`or`/`not`/`forall`/`exists` over literals | railroad `AndGoal`/`OrGoal`/negated-literal goal trees |
 | type hierarchy | flattened: `objects_by_type[t]` contains objects of `t` and all subtypes |
 | `(= ?x ?y)` / `(not (= ?x ?y))` | evaluated while grounding (bindings filtered) |
-| predicates named `free`, `waiting`, or `not-*` | transparently renamed with a `pddl-` prefix (reserved by the railroad core) |
+| predicates named `free`, `waiting`, or `not-*` | transparently renamed with a `pddl-` prefix. `free` and `waiting` are keywords to the railroad core: `free X` means "agent X is available" and drives the concurrency machinery (a free agent makes the state a decision point; the synthetic serializing agent relies on exactly this). A PDDL domain's `free` is an ordinary predicate with unrelated meaning — gripper's `(free ?gripper)` says a hand is empty — and left unrenamed it would make the core treat every gripper hand as a schedulable agent. `not-*` is reserved as the bookkeeping prefix for compiled negative preconditions. A domain that already contains both a reserved name and its `pddl-`-prefixed form is rejected (`predicate-rename-collision`) rather than silently merged |
 
 Grounding notes:
 

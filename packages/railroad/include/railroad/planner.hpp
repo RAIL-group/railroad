@@ -222,6 +222,16 @@ inline std::size_t sample_index(const std::vector<double> &weights,
   return dist(rng);
 }
 
+// The RNG behind MCTS outcome sampling. Thread-local, seeded from
+// std::random_device by default; seed via seed_mcts_rng() for reproducible
+// planning (the seed applies only to the calling thread).
+inline std::mt19937 &mcts_rng() {
+  static thread_local std::mt19937 rng{std::random_device{}()};
+  return rng;
+}
+
+inline void seed_mcts_rng(unsigned int seed) { mcts_rng().seed(seed); }
+
 inline void backpropagate(MCTSDecisionNode *leaf, double reward) {
   MCTSDecisionNode *d = leaf;
   MCTSChanceNode *c = nullptr;
@@ -325,7 +335,7 @@ inline std::string mcts(const State &root_state,
                         double lambda_max = 0.0,
                         double lambda_ff  = 0.5) {
   // RNG
-  static thread_local std::mt19937 rng{std::random_device{}()};
+  std::mt19937 &rng = mcts_rng();
 
   auto all_actions = get_usable_actions(root_state, all_actions_base);
 

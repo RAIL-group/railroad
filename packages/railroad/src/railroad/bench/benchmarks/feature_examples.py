@@ -32,7 +32,7 @@ from railroad.core import (
     get_action_by_name,
     transition,
 )
-from railroad.planner import MCTSPlanner
+from railroad.planner import MCTSPlanner, seed_planner_rng
 
 
 def _plan_and_execute(actions, initial_state, goal, *, seed=0, max_steps=50,
@@ -41,6 +41,9 @@ def _plan_and_execute(actions, initial_state, goal, *, seed=0, max_steps=50,
 
     Returns (final_state, executed_action_names, total_extra_cost).
     """
+    # The success criteria below assert exact optimal plans, so both the MCTS
+    # search and the outcome sampling must be deterministic.
+    seed_planner_rng(seed)
     planner = MCTSPlanner(actions)
     rng = random.Random(seed)
     state = initial_state

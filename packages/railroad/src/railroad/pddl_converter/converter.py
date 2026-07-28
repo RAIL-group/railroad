@@ -228,11 +228,29 @@ def _build_type_objects(
 
 
 def _build_predicate_renaming(domain: PDDLDomain) -> Dict[str, str]:
-    """Rename predicates that collide with railroad-reserved fluent names."""
+    """Rename predicates that collide with railroad-reserved fluent names.
+
+    Railroad gives some fluent names built-in meaning: ``free X`` marks agent
+    X as available and drives the core's concurrency machinery (a state with
+    a free agent is a decision point), ``waiting`` participates in the same
+    machinery, and ``not-*`` is the bookkeeping prefix for compiled negative
+    preconditions. A PDDL domain using these as ordinary predicates (e.g.
+    gripper's ``(free ?gripper)``) means something entirely different, so
+    such predicates are renamed with a ``pddl-`` prefix to keep them inert.
+    """
     rename = {}
     for pred in domain.predicates:
         if pred in _RESERVED_PREDICATES or pred.startswith("not-"):
             rename[pred] = _RENAME_PREFIX + pred
+    renamed = {rename.get(p, p) for p in domain.predicates}
+    if len(renamed) != len(domain.predicates):
+        collisions = sorted(
+            new for old, new in rename.items() if new in domain.predicates
+        )
+        raise UnsupportedPDDLError(
+            "predicate-rename-collision",
+            f"renaming reserved predicates collides with existing: {collisions}",
+        )
     return rename
 
 
