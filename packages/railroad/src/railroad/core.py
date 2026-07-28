@@ -371,17 +371,57 @@ class GroundingStats:
 
 
 class GroundingResult:
-    __slots__ = ("actions", "static_predicates", "stats")
+    __slots__ = (
+        "actions",
+        "static_predicates",
+        "eliminable_fluents",
+        "eliminated_predicates",
+        "stats",
+    )
 
     def __init__(
         self,
         actions: List[Action],
         static_predicates: Collection[str],
+        eliminable_fluents: Set[Fluent],
         stats: GroundingStats,
     ) -> None:
         self.actions = actions
         self.static_predicates = frozenset(static_predicates)
+        self.eliminable_fluents = eliminable_fluents
+        self.eliminated_predicates = frozenset(f.name for f in eliminable_fluents)
         self.stats = stats
+
+
+def _collect_condition_predicates(effect: Effect, out: Set[str]) -> None:
+    """Predicates read by conditional-branch conditions (ungrounded form)."""
+    for conditions, sub_effects in effect.cond_effects:
+        for fluent in conditions:
+            out.add(fluent.name)
+        for sub in sub_effects:
+            _collect_condition_predicates(sub, out)
+    for forall in effect.forall_effects:
+        for fluent in forall.conditions:
+            out.add(fluent.name)
+        for sub in forall.effects:
+            _collect_condition_predicates(sub, out)
+    for _, sub_effects in effect.prob_effects:
+        for sub in sub_effects:
+            _collect_condition_predicates(sub, out)
+
+
+def _collect_grounded_condition_predicates(
+    effect: GroundedEffect, out: Set[str]
+) -> None:
+    """Predicates read by conditional-branch conditions (grounded form)."""
+    for branch in effect.cond_effects:
+        for fluent in branch.conditions:
+            out.add(fluent.name)
+        for sub in branch.effects:
+            _collect_grounded_condition_predicates(sub, out)
+    for branch in effect.prob_effects:
+        for sub in branch.effects:
+            _collect_grounded_condition_predicates(sub, out)
 
 
 def ground_operators(
@@ -393,15 +433,36 @@ def ground_operators(
     skip_on: Tuple[type[BaseException], ...] = (),
     assert_static: Optional[Collection[str]] = None,
     treat_dynamic: Optional[Collection[str]] = None,
+    runtime_referenced: Optional[Collection[str]] = None,
+    simplify_conditions: bool = True,
+    check_negated_static: bool = True,
+    eliminate_static: bool = True,
 ) -> GroundingResult:
     """Ground operators via backtracking with static-precondition pruning.
 
     A predicate is *static* if no effect of any operator in ``operators``
-    touches it (see :func:`dynamic_predicates`); positive preconditions on
-    static predicates, and Eq/Neq constraints, are evaluated against
+    touches it (see :func:`dynamic_predicates`); preconditions on static
+    predicates, and Eq/Neq constraints, are evaluated against
     ``initial_fluents`` as soon as their variables are bound, pruning the
-    enumeration early. Negated static preconditions are left as runtime
-    preconditions (they rarely prune).
+    enumeration early.
+
+    By default (design doc §4.4) grounding also compiles static material
+    away, which never changes plans or reachability — only what states and
+    actions carry at runtime:
+
+    - ``simplify_conditions``: static conjuncts of conditional-branch
+      (PDDL ``when``) conditions are evaluated per grounding — a false
+      conjunct drops the branch, true conjuncts are removed.
+    - ``check_negated_static``: negated static preconditions prune bindings
+      too (a never-applicable action is never created).
+    - ``eliminate_static``: verified static preconditions are stripped from
+      grounded actions, and ``eliminable_fluents`` reports the static facts
+      nothing references at runtime (callers may drop them from the state).
+      Predicates read outside the operators — goals, custom code — must be
+      listed in ``runtime_referenced`` to keep their facts.
+
+    Pass ``False`` to inspect the un-rewritten grounding (debugging, or
+    structural tests per design doc §7.1).
 
     Args:
         allow_duplicate_bindings: if True, the same object may bind several
@@ -416,6 +477,9 @@ def ground_operators(
             effect touches them — required when the execution environment
             mutates them out-of-band (e.g. ObjectSearchEnvironment's
             revelation adds ``revealed``/``found``/``at`` fluents).
+        runtime_referenced: static predicates read at runtime outside the
+            operators (goal literals, custom readers); their facts are never
+            reported eliminable.
 
     Actions with non-finite effect times are dropped (an ``inf`` duration
     marks a statically impossible action, e.g. a move between unknown
@@ -431,15 +495,17 @@ def ground_operators(
                 f"assert_static predicates are touched by effects: {violations}"
             )
 
-    precondition_predicates = {
-        f.name for op in operators for f in op.preconditions
-    }
-    static_predicates = precondition_predicates - dynamic
+    observed: Set[str] = {f.name for op in operators for f in op.preconditions}
+    for op in operators:
+        for effect in op.effects:
+            _collect_condition_predicates(effect, observed)
+    observed |= {f.name for f in initial_fluents}
+    static_predicates = observed - dynamic
 
     # Fact index for O(1) static checks: predicate -> set of arg tuples.
     facts: Dict[str, Set[Tuple[str, ...]]] = {}
     for fluent in initial_fluents:
-        if fluent.name in static_predicates and not fluent.negated:
+        if fluent.name not in dynamic and not fluent.negated:
             facts.setdefault(fluent.name, set()).add(tuple(fluent.args))
 
     stats = GroundingStats()
@@ -450,9 +516,10 @@ def ground_operators(
                 op,
                 objects_by_type,
                 facts,
-                static_predicates,
+                dynamic,
                 allow_duplicate_bindings,
                 skip_on,
+                check_negated_static,
                 stats,
             )
         )
@@ -462,17 +529,134 @@ def ground_operators(
         for a in actions
         if all(math.isfinite(eff.time) for eff in a.effects)
     ]
+
+    if simplify_conditions or eliminate_static:
+        actions = [
+            _compile_static_away(
+                a, facts, dynamic, simplify_conditions,
+                check_negated_static, eliminate_static,
+            )
+            for a in actions
+        ]
+
+    eliminable: Set[Fluent] = set()
+    if eliminate_static:
+        referenced: Set[str] = set(runtime_referenced or ())
+        for a in actions:
+            for f in a.preconditions:
+                referenced.add(f.name)
+            for eff in a.effects:
+                _collect_grounded_condition_predicates(eff, referenced)
+        eliminable = {
+            f
+            for f in initial_fluents
+            if f.name not in dynamic
+            and f.name not in referenced
+            and not f.negated
+        }
+
     stats.actions_kept = len(actions)
-    return GroundingResult(actions, static_predicates, stats)
+    return GroundingResult(actions, static_predicates, eliminable, stats)
+
+
+def _simplify_grounded_effect(
+    effect: GroundedEffect,
+    facts: Dict[str, Set[Tuple[str, ...]]],
+    dynamic: Set[str],
+) -> Tuple[GroundedEffect, bool]:
+    """Evaluate static conjuncts of conditional-branch conditions.
+
+    Returns (effect, changed); the effect is rebuilt only when something
+    changed, so unmodified effects keep their identity.
+    """
+    changed = False
+    new_cond: List[Tuple[Set[Fluent], List[GroundedEffect]]] = []
+    for branch in effect.cond_effects:
+        sub_effects: List[GroundedEffect] = []
+        for sub in branch.effects:
+            new_sub, sub_changed = _simplify_grounded_effect(sub, facts, dynamic)
+            sub_effects.append(new_sub)
+            changed |= sub_changed
+        static_conds = [c for c in branch.conditions if c.name not in dynamic]
+        dynamic_conds = {c for c in branch.conditions if c.name in dynamic}
+        if static_conds:
+            changed = True
+            holds = all(
+                (tuple(c.args) in facts.get(c.name, ())) != c.negated
+                for c in static_conds
+            )
+            if not holds:
+                continue  # branch can never fire for this grounding
+        new_cond.append((dynamic_conds, sub_effects))
+
+    new_prob: List[Tuple[float, List[GroundedEffect]]] = []
+    for branch in effect.prob_effects:
+        sub_effects = []
+        for sub in branch.effects:
+            new_sub, sub_changed = _simplify_grounded_effect(sub, facts, dynamic)
+            sub_effects.append(new_sub)
+            changed |= sub_changed
+        new_prob.append((branch.prob, sub_effects))
+
+    if not changed:
+        return effect, False
+    return (
+        GroundedEffect(
+            effect.time,
+            set(effect.resulting_fluents),
+            prob_effects=new_prob,
+            cond_effects=new_cond,
+        ),
+        True,
+    )
+
+
+def _compile_static_away(
+    action: Action,
+    facts: Dict[str, Set[Tuple[str, ...]]],
+    dynamic: Set[str],
+    simplify_conditions: bool,
+    check_negated_static: bool,
+    eliminate_static: bool,
+) -> Action:
+    """Strip grounding-verified static material from one grounded action."""
+    changed = False
+
+    preconditions = set(action.preconditions)
+    if eliminate_static:
+        kept = {
+            f
+            for f in preconditions
+            if f.name in dynamic or (f.negated and not check_negated_static)
+        }
+        if kept != preconditions:
+            preconditions = kept
+            changed = True
+
+    effects = list(action.effects)
+    if simplify_conditions:
+        new_effects = []
+        for eff in effects:
+            new_eff, eff_changed = _simplify_grounded_effect(eff, facts, dynamic)
+            new_effects.append(new_eff)
+            changed |= eff_changed
+        effects = new_effects
+
+    if not changed:
+        return action
+    return Action(
+        preconditions, effects, name=action.name, extra_cost=action.extra_cost
+    )
 
 
 def _ground_one_operator(
     op: Operator,
     objects_by_type: Mapping[str, Collection[str]],
     facts: Dict[str, Set[Tuple[str, ...]]],
-    static_predicates: Set[str],
+    dynamic: Set[str],
     allow_duplicate_bindings: bool,
     skip_on: Tuple[type[BaseException], ...],
+    check_negated_static: bool,
     stats: GroundingStats,
 ) -> List[Action]:
     """Backtracking enumeration for one operator (see ground_operators)."""
@@ -485,8 +669,11 @@ def _ground_one_operator(
     for eq in op.grounding_constraints:
         checks.append(({t for t in (eq.left, eq.right) if _is_var(t)}, eq))
     for fluent in op.preconditions:
-        if fluent.name in static_predicates and not fluent.negated:
-            checks.append(({a for a in fluent.args if _is_var(a)}, fluent))
+        if fluent.name in dynamic:
+            continue
+        if fluent.negated and not check_negated_static:
+            continue
+        checks.append(({a for a in fluent.args if _is_var(a)}, fluent))
 
     order = _order_parameters(params, [needed for needed, _ in checks])
 
@@ -514,7 +701,7 @@ def _ground_one_operator(
             right = binding.get(check.right, check.right)
             return (left == right) != check.negated
         grounded = tuple(binding.get(a, a) for a in check.args)
-        return grounded in facts.get(check.name, ())
+        return (grounded in facts.get(check.name, ())) != check.negated
 
     if not all(satisfied(c, {}) for c in always):
         return []

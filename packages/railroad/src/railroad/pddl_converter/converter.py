@@ -36,6 +36,7 @@ from railroad.core import (
     Operator,
     OrGoal,
     State,
+    dynamic_predicates,
     ground_operators,
 )
 
@@ -71,9 +72,10 @@ PROBABILITY_TOLERANCE = 1e-6
 # predicates that collide are transparently renamed with this prefix.
 _RENAME_PREFIX = "pddl-"
 
-# Equality in `when` conditions compiles to this static predicate; the
-# initial state is seeded with (pddl-eq o o) for every object, so condition
-# evaluation by fluent lookup answers (= a b) exactly.
+# Equality in `when` conditions compiles to this static predicate; identity
+# facts (pddl-eq o o) are added to the grounding fact set only, so
+# grounding-time condition simplification evaluates (= a b) exactly and no
+# pddl-eq fluent ever reaches the runtime state.
 EQ_PREDICATE = "pddl-eq"
 
 _RESERVED_PREDICATES = {"free", "waiting", "not", EQ_PREDICATE}
@@ -119,6 +121,7 @@ class ConvertedProblem:
     goal: Goal
     compiled_operators: List[CompiledOperator]
     _static_fluents: FrozenSet[Fluent] = field(default_factory=frozenset)
+    _goal_predicates: FrozenSet[str] = field(default_factory=frozenset)
     _actions: Optional[List[Action]] = None
 
     @property
@@ -134,6 +137,7 @@ class ConvertedProblem:
                 self._static_fluents,
                 allow_duplicate_bindings=True,
                 skip_on=(_UndefinedFunctionValue,),
+                runtime_referenced=self._goal_predicates,
             )
             self._actions = result.actions
         return self._actions
@@ -170,16 +174,28 @@ def convert(domain: PDDLDomain, problem: PDDLProblem) -> ConvertedProblem:
     init_fluents = {
         _make_fluent(lit, rename) for lit in problem.init_literals
     }
+    goal = _compile_goal(problem.goal, type_objects, rename)
+    goal_predicates = _goal_predicates(problem.goal, rename)
 
-    initial_fluents = set(init_fluents)
-    initial_fluents.add(Fluent("free", agent))
+    # Facts consulted only while grounding: every init fact, plus identity
+    # facts answering (= a b) conditions inside `when` branches (evaluated
+    # away by grounding-time condition simplification).
+    grounding_fluents = set(init_fluents)
     if any(
         _uses_eq_conditions(comp.operator.effects) for comp in compiled_operators
     ):
-        initial_fluents.update(
+        grounding_fluents.update(
             Fluent(EQ_PREDICATE, obj, obj) for obj in object_types
         )
-    goal = _compile_goal(problem.goal, type_objects, rename)
+
+    # Static facts are compile-time material: grounding verifies and strips
+    # the preconditions/conditions that read them, so only goal-referenced
+    # static facts stay in the runtime state.
+    dynamic = dynamic_predicates([comp.operator for comp in compiled_operators])
+    initial_fluents = {
+        f for f in init_fluents if f.name in dynamic or f.name in goal_predicates
+    }
+    initial_fluents.add(Fluent("free", agent))
 
     return ConvertedProblem(
         domain_name=domain.name,
@@ -190,7 +206,8 @@ def convert(domain: PDDLDomain, problem: PDDLProblem) -> ConvertedProblem:
         initial_state=State(0.0, initial_fluents, []),
         goal=goal,
         compiled_operators=compiled_operators,
-        _static_fluents=frozenset(init_fluents),
+        _static_fluents=frozenset(grounding_fluents),
+        _goal_predicates=frozenset(goal_predicates),
     )
 
 
@@ -761,6 +778,27 @@ def _check_variables_bound(
 # ============================================================================
 #  Goal compilation
 # ============================================================================
+
+
+def _goal_predicates(
+    node: Optional[ConditionNode], rename: Dict[str, str]
+) -> Set[str]:
+    """Predicates the goal reads at runtime (keeps their static facts)."""
+    out: Set[str] = set()
+
+    def visit(n: ConditionNode) -> None:
+        if isinstance(n, Literal):
+            out.add(rename.get(n.predicate, n.predicate))
+        elif isinstance(n, (And, Or)):
+            for c in n.children:
+                visit(c)
+        elif isinstance(n, (Forall, Exists)):
+            visit(n.body)
+        # Equals resolves to True/False at compile time; nothing to keep.
+
+    if node is not None:
+        visit(node)
+    return out
 
 
 def _compile_goal(
