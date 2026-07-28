@@ -1,6 +1,6 @@
 """ProcTHOR scene data provider."""
 
-from typing import Callable, Dict, List, Set, Tuple
+from typing import Callable, Dict, Set, Tuple
 
 import numpy as np
 
