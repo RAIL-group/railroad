@@ -1,13 +1,30 @@
 # Design: First-Class Static Preconditions and a Shared Grounder
 
 **Status:** implemented (phases 1a/1b/2; phases 3–4 remain per-setting
-follow-ups). Notable deltas from this document as written: the
-`goal=` parameter became `runtime_referenced=` (a predicate set — Goal
-objects are not introspectable from Python); `free`/`waiting` are always
-treated dynamic by `Environment` (the C++ core mutates them outside operator
-effects); and `invalidate_grounding()` was reinstated for the one case
-compare-on-call keys cannot see — mutable state captured inside operator
-callables (e.g. replay policy swaps).
+follow-ups). Notable deltas from this document as written:
+
+- The `goal=` parameter became `runtime_referenced=`, a predicate set. (The
+  original rationale — "Goal objects are not introspectable from Python" — was
+  wrong; `Goal.get_all_literals()` and `extract_negative_goal_fluents` both
+  walk goal trees. The predicate set is simply the smaller interface.)
+- `free`/`waiting` are always treated dynamic by `Environment` (the C++ core
+  mutates them outside operator effects).
+- `invalidate_grounding()` was reinstated for the one case compare-on-call
+  keys cannot see: mutable state captured inside operator callables (e.g.
+  replay policy swaps).
+- **§4.4's state-level elimination was withdrawn on the `Environment` path.**
+  Grounding still strips verified static preconditions from grounded actions,
+  but it no longer removes facts from the environment's fluent set.
+  `eliminable_fluents` answers "what do *these operators* reference", which is
+  not the same question as "what does this environment reference": goals,
+  branch conditions on effects a state is carrying, and subclass code all read
+  fluents that grounding cannot see. A regression test pins the case that
+  caught this — a `when` condition on a state-carried effect silently stopped
+  firing. `Environment.static_facts` survives as a read-only view.
+  Dropping search-irrelevant fluents moved to the planner, where the problem
+  *is* closed (§9). The converter path keeps its filtering: it owns the whole
+  problem and passes `runtime_referenced=` for the goal.
+
 **Scope:** `railroad.core` (grounding), `railroad.environment` (integration),
 `railroad.pddl_converter` (adoption)
 
@@ -470,3 +487,57 @@ Also per review: the duplicate-bindings mode is a plain boolean
 `invalidate_grounding()` API is dropped in favor of compare-on-call cache
 keys, which automatically handle revelation's `objects_by_type` mutation —
 a case v1's explicit-invalidation design would have missed.
+
+---
+
+## 9. Relevance projection (supersedes §4.4's state-level elimination)
+
+The elimination §4.4 specified — dropping static facts nothing references from
+the runtime state — is correct in principle and was implemented on both
+adopters. It is sound on the converter path and unsound on the environment
+path, for a reason worth recording.
+
+**The question grounding can answer** is "which predicates do *these operators*
+read?" — precondition literals and conditional-branch conditions, both visible
+in the operator set. **The question elimination needs answered** is "which
+predicates does *anything* read?" On the converter path these coincide: the
+converter builds the initial state (with no pre-existing upcoming effects),
+knows the goal, and is the only reader. On the environment path they diverge:
+
+- goal literals (§4.4 anticipated this; `runtime_referenced=` covers it only
+  if the caller supplies them, and `Environment` has no goal),
+- conditional-branch conditions on effects carried in a `State` or queued by a
+  skill — grounding never sees these, and this is what broke in practice,
+- subclass code reading `env.fluents` directly,
+- foreign `Action`s built outside `get_actions()` (§4.4's own interop caveat).
+
+The planner has the closed world the environment lacks: at call time it holds
+every action, the goal, and the state including its queued effects. So the
+projection moved there, and got stronger in the process:
+
+```python
+relevant = relevant_predicates(actions, goal, state.upcoming_effects)
+```
+
+A fluent is *read* only through an action precondition, a branch condition
+(in an action or a queued effect), the goal, or the core's name-keyed
+machinery — `free`/`waiting` drive the concurrency logic in `transition()`,
+and the FF heuristic's `at_implies_found` rule keys on `at`/`found`. Fluents
+of every other predicate are written and never consulted, so two states
+differing only in those are bisimilar: projecting them away preserves the
+policy and merges more search nodes.
+
+Two steps are required, not one. Projecting the root state alone leaks the
+benefit back, because effects re-add the irrelevant fluents at each rollout
+step; `project_action` therefore strips irrelevant adds from action effects
+(recursively through probabilistic and conditional branches) once per relevance
+set. Branch *conditions* are left alone — their predicates are relevant by
+construction.
+
+This subsumes static-fact elimination and extends it: it also removes
+**dynamic write-only** predicates, which no staticness analysis can touch. On
+a ring-connected search domain (40 locations, 280 actions, 242 fluents) MCTS
+runs ~5.8× faster with projection on, choosing the same action.
+
+`MCTSPlanner(project_irrelevant=False)` / `GreedyPlanner(project_irrelevant=False)`
+search the full fluent set for debugging.

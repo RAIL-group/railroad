@@ -546,8 +546,8 @@ def test_grounding_cache_regrounds_on_universe_change():
 
 
 def test_environment_static_preconditions_end_to_end():
-    """Connected-domain exemplar: static facts constrain grounding, are
-    compiled out of planner states, and remain available as static_facts."""
+    """Connected-domain exemplar: static facts constrain grounding and are
+    stripped from grounded actions, while staying in the environment state."""
     from railroad.core import get_action_by_name
 
     move_op = Operator(
@@ -569,14 +569,100 @@ def test_environment_static_preconditions_end_to_end():
         operators=[move_op],
     )
 
-    names = {a.name for a in env.get_actions()}
+    before = set(env.state.fluents)
+    actions = env.get_actions()
+    names = {a.name for a in actions}
     assert names == {"move r1 kitchen hall", "move r1 hall office"}
 
-    # Static facts are compiled out of the runtime state but stay queryable.
-    assert F("connected kitchen hall") not in env.state.fluents
+    # Verified static preconditions are gone from the grounded actions...
+    move = get_action_by_name(actions, "move r1 kitchen hall")
+    assert not any(f.name == "connected" for f in move.preconditions)
+    # ...but grounding never mutates the environment's state. Dropping
+    # search-irrelevant fluents belongs to the planner, which (unlike the
+    # environment) can see the goal and the state's queued effects.
+    assert set(env.state.fluents) == before
+    assert F("connected kitchen hall") in env.state.fluents
     assert F("connected kitchen hall") in env.static_facts
 
     env.act(get_action_by_name(env.get_actions(), "move r1 kitchen hall"))
     env.act(get_action_by_name(env.get_actions(), "move r1 hall office"))
     assert F("at r1 office") in env.state.fluents
     assert env.is_goal_reached([F("at r1 office"), F("connected hall office")])
+
+
+def test_initial_upcoming_effects_keep_their_branches():
+    """State-carried effects survive conversion into the bootstrap skill.
+
+    Probabilistic and conditional branches are rebuilt alongside the effect's
+    own fluents; only the top-level time is rebased onto the start time.
+    """
+    from railroad.core import get_action_by_name
+
+    effect = GroundedEffect(
+        time=2.0,
+        resulting_fluents={F("started")},
+        prob_effects=[(1.0, [GroundedEffect(0.0, {F("finished")})])],
+        cond_effects=[({F("armed")}, [GroundedEffect(0.0, {F("fired")})])],
+    )
+    # Occupies the robot until t=3, so act() runs past the t=2 initial effect.
+    wait = Operator(
+        name="wait", parameters=[("?r", "robot")], preconditions=[F("free ?r")],
+        effects=[
+            Effect(time=0.0, resulting_fluents={~F("free ?r")}),
+            Effect(time=3.0, resulting_fluents={F("free ?r")}),
+        ],
+    )
+    # Keeps `armed` dynamic so grounding does not compile it out of the state;
+    # this test is about branch preservation, not static elimination.
+    disarm = Operator(
+        name="disarm", parameters=[], preconditions=[F("armed")],
+        effects=[Effect(time=1.0, resulting_fluents={~F("armed")})],
+    )
+    env = SymbolicEnvironment(
+        state=State(0.0, {F("free r1"), F("armed")}, [(2.0, effect)]),
+        objects_by_type={"robot": {"r1"}},
+        operators=[wait, disarm],
+    )
+
+    ((_, rebuilt),) = env._active_skills[0].upcoming_effects
+    assert rebuilt.is_probabilistic
+    assert rebuilt.is_conditional
+
+    # And they actually fire when the effect comes due.
+    env.act(get_action_by_name(env.get_actions(), "wait r1"))
+    assert F("started") in env.state.fluents
+    assert F("finished") in env.state.fluents
+    assert F("fired") in env.state.fluents
+
+
+def test_grounding_keeps_facts_read_by_queued_effect_conditions():
+    """Regression: grounding must not compile out a fact a `when` reads.
+
+    `armed` is touched by no operator effect, so grounding classifies it as
+    static and unreferenced — it cannot see that an effect carried in the
+    state conditions on it. Removing it from the runtime state used to make
+    the branch silently not fire.
+    """
+    from railroad.core import get_action_by_name
+
+    effect = GroundedEffect(
+        time=2.0,
+        resulting_fluents={F("started")},
+        cond_effects=[({F("armed")}, [GroundedEffect(0.0, {F("fired")})])],
+    )
+    wait = Operator(
+        name="wait", parameters=[("?r", "robot")], preconditions=[F("free ?r")],
+        effects=[
+            Effect(time=0.0, resulting_fluents={~F("free ?r")}),
+            Effect(time=3.0, resulting_fluents={F("free ?r")}),
+        ],
+    )
+    env = SymbolicEnvironment(
+        state=State(0.0, {F("free r1"), F("armed")}, [(2.0, effect)]),
+        objects_by_type={"robot": {"r1"}},
+        operators=[wait],
+    )
+
+    env.act(get_action_by_name(env.get_actions(), "wait r1"))
+    assert F("started") in env.state.fluents
+    assert F("fired") in env.state.fluents
