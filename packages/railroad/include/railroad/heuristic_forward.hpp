@@ -6,6 +6,7 @@
 #include "railroad/heuristic_types.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <unordered_map>
 #include <unordered_set>
@@ -195,6 +196,19 @@ inline void compute_optimistic_costs(FFForwardResult& result) {
 
       for (const auto& achiever : achievers) {
         double cost = achiever.attempt_cost();
+        // An achiever whose preconditions are not yet costed has an infinite
+        // attempt_cost and must not compete this round. The deterministic
+        // branch below is immune (it ranks by `cost < cost_det`, which inf
+        // never wins), but the probabilistic branch ranks by *probability*
+        // first -- so an infinite-cost achiever with the highest probability
+        // would win, set cost_prob = inf, and leave optimistic_cost[f] at its
+        // inf initialization. That is self-sustaining whenever the
+        // highest-probability achiever depends transitively on f itself: the
+        // cheaper, immediately-applicable achiever is discarded every round
+        // and the fixed point never moves. Skipping infinite costs lets f
+        // settle via a viable achiever first; a later iteration reconsiders
+        // this one once its preconditions have finite costs.
+        if (!std::isfinite(cost)) continue;
         if (achiever.probability >= 1.0 - TOLERANCE) {
           if (cost < cost_det) {
             cost_det = cost;

@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <unordered_set>
@@ -87,6 +88,30 @@ public:
     return *cached_dnf_branches_;
   }
 
+  // Saturation sentinel for dnf_branch_count().
+  static constexpr std::size_t DNF_COUNT_SATURATED =
+      std::numeric_limits<std::size_t>::max();
+
+  // How many branches get_dnf_branches() *would* materialise, computed
+  // structurally without building any of them.
+  //
+  // AND distributes over OR, so the count is a product and grows
+  // exponentially in the number of conjoined disjunctions: a goal like
+  // `(forall (?b - box) (exists (?c - city) ...))` over 10 boxes and 5
+  // cities is 5^10 branches, each a FluentSet. Materialising that exhausts
+  // memory and takes the machine down with it, so callers that are about to
+  // walk the DNF should check this first and pick a cheaper strategy above
+  // some cap (see select_cheapest_branch in heuristic.hpp).
+  //
+  // Saturates at DNF_COUNT_SATURATED rather than overflowing: callers only
+  // compare against a cap, so an exact value beyond it is worthless.
+  std::size_t dnf_branch_count() const {
+    if (!cached_dnf_count_) {
+      cached_dnf_count_ = compute_dnf_branch_count();
+    }
+    return *cached_dnf_count_;
+  }
+
   // Structural equality (never hash-only).
   virtual bool equals(const GoalBase& other) const = 0;
 
@@ -111,9 +136,24 @@ protected:
   virtual int satisfied_leaf_count(const FluentSet& fluents) const = 0;
   virtual std::vector<FluentSet> compute_dnf_branches() const = 0;
 
+  // Leaves are one branch; AND multiplies, OR adds (see the overrides).
+  virtual std::size_t compute_dnf_branch_count() const { return 1; }
+
+  // Saturating helpers so a huge count cannot wrap around into a small one.
+  static std::size_t sat_mul(std::size_t a, std::size_t b) {
+    if (a == 0 || b == 0) return 0;
+    if (a > DNF_COUNT_SATURATED / b) return DNF_COUNT_SATURATED;
+    return a * b;
+  }
+  static std::size_t sat_add(std::size_t a, std::size_t b) {
+    if (a > DNF_COUNT_SATURATED - b) return DNF_COUNT_SATURATED;
+    return a + b;
+  }
+
   // Cache is safe because goals are immutable after construction.
   mutable std::optional<std::size_t> cached_hash_;
   mutable std::optional<std::vector<FluentSet>> cached_dnf_branches_;
+  mutable std::optional<std::size_t> cached_dnf_count_;
 };
 
 // Forward declarations for factories used by normalize().
@@ -177,6 +217,8 @@ protected:
     // No valid branches (unsatisfiable)
     return {};
   }
+
+  std::size_t compute_dnf_branch_count() const override { return 0; }
 };
 
 // LiteralGoal: leaf fluent that must hold (or must not hold if negated)
@@ -300,6 +342,12 @@ protected:
     return sum;
   }
 
+  std::size_t compute_dnf_branch_count() const override {
+    std::size_t n = 1;
+    for (const auto& child : children_) n = sat_mul(n, child->dnf_branch_count());
+    return n;
+  }
+
   std::vector<FluentSet> compute_dnf_branches() const override {
     // AND distributes over OR: AND(A, OR(B,C)) -> [{A,B}, {A,C}]
     // Start with a single empty branch
@@ -404,6 +452,12 @@ protected:
     int best = 0;
     for (const auto& child : children_) best = std::max(best, child->goal_count(fluents));
     return best;
+  }
+
+  std::size_t compute_dnf_branch_count() const override {
+    std::size_t n = 0;
+    for (const auto& child : children_) n = sat_add(n, child->dnf_branch_count());
+    return n;
   }
 
   std::vector<FluentSet> compute_dnf_branches() const override {

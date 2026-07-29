@@ -1,12 +1,12 @@
 """Plan/act loop for converted PDDL problems.
 
-Uses ``MCTSPlanner`` or ``GreedyPlanner`` for action selection and the C++
-``transition`` function for execution, sampling probabilistic outcomes with a
-seeded RNG. This bypasses the environment layer: converted problems carry a
-pre-grounded action set and need none of the skill machinery. Both paths now
-ground through ``railroad.core.ground_operators``, but
-``Environment.get_actions`` pins ``allow_duplicate_bindings=False`` (the
-legacy all-distinct rule) while PDDL semantics require ``True``.
+Uses ``MCTSPlanner`` for action selection and the C++ ``transition`` function
+for execution, sampling probabilistic outcomes with a seeded RNG. This
+bypasses the environment layer: converted problems carry a pre-grounded action
+set and need none of the skill machinery. Both paths now ground through
+``railroad.core.ground_operators``, but ``Environment.get_actions`` pins
+``allow_duplicate_bindings=False`` (the legacy all-distinct rule) while PDDL
+semantics require ``True``.
 """
 
 import random
@@ -17,10 +17,9 @@ from typing import List, Optional
 from railroad.core import (
     State,
     get_action_by_name,
-    get_next_actions,
     transition,
 )
-from railroad.planner import GreedyPlanner, MCTSPlanner, seed_planner_rng
+from railroad.planner import MCTSPlanner, seed_planner_rng
 
 from .converter import ConvertedProblem
 
@@ -44,30 +43,30 @@ def solve(
     max_iterations: int = 4000,
     max_depth: int = 40,
     c: float = 100.0,
-    planner: str = "mcts",
+    dead_end_penalty: Optional[float] = None,
     verbose: bool = False,
 ) -> RunResult:
     """Repeatedly plan and apply the chosen action until the goal holds.
 
-    ``planner`` selects the action-selection policy:
+    Replans with ``MCTSPlanner`` at every step, applying the chosen action to
+    a sampled successor.
 
-    - ``"mcts"``: full MCTS search per step (best plans, can wander on
-      probabilistic domains with many degenerate actions).
-    - ``"greedy"``: pick the applicable action minimizing the expected FF
-      heuristic over its outcome distribution — a one-step-lookahead policy
-      that is fast and surprisingly robust on IPPC-style domains.
+    ``dead_end_penalty`` is passed through to the planner: by default MCTS
+    clamps an unreachable-goal state's heuristic to
+    ``HEURISTIC_CANNOT_FIND_GOAL_PENALTY`` (0), which makes dead ends score
+    *better* than reachable states, so domains that can strand the agent
+    report failure even though the conversion is faithful. Setting a penalty
+    that dominates typical plan costs (e.g. ``1e4``) makes those solvable —
+    see the converter README's planner notes for what it costs elsewhere.
     """
     start = _time.perf_counter()
     actions = problem.ground_actions()
     if not actions:
         return RunResult(False, failure_reason="no grounded actions")
-    if planner not in ("mcts", "greedy"):
-        raise ValueError(f"Unknown planner {planner!r}; use 'mcts' or 'greedy'")
     # ``seed`` covers both the MCTS search and the outcome sampling below,
     # so runs are reproducible end-to-end.
     seed_planner_rng(seed)
-    mcts = MCTSPlanner(actions) if planner == "mcts" else None
-    greedy = GreedyPlanner(actions) if planner == "greedy" else None
+    mcts = MCTSPlanner(actions, dead_end_penalty=dead_end_penalty)
     rng = random.Random(seed)
     state = problem.initial_state
     plan: List[str] = []
@@ -84,26 +83,16 @@ def solve(
     for _ in range(max_steps):
         if problem.goal.evaluate(state.fluents):
             return finish(True)
-        if mcts is not None:
-            action_name = mcts(
-                state,
-                problem.goal,
-                max_iterations=max_iterations,
-                max_depth=max_depth,
-                c=c,
-            )
-            if action_name == "NONE":
-                return finish(False, "planner returned NONE")
-            action = get_action_by_name(actions, action_name)
-        else:
-            assert greedy is not None
-            action = greedy.select_action(state, problem.goal)
-            if action is None:
-                if not get_next_actions(state, actions):
-                    return finish(False, "no applicable action (dead end)")
-                return finish(
-                    False, "all applicable actions have infinite heuristic (dead end)"
-                )
+        action_name = mcts(
+            state,
+            problem.goal,
+            max_iterations=max_iterations,
+            max_depth=max_depth,
+            c=c,
+        )
+        if action_name == "NONE":
+            return finish(False, "planner returned NONE")
+        action = get_action_by_name(actions, action_name)
         if verbose:
             print(f"  t={state.time:8.3f}  {action.name}")
         state = _apply(state, action, rng)

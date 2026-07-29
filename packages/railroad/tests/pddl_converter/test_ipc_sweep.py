@@ -1,17 +1,20 @@
-"""Network-gated IPC compatibility sweep (design doc §7.2 and §7.3).
+"""Network-gated IPC compatibility sweep.
 
-The converter README publishes per-domain compatibility tables and a set of
-"solved optimally" claims. Those are the converter's contract with the IPC
-collections, but they were produced by hand, so nothing re-checks them when
-grounding or the planner changes. These tests encode them.
+The converter README publishes per-domain compatibility tables. They are the
+converter's contract with the IPC collections, but they were produced by
+hand, so nothing re-checks them when grounding changes. This test encodes
+them: it re-derives every status and compares against the table.
 
-Both are gated on ``RAILROAD_PDDL_NETWORK_TESTS`` because they need the
-GitHub API. Anonymous requests are limited to 60/hour and a full sweep needs
-roughly 130, so populate the cache incrementally (it is permanent) or set
-``GITHUB_TOKEN``::
+The scope is deliberately *conversion*, not solving. Whether a planner
+happens to reach the goal on a given instance is a planner property, and
+pinning it here only couples the converter's test suite to planner quality
+(see the feature-example benchmarks for optional end-to-end demos).
+
+Gated on ``RAILROAD_PDDL_NETWORK_TESTS`` because it needs the GitHub API.
+Anonymous requests are limited to 60/hour and a full sweep needs roughly 130,
+so populate the cache incrementally (it is permanent) or set ``GITHUB_TOKEN``::
 
     RAILROAD_PDDL_NETWORK_TESTS=1 uv run pytest -q -k ipc_sweep
-    RAILROAD_PDDL_NETWORK_TESTS=1 uv run pytest -q -k ipc_solves -m slow
 
 A drifted status is reported for the whole collection at once rather than
 failing on the first domain, so one run tells you everything that moved.
@@ -157,44 +160,3 @@ def test_ipc_sweep_matches_published_table(collection):
             f"unreachable (GitHub API rate limit? set GITHUB_TOKEN): "
             + ", ".join(sorted(unavailable))
         )
-
-
-# Instances the README reports as solved, with the planner and, where a cost
-# is pinned, the value this repo actually produces under seed 0. `sim_time` is
-# total cost under the cost->duration mapping and plan length under the unit
-# mapping. A pinned number is a regression guard on *our* output, not a claim
-# about the instance's true optimum.
-SOLVED_INSTANCES = [
-    ("ipc-2000", "blocks-strips-typed", "mcts", None),
-    # 21 steps, stable across seeds 0-2 and independent of relevance
-    # projection. The README previously recorded "20 steps, optimal"; that
-    # does not reproduce, so the README now records 21.
-    ("ipc-2000", "logistics-strips-typed", "mcts", 21.0),
-    ("ipc-2000", "elevator-adl-simple-typed", "mcts", None),
-    ("ippc-2006", "blocksworld", "greedy", None),
-    ("ippc-2008", "triangle-tireworld", "greedy", None),
-]
-
-
-@pytest.mark.slow
-@pytest.mark.parametrize(
-    "collection, domain, planner, expected_cost",
-    SOLVED_INSTANCES,
-    ids=[f"{c}-{d}" for c, d, _, _ in SOLVED_INSTANCES],
-)
-def test_ipc_solves_first_instance(collection, domain, planner, expected_cost):
-    """Solved-instance regression (design doc §7.3), under a fixed seed."""
-    try:
-        fetched = _fetch(collection, domain)
-    except _Unavailable as exc:
-        pytest.skip(f"{collection}/{domain} unreachable: {exc}")
-    if not fetched.instances:
-        pytest.skip(f"{collection}/{domain} has no instances")
-
-    instance = fetched.instances[0]
-    problem = pc.load_problem(fetched.domain_for(instance), instance)
-    result = pc.solve(problem, seed=0, planner=planner, max_iterations=4000)
-
-    assert result.success, result.failure_reason
-    if expected_cost is not None:
-        assert result.sim_time == pytest.approx(expected_cost)

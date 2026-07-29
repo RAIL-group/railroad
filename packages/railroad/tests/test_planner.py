@@ -239,3 +239,105 @@ def test_mcts_planner_lambdas_propagate_to_heuristic():
     # Read-back of stored weights via the C++ binding.
     assert mcts_max._cpp_planner.lambda_max == 1.0
     assert mcts_ff._cpp_planner.lambda_ff == 1.0
+
+
+def _fragile_delivery_actions():
+    """Two items; dropping the fragile one unpadded breaks it irreversibly.
+
+    The goal needs the vase unbroken, so `drop-off vase` before `pad vase` is
+    a dead end the delete-relaxation *can* see (h = inf).
+    """
+    from railroad.core import Effect, Operator
+
+    pad = Operator(
+        name="pad",
+        parameters=[("?r", "robot"), ("?x", "item")],
+        preconditions=[F("free ?r"), F("holding ?x")],
+        effects=[
+            Effect(time=0, resulting_fluents={~F("free ?r")}),
+            Effect(time=1.0, resulting_fluents={F("padded ?x"), F("free ?r")}),
+        ],
+    )
+    drop = Operator(
+        name="drop-off",
+        parameters=[("?r", "robot"), ("?x", "item")],
+        preconditions=[F("free ?r"), F("holding ?x")],
+        effects=[
+            Effect(time=0, resulting_fluents={~F("free ?r")}),
+            Effect(
+                time=1.0,
+                resulting_fluents={
+                    ~F("holding ?x"), F("delivered ?x"), F("free ?r"),
+                },
+                cond_effects=[
+                    ({F("fragile ?x"), ~F("padded ?x")},
+                     [Effect(time=0, resulting_fluents={F("broken ?x")})]),
+                ],
+            ),
+        ],
+    )
+    objects = {"robot": {"r1"}, "item": {"vase", "brick"}}
+    return [a for op in (pad, drop) for a in op.instantiate(objects)]
+
+
+def _drive_to_goal(planner, state, goal, actions, max_steps=10, seed=0):
+    rng = random.Random(seed)
+    plan = []
+    for _ in range(max_steps):
+        if goal.evaluate(state.fluents):
+            return True, plan
+        name = planner(state, goal, max_iterations=2000, c=100)
+        if name == "NONE":
+            return False, plan
+        successors = transition(state, get_action_by_name(actions, name))
+        state = successors[
+            rng.choices(range(len(successors)),
+                        weights=[p for _, p in successors], k=1)[0]
+        ][0]
+        plan.append(name)
+    return goal.evaluate(state.fluents), plan
+
+
+@pytest.mark.parametrize("penalty, should_solve", [(None, False), (1e4, True)])
+def test_dead_end_penalty_steers_mcts_away_from_dead_ends(penalty, should_solve):
+    """A flat failure cost makes MCTS avoid a dead end it otherwise seeks.
+
+    With `dead_end_penalty=None` the reward for an h = inf state is clamped
+    to -(time + cost), which is *higher* than any reachable state's reward --
+    so the search is drawn to the dead end and drops the vase unpadded.
+    """
+    actions = _fragile_delivery_actions()
+    initial = State(
+        0.0,
+        {F("free r1"), F("holding vase"), F("holding brick"), F("fragile vase")},
+        [],
+    )
+    goal = F("delivered vase") & F("delivered brick") & ~F("broken vase")
+
+    planner = MCTSPlanner(actions, dead_end_penalty=penalty)
+    solved, plan = _drive_to_goal(planner, initial, goal, actions)
+
+    assert solved is should_solve, plan
+    if should_solve:
+        assert plan.index("pad r1 vase") < plan.index("drop-off r1 vase")
+
+
+def test_dead_end_penalty_is_flat_not_added_to_elapsed_cost():
+    """The penalty replaces the branch's accrued cost rather than adding to it.
+
+    Two dead ends reached at different depths must be scored identically, so
+    the search expresses no preference for failing quickly. Reaching one via
+    an extra `pad brick` step (pure delay, no progress) must not change the
+    action chosen at the root.
+    """
+    actions = _fragile_delivery_actions()
+    goal = F("delivered vase") & F("delivered brick") & ~F("broken vase")
+    base = {F("free r1"), F("holding vase"), F("holding brick"), F("fragile vase")}
+
+    planner = MCTSPlanner(actions, dead_end_penalty=1e4)
+    early = State(0.0, set(base), [])
+    # Same problem, but the clock has already advanced a long way.
+    late = State(50.0, set(base), [])
+
+    assert planner(early, goal, max_iterations=2000, c=100) == "pad r1 vase"
+    assert planner(late, goal, max_iterations=2000, c=100) == "pad r1 vase"
