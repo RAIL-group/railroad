@@ -213,11 +213,13 @@ class Environment:
   - Registering `robot1_loc` after an interrupted move changes the location
     universe (and, in the later phase 4, adds its `connected` facts) → key
     changes → reground.
-- With `eliminate_static=True` (a later, opt-in phase), the environment
+- ~~With `eliminate_static=True` (a later, opt-in phase), the environment
   strips `eliminable_fluents` from its runtime fluent set at construction and
   keeps them in a `static_facts` property — still facts about the world for
   ground-truth queries and re-grounding, just not carried in every planner
-  state.
+  state.~~ **Withdrawn** — see §9. Grounding still strips verified static
+  preconditions from grounded actions, but the environment keeps the facts;
+  `static_facts` is a view over them. Shrinking states is the planner's job.
 
 ### 3.5 What stays the same
 
@@ -279,6 +281,12 @@ produced today — same name, same preconditions, same effects. This is what
 makes the parity harness (§7) meaningful.
 
 ### 4.4 Flagged optimizations (each individually opt-in, default off)
+
+> **Superseded in part.** The flags now default *on*, and `eliminate_static`'s
+> state-level half was withdrawn on the `Environment` path — see §9. What
+> follows describes the phase-1b design as shipped; §9 records why the
+> "referenced by none of ... the goal" clause below cannot be decided from the
+> operator set alone.
 
 1. **`eliminate_static=True`** — strip verified positive static
    preconditions from grounded actions, and report as `eliminable_fluents`

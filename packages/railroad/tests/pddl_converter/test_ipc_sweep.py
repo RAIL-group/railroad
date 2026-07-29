@@ -76,7 +76,7 @@ EXPECTED_STATUS = {
         "rectangle-tireworld": "unsupported:numeric-effects",
         "schedule": "ok",
         "search-and-rescue": "unsupported:imply-conditions",
-        "sysadmin-slp": "unsupported:rewards",
+        "sysAdmin-SLP": "unsupported:rewards",  # upstream name is case-sensitive
         "triangle-tireworld": "ok",
         "zenotravel": "unsupported:numeric-effects",
     },
@@ -116,6 +116,23 @@ def test_ipc_sweep_matches_published_table(collection):
     incomplete run skips.
     """
     expected = EXPECTED_STATUS[collection]
+
+    # Reconcile against the upstream listing first. A domain name that does
+    # not exist upstream 404s, which would otherwise land in `unavailable`
+    # and skip -- indistinguishable from a rate limit. Names are
+    # case-sensitive (ippc-2008 ships `sysAdmin-SLP`).
+    try:
+        upstream = set(pc.list_domains(collection))
+    except OSError as exc:
+        pytest.skip(f"cannot list {collection}: {exc}")
+    missing = sorted(upstream - set(expected))
+    unknown = sorted(set(expected) - upstream)
+    assert not (missing or unknown), (
+        f"{collection} table is out of sync with the source repo:\n"
+        f"  absent from the table: {missing}\n"
+        f"  no longer upstream:    {unknown}"
+    )
+
     drift, unavailable = {}, {}
     for domain in sorted(expected):
         try:
