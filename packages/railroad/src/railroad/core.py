@@ -410,6 +410,30 @@ def _collect_condition_predicates(effect: Effect, out: Set[str]) -> None:
             _collect_condition_predicates(sub, out)
 
 
+def _effect_times_finite(effect: GroundedEffect) -> bool:
+    """Whether this effect and every nested branch sub-effect has a finite time."""
+    if not math.isfinite(effect.time):
+        return False
+    for branch in effect.prob_effects:
+        if not all(_effect_times_finite(sub) for sub in branch.effects):
+            return False
+    for branch in effect.cond_effects:
+        if not all(_effect_times_finite(sub) for sub in branch.effects):
+            return False
+    return True
+
+
+def action_times_finite(action: Action) -> bool:
+    """Whether every effect time in an action is finite, branches included.
+
+    An ``inf`` duration marks a statically impossible action (e.g. a move
+    between unconnected locations). Branch sub-effects count: an ``inf``
+    inside a conditional or probabilistic branch would advance state time to
+    infinity if that branch ever fired.
+    """
+    return all(_effect_times_finite(eff) for eff in action.effects)
+
+
 def _collect_grounded_condition_predicates(
     effect: GroundedEffect, out: Set[str]
 ) -> None:
@@ -483,7 +507,14 @@ def ground_operators(
 
     Actions with non-finite effect times are dropped (an ``inf`` duration
     marks a statically impossible action, e.g. a move between unknown
-    locations).
+    locations); branch sub-effect times count too, and the filter runs after
+    condition simplification so a dropped branch cannot condemn its action.
+
+    Raises:
+        ValueError: if an operator names a parameter type absent from
+            ``objects_by_type``, or a precondition/constraint references a
+            variable that is not one of its parameters — both of which would
+            otherwise fail silently (see :func:`_validate_operator_terms`).
     """
     dynamic = dynamic_predicates(operators)
     if treat_dynamic:
@@ -524,12 +555,6 @@ def ground_operators(
             )
         )
 
-    actions = [
-        a
-        for a in actions
-        if all(math.isfinite(eff.time) for eff in a.effects)
-    ]
-
     if simplify_conditions or eliminate_static:
         actions = [
             _compile_static_away(
@@ -538,6 +563,10 @@ def ground_operators(
             )
             for a in actions
         ]
+
+    # After simplification, so an `inf` sub-effect inside a branch that this
+    # grounding proved unreachable does not condemn the whole action.
+    actions = [a for a in actions if action_times_finite(a)]
 
     eliminable: Set[Fluent] = set()
     if eliminate_static:
@@ -649,6 +678,53 @@ def _compile_static_away(
     )
 
 
+def _validate_operator_terms(
+    op: Operator, objects_by_type: Mapping[str, Collection[str]]
+) -> None:
+    """Reject operators that cannot ground meaningfully.
+
+    Both failures are otherwise silent:
+
+    - An unknown parameter type enumerates an empty domain, so the operator
+      contributes no actions and says nothing about why. (A *declared* type
+      with no objects is legitimate — frontier sets are often empty — so only
+      a missing key is an error, matching ``Operator.instantiate``.)
+    - A precondition variable that is not a parameter can never be bound. For
+      a static predicate that means the check is never scheduled and then
+      ``eliminate_static`` strips the precondition anyway, so a misspelled
+      parameter silently *widens* the action set instead of narrowing it.
+    """
+    known_types = set(objects_by_type)
+    missing_types = sorted(
+        {typ for _, typ in op.parameters if typ not in known_types}
+    )
+    if missing_types:
+        raise ValueError(
+            f"Operator {op.name!r} has parameters of type(s) {missing_types}, "
+            f"absent from objects_by_type (known: {sorted(known_types)}). "
+            "Declare the type with an empty object set if it is legitimately "
+            "empty."
+        )
+
+    param_vars = {var for var, _ in op.parameters}
+
+    def check_terms(terms: Collection[str], where: str) -> None:
+        unbound = sorted(t for t in terms if _is_var(t) and t not in param_vars)
+        if unbound:
+            raise ValueError(
+                f"Operator {op.name!r} references unbound variable(s) "
+                f"{unbound} in {where}; its parameters are "
+                f"{sorted(param_vars)}. A misspelled parameter in a static "
+                "precondition would otherwise be dropped silently, widening "
+                "the action set."
+            )
+
+    for fluent in op.preconditions:
+        check_terms(fluent.args, f"precondition {fluent}")
+    for eq in op.grounding_constraints:
+        check_terms((eq.left, eq.right), f"constraint {eq!r}")
+
+
 def _ground_one_operator(
     op: Operator,
     objects_by_type: Mapping[str, Collection[str]],
@@ -660,8 +736,9 @@ def _ground_one_operator(
     stats: GroundingStats,
 ) -> List[Action]:
     """Backtracking enumeration for one operator (see ground_operators)."""
+    _validate_operator_terms(op, objects_by_type)
     params = op.parameters
-    domains = [sorted(objects_by_type.get(typ, set())) for _, typ in params]
+    domains = [sorted(objects_by_type[typ]) for _, typ in params]
     stats.nominal_bindings += math.prod(len(d) for d in domains)
 
     # Checks as (needed_vars, check) where check is an Eq or a static Fluent.
@@ -678,7 +755,8 @@ def _ground_one_operator(
     order = _order_parameters(params, [needed for needed, _ in checks])
 
     # Assign each check to the earliest depth at which all its variables are
-    # bound; variable-free checks are evaluated once up front.
+    # bound; variable-free checks are evaluated once up front. Every variable
+    # is a parameter (_validate_operator_terms), so every check lands.
     bound_after: List[Set[str]] = []
     acc: Set[str] = set()
     for pos in order:
@@ -786,6 +864,108 @@ def get_next_actions(state: State, all_actions: List[Action]) -> List[Action]:
 
     # Step 4: Otherwise, return any possible actions
     return [a for a in all_actions if state.satisfies_precondition(a)]
+
+
+# ============================================================================
+#  Relevance projection (planner-side)
+# ============================================================================
+
+# Fluent names the core reads by name rather than through an action
+# precondition, so projection must never drop them:
+#
+# - `free`/`waiting` drive the concurrency machinery in transition() and
+#   advance_to_terminal(), which test them via Fluent::is_free/is_waiting.
+# - `at`/`found` are read by the FF heuristic's `at_implies_found` rule
+#   (augment_at_with_found): a required `at <entity> <loc>` also requires
+#   `found <entity>`. Object-search domains rely on this to leave `found` out
+#   of the goal entirely (see the procthor_search benchmark). `found` needs
+#   naming explicitly because the negative-precondition conversion moves the
+#   applicability test onto `not-found`, leaving `found` read by nothing else
+#   -- and augment_at_with_found guards on reachability, so dropping it does
+#   not error, it silently weakens the heuristic. Pinned by
+#   test_found_reservation_preserves_at_implies_found.
+RESERVED_PLANNING_PREDICATES = frozenset({"free", "waiting", "at", "found"})
+
+
+def relevant_predicates(
+    actions: Collection[Action],
+    goal: Optional[Union[Goal, Fluent]] = None,
+    upcoming_effects: Collection[Tuple[float, GroundedEffect]] = (),
+) -> Set[str]:
+    """Predicates that can influence search for a closed planning problem.
+
+    A fluent is *read* only through an action precondition, a conditional
+    branch condition, the goal, or the core's name-keyed machinery
+    (:data:`RESERVED_PLANNING_PREDICATES`). Fluents of every other predicate
+    are written and never consulted, so two states differing only in those are
+    bisimilar — a planner may project them away, shrinking every state hash
+    and merging more search nodes.
+
+    This subsumes static-fact elimination and goes further: it also catches
+    *dynamic* write-only predicates, which no staticness analysis can touch.
+    It is sound only for a caller holding the whole problem — pass every
+    action, the goal, and the state's upcoming effects, whose branch
+    conditions read the state as well. That is why this belongs to the
+    planner and not to :class:`~railroad.environment.Environment`, which
+    cannot see the goal or foreign queued effects.
+    """
+    relevant: Set[str] = set(RESERVED_PLANNING_PREDICATES)
+    for action in actions:
+        for fluent in action.preconditions:
+            relevant.add(fluent.name)
+        for effect in action.effects:
+            _collect_grounded_condition_predicates(effect, relevant)
+    for _, effect in upcoming_effects:
+        _collect_grounded_condition_predicates(effect, relevant)
+    if goal is not None:
+        for fluent in goal.get_all_literals():
+            relevant.add(fluent.name)
+    return relevant
+
+
+def project_state(state: State, relevant: Collection[str]) -> State:
+    """Drop fluents whose predicate nothing reads (see relevant_predicates)."""
+    names = set(relevant)
+    fluents = {f for f in state.fluents if f.name in names}
+    if len(fluents) == len(state.fluents):
+        return state
+    return State(state.time, fluents, list(state.upcoming_effects))
+
+
+def _project_grounded_effect(
+    effect: GroundedEffect, names: Set[str]
+) -> GroundedEffect:
+    kept = {f for f in effect.resulting_fluents if f.name in names}
+    return GroundedEffect(
+        effect.time,
+        kept,
+        prob_effects=[
+            (branch.prob, [_project_grounded_effect(e, names) for e in branch.effects])
+            for branch in effect.prob_effects
+        ],
+        cond_effects=[
+            (branch.conditions, [_project_grounded_effect(e, names) for e in branch.effects])
+            for branch in effect.cond_effects
+        ],
+    )
+
+
+def project_action(action: Action, relevant: Collection[str]) -> Action:
+    """Strip writes of irrelevant predicates from an action's effects.
+
+    Projecting the root state alone is not enough: effects would re-add the
+    irrelevant fluents at every step of every rollout. Effects with no
+    surviving fluents are kept — they still advance time, which is what
+    creates decision points. Branch *conditions* are untouched: every
+    predicate they read is relevant by construction.
+    """
+    names = set(relevant)
+    return Action(
+        set(action.preconditions),
+        [_project_grounded_effect(eff, names) for eff in action.effects],
+        name=action.name,
+        extra_cost=action.extra_cost,
+    )
 
 
 # ============================================================================

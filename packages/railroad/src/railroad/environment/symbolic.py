@@ -219,9 +219,6 @@ class SymbolicEnvironment(Environment):
     def fluents(self) -> Set[Fluent]:
         return self._fluents
 
-    def _remove_fluents(self, fluents: "Collection[Fluent]") -> None:
-        self._fluents -= set(fluents)
-
     @property
     def objects_by_type(self) -> Dict[str, Set[str]]:
         return self._objects_by_type
@@ -276,11 +273,20 @@ class SymbolicEnvironment(Environment):
         start_time: float,
         upcoming_effects: List[Tuple[float, GroundedEffect]],
     ) -> SymbolicSkill:
-        """Create a SymbolicSkill from initial upcoming effects."""
+        """Create a SymbolicSkill from initial upcoming effects.
+
+        Only the top-level time is rebased onto the skill's start time; branch
+        sub-effect times are already relative to their parent, so they carry
+        over untouched.
+        """
         relative_effects = [
             GroundedEffect(
                 abs_time - start_time,
                 effect.resulting_fluents,
+                prob_effects=[
+                    (branch.prob, branch.effects)
+                    for branch in effect.prob_effects
+                ],
                 cond_effects=[
                     (branch.conditions, branch.effects)
                     for branch in effect.cond_effects

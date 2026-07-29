@@ -24,6 +24,9 @@ from railroad.core import (
     convert_goal_to_positive_preconditions,
     ff_heuristic,
     get_next_actions,
+    project_action,
+    project_state,
+    relevant_predicates,
     transition,
 )
 
@@ -93,6 +96,7 @@ class MCTSPlanner:
         prune_cheapest_m: int | None = None,
         prune_orphaned_supports: bool = True,
         frontier_objects: set[str] | None = None,
+        project_irrelevant: bool = True,
     ):
         """Initialize MCTSPlanner with automatic preprocessing.
 
@@ -117,6 +121,12 @@ class MCTSPlanner:
                 pruned and that has nothing located at it is removed entirely --
                 including the moves that route to/through it -- which the generic
                 closure cannot do in densely connected location graphs.
+            project_irrelevant: drop fluents no precondition, branch condition,
+                or goal reads from searched states and from action effects
+                (``railroad.core.relevant_predicates``). Bisimulation-preserving
+                and typically a large win -- every state hash walks the fluent
+                set -- so it is on by default; pass False to search over the
+                full fluent set when debugging.
 
         Defaults are an even split between h_add and h_ff (0.5, 0.0, 0.5).
         Weights are free-form (not normalized); the heuristic used during MCTS
@@ -153,8 +163,16 @@ class MCTSPlanner:
         # Convert actions with base mapping and create initial C++ planner
         self._current_mapping = self._base_mapping
         self._converted_actions = self._convert_actions(actions, self._current_mapping)
+
+        # Relevance projection state (see _project_for). Computed lazily on the
+        # first call, once the goal and the state's queued effects are known --
+        # both are readers, and neither is available here.
+        self._project_irrelevant = project_irrelevant
+        self._relevant: Set[str] | None = None
+        self._search_actions = self._converted_actions
+
         self._cpp_planner = _MCTSPlannerCpp(
-            self._converted_actions,
+            self._search_actions,
             lambda_add=self._lambda_add,
             lambda_max=self._lambda_max,
             lambda_ff=self._lambda_ff,
@@ -199,13 +217,45 @@ class MCTSPlanner:
                 self._original_actions, self._current_mapping
             )
 
+            # The projection was derived from the old action set; drop it.
+            self._relevant = None
+            self._search_actions = self._converted_actions
+
             # Create new C++ planner with re-converted actions
             self._cpp_planner = _MCTSPlannerCpp(
-                self._converted_actions,
+                self._search_actions,
                 lambda_add=self._lambda_add,
                 lambda_max=self._lambda_max,
                 lambda_ff=self._lambda_ff,
             )
+
+    def _project_for(self, goal: Goal, state: State) -> State:
+        """Project `state`, rebuilding the projected action set if needed.
+
+        The relevance set depends on the goal and on the branch conditions of
+        the state's queued effects, so it is computed per call and the action
+        projection is rebuilt whenever a new reader shows up. In a normal run
+        that happens once: every effect the search can queue comes from an
+        action already scanned.
+        """
+        if not self._project_irrelevant:
+            return state
+
+        needed = relevant_predicates(
+            self._converted_actions, goal, state.upcoming_effects
+        )
+        if self._relevant is None or not needed <= self._relevant:
+            self._relevant = needed
+            self._search_actions = [
+                project_action(a, needed) for a in self._converted_actions
+            ]
+            self._cpp_planner = _MCTSPlannerCpp(
+                self._search_actions,
+                lambda_add=self._lambda_add,
+                lambda_max=self._lambda_max,
+                lambda_ff=self._lambda_ff,
+            )
+        return project_state(state, self._relevant)
 
     def __call__(
         self,
@@ -247,6 +297,10 @@ class MCTSPlanner:
             goal, self._current_mapping
         )
 
+        # Drop fluents nothing reads from the searched states and from the
+        # actions that would re-add them (may rebuild self._cpp_planner).
+        converted_state = self._project_for(converted_goal, converted_state)
+
         # Optionally prune redundant probabilistic achievers (and the support
         # actions they orphan) before searching. The pruned set depends on the
         # state/goal, so a planner is built per call; assign it to
@@ -258,7 +312,7 @@ class MCTSPlanner:
             pruned_actions = prune_probabilistic_achievers(
                 converted_state,
                 converted_goal,
-                self._converted_actions,
+                self._search_actions,
                 top_n=self._prune_top_n if self._prune_top_n is not None else 0,
                 cheapest_m=(
                     self._prune_cheapest_m
@@ -319,8 +373,11 @@ class MCTSPlanner:
             goal, self._current_mapping
         )
 
+        # Same projection MCTS searches under, so the two agree.
+        converted_state = self._project_for(converted_goal, converted_state)
+
         return _ff_heuristic_cpp(
-            converted_state, converted_goal, self._converted_actions,
+            converted_state, converted_goal, self._search_actions,
             lambda_add=self._lambda_add,
             lambda_max=self._lambda_max,
             lambda_ff=self._lambda_ff,
@@ -348,12 +405,14 @@ class GreedyPlanner:
         action_name = greedy(state, goal)  # "NONE" if no viable action
     """
 
-    def __init__(self, actions: List[Action]):
+    def __init__(self, actions: List[Action], project_irrelevant: bool = True):
         self._actions = actions
         self._cached_goal: Goal | None = None
         self._h_actions: List[Action] = actions
         self._h_goal: Goal | None = None
         self._mapping: Dict[Fluent, Fluent] | None = None
+        self._project_irrelevant = project_irrelevant
+        self._relevant: Set[str] | None = None
 
     def _prepare(self, goal: Goal) -> None:
         """(Re)build the converted heuristic actions/goal for this goal."""
@@ -372,12 +431,23 @@ class GreedyPlanner:
             self._mapping = None
             self._h_actions = self._actions
             self._h_goal = goal
+        # Applicability and transitions deliberately run on the originals, so
+        # only the heuristic evaluation is projected -- which is where the FF
+        # cost is. Successor states come from the original actions, whose
+        # branch conditions read the same predicates as the converted ones.
+        if self._project_irrelevant:
+            self._relevant = relevant_predicates(self._h_actions, self._h_goal)
+            self._h_actions = [
+                project_action(a, self._relevant) for a in self._h_actions
+            ]
         self._cached_goal = goal
 
     def _heuristic(self, state: State) -> float:
         assert self._h_goal is not None  # _prepare always runs first
         if self._mapping is not None:
             state = convert_state_to_positive_preconditions(state, self._mapping)
+        if self._relevant is not None:
+            state = project_state(state, self._relevant)
         return ff_heuristic(state, self._h_goal, self._h_actions)
 
     def select_action(

@@ -245,3 +245,85 @@ def test_eliminate_static_strips_and_reports():
     # `connected` facts are dead weight at runtime; `landmark` is referenced.
     assert result.eliminable_fluents == {F("connected a b")}
     assert result.eliminated_predicates == {"connected"}
+
+
+def test_unbound_precondition_variable_is_an_error():
+    """A misspelled parameter must not silently disable a static constraint.
+
+    Without the check the binding-time check is never scheduled (nothing ever
+    binds `?form`) and eliminate_static then strips the precondition anyway,
+    so the typo would *widen* the action set instead of narrowing it.
+    """
+    op = Operator(
+        name="move",
+        parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F("at ?r ?from"), F("connected ?form ?to")],  # typo
+        effects=[Effect(time=1.0, resulting_fluents={F("at ?r ?to")})],
+    )
+    with pytest.raises(ValueError, match=r"unbound variable\(s\) \['\?form'\]"):
+        ground_operators(
+            [op], {**ROBOTS, "location": {"a", "b"}}, {F("connected a b")}
+        )
+
+
+def test_unbound_constraint_variable_is_an_error():
+    op = Operator(
+        name="pair",
+        parameters=[("?a", "item")],
+        preconditions=[Neq("?a", "?b")],
+        effects=[Effect(time=1.0, resulting_fluents={F("paired ?a")})],
+    )
+    with pytest.raises(ValueError, match=r"unbound variable\(s\) \['\?b'\]"):
+        ground_operators([op], {"item": {"x", "y"}}, set())
+
+
+def test_unknown_parameter_type_is_an_error_but_empty_type_is_fine():
+    """A missing type is a typo; a declared-but-empty one is legitimate."""
+    op = _move_op()
+    with pytest.raises(ValueError, match="absent from objects_by_type"):
+        ground_operators([op], ROBOTS, set())  # no "location" key at all
+
+    empty = ground_operators([op], {**ROBOTS, "location": set()}, set())
+    assert empty.actions == []
+
+
+def test_infinite_time_inside_a_branch_drops_the_action():
+    """`inf` sub-effect times count, not just top-level ones."""
+    op = Operator(
+        name="risky",
+        parameters=[("?r", "robot")],
+        preconditions=[F("free ?r")],
+        effects=[Effect(
+            time=1.0,
+            resulting_fluents={F("free ?r")},
+            cond_effects=[({F("armed")}, [
+                Effect(time=float("inf"), resulting_fluents={F("boom ?r")}),
+            ])],
+        )],
+    )
+    # `armed` is dynamic, so the branch survives grounding and its inf stands.
+    arm = Operator(
+        name="arm", parameters=[], preconditions=[],
+        effects=[Effect(time=1.0, resulting_fluents={F("armed")})],
+    )
+    result = ground_operators([op, arm], ROBOTS, {F("free r1")})
+    assert {a.name for a in result.actions} == {"arm"}
+
+
+def test_infinite_time_in_a_statically_dropped_branch_keeps_the_action():
+    """The filter runs after simplification, so a dead branch is harmless."""
+    op = Operator(
+        name="risky",
+        parameters=[("?r", "robot")],
+        preconditions=[F("free ?r")],
+        effects=[Effect(
+            time=1.0,
+            resulting_fluents={F("free ?r")},
+            # `armed` is static and absent, so this branch can never fire.
+            cond_effects=[({F("armed")}, [
+                Effect(time=float("inf"), resulting_fluents={F("boom ?r")}),
+            ])],
+        )],
+    )
+    result = ground_operators([op], ROBOTS, {F("free r1")})
+    assert {a.name for a in result.actions} == {"risky r1"}
