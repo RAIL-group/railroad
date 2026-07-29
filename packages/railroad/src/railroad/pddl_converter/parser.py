@@ -269,6 +269,13 @@ def _parse_atom(sexpr: Sexpr, context: str) -> Tuple[str, Tuple[str, ...]]:
 _NUMERIC_COMPARISONS = {"<", ">", "<=", ">="}
 _NUMERIC_OPS = {"+", "-", "*", "/"}
 
+# Structural heads: a `(not ...)` wrapping one of these is a negated compound,
+# not an atom, and must be reported as such.
+_COMPOUND_HEADS = {
+    "and", "or", "not", "imply", "forall", "exists", "when", "probabilistic",
+    "oneof",
+}
+
 
 def parse_condition(sexpr: Sexpr, context: str) -> ConditionNode:
     """Parse a goal-description (precondition/goal) tree."""
@@ -343,6 +350,14 @@ def parse_effect(sexpr: Sexpr, context: str) -> EffectNode:
         assert isinstance(sexpr, list)
         if len(sexpr) != 2:
             raise PDDLParseError(f"(not ...) takes one argument in {context}")
+        inner_head = _head(sexpr[1])
+        if inner_head in _COMPOUND_HEADS:
+            # Report what this actually is, rather than letting _parse_atom
+            # trip over the nested list and blame object fluents.
+            raise UnsupportedPDDLError(
+                "negated-compound-condition",
+                f"(not ({inner_head} ...)) in {context}",
+            )
         name, args = _parse_atom(sexpr[1], context)
         return Literal(name, args, negated=True)
     if head == "forall":

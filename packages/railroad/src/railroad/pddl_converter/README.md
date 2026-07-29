@@ -136,7 +136,20 @@ Grounding notes:
 
 ## Compatibility scan results
 
-`railroad pddl check <collection>` (first instance per domain), 2026-07-07:
+`railroad pddl check <collection>` (first instance per domain), 2026-07-07.
+
+These tables are the converter's contract with the IPC collections and are
+checked by `tests/pddl_converter/test_ipc_sweep.py`, which re-derives every
+status and compares it here. It needs the GitHub API, so it is gated:
+
+```bash
+RAILROAD_PDDL_NETWORK_TESTS=1 uv run pytest -q -k ipc_sweep
+RAILROAD_PDDL_NETWORK_TESTS=1 uv run pytest -q -k ipc_solves -m slow
+```
+
+A full sweep needs ~130 API calls against the 60/hour anonymous limit, so set
+`GITHUB_TOKEN` or let the (permanent) cache fill over several runs; an
+incomplete run skips rather than reporting a green tick it did not earn.
 
 **ipc-2000 — 11/12 domains convert**
 
@@ -147,7 +160,7 @@ Grounding notes:
 | elevator-adl-simple-typed | ok | forall+when boarding; instance 1 solved optimally |
 | schedule-adl-{typed,untyped} | ok | conditional effects with equality conditions |
 | freecell-strips-{typed,untyped} | ok | 8.4k/34k actions |
-| logistics-strips-{typed,untyped} | ok | instance 1 solved optimally (20 steps) |
+| logistics-strips-{typed,untyped} | ok | instance 1 solved in 21 steps |
 | elevator-adl-full-typed | unsupported | imply-conditions |
 
 **ippc-2006 (PPDDL) — 9/10 domains convert**
