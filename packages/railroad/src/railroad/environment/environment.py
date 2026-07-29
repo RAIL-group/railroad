@@ -232,6 +232,10 @@ class Environment(ABC):
         reader — goals, conditions on queued effects, subclass code. Dropping
         search-irrelevant fluents is the planner's job, where the problem is
         closed; see :func:`railroad.core.relevant_predicates`.
+
+        Grounding is what identifies these, so this is empty until the first
+        :meth:`get_actions` call — an empty result means "not yet grounded",
+        not "no static facts".
         """
         return {f for f in self.fluents if f.name in self._eliminated_predicates}
 

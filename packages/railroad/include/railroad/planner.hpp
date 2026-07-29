@@ -333,7 +333,8 @@ inline std::string mcts(const State &root_state,
                         std::string* out_tree_trace = nullptr,
                         double lambda_add = 0.5,
                         double lambda_max = 0.0,
-                        double lambda_ff  = 0.5) {
+                        double lambda_ff  = 0.5,
+                        std::optional<double> dead_end_penalty = std::nullopt) {
   // RNG
   std::mt19937 &rng = mcts_rng();
 
@@ -439,13 +440,23 @@ inline std::string mcts(const State &root_state,
       reward = -node->state.time() + SUCCESS_REWARD + 0 * goal_count_val - accumulated_extra_cost;
     } else {
       h = heuristic_fn ? heuristic_fn(node->state) : 0.0;
-      if (h > 1e10) {
-        h = HEURISTIC_CANNOT_FIND_GOAL_PENALTY;
-      }
-      if (did_need_relaxed_transition)
-        h += 100;
+      if (h > 1e10 && dead_end_penalty) {
+        // The relaxation proved the goal unreachable from here. Charge a
+        // *flat* cost: what this branch spent getting here is irrelevant,
+        // because no continuation of it can reach the goal. Folding the
+        // elapsed time and accumulated cost in would rank a slow failure
+        // below a fast one and push the search toward failing quickly,
+        // which is not a preference we want to express.
+        reward = -*dead_end_penalty;
+      } else {
+        if (h > 1e10) {
+          h = HEURISTIC_CANNOT_FIND_GOAL_PENALTY;
+        }
+        if (did_need_relaxed_transition)
+          h += 100;
 
-      reward = -node->state.time() - h * heuristic_multiplier + 0 * goal_count_val - accumulated_extra_cost;
+        reward = -node->state.time() - h * heuristic_multiplier + 0 * goal_count_val - accumulated_extra_cost;
+      }
     }
 
     // ---------------- Backpropagation ----------------
@@ -492,11 +503,13 @@ public:
   explicit MCTSPlanner(std::vector<Action> all_actions,
                        double lambda_add = 0.5,
                        double lambda_max = 0.0,
-                       double lambda_ff  = 0.5)
+                       double lambda_ff  = 0.5,
+                       std::optional<double> dead_end_penalty = std::nullopt)
       : all_actions_(std::move(all_actions)),
         lambda_add_(lambda_add),
         lambda_max_(lambda_max),
-        lambda_ff_(lambda_ff) {}
+        lambda_ff_(lambda_ff),
+        dead_end_penalty_(dead_end_penalty) {}
 
   // Call operator: planner(initial_state, goal) → string
   std::string operator()(const State &root_state,
@@ -508,7 +521,7 @@ public:
     return mcts(root_state, all_actions_, goal.get(), &ff_memory_,
                 max_iterations, max_depth, c, heuristic_multiplier,
                 &last_mcts_tree_trace_,
-                lambda_add_, lambda_max_, lambda_ff_);
+                lambda_add_, lambda_max_, lambda_ff_, dead_end_penalty_);
   }
 
   void clear_cache() { ff_memory_.clear(); }
@@ -517,6 +530,7 @@ public:
   double lambda_add() const { return lambda_add_; }
   double lambda_max() const { return lambda_max_; }
   double lambda_ff()  const { return lambda_ff_; }
+  std::optional<double> dead_end_penalty() const { return dead_end_penalty_; }
 
   // Get the tree trace from the most recent MCTS planning call
   const std::string& get_trace_from_last_mcts_tree() const {
@@ -530,6 +544,7 @@ private:
   double lambda_add_;
   double lambda_max_;
   double lambda_ff_;
+  std::optional<double> dead_end_penalty_;
 };
 
 } // namespace railroad

@@ -495,6 +495,12 @@ PYBIND11_MODULE(_bindings, m) {
            "Get all literal fluents in this goal")
       .def("get_dnf_branches", &GoalBase::get_dnf_branches,
            "Get DNF branches: list of fluent sets (OR of ANDs)")
+      .def("dnf_branch_count", &GoalBase::dnf_branch_count,
+           "How many branches get_dnf_branches() would build, computed "
+           "structurally without building any. AND multiplies and OR adds, so "
+           "this grows exponentially in the number of conjoined disjunctions "
+           "-- check it before walking the DNF of a machine-generated goal. "
+           "Saturates rather than overflowing.")
       .def("children", &GoalBase::children,
            "Get children (for AND/OR goals)")
       .def("goal_count", &GoalBase::goal_count, py::arg("fluents"),
@@ -667,15 +673,24 @@ PYBIND11_MODULE(_bindings, m) {
 
 
   py::class_<MCTSPlanner>(m, "MCTSPlanner")
-      .def(py::init<std::vector<Action>, double, double, double>(),
+      .def(py::init<std::vector<Action>, double, double, double,
+                    std::optional<double>>(),
            py::arg("all_actions"),
            py::arg("lambda_add") = 0.5,
            py::arg("lambda_max") = 0.0,
            py::arg("lambda_ff")  = 0.5,
+           py::arg("dead_end_penalty") = py::none(),
            "Construct an MCTSPlanner. The lambda_* weights mix the additive "
            "(h_add), max (h_max), and relaxed-plan-cost (h_ff) heuristic "
            "components used during search; defaults are an even split between "
-           "h_add and h_ff (0.5, 0.0, 0.5).")
+           "h_add and h_ff (0.5, 0.0, 0.5).\n\n"
+           "dead_end_penalty: reward charged for a branch the relaxation "
+           "proves cannot reach the goal (h = inf), as a flat cost -- the "
+           "time and extra_cost the branch already spent are not added, so a "
+           "slow failure is not ranked below a fast one. None (the default) "
+           "keeps the legacy behavior of clamping h to "
+           "HEURISTIC_CANNOT_FIND_GOAL_PENALTY, under which dead ends score "
+           "*better* than reachable states and the search is drawn to them.")
       .def(
           "__call__",
           [](MCTSPlanner &self, const State &s,
@@ -690,6 +705,7 @@ PYBIND11_MODULE(_bindings, m) {
       .def_property_readonly("lambda_add", &MCTSPlanner::lambda_add)
       .def_property_readonly("lambda_max", &MCTSPlanner::lambda_max)
       .def_property_readonly("lambda_ff",  &MCTSPlanner::lambda_ff)
+      .def_property_readonly("dead_end_penalty", &MCTSPlanner::dead_end_penalty)
       .def("get_trace_from_last_mcts_tree", &MCTSPlanner::get_trace_from_last_mcts_tree,
            "Get the tree trace from the most recent MCTS planning call");
 

@@ -1023,3 +1023,123 @@ def test_ff_heuristic_prefers_cheaper_achiever():
     h_cheap_only = ff_heuristic(state, goal, [cheap])
 
     assert h_both == pytest.approx(h_cheap_only)
+
+
+# ============================================================================
+# DNF branch counting and the greedy fallback above the enumeration cap
+# ============================================================================
+
+
+def _or(*fluents):
+    from railroad.core import LiteralGoal, OrGoal
+    return OrGoal([LiteralGoal(f) for f in fluents])
+
+
+def test_dnf_branch_count_matches_enumeration_on_small_goals():
+    """The structural count must agree with actually building the DNF."""
+    from railroad.core import AndGoal, LiteralGoal, OrGoal
+    from railroad._bindings import FalseGoal, TrueGoal
+
+    cases = [
+        LiteralGoal(F("a")),
+        TrueGoal(),
+        AndGoal([LiteralGoal(F("a")), LiteralGoal(F("b"))]),
+        _or(F("a"), F("b")),
+        AndGoal([_or(F("a"), F("b")), _or(F("c"), F("d"))]),
+        AndGoal([_or(F("a"), F("b")), LiteralGoal(F("c")), _or(F("d"), F("e"), F("g"))]),
+        OrGoal([AndGoal([LiteralGoal(F("a")), _or(F("b"), F("c"))]), LiteralGoal(F("d"))]),
+    ]
+    for goal in cases:
+        assert goal.dnf_branch_count() == len(goal.get_dnf_branches()), goal
+    # FalseGoal is unsatisfiable: zero branches, and it annihilates a product.
+    assert FalseGoal().dnf_branch_count() == 0
+    assert AndGoal([LiteralGoal(F("a")), FalseGoal()]).dnf_branch_count() == 0
+
+
+def test_dnf_branch_count_is_exponential_but_cheap():
+    """The count must be computable for goals the DNF cannot represent.
+
+    This is the boxworld shape: forall over objects of an exists over
+    locations. Materialising it exhausts memory, so nothing may call
+    get_dnf_branches() here -- only the structural count.
+    """
+    from railroad.core import AndGoal
+
+    goal = AndGoal([_or(*[F(f"at obj{i} loc{j}") for j in range(5)])
+                    for i in range(10)])
+    assert goal.dnf_branch_count() == 5 ** 10 == 9_765_625
+
+
+def _switch_domain(n_items, n_slots):
+    """`n_items` items, each placeable in any of `n_slots` slots (one action
+    per pair). Goal: every item somewhere -> AndGoal of OrGoals, so the DNF is
+    n_slots ** n_items."""
+    from railroad.core import AndGoal, Effect, Operator
+
+    place = Operator(
+        name="place",
+        parameters=[("?r", "robot"), ("?i", "item"), ("?s", "slot")],
+        preconditions=[F("free ?r"), F("held ?i")],
+        effects=[
+            Effect(time=0, resulting_fluents={~F("free ?r")}),
+            Effect(time=1.0, resulting_fluents={F("in ?i ?s"), F("free ?r")}),
+        ],
+    )
+    objects = {
+        "robot": {"r1"},
+        "item": {f"i{k}" for k in range(n_items)},
+        "slot": {f"s{k}" for k in range(n_slots)},
+    }
+    actions = place.instantiate(objects)
+    state = State(0.0, {F("free r1")} | {F(f"held i{k}") for k in range(n_items)}, [])
+    goal = AndGoal([_or(*[F(f"in i{k} s{j}") for j in range(n_slots)])
+                    for k in range(n_items)])
+    return actions, state, goal
+
+
+def test_greedy_branch_selection_agrees_with_enumeration_below_the_cap():
+    """Small enough to enumerate: the two paths must give the same value.
+
+    Disjuncts here are literal-disjoint, which is the case where greedy
+    selection provably matches the exhaustive minimum.
+    """
+    actions, state, goal = _switch_domain(n_items=2, n_slots=3)
+    assert goal.dnf_branch_count() == 9  # enumerated path
+    assert ff_heuristic(state, goal, actions) == pytest.approx(2.0)
+
+
+def test_heuristic_survives_a_goal_whose_dnf_cannot_be_built():
+    """The regression this whole mechanism exists for.
+
+    10 items x 5 slots is 9.7M DNF branches. Before the cap, evaluating this
+    allocated until the machine swapped; it must now be cheap and finite, and
+    agree with the small-goal answer (one placement per item).
+    """
+    actions, state, goal = _switch_domain(n_items=10, n_slots=5)
+    assert goal.dnf_branch_count() == 5 ** 10
+    assert ff_heuristic(state, goal, actions) == pytest.approx(10.0)
+
+
+def test_greedy_selection_reports_unreachable_goals_as_infinite():
+    """Unreachability must stay exact above the cap.
+
+    An OrGoal with one reachable disjunct is reachable; one with none makes
+    the whole conjunction unreachable.
+    """
+    from railroad.core import AndGoal
+
+    actions, state, _ = _switch_domain(n_items=10, n_slots=5)
+
+    # Every item has a reachable slot, plus an unreachable decoy disjunct.
+    ok = AndGoal([_or(F(f"in i{k} nowhere"), *[F(f"in i{k} s{j}") for j in range(5)])
+                  for k in range(10)])
+    assert ok.dnf_branch_count() == 6 ** 10
+    assert ff_heuristic(state, ok, actions) == pytest.approx(10.0)
+
+    # One item can only go somewhere unreachable -> whole goal unreachable.
+    bad = AndGoal(
+        [_or(*[F(f"in i{k} s{j}") for j in range(5)]) for k in range(9)]
+        + [_or(F("in i9 nowhere"), F("in i9 alsonowhere"))]
+    )
+    assert bad.dnf_branch_count() == 5 ** 9 * 2
+    assert ff_heuristic(state, bad, actions) == float("inf")

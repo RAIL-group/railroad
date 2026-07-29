@@ -320,7 +320,6 @@ def get_action_by_name(actions: List[Action], name: str) -> Action:
 
 # ============================================================================
 #  Grounding with static-precondition pruning
-#  (design: docs/design/static-grounding.md)
 # ============================================================================
 
 
@@ -354,7 +353,17 @@ def dynamic_predicates(operators: Sequence[Operator]) -> Set[str]:
 
 
 class GroundingStats:
-    """Enumeration counters from one ground_operators() call."""
+    """Enumeration counters from one ground_operators() call.
+
+    ``nominal_bindings`` and ``visited_bindings`` count *different things* and
+    are not a pruning ratio: nominal is the number of complete binding tuples
+    (the product of the parameter domain sizes), while visited counts every
+    partial-binding node the backtracking search touches, at every depth. For
+    a shallow operator, visiting the first parameter's domain once already
+    costs |D| visits toward a nominal of |D|**k, so ``visited > nominal`` is
+    normal and does not mean pruning failed. The two become comparable only
+    for operators deep enough that the leaf level dominates the count.
+    """
 
     __slots__ = ("nominal_bindings", "visited_bindings", "actions_kept")
 

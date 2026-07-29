@@ -247,17 +247,19 @@ bench_conditional_effects_briefcase.add_cases([
 
 @dataclass(frozen=True)
 class _PDDLVariant:
-    planner: str
     domain: str
     problem: str
     expected_cost: Optional[float]
+    # Flat cost charged for a branch the relaxation proves cannot reach the
+    # goal. None keeps MCTS's default clamp, under which dead ends look
+    # goal-adjacent; variants that hinge on avoiding one must set it.
+    dead_end_penalty: Optional[float] = None
 
 
 _PDDL_VARIANTS: Dict[str, _PDDLVariant] = {
     # :action-costs -> durations; minimize (total-cost). Optimal cost is
     # pick (1) + move (5) + drop (1) = 7.
     "action-costs": _PDDLVariant(
-        planner="mcts",
         domain="""
             (define (domain gripper-costs)
               (:requirements :strips :typing :action-costs)
@@ -296,7 +298,6 @@ _PDDL_VARIANTS: Dict[str, _PDDLVariant] = {
     ),
     # PPDDL probabilistic effects: pickup may slip (70% success).
     "probabilistic": _PDDLVariant(
-        planner="mcts",
         domain="""
             (define (domain slippery-blocks)
               (:requirements :strips :probabilistic-effects)
@@ -328,7 +329,6 @@ _PDDL_VARIANTS: Dict[str, _PDDLVariant] = {
     # blocker across IPC/IPPC domains. The converter expands the forall over
     # the passengers and attaches one conditional branch each.
     "forall-when": _PDDLVariant(
-        planner="mcts",
         domain="""
             (define (domain mini-miconic)
               (:requirements :strips :typing :conditional-effects)
@@ -366,14 +366,13 @@ _PDDL_VARIANTS: Dict[str, _PDDLVariant] = {
         # move back, stop f1 (serve p2).
         expected_cost=5.0,
     ),
-    # Conditional effects: dropping breaks exactly the fragile items.
-    # Dropping the unpadded vase is an irreversible mistake (the goal needs
-    # it unbroken). The greedy planner avoids it because the FF heuristic
-    # returns h=inf for the broken state; MCTS currently clamps h=inf to
-    # HEURISTIC_CANNOT_FIND_GOAL_PENALTY=0, which makes dead ends look
-    # attractive, so it is the wrong tool for this variant.
+    # Conditional effects gating an *irreversible* mistake: dropping the
+    # unpadded vase breaks it, and the goal needs it unbroken. The relaxation
+    # does flag the broken state (h = inf), but MCTS's default clamp turns
+    # that into the best available reward and walks straight into it -- so
+    # this variant only works with an explicit dead_end_penalty, which is
+    # exactly the behavior it exists to demonstrate.
     "conditional-effects": _PDDLVariant(
-        planner="greedy",
         domain="""
             (define (domain fragile-delivery)
               (:requirements :strips :conditional-effects)
@@ -400,6 +399,7 @@ _PDDL_VARIANTS: Dict[str, _PDDLVariant] = {
         """,
         # pad vase, drop-off vase, drop-off brick (order-insensitive).
         expected_cost=3.0,
+        dead_end_penalty=1e4,
     ),
 }
 
@@ -421,7 +421,8 @@ def bench_pddl_converter_features(case: BenchmarkCase):
 
     start_time = time.perf_counter()
     result = pc.solve(
-        problem, seed=case.seed, max_iterations=2000, planner=variant.planner
+        problem, seed=case.seed, max_iterations=2000,
+        dead_end_penalty=variant.dead_end_penalty,
     )
     wall_time = time.perf_counter() - start_time
 

@@ -64,8 +64,9 @@ def test_solve_reports_no_grounded_actions():
     assert result.failure_reason == "no grounded actions"
 
 
-def test_solve_reports_dead_end_when_goal_is_unachievable():
-    """Greedy reports the dead end rather than burning every step on it."""
+
+def test_solve_gives_up_when_the_goal_is_unachievable():
+    """An unreachable goal ends the run instead of erroring out."""
     from railroad.pddl_converter import convert_texts
 
     domain = """
@@ -78,32 +79,24 @@ def test_solve_reports_dead_end_when_goal_is_unachievable():
     """
     problem = convert_texts(domain, problem_text)
     assert problem.ground_actions()  # `idle` exists; it just cannot help
-    result = solve(problem, seed=0, planner="greedy", max_steps=5)
+    result = solve(problem, seed=0, max_steps=5, max_iterations=200)
     assert not result.success
-    assert "infinite heuristic" in (result.failure_reason or "")
+    assert result.failure_reason
 
 
-def test_greedy_planner_solves_blocks():
-    problem = load_problem(DATA / "blocks-domain.pddl", DATA / "blocks-instance.pddl")
-    result = solve(problem, seed=0, planner="greedy")
-    assert result.success
-    assert len(result.plan) >= 6
+def test_negated_goal_literals_reach_the_heuristic():
+    """Negated goal literals must be compiled to `not-*` before evaluation.
 
-
-def test_unknown_planner_rejected():
-    problem = load_problem(DATA / "blocks-domain.pddl", DATA / "blocks-instance.pddl")
-    with pytest.raises(ValueError):
-        solve(problem, planner="astar")
-
-
-def test_greedy_planner_handles_negative_goal():
-    """Greedy heuristic evaluation must preprocess negated goal literals.
-
-    Without the not-* rewriting the FF heuristic returns inf everywhere and
-    greedy picks arbitrarily — here walking into the irreversible mistake of
-    dropping the fragile vase unpadded.
+    Without that rewriting the FF heuristic cannot tell an irreversibly
+    broken state from an intact one, and every state scores alike. This pins
+    the preprocessing at the heuristic level, independent of which planner
+    consumes it -- MCTS itself clamps h = inf to
+    HEURISTIC_CANNOT_FIND_GOAL_PENALTY, so it cannot act on the distinction
+    (see the converter README's planner notes).
     """
+    from railroad.core import get_action_by_name, transition
     from railroad.pddl_converter import convert_texts
+    from railroad.planner import MCTSPlanner
 
     domain = """
     (define (domain fragile) (:requirements :strips :conditional-effects)
@@ -120,6 +113,13 @@ def test_greedy_planner_handles_negative_goal():
       (:goal (and (delivered vase) (not (broken vase)))))
     """
     problem = convert_texts(domain, problem_text)
-    result = solve(problem, seed=0, planner="greedy")
-    assert result.success
-    assert result.plan == ["pad vase", "drop-off vase"]
+    actions = problem.ground_actions()
+    planner = MCTSPlanner(actions)
+
+    intact = problem.initial_state
+    assert planner.heuristic(intact, problem.goal) < float("inf")
+
+    # Dropping the unpadded vase breaks it, and nothing can un-break it.
+    broken, _ = transition(intact, get_action_by_name(actions, "drop-off vase"))[0]
+    assert any(str(f) == "(broken vase)" for f in broken.fluents)
+    assert planner.heuristic(broken, problem.goal) == float("inf")

@@ -157,6 +157,126 @@ inline const std::vector<std::unordered_set<Fluent>>& extract_or_branches(const 
   return goal->get_dnf_branches();
 }
 
+// Above this many DNF branches, ff_heuristic stops enumerating them and picks
+// one greedily instead (see select_cheapest_branch). The DNF is a *product*
+// over conjoined disjunctions, so this is not a slow path being avoided --
+// past a few thousand branches, materialising them exhausts memory and takes
+// the machine down. Below the cap nothing changes: the exhaustive minimum
+// remains the contract wherever it is affordable.
+inline constexpr std::size_t MAX_ENUMERATED_DNF_BRANCHES = 1024;
+
+// Greedily choose one conjunctive goal set from a goal tree, without building
+// the DNF: at each OR, keep whichever disjunct has the lowest summed
+// optimistic cost; at each AND, take the union of its children.
+//
+// Returns false when the goal is unreachable in the relaxed planning graph.
+// That verdict is *exact*, matching what enumerating every branch would say:
+// the exhaustive minimum is infinite iff every branch contains an unreachable
+// literal, and since the choices at each OR are independent, that holds iff
+// some OR has all of its disjuncts unreachable -- otherwise picking a
+// reachable disjunct at every OR yields a reachable branch. The reachability
+// test (known_fluents) is the same one ff_backward_optimistic applies.
+//
+// Only the *selection* is greedy. Whatever conjunction comes out is then fed
+// to the ordinary backward pass, so h_ff and the probabilistic delta are
+// still computed over the union of the chosen literals -- with shared actions
+// counted once, which is precisely what a per-disjunct decomposition of the
+// cost would get wrong.
+inline bool select_cheapest_branch(const GoalBase* goal,
+                                   const FFForwardResult& forward,
+                                   std::unordered_set<Fluent>& out) {
+  if (!goal) return false;
+
+  auto literal_cost = [&forward](const std::unordered_set<Fluent>& fluents) {
+    double total = 0.0;
+    for (const auto& f : fluents) {
+      auto it = forward.optimistic_cost.find(f);
+      if (it == forward.optimistic_cost.end())
+        return std::numeric_limits<double>::infinity();
+      total += it->second;
+    }
+    return total;
+  };
+
+  switch (goal->get_type()) {
+    case GoalType::TRUE_GOAL:
+      return true;  // contributes no requirements
+    case GoalType::FALSE_GOAL:
+      return false;
+    case GoalType::LITERAL: {
+      const auto& lits = goal->get_all_literals();
+      for (const auto& f : lits) {
+        if (!forward.known_fluents.count(f)) return false;
+      }
+      out.insert(lits.begin(), lits.end());
+      return true;
+    }
+    case GoalType::AND: {
+      for (const auto& child : goal->children()) {
+        if (!select_cheapest_branch(child.get(), forward, out)) return false;
+      }
+      return true;
+    }
+    case GoalType::OR: {
+      std::unordered_set<Fluent> best;
+      double best_cost = std::numeric_limits<double>::infinity();
+      bool found = false;
+      for (const auto& child : goal->children()) {
+        std::unordered_set<Fluent> candidate;
+        if (!select_cheapest_branch(child.get(), forward, candidate)) continue;
+        double cost = literal_cost(candidate);
+        if (!found || cost < best_cost) {
+          best = std::move(candidate);
+          best_cost = cost;
+          found = true;
+        }
+      }
+      if (!found) return false;  // every disjunct unreachable
+      out.insert(best.begin(), best.end());
+      return true;
+    }
+  }
+  return false;
+}
+
+// The branches a heuristic pass should walk: the full DNF while that is
+// affordable, otherwise the single greedily-chosen conjunction. Points at the
+// goal's cached DNF in the common case, so the small path copies nothing.
+//
+// Above the cap, callers that take a *minimum* over branches (ff_heuristic)
+// get an upper bound on the true minimum, and callers that take a *union*
+// over branches (the introspection helpers) get a subset of the true union.
+// Both are degradations that only apply to goals which are otherwise
+// impossible to evaluate at all.
+class BranchView {
+public:
+  BranchView(const GoalBase* goal, const FFForwardResult& forward) {
+    if (!goal) { source_ = &empty(); return; }
+    if (goal->dnf_branch_count() <= MAX_ENUMERATED_DNF_BRANCHES) {
+      source_ = &goal->get_dnf_branches();
+      return;
+    }
+    std::unordered_set<Fluent> chosen;
+    if (select_cheapest_branch(goal, forward, chosen)) {
+      storage_.push_back(std::move(chosen));
+    }
+    source_ = &storage_;
+  }
+
+  BranchView(const BranchView&) = delete;
+  BranchView& operator=(const BranchView&) = delete;
+
+  const std::vector<std::unordered_set<Fluent>>& get() const { return *source_; }
+
+private:
+  static const std::vector<std::unordered_set<Fluent>>& empty() {
+    static const std::vector<std::unordered_set<Fluent>> value;
+    return value;
+  }
+  std::vector<std::unordered_set<Fluent>> storage_;
+  const std::vector<std::unordered_set<Fluent>>* source_ = nullptr;
+};
+
 // For each probabilistic fluent on the relaxed path to `goal`, return its
 // achievers as (action_name, probability, exec_cost, wait_cost). "On the path"
 // means the fluent appears in the backward extraction (on_path) of some DNF
@@ -182,9 +302,11 @@ get_probabilistic_path_achievers(const State &input_state,
   auto forward = ff_forward_phase(initial_fluents, all_actions);
   compute_optimistic_costs(forward);
 
-  // Union of on-path fluents across DNF branches.
+  // Union of on-path fluents across DNF branches (a subset of that union
+  // above the enumeration cap; see BranchView).
   std::unordered_set<Fluent> on_path;
-  for (const auto& branch : extract_or_branches(goal)) {
+  BranchView branch_view(goal, forward);
+  for (const auto& branch : branch_view.get()) {
     auto opt = ff_backward_optimistic(forward, branch, at_implies_found);
     if (opt.h_add == std::numeric_limits<double>::infinity()) continue;  // unreachable branch
     on_path.insert(opt.on_path.begin(), opt.on_path.end());
@@ -226,7 +348,8 @@ inline std::vector<std::string> get_goal_relevant_action_names(
   auto forward = ff_forward_phase(initial_fluents, all_actions);
 
   std::unordered_set<const Action*> keep;
-  for (const auto& branch : extract_or_branches(goal)) {
+  BranchView branch_view(goal, forward);
+  for (const auto& branch : branch_view.get()) {
     auto branch_keep = goal_relevant_actions(forward, branch, at_implies_found);
     keep.insert(branch_keep.begin(), branch_keep.end());
   }
@@ -341,7 +464,11 @@ inline double ff_heuristic(const State &input_state,
   auto forward = ff_forward_phase(initial_fluents, all_actions);
   compute_optimistic_costs(forward);
 
-  auto branches = extract_or_branches(goal);
+  // The DNF is a product over conjoined disjunctions; walk it only while that
+  // is affordable (see BranchView -- the alternative above the cap is not a
+  // slow heuristic but an out-of-memory abort).
+  BranchView branch_view(goal, forward);
+  const auto& branches = branch_view.get();
   if (branches.empty()) {
     return std::numeric_limits<double>::infinity();  // FalseGoal-like
   }

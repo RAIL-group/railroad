@@ -14,7 +14,7 @@ uv run railroad pddl check ippc-2008 --markdown
 
 # Convert + solve one instance
 uv run railroad pddl run --collection ipc-2000 --domain blocks-strips-typed --instance 1
-uv run railroad pddl run --collection ippc-2006 --domain blocksworld --instance 1 --planner greedy
+uv run railroad pddl run --collection ippc-2006 --domain blocksworld --instance 1
 uv run railroad pddl run --domain-file dom.pddl --problem-file prob.pddl
 ```
 
@@ -23,7 +23,7 @@ from railroad import pddl_converter as pc
 
 fetched = pc.fetch_domain("ipc-2000", "logistics-strips-typed", max_instances=1)
 problem = pc.load_problem(fetched.domain_for(fetched.instances[0]), fetched.instances[0])
-result = pc.solve(problem, seed=0)          # planner="mcts" (default) or "greedy"
+result = pc.solve(problem, seed=0)          # replans with MCTSPlanner each step
 print(result.success, result.plan, result.sim_time)
 ```
 
@@ -72,7 +72,7 @@ Grounding notes:
   ever touches are checked against `:init` as soon as their variables are
   bound). This keeps large domains tractable — e.g. IPC-2000 freecell grounds
   to ~34k actions instead of a combinatorial blowup.
-- **Static material is compiled away** (see `docs/design/static-grounding.md`):
+- **Static material is compiled away** (see `railroad.core.ground_operators`):
   verified static preconditions are stripped from grounded actions, static
   conjuncts of `when` conditions are evaluated per grounding, and static
   facts nothing references at runtime (only goal-referenced ones survive)
@@ -144,46 +144,73 @@ status and compares it here. It needs the GitHub API, so it is gated:
 
 ```bash
 RAILROAD_PDDL_NETWORK_TESTS=1 uv run pytest -q -k ipc_sweep
-RAILROAD_PDDL_NETWORK_TESTS=1 uv run pytest -q -k ipc_solves -m slow
 ```
+
+The sweep checks *conversion* only. Whether a planner reaches the goal on a
+given instance is a planner property and is deliberately not pinned here —
+see the planner notes below for what is known, and the
+`pddl_converter_features` benchmark for optional end-to-end demos.
 
 A full sweep needs ~130 API calls against the 60/hour anonymous limit, so set
 `GITHUB_TOKEN` or let the (permanent) cache fill over several runs; an
 incomplete run skips rather than reporting a green tick it did not earn.
 
-**ipc-2000 — 11/12 domains convert**
+### Methodology for the solve columns
 
-| Domain | Status | Notes |
-|---|---|---|
-| blocks-strips-{typed,untyped} | ok | 40 actions; solved optimally |
-| elevator-strips-simple-{typed,untyped} | ok | |
-| elevator-adl-simple-typed | ok | forall+when boarding; instance 1 solved optimally |
-| schedule-adl-{typed,untyped} | ok | conditional effects with equality conditions |
-| freecell-strips-{typed,untyped} | ok | 8.4k/34k actions |
-| logistics-strips-{typed,untyped} | ok | instance 1 solved in 21 steps |
-| elevator-adl-full-typed | unsupported | imply-conditions |
+`solve()` on the **first instance** of each domain, seeds 0-2, 4000 MCTS
+iterations, at most 300 steps. `default` is the shipped configuration;
+`penalty` adds `dead_end_penalty=1e4`. Re-measured 2026-07-29.
 
-**ippc-2006 (PPDDL) — 9/10 domains convert**
+Solve rates are **not** part of the checked contract — `test_ipc_sweep.py`
+verifies conversion only. They are recorded because "converts" and "is
+usable" are different claims and the difference is worth knowing.
 
-| Domain | Status | Notes |
-|---|---|---|
-| blocksworld | ok | solved 5/5 seeds with `--planner greedy` |
-| drive-unrolled, elevators, pitchcatch, random, schedule, zenotravel | ok | conditional effects (some with equality conditions) |
-| ex-blocksworld | ok | converts + executes correctly; solving blocked by dead ends (detonations) |
-| tireworld | ok | converts, but unsolved: dead ends (see below) |
-| drive | unsupported | disjunctive-preconditions |
+A 10x budget (40,000 iterations) was also measured and **moved no domain in
+either direction**: every failure below is a heuristic or dead-end problem,
+not a search-effort one. The one thing it improved was plan *quality* —
+logistics finds 20 steps instead of 21.
 
-**ippc-2008 (PPDDL) — 5/10 domains convert**
+**ipc-2000 — 11/12 convert, 11/11 solved**
 
-| Domain | Status | Notes |
-|---|---|---|
-| blocksworld | ok | bundled domain+problem files |
-| boxworld, ex-blocksworld, schedule | ok | conditional effects |
-| triangle-tireworld | ok | instance 1 solved |
-| search-and-rescue | unsupported | imply-conditions |
-| rectangle-tireworld, zenotravel | unsupported | numeric-effects |
-| sysAdmin-SLP | unsupported | rewards |
-| 2-tireworlds | parse-error | source repo ships no domain file for it |
+| Domain | Actions | default | penalty | Notes |
+|---|---:|---|---|---|
+| blocks-strips-{typed,untyped} | 40 | 3/3 | 3/3 | 6 steps (optimal) |
+| elevator-adl-simple-typed | 4 | 3/3 | 3/3 | 4 steps; forall+when boarding |
+| elevator-strips-simple-{typed,untyped} | 4 | 3/3 | 3/3 | 4 steps |
+| freecell-strips-typed | 8408 | 3/3 | 3/3 | 9 steps |
+| freecell-strips-untyped | 34436 | 3/3 | 3/3 | 9 steps |
+| logistics-strips-{typed,untyped} | 164 | 3/3 | 3/3 | 21 steps (20 at 40k iterations) |
+| schedule-adl-{typed,untyped} | 49 | 3/3 | 3/3 | 2 steps; equality conditions |
+| elevator-adl-full-typed | — | — | — | unsupported: imply-conditions |
+
+**ippc-2006 (PPDDL) — 9/10 convert, 5/9 solved**
+
+| Domain | Actions | default | penalty | Notes |
+|---|---:|---|---|---|
+| blocksworld | 330 | 3/3 | 3/3 | 18-42 steps; MCTS wanders |
+| elevators | 74 | 3/3 | 3/3 | 13 steps |
+| schedule | 11 | 3/3 | 3/3 | 3-81 steps |
+| zenotravel | 740 | 3/3 | 3/3 | **goal already true at t=0** — proves nothing |
+| drive-unrolled | 44 | 2/3 | 2/3 | 6 steps; one seed hits the 300-step ceiling |
+| ex-blocksworld | 60 | 0/3 | 0/3 | dead ends (detonations) |
+| pitchcatch | 6 | 0/3 | 0/3 | 300-step ceiling |
+| tireworld | 62 | 0/3 | 0/3 | dead ends |
+| random | 2302 | — | — | not measured: >1200 s |
+| drive | — | — | — | unsupported: disjunctive-preconditions |
+
+**ippc-2008 (PPDDL) — 5/10 convert, 3/5 solved**
+
+| Domain | Actions | default | penalty | Notes |
+|---|---:|---|---|---|
+| schedule | 14 | 3/3 | 3/3 | 3-81 steps |
+| triangle-tireworld | 18 | 1/3 | **3/3** | penalty converts it |
+| ex-blocksworld | 60 | 0/3 | **2/3** | penalty converts it |
+| blocksworld | 305 | 0/3 | 0/3 | 300-step ceiling; bundled domain+problem |
+| boxworld | 750 | — | — | not measured: >1200 s. Its goal has 9.7M DNF branches (see planner notes) |
+| 2-tireworlds | — | — | — | parse-error: source repo ships no domain file |
+| rectangle-tireworld, zenotravel | — | — | — | unsupported: numeric-effects |
+| search-and-rescue | — | — | — | unsupported: imply-conditions |
+| sysAdmin-SLP | — | — | — | unsupported: rewards |
 
 Later deterministic years (spot-checked): `:action-costs` domains convert —
 e.g. ipc-2011 `elevator-sequential-optimal` grounds to 1793 actions with
@@ -191,22 +218,52 @@ function-valued costs mapped to durations.
 
 ## Planner notes
 
-- `solve(..., planner="mcts")` replans with `MCTSPlanner` each step;
-  `planner="greedy"` picks the applicable action minimizing the expected
-  (time + FF heuristic) over the outcome distribution. Greedy is much more
-  robust on IPPC domains full of degenerate-but-legal actions (e.g.
-  probabilistic blocksworld), while MCTS gives better plans on deterministic
-  domains.
-- **Dead ends are not avoided by MCTS.** Two separate reasons: (a) the FF
-  heuristic is a delete-relaxation, so it cannot see that driving without a
-  spare risks an unrecoverable flat (ippc-2006 tireworld); (b) even when the
-  relaxation *does* flag a state as hopeless (h = inf, e.g. after breaking
-  an object a negated goal needs intact), MCTS currently clamps that to
+- `solve()` replans with `MCTSPlanner` at every step, applying the chosen
+  action to a sampled successor. It is the only planner this package uses;
+  action selection is deliberately not a knob here, because the point of the
+  converter is to validate the *conversion*, not to benchmark planners.
+- **Dead ends are not avoided.** Two separate reasons: (a) the FF heuristic
+  is a delete-relaxation, so it cannot see that driving without a spare risks
+  an unrecoverable flat (ippc-2006 tireworld); (b) even when the relaxation
+  *does* flag a state as hopeless (h = inf, e.g. after breaking an object a
+  negated goal needs intact), MCTS clamps that to
   `HEURISTIC_CANNOT_FIND_GOAL_PENALTY = 0`, which makes such states look
-  goal-adjacent. Raising the penalty perturbs multi-robot search-ordering
-  behavior, so it stays 0 for now; dead-end-aware planning is future planner
-  work. The `greedy` planner uses the unclamped heuristic and does steer
-  around type-(b) dead ends (see the `fragile-delivery` feature benchmark).
+  goal-adjacent — the clamped value is the *best* available reward, so the
+  search is actively drawn to them.
+
+  `solve(..., dead_end_penalty=...)` / `MCTSPlanner(dead_end_penalty=...)`
+  replaces that clamp with a **flat** failure cost: the branch's elapsed time
+  and accumulated `extra_cost` are *not* added, so a doomed branch is worth
+  exactly `-penalty` however long it took to fail, and failing slowly is not
+  ranked below failing fast.
+
+  It fixes class (b), and only nibbles at (a) — as expected, since (a) is the
+  relaxation being blind rather than the reward being wrong. In the tables
+  above it converts ippc-2008 triangle-tireworld (1/3 -> 3/3) and
+  ex-blocksworld (0/3 -> 2/3), and it is what makes the `fragile-delivery`
+  feature benchmark solvable at all (0/3 -> 3/3). It does not rescue the
+  domains whose dead ends the delete-relaxation cannot see (ippc-2006
+  tireworld, ex-blocksworld).
+
+  It stays opt-in (default `None`) because it also perturbs multi-robot
+  search-ordering ties (`test_mcts_search_picks_more_likely_location`,
+  `test_procthor_object_search_replay_end_to_end`); making it the default is
+  planner work, tracked separately from the converter.
+- **The solve rates above are not domain limits.** They come from a fixed,
+  fairly small budget (4000 iterations, `c=100`, unchanged exploration
+  parameters). Raising the iteration count or tuning exploration has not been
+  explored, so read these as "what the current defaults do", not as evidence
+  about what the domains require.
+- **Disjunctive goals and the heuristic**: `(forall ?x (exists ?y ...))` goals
+  compile to an `AndGoal` of `OrGoal`s, whose DNF is a *product* — ippc-2008
+  boxworld (10 boxes, 5 cities) is 5^10 = 9.7M branches. The FF heuristic used
+  to materialise and walk all of them, which exhausted memory rather than
+  merely being slow. It now checks `Goal.dnf_branch_count()` first and, above
+  1024 branches, picks one conjunction greedily (cheapest disjunct per `OR` by
+  optimistic cost) and runs the ordinary backward pass on it. Below the cap
+  the exhaustive minimum is unchanged, and every other IPC domain's goal has a
+  DNF of exactly 1 branch. Above it the result is an upper bound on the true
+  minimum; unreachability stays exact.
 - **Conditional effects and the heuristic**: the relaxed-plan heuristic
   optimistically assumes `when` conditions hold (relaxation fires every
   conditional branch), so conditionally-achievable goals get finite h values
