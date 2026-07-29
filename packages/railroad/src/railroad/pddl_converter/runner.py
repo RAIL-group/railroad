@@ -2,11 +2,11 @@
 
 Uses ``MCTSPlanner`` or ``GreedyPlanner`` for action selection and the C++
 ``transition`` function for execution, sampling probabilistic outcomes with a
-seeded RNG. This bypasses the environment layer because converted problems
-carry a pre-grounded action set (``Environment.get_actions`` grounds via
-``Operator.instantiate``, which cannot reproduce the converter's grounding —
-duplicate bindings, static-precondition pruning) and need none of the skill
-machinery.
+seeded RNG. This bypasses the environment layer: converted problems carry a
+pre-grounded action set and need none of the skill machinery. Both paths now
+ground through ``railroad.core.ground_operators``, but
+``Environment.get_actions`` pins ``allow_duplicate_bindings=False`` (the
+legacy all-distinct rule) while PDDL semantics require ``True``.
 """
 
 import random

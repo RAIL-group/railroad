@@ -241,6 +241,49 @@ def _build_type_objects(
     return type_objects
 
 
+def _condition_predicates(node: Optional[ConditionNode], out: Set[str]) -> None:
+    if isinstance(node, Literal):
+        out.add(node.predicate)
+    elif isinstance(node, (And, Or)):
+        for child in node.children:
+            _condition_predicates(child, out)
+    elif isinstance(node, (Forall, Exists)):
+        _condition_predicates(node.body, out)
+    # Equals carries no predicate; None is the empty precondition.
+
+
+def _effect_predicates(node: EffectNode, out: Set[str]) -> None:
+    if isinstance(node, Literal):
+        out.add(node.predicate)
+    elif isinstance(node, EffectAnd):
+        for child in node.children:
+            _effect_predicates(child, out)
+    elif isinstance(node, EffectForall):
+        _effect_predicates(node.body, out)
+    elif isinstance(node, Probabilistic):
+        for _, branch in node.branches:
+            _effect_predicates(branch, out)
+    elif isinstance(node, When):
+        _condition_predicates(node.condition, out)
+        _effect_predicates(node.effect, out)
+    # Increase names a function, not a predicate.
+
+
+def _all_predicate_names(domain: PDDLDomain) -> Set[str]:
+    """Every predicate the domain mentions, declared or not.
+
+    ``(:predicates ...)`` is conventional but not enforced by the parser, and
+    renaming keys on this set — a domain that omits the section would
+    otherwise keep a reserved name like ``free`` unrenamed and hand it to the
+    core's concurrency machinery.
+    """
+    names: Set[str] = set(domain.predicates)
+    for action in domain.actions:
+        _condition_predicates(action.precondition, names)
+        _effect_predicates(action.effect, names)
+    return names
+
+
 def _build_predicate_renaming(domain: PDDLDomain) -> Dict[str, str]:
     """Rename predicates that collide with railroad-reserved fluent names.
 
@@ -252,15 +295,14 @@ def _build_predicate_renaming(domain: PDDLDomain) -> Dict[str, str]:
     gripper's ``(free ?gripper)``) means something entirely different, so
     such predicates are renamed with a ``pddl-`` prefix to keep them inert.
     """
+    known = _all_predicate_names(domain)
     rename = {}
-    for pred in domain.predicates:
+    for pred in known:
         if pred in _RESERVED_PREDICATES or pred.startswith("not-"):
             rename[pred] = _RENAME_PREFIX + pred
-    renamed = {rename.get(p, p) for p in domain.predicates}
-    if len(renamed) != len(domain.predicates):
-        collisions = sorted(
-            new for old, new in rename.items() if new in domain.predicates
-        )
+    renamed = {rename.get(p, p) for p in known}
+    if len(renamed) != len(known):
+        collisions = sorted(new for old, new in rename.items() if new in known)
         raise UnsupportedPDDLError(
             "predicate-rename-collision",
             f"renaming reserved predicates collides with existing: {collisions}",
@@ -361,8 +403,14 @@ def _substitute_effect(node: EffectNode, mapping: Dict[str, str]) -> EffectNode:
 
 
 def _quantifier_expansions(
-    variables: TypedVars, type_objects: Dict[str, Set[str]], context: str
+    variables: TypedVars, type_objects: Dict[str, Set[str]]
 ) -> List[Dict[str, str]]:
+    """Every assignment of the quantified variables to objects of their types.
+
+    An empty domain yields no expansions, which is the right reading in each
+    caller: a `forall` over nothing is vacuously true, an `exists` over
+    nothing is false, and a quantified effect over nothing does nothing.
+    """
     domains = []
     for var, typ in variables:
         objs = sorted(type_objects.get(typ, set()))
@@ -413,7 +461,7 @@ def _compile_precondition_into(
             "disjunctive-preconditions", f"(or ...) in {context}"
         )
     elif isinstance(node, Forall):
-        for mapping in _quantifier_expansions(node.variables, type_objects, context):
+        for mapping in _quantifier_expansions(node.variables, type_objects):
             _compile_precondition_into(
                 _substitute_condition(node.body, mapping),
                 type_objects,
@@ -487,7 +535,7 @@ def _compile_effect_into(
         for c in node.children:
             _compile_effect_into(c, type_objects, context, nested_in, out)
     elif isinstance(node, EffectForall):
-        for mapping in _quantifier_expansions(node.variables, type_objects, context):
+        for mapping in _quantifier_expansions(node.variables, type_objects):
             _compile_effect_into(
                 _substitute_effect(node.body, mapping),
                 type_objects,
@@ -564,7 +612,7 @@ def _compile_when_condition(
     if isinstance(node, Forall):
         return [
             lit
-            for mapping in _quantifier_expansions(node.variables, type_objects, context)
+            for mapping in _quantifier_expansions(node.variables, type_objects)
             for lit in _compile_when_condition(
                 _substitute_condition(node.body, mapping), type_objects, context
             )
@@ -701,6 +749,14 @@ def _uses_eq_conditions(effects: Sequence[Effect]) -> bool:
         for _, sub_effects in eff.prob_effects:
             if _uses_eq_conditions(sub_effects):
                 return True
+        # The converter expands `forall` itself and never builds a
+        # ForallEffect, but this walks the public Effect type -- missing the
+        # branch would silently leave (= ...) conditions unseeded.
+        for forall in eff.forall_effects:
+            if any(f.name == EQ_PREDICATE for f in forall.conditions):
+                return True
+            if _uses_eq_conditions(forall.effects):
+                return True
     return False
 
 
@@ -825,7 +881,7 @@ def _compile_goal(
     if isinstance(node, (Forall, Exists)):
         children = [
             _compile_goal(_substitute_condition(node.body, m), type_objects, rename)
-            for m in _quantifier_expansions(node.variables, type_objects, "goal")
+            for m in _quantifier_expansions(node.variables, type_objects)
         ]
         if not children:
             return TrueGoal() if isinstance(node, Forall) else FalseGoal()

@@ -141,3 +141,14 @@ def test_parse_problem_negative_init_ignored():
         "(define (problem p) (:domain d) (:init (a) (not (b))) (:goal (a)))"
     )
     assert problem.init_literals == [Literal("a", ())]
+
+
+def test_negated_compound_effect_reports_its_own_slug():
+    """`(not (and ...))` in an effect is a negated compound, not a fluent.
+
+    It used to reach _parse_atom and surface as `object-fluents`, which sent
+    `pddl check` readers looking for numeric fluents that were not there.
+    """
+    with pytest.raises(UnsupportedPDDLError) as excinfo:
+        parse_domain(_action_with(effect="(not (and (p) (q)))"))
+    assert excinfo.value.reason == "negated-compound-condition"

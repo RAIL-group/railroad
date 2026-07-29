@@ -619,3 +619,87 @@ def test_equality_in_when_condition():
 
     same = _apply(converted, "paint obj red red")
     assert F("painted obj red") in same.fluents  # condition did not fire
+
+
+# ============================================================================
+# Static elimination and the goal
+# ============================================================================
+
+
+def test_goal_over_a_static_predicate_survives_elimination():
+    """Static facts the goal reads stay in the runtime state.
+
+    Grounding compiles static material away, but a goal is a runtime reader
+    the operators say nothing about — hence `runtime_referenced=`. Without it
+    the goal literal would be unsatisfiable in every state.
+    """
+    domain = """
+    (define (domain d) (:requirements :strips)
+      (:predicates (road ?a ?b) (scenic ?a) (at ?a) (visited ?a))
+      (:action drive :parameters (?a ?b)
+               :precondition (and (at ?a) (road ?a ?b))
+               :effect (and (not (at ?a)) (at ?b) (visited ?b))))
+    """
+    problem = """
+    (define (problem p) (:domain d) (:objects l1 l2 l3)
+      (:init (at l1) (road l1 l2) (road l2 l3) (scenic l3))
+      (:goal (and (visited l2) (road l2 l3))))
+    """
+    converted = convert_texts(domain, problem)
+
+    # Both are static and both are stripped from the grounded actions...
+    drive = _get_action(converted, "drive l1 l2")
+    assert not any(f.name == "road" for f in drive.preconditions)
+    # ...but `road` is a goal predicate, so its facts stay in the state
+    # (elimination is per-predicate, not per-ground-fluent).
+    assert F("road l2 l3") in converted.initial_state.fluents
+    # `scenic` is read by nothing at runtime, so it is gone.
+    assert not any(f.name == "scenic" for f in converted.initial_state.fluents)
+
+    assert not converted.goal.evaluate(converted.initial_state.fluents)
+    from railroad.pddl_converter import solve
+    assert solve(converted, seed=0).success
+
+
+def test_reserved_predicates_renamed_without_a_predicates_section():
+    """Renaming keys on predicates used, not only on those declared.
+
+    `(:predicates ...)` is conventional but the parser does not require it;
+    an undeclared `free` left unrenamed would be handed to the core's
+    concurrency machinery as a schedulable agent.
+    """
+    domain = """
+    (define (domain d) (:requirements :strips)
+      (:action use :parameters (?x) :precondition (free ?x)
+               :effect (and (used ?x) (not (free ?x)))))
+    """
+    problem = """
+    (define (problem p) (:domain d) (:objects x1) (:init (free x1)) (:goal (used x1)))
+    """
+    converted = convert_texts(domain, problem)
+    action = _get_action(converted, "use x1")
+    assert F("pddl-free x1") in action.preconditions
+    # The only real `free` is the synthetic agent's.
+    free_fluents = [f for f in converted.initial_state.fluents if f.name == "free"]
+    assert free_fluents == [F(f"free {converted.agent}")]
+
+
+def test_eq_conditions_are_seeded_through_forall_effects():
+    """`_uses_eq_conditions` must see ForallEffect branches too.
+
+    The converter expands `forall` itself, but the helper walks the public
+    Effect type; missing the branch would leave `(= ...)` unseeded and every
+    such condition would silently evaluate false.
+    """
+    from railroad.core import Effect, ForallEffect
+    from railroad.pddl_converter.converter import EQ_PREDICATE, _uses_eq_conditions
+
+    effect = Effect(
+        time=1.0,
+        forall_effects=[ForallEffect(
+            variables=[("?y", "item")],
+            conditions={F(f"{EQ_PREDICATE} ?x ?y")},
+            effects=[Effect(time=0, resulting_fluents={F("marked ?y")})],
+        )],
+    )
+    assert _uses_eq_conditions([effect])

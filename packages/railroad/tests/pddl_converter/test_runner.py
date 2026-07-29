@@ -38,13 +38,49 @@ def test_solve_probabilistic_slippery():
     assert len(result.plan) >= 4
 
 
-def test_solve_reports_unreachable_goal():
-    problem = load_problem(DATA / "blocks-domain.pddl", DATA / "blocks-instance.pddl")
-    # Empty the grounded action set to force failure.
-    problem._actions = []
+def test_solve_reports_no_grounded_actions():
+    """Static pruning can legitimately empty the action set.
+
+    `road` is static and `:init` has no road facts, so every binding of
+    `drive` is pruned at grounding — no private state poking needed.
+    """
+    from railroad.pddl_converter import convert_texts
+
+    domain = """
+    (define (domain d) (:requirements :strips)
+      (:predicates (road ?a ?b) (at ?a))
+      (:action drive :parameters (?a ?b)
+               :precondition (and (at ?a) (road ?a ?b))
+               :effect (and (not (at ?a)) (at ?b))))
+    """
+    problem_text = """
+    (define (problem p) (:domain d) (:objects l1 l2)
+      (:init (at l1)) (:goal (at l2)))
+    """
+    problem = convert_texts(domain, problem_text)
+    assert problem.ground_actions() == []
     result = solve(problem, seed=0)
     assert not result.success
     assert result.failure_reason == "no grounded actions"
+
+
+def test_solve_reports_dead_end_when_goal_is_unachievable():
+    """Greedy reports the dead end rather than burning every step on it."""
+    from railroad.pddl_converter import convert_texts
+
+    domain = """
+    (define (domain d) (:requirements :strips)
+      (:predicates (idled) (unreachable))
+      (:action idle :parameters () :precondition () :effect (idled)))
+    """
+    problem_text = """
+    (define (problem p) (:domain d) (:objects x) (:init) (:goal (unreachable)))
+    """
+    problem = convert_texts(domain, problem_text)
+    assert problem.ground_actions()  # `idle` exists; it just cannot help
+    result = solve(problem, seed=0, planner="greedy", max_steps=5)
+    assert not result.success
+    assert "infinite heuristic" in (result.failure_reason or "")
 
 
 def test_greedy_planner_solves_blocks():
