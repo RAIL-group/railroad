@@ -1,0 +1,5 @@
+(define (problem slippery-2)
+  (:domain slippery-blocks)
+  (:objects b1 b2)
+  (:init (on-table b1) (on-table b2) (hand-empty))
+  (:goal (and (delivered b1) (delivered b2))))

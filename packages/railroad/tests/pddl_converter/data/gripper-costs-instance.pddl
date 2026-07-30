@@ -1,0 +1,12 @@
+(define (problem gripper-costs-1)
+  (:domain gripper-costs)
+  (:objects rooma roomb - room
+            ball1 - ball)
+  (:init (at-robby rooma)
+         (at ball1 rooma)
+         (hand-empty)
+         (= (total-cost) 0)
+         (= (move-cost rooma roomb) 5)
+         (= (move-cost roomb rooma) 5))
+  (:goal (at ball1 roomb))
+  (:metric minimize (total-cost)))

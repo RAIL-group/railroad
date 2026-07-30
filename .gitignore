@@ -18,8 +18,14 @@ wheels/
 
 # Resources
 resources/
-data/
-/uv.lock
+# Anchored: this is the repo-root output directory (test_logs, replay,
+# *_episodes). Unanchored it also matched any nested directory named `data`,
+# which silently swallowed packages/railroad/tests/pddl_converter/data --
+# fixtures the tests need, so they passed locally and failed on CI.
+/data/
+# Every uv.lock, not just the root one: running uv from inside a package
+# directory leaves a stray lockfile there, and we don't track any of them.
+uv.lock
 
 
 # Logging
