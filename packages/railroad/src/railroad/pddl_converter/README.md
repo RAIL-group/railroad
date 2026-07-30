@@ -206,7 +206,7 @@ logistics finds 20 steps instead of 21.
 | triangle-tireworld | 18 | 1/3 | **3/3** | penalty converts it |
 | ex-blocksworld | 60 | 0/3 | **2/3** | penalty converts it |
 | blocksworld | 305 | 0/3 | 0/3 | 300-step ceiling; bundled domain+problem |
-| boxworld | 750 | — | — | not measured: >1200 s. Its goal has 9.7M DNF branches (see planner notes) |
+| boxworld | 750 | 0/3 | 0/3 | reaches the 300-step ceiling having satisfied 0 of 10 goal conjuncts (~64 s/seed) |
 | 2-tireworlds | — | — | — | parse-error: source repo ships no domain file |
 | rectangle-tireworld, zenotravel | — | — | — | unsupported: numeric-effects |
 | search-and-rescue | — | — | — | unsupported: imply-conditions |
@@ -255,15 +255,27 @@ function-valued costs mapped to durations.
   explored, so read these as "what the current defaults do", not as evidence
   about what the domains require.
 - **Disjunctive goals and the heuristic**: `(forall ?x (exists ?y ...))` goals
-  compile to an `AndGoal` of `OrGoal`s, whose DNF is a *product* — ippc-2008
-  boxworld (10 boxes, 5 cities) is 5^10 = 9.7M branches. The FF heuristic used
-  to materialise and walk all of them, which exhausted memory rather than
-  merely being slow. It now checks `Goal.dnf_branch_count()` first and, above
-  1024 branches, picks one conjunction greedily (cheapest disjunct per `OR` by
-  optimistic cost) and runs the ordinary backward pass on it. Below the cap
-  the exhaustive minimum is unchanged, and every other IPC domain's goal has a
-  DNF of exactly 1 branch. Above it the result is an upper bound on the true
-  minimum; unreachability stays exact.
+  compile to an `AndGoal` of `OrGoal`s, whose DNF is a *product*. Two things
+  guard against that.
+
+  First, `core.simplify_static_goal` folds goal literals whose predicate no
+  operator effect touches, using the initial facts. PDDL states "every box to
+  the city that is its destination" as an `exists` gated by a static
+  `destination` predicate, so all but one disjunct per box is unsatisfiable —
+  ippc-2008 boxworld goes from 5^10 = 9.7M branches to **1**, and 10 static
+  facts leave the runtime state (27 initial fluents to 17). This makes the
+  compiled goal specific to its problem's initial state, which is the same
+  contract grounding already applies to static preconditions.
+
+  Second, for a genuinely disjunctive goal, `ff_heuristic` checks
+  `Goal.dnf_branch_count()` and, above 1024 branches, picks one conjunction
+  greedily instead of materialising the DNF (which exhausted memory rather
+  than merely being slow). Each `OR` takes its cheapest disjunct by *marginal*
+  h_add — literals a sibling conjunct already requires cost nothing — and the
+  ordinary backward pass runs on the result. Below the cap the exhaustive
+  minimum is unchanged; above it the result is an upper bound on the true
+  minimum, and unreachability stays exact. After static folding, no IPC domain
+  in the tables above still exceeds the cap.
 - **Conditional effects and the heuristic**: the relaxed-plan heuristic
   optimistically assumes `when` conditions hold (relaxation fires every
   conditional branch), so conditionally-achievable goals get finite h values

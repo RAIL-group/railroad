@@ -1,14 +1,30 @@
 """Tests for ground_operators: static-precondition grounding in core.
 
-Per design doc §7.1, tests here assert behavior (which actions exist, what
-plans do) rather than grounded-action structure, except where structure is
-the subject — those pin the relevant flags explicitly.
+Tests here assert behavior (which actions exist, what plans do) rather than
+grounded-action structure, except where structure is the subject — those pin
+the relevant flags explicitly.
 """
 
 import pytest
 
-from railroad._bindings import Fluent as F, State
-from railroad.core import Effect, Eq, ForallEffect, Neq, Operator, ground_operators
+from railroad._bindings import (
+    AndGoal,
+    Fluent as F,
+    GoalType,
+    LiteralGoal,
+    OrGoal,
+    State,
+)
+from railroad.core import (
+    Effect,
+    Eq,
+    ForallEffect,
+    Neq,
+    Operator,
+    dynamic_predicates,
+    ground_operators,
+    simplify_static_goal,
+)
 
 ROBOTS = {"robot": {"r1"}}
 
@@ -327,3 +343,79 @@ def test_infinite_time_in_a_statically_dropped_branch_keeps_the_action():
     )
     result = ground_operators([op], ROBOTS, {F("free r1")})
     assert {a.name for a in result.actions} == {"risky r1"}
+
+
+# ============================================================================
+# Static-fact simplification of goals
+# ============================================================================
+
+
+def _placer():
+    """One operator, writing only `in ?i ?s`. Every other predicate is static."""
+    return Operator(
+        name="place",
+        parameters=[("?r", "robot"), ("?i", "item"), ("?s", "slot")],
+        preconditions=[F("free ?r")],
+        effects=[Effect(time=1.0, resulting_fluents={F("in ?i ?s")})],
+    )
+
+
+def test_static_goal_literal_that_holds_is_folded_out():
+    dynamic = dynamic_predicates([_placer()])
+    goal = AndGoal([LiteralGoal(F("dest i1 s2")), LiteralGoal(F("in i1 s2"))])
+
+    simplified = simplify_static_goal(goal, {F("dest i1 s2")}, dynamic)
+
+    assert isinstance(simplified, LiteralGoal)
+    assert simplified.fluent() == F("in i1 s2")
+
+
+def test_static_goal_literal_that_fails_makes_the_goal_false():
+    dynamic = dynamic_predicates([_placer()])
+    goal = AndGoal([LiteralGoal(F("dest i1 s3")), LiteralGoal(F("in i1 s3"))])
+
+    simplified = simplify_static_goal(goal, {F("dest i1 s2")}, dynamic)
+
+    assert simplified.get_type() == GoalType.FALSE_GOAL
+
+
+def test_static_gated_exists_collapses_to_one_branch():
+    """The boxworld shape: `exists ?s` gated by a static `dest`, of which
+    exactly one binding holds. The DNF goes from one branch per slot to one."""
+    dynamic = dynamic_predicates([_placer()])
+    goal = OrGoal([
+        AndGoal([LiteralGoal(F(f"dest i1 s{j}")), LiteralGoal(F(f"in i1 s{j}"))])
+        for j in range(5)
+    ])
+    assert goal.dnf_branch_count() == 5
+
+    simplified = simplify_static_goal(goal, {F("dest i1 s2")}, dynamic)
+
+    assert simplified.dnf_branch_count() == 1
+    assert simplified.evaluate({F("in i1 s2")})
+    assert not simplified.evaluate({F("in i1 s0")})
+
+
+def test_negated_static_goal_literals_are_folded_by_absence():
+    dynamic = dynamic_predicates([_placer()])
+    facts = {F("dest i1 s2")}
+
+    # Absent, so ~dest holds and the conjunct drops out.
+    goal = AndGoal([LiteralGoal(~F("dest i1 s3")), LiteralGoal(F("in i1 s1"))])
+    assert simplify_static_goal(goal, facts, dynamic).get_type() == GoalType.LITERAL
+
+    # Present, so ~dest fails and takes the conjunction with it.
+    goal = AndGoal([LiteralGoal(~F("dest i1 s2")), LiteralGoal(F("in i1 s1"))])
+    assert simplify_static_goal(goal, facts, dynamic).get_type() == GoalType.FALSE_GOAL
+
+
+def test_dynamic_goal_literals_are_left_alone():
+    """Absent-but-dynamic is not the same as absent-and-static: `in` is
+    written by an operator, so its absence at t=0 decides nothing."""
+    dynamic = dynamic_predicates([_placer()])
+    goal = OrGoal([LiteralGoal(F("in i1 s0")), LiteralGoal(F("in i1 s1"))])
+
+    simplified = simplify_static_goal(goal, set(), dynamic)
+
+    assert simplified.get_type() == GoalType.OR
+    assert simplified.dnf_branch_count() == 2

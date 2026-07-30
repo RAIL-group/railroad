@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from railroad._bindings import GoalType
 from railroad.core import Fluent as F
 from railroad.pddl_converter import convert_texts, load_problem
 from railroad.pddl_converter.converter import EPSILON_DURATION
@@ -250,10 +251,14 @@ def test_quantified_goal_compiles_to_goal_tree():
 
 
 def test_disjunctive_and_negated_goals():
+    # Both predicates are dynamic, so goal compilation is exercised on its own.
+    # A *static* goal predicate is folded against the initial state instead —
+    # see test_static_goal_literals_are_folded_against_the_initial_state.
     domain = """
     (define (domain d) (:requirements :strips)
       (:predicates (p ?x) (q ?x))
-      (:action do :parameters (?x) :precondition () :effect (p ?x)))
+      (:action do :parameters (?x) :precondition () :effect (p ?x))
+      (:action doq :parameters (?x) :precondition () :effect (q ?x)))
     """
     converted = convert_texts(domain, _minimal_problem(goal="(or (p x1) (q x1))"))
     assert converted.goal.evaluate({F("q x1")})
@@ -626,12 +631,12 @@ def test_equality_in_when_condition():
 # ============================================================================
 
 
-def test_goal_over_a_static_predicate_survives_elimination():
-    """Static facts the goal reads stay in the runtime state.
+def test_static_goal_literals_are_folded_against_the_initial_state():
+    """A static goal literal is decided at compile time, not carried at runtime.
 
-    Grounding compiles static material away, but a goal is a runtime reader
-    the operators say nothing about — hence `runtime_referenced=`. Without it
-    the goal literal would be unsatisfiable in every state.
+    `road` is static, so `(road l2 l3)` can never change truth value. Folding
+    it leaves `(visited l2)` as the whole goal, and the fact no longer has to
+    be kept in the state for the goal to be satisfiable.
     """
     domain = """
     (define (domain d) (:requirements :strips)
@@ -647,18 +652,39 @@ def test_goal_over_a_static_predicate_survives_elimination():
     """
     converted = convert_texts(domain, problem)
 
-    # Both are static and both are stripped from the grounded actions...
+    # Static in the preconditions, so grounding strips it there...
     drive = _get_action(converted, "drive l1 l2")
     assert not any(f.name == "road" for f in drive.preconditions)
-    # ...but `road` is a goal predicate, so its facts stay in the state
-    # (elimination is per-predicate, not per-ground-fluent).
-    assert F("road l2 l3") in converted.initial_state.fluents
-    # `scenic` is read by nothing at runtime, so it is gone.
-    assert not any(f.name == "scenic" for f in converted.initial_state.fluents)
+    # ...and static in the goal, so it is folded to True and the conjunction
+    # collapses to the one dynamic literal.
+    assert converted.goal.evaluate({F("visited l2")})
+    # Nothing reads `road` or `scenic` at runtime any more, so neither is kept.
+    assert not any(f.name in ("road", "scenic")
+                   for f in converted.initial_state.fluents)
 
     assert not converted.goal.evaluate(converted.initial_state.fluents)
     from railroad.pddl_converter import solve
     assert solve(converted, seed=0).success
+
+
+def test_unsatisfiable_static_goal_literal_makes_the_goal_false():
+    """The other side of folding: a static literal that is false at t=0 can
+    never become true, so the whole conjunction is unsatisfiable."""
+    domain = """
+    (define (domain d) (:requirements :strips)
+      (:predicates (road ?a ?b) (at ?a) (visited ?a))
+      (:action drive :parameters (?a ?b)
+               :precondition (and (at ?a) (road ?a ?b))
+               :effect (and (not (at ?a)) (at ?b) (visited ?b))))
+    """
+    problem = """
+    (define (problem p) (:domain d) (:objects l1 l2)
+      (:init (at l1) (road l1 l2))
+      (:goal (and (visited l2) (road l2 l1))))
+    """
+    converted = convert_texts(domain, problem)
+    assert converted.goal.get_type() == GoalType.FALSE_GOAL
+    assert not converted.goal.evaluate({F("visited l2"), F("road l2 l1")})
 
 
 def test_reserved_predicates_renamed_without_a_predicates_section():
