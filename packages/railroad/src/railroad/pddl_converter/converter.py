@@ -26,6 +26,7 @@ from typing import Dict, FrozenSet, List, Optional, Sequence, Set, Tuple, Union
 from railroad._bindings import FalseGoal, TrueGoal
 from railroad.core import OptExpr
 from railroad.core import (
+    RESERVED_PLANNING_PREDICATES,
     Action,
     AndGoal,
     Effect,
@@ -79,7 +80,17 @@ _RENAME_PREFIX = "pddl-"
 # pddl-eq fluent ever reaches the runtime state.
 EQ_PREDICATE = "pddl-eq"
 
-_RESERVED_PREDICATES = {"free", "waiting", "not", EQ_PREDICATE}
+# Every predicate the railroad core reads by name, taken from the core's own
+# list so the two cannot drift apart. `free`/`waiting` drive the concurrency
+# machinery; `at`/`found` drive the FF heuristic's at-implies-found rule, which
+# turns a required `at X L` into a required `found X` whenever `found X` is
+# relaxed-reachable. Renaming `found` is what actually defuses that rule for
+# PDDL (no reachable `found` fluent can exist afterwards), and `at` follows so
+# this set stays a straight copy of the core's rather than a carve-out that
+# quietly stops matching it. Plus `not` (railroad's negation keyword),
+# `not-*` (the negative-precondition bookkeeping prefix) and the converter's
+# own EQ_PREDICATE.
+_RESERVED_PREDICATES = set(RESERVED_PLANNING_PREDICATES) | {"not", EQ_PREDICATE}
 
 CostAmount = Union[float, Tuple[str, Tuple[str, ...]]]
 

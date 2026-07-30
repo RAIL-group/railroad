@@ -605,7 +605,17 @@ def _parse_init(entries: List[Sexpr], problem: PDDLProblem) -> None:
             continue
         elif head == "probabilistic":
             raise UnsupportedPDDLError("probabilistic-init", "in :init")
-        elif head == "at" and isinstance(entry, list) and len(entry) == 3 and isinstance(entry[1], str) and entry[1].replace(".", "").isdigit():
+        elif (
+            head == "at"
+            and isinstance(entry, list)
+            and len(entry) == 3
+            and isinstance(entry[1], str)
+            and entry[1].replace(".", "").isdigit()
+            # A timed initial literal wraps a *literal*: (at 5 (p x)). Without
+            # this the test also matches an ordinary `at/2` fact whose first
+            # argument happens to be an all-digit object name, e.g. (at 1 room).
+            and isinstance(entry[2], list)
+        ):
             raise UnsupportedPDDLError("timed-initial-literals", f"{entry!r} in :init")
         else:
             name, args = _parse_atom(entry, ":init")

@@ -64,6 +64,39 @@ def test_solve_reports_no_grounded_actions():
     assert result.failure_reason == "no grounded actions"
 
 
+def test_solve_reports_an_unsatisfiable_goal_immediately():
+    """A goal folded to FalseGoal is provably unreachable — say so and stop.
+
+    The planner cannot tell us: it clamps h = inf to the dead-end penalty (0
+    by default) and keeps proposing actions, so without the short-circuit the
+    loop burns max_steps and then blames the step budget.
+    """
+    from railroad._bindings import GoalType
+    from railroad.pddl_converter import convert_texts
+
+    domain = """
+    (define (domain d) (:requirements :strips)
+      (:predicates (fixed ?l) (visited ?l) (here ?l))
+      (:action go :parameters (?a ?b)
+               :precondition (and (here ?a) (fixed ?b))
+               :effect (and (not (here ?a)) (here ?b) (visited ?b))))
+    """
+    # `fixed` is static, and the goal asks for one :init never established.
+    problem_text = """
+    (define (problem p) (:domain d) (:objects l1 l2)
+      (:init (here l1) (fixed l2))
+      (:goal (and (visited l2) (fixed l1))))
+    """
+    problem = convert_texts(domain, problem_text)
+    assert problem.goal.get_type() == GoalType.FALSE_GOAL
+
+    result = solve(problem, seed=0, max_steps=25)
+    assert not result.success
+    assert result.failure_reason == "goal is unsatisfiable"
+    assert result.plan == []
+    assert result.sim_time == 0.0
+
+
 
 def test_solve_gives_up_when_the_goal_is_unachievable():
     """An unreachable goal ends the run instead of erroring out."""

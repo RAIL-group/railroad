@@ -105,6 +105,12 @@ public:
   //
   // Saturates at DNF_COUNT_SATURATED rather than overflowing: callers only
   // compare against a cap, so an exact value beyond it is worthless.
+  //
+  // Zero is exact and means the DNF is empty (unsatisfiable): OR sums to 0
+  // only when every disjunct is empty, and AND's product is 0 only when some
+  // conjunct is, and either way get_dnf_branches() returns {}. Callers must
+  // test for it *before* the cap -- a zero from a FalseGoal conjunct is below
+  // any cap no matter how large its siblings are (see BranchView).
   std::size_t dnf_branch_count() const {
     if (!cached_dnf_count_) {
       cached_dnf_count_ = compute_dnf_branch_count();

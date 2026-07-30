@@ -14,6 +14,7 @@ import time as _time
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from railroad._bindings import GoalType
 from railroad.core import (
     State,
     get_action_by_name,
@@ -60,14 +61,6 @@ def solve(
     see the converter README's planner notes for what it costs elsewhere.
     """
     start = _time.perf_counter()
-    actions = problem.ground_actions()
-    if not actions:
-        return RunResult(False, failure_reason="no grounded actions")
-    # ``seed`` covers both the MCTS search and the outcome sampling below,
-    # so runs are reproducible end-to-end.
-    seed_planner_rng(seed)
-    mcts = MCTSPlanner(actions, dead_end_penalty=dead_end_penalty)
-    rng = random.Random(seed)
     state = problem.initial_state
     plan: List[str] = []
 
@@ -79,6 +72,23 @@ def solve(
             wall_time=_time.perf_counter() - start,
             failure_reason=reason,
         )
+
+    # A goal that folded to FalseGoal is provably unsatisfiable (typically a
+    # static goal literal that :init contradicts -- see simplify_static_goal).
+    # The planner cannot tell us so: it clamps h = inf to 0 or to the dead-end
+    # penalty and keeps proposing actions, so without this the loop burns
+    # max_steps and then blames the step budget for an unreachable goal.
+    if problem.goal.get_type() == GoalType.FALSE_GOAL:
+        return finish(False, "goal is unsatisfiable")
+
+    actions = problem.ground_actions()
+    if not actions:
+        return finish(False, "no grounded actions")
+    # ``seed`` covers both the MCTS search and the outcome sampling below,
+    # so runs are reproducible end-to-end.
+    seed_planner_rng(seed)
+    mcts = MCTSPlanner(actions, dead_end_penalty=dead_end_penalty)
+    rng = random.Random(seed)
 
     for _ in range(max_steps):
         if problem.goal.evaluate(state.fluents):

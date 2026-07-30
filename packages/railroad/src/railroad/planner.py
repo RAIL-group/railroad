@@ -99,7 +99,8 @@ class MCTSPlanner:
                 including the moves that route to/through it -- which the generic
                 closure cannot do in densely connected location graphs.
             project_irrelevant: drop fluents no precondition, branch condition,
-                or goal reads from searched states and from action effects
+                or goal reads from searched states, from action effects, and
+                from the effects already queued in those states
                 (``railroad.core.relevant_predicates``). Bisimulation-preserving
                 and typically a large win -- every state hash walks the fluent
                 set -- so it is on by default; pass False to search over the
@@ -161,6 +162,7 @@ class MCTSPlanner:
         # both are readers, and neither is available here.
         self._project_irrelevant = project_irrelevant
         self._relevant: Set[str] | None = None
+        self._actions_relevant: Set[str] | None = None
         self._search_actions = self._converted_actions
 
         self._cpp_planner = _MCTSPlannerCpp(
@@ -223,6 +225,7 @@ class MCTSPlanner:
 
             # The projection was derived from the old action set; drop it.
             self._relevant = None
+            self._actions_relevant = None
             self._search_actions = self._converted_actions
 
             # Create new C++ planner with re-converted actions
@@ -242,12 +245,21 @@ class MCTSPlanner:
         projection is rebuilt whenever a new reader shows up. In a normal run
         that happens once: every effect the search can queue comes from an
         action already scanned.
+
+        The action set's own contribution is cached, since it is a pure
+        function of ``self._converted_actions`` and changes only where that
+        list is reassigned (here and in ``_ensure_mapping_includes_goal``,
+        both of which clear the cache). Recomputing it per call is the whole
+        cost of the scan -- ~65 ms on a 24k-action problem, versus a few
+        microseconds for the goal and queued effects.
         """
         if not self._project_irrelevant:
             return state
 
-        needed = relevant_predicates(
-            self._converted_actions, goal, state.upcoming_effects
+        if self._actions_relevant is None:
+            self._actions_relevant = relevant_predicates(self._converted_actions)
+        needed = self._actions_relevant | relevant_predicates(
+            (), goal, state.upcoming_effects
         )
         if self._relevant is None or not needed <= self._relevant:
             self._relevant = needed

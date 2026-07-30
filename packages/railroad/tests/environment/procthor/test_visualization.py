@@ -1,14 +1,23 @@
-"""Integration tests for ProcTHOR visualization with multi-robot planning.
+"""Integration tests for ProcTHOR end-to-end planning with MCTS.
 
-These tests verify end-to-end planning with MCTS and trajectory visualization
-using PlannerDashboard.show_plots().
+Each test drives a full plan/act loop on a real ProcTHOR scene and asserts the
+goal is reached — that assertion is what these tests are for.
+
+Trajectory rendering is opt-in (see ``_maybe_render``). Nothing about the
+image was ever asserted, and the plotting routine it exercises,
+``PlannerDashboard._render_static_plot``, is already covered by
+``test_dashboard.py::TestGetPlotImage`` in the fast test set. Rendering here
+costs ~4s per test for a 3840x2160 PNG nobody reads. Set
+``RAILROAD_TEST_PLOTS=1`` to produce them when you want to look at one; that
+also restores the only coverage unique to this file, namely ``show_plots()``'s
+save-to-file wrapper and rendering against a real scene rather than the
+two-location synthetic fixture.
 """
 
+import os
 import random
 from pathlib import Path
 
-import matplotlib
-matplotlib.use('Agg')  # Headless backend for tests
 import pytest
 
 from railroad import operators
@@ -22,6 +31,19 @@ from railroad.planner import MCTSPlanner
 # Test configuration
 SEED = 7005
 SAVE_DIR = Path('./data/test_logs')
+
+RENDER_PLOTS = bool(os.environ.get('RAILROAD_TEST_PLOTS'))
+
+
+def _maybe_render(dashboard: PlannerDashboard, filename: str) -> None:
+    """Save the trajectory plot, if plot rendering is enabled."""
+    if not RENDER_PLOTS:
+        return
+    import matplotlib
+    matplotlib.use('Agg')  # show_plots() does not select a backend itself
+    figpath = SAVE_DIR / filename
+    figpath.parent.mkdir(parents=True, exist_ok=True)
+    dashboard.show_plots(save_plot=str(figpath))
 
 
 @pytest.fixture
@@ -138,10 +160,7 @@ def test_single_robot_plotting(scene, target_objects, target_locations):
             if goal.evaluate(env.state.fluents):
                 break
 
-    # Plot using full layout (trajectory + sidebar + overhead)
-    figpath = SAVE_DIR / f'test_visualization_single_robot_{SEED}.png'
-    figpath.parent.mkdir(parents=True, exist_ok=True)
-    dashboard.show_plots(save_plot=str(figpath))
+    _maybe_render(dashboard, f'test_visualization_single_robot_{SEED}.png')
 
     # Verify goal reached
     assert goal.evaluate(env.state.fluents), f"Goal not reached. Final fluents: {env.state.fluents}"
@@ -225,10 +244,7 @@ def test_multi_robot_unknown_plotting(scene, target_objects, target_locations):
             if goal.evaluate(env.state.fluents):
                 break
 
-    # Plot using full layout (trajectory + sidebar + overhead)
-    figpath = SAVE_DIR / f'test_visualization_unknown_multi_robot_{SEED}.png'
-    figpath.parent.mkdir(parents=True, exist_ok=True)
-    dashboard.show_plots(save_plot=str(figpath))
+    _maybe_render(dashboard, f'test_visualization_unknown_multi_robot_{SEED}.png')
 
     assert goal.evaluate(env.state.fluents), f"Goal not reached. Final fluents: {env.state.fluents}"
 
@@ -308,9 +324,6 @@ def test_multi_robot_known_plotting(scene, target_objects, target_locations):
             if goal.evaluate(env.state.fluents):
                 break
 
-    # Plot using full layout (trajectory + sidebar + overhead)
-    figpath = SAVE_DIR / f'test_visualization_known_multi_robot_{SEED}.png'
-    figpath.parent.mkdir(parents=True, exist_ok=True)
-    dashboard.show_plots(save_plot=str(figpath))
+    _maybe_render(dashboard, f'test_visualization_known_multi_robot_{SEED}.png')
 
     assert goal.evaluate(env.state.fluents), f"Goal not reached. Final fluents: {env.state.fluents}"
