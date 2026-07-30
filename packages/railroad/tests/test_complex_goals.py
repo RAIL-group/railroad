@@ -338,7 +338,7 @@ class TestBranchAccess:
 # -----------------------------
 
 class TestHouseholdScenarios:
-    """Regression tests using realistic goal expressions from the design doc."""
+    """Regression tests using realistic goal expressions."""
 
     def test_set_table_and_choose_meal(self):
         """AND(table_set, OR(meal_a, meal_b)) - realistic shape."""

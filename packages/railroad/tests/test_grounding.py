@@ -252,15 +252,15 @@ def test_eliminate_static_strips_and_reports():
     }
     result = ground_operators(
         [op], {**ROBOTS, "location": {"a", "b"}}, facts,
-        runtime_referenced={"landmark"},  # e.g. read by the goal
     )
     (action,) = result.actions
     assert action.name == "move r1 a b"
     # The verified static precondition is gone; dynamic ones remain.
     assert set(action.preconditions) == {F("at r1 a"), F("free r1")}
-    # `connected` facts are dead weight at runtime; `landmark` is referenced.
-    assert result.eliminable_fluents == {F("connected a b")}
-    assert result.eliminated_predicates == {"connected"}
+    # Both are dead weight at runtime: `connected` was compiled into the
+    # grounding, and no action mentions `landmark` at all.
+    assert result.eliminable_fluents == {F("connected a b"), F("landmark b")}
+    assert result.eliminated_predicates == {"connected", "landmark"}
 
 
 def test_unbound_precondition_variable_is_an_error():

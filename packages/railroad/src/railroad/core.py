@@ -539,7 +539,6 @@ def ground_operators(
     skip_on: Tuple[type[BaseException], ...] = (),
     assert_static: Optional[Collection[str]] = None,
     treat_dynamic: Optional[Collection[str]] = None,
-    runtime_referenced: Optional[Collection[str]] = None,
     simplify_conditions: bool = True,
     check_negated_static: bool = True,
     eliminate_static: bool = True,
@@ -552,8 +551,7 @@ def ground_operators(
     ``initial_fluents`` as soon as their variables are bound, pruning the
     enumeration early.
 
-    By default (design doc §4.4) grounding also compiles static material
-    away, which never changes plans or reachability — only what states and
+    By default grounding also compiles static material away, which never changes plans or reachability — only what states and
     actions carry at runtime:
 
     - ``simplify_conditions``: static conjuncts of conditional-branch
@@ -563,12 +561,13 @@ def ground_operators(
       too (a never-applicable action is never created).
     - ``eliminate_static``: verified static preconditions are stripped from
       grounded actions, and ``eliminable_fluents`` reports the static facts
-      nothing references at runtime (callers may drop them from the state).
-      Predicates read outside the operators — goals, custom code — must be
-      listed in ``runtime_referenced`` to keep their facts.
+      no grounded action references (callers may drop them from the state).
+      A caller that reads static facts elsewhere is responsible for keeping
+      them; goals do not, since :func:`simplify_static_goal` folds static
+      goal literals at compile time.
 
     Pass ``False`` to inspect the un-rewritten grounding (debugging, or
-    structural tests per design doc §7.1).
+    structural tests).
 
     Args:
         allow_duplicate_bindings: if True, the same object may bind several
@@ -583,10 +582,6 @@ def ground_operators(
             effect touches them — required when the execution environment
             mutates them out-of-band (e.g. ObjectSearchEnvironment's
             revelation adds ``revealed``/``found``/``at`` fluents).
-        runtime_referenced: static predicates read at runtime outside the
-            operators (goal literals, custom readers); their facts are never
-            reported eliminable.
-
     Actions with non-finite effect times are dropped (an ``inf`` duration
     marks a statically impossible action, e.g. a move between unknown
     locations); branch sub-effect times count too, and the filter runs after
@@ -652,7 +647,7 @@ def ground_operators(
 
     eliminable: Set[Fluent] = set()
     if eliminate_static:
-        referenced: Set[str] = set(runtime_referenced or ())
+        referenced: Set[str] = set()
         for a in actions:
             for f in a.preconditions:
                 referenced.add(f.name)
