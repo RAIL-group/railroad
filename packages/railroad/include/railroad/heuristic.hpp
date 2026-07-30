@@ -166,8 +166,9 @@ inline const std::vector<std::unordered_set<Fluent>>& extract_or_branches(const 
 inline constexpr std::size_t MAX_ENUMERATED_DNF_BRANCHES = 1024;
 
 // Greedily choose one conjunctive goal set from a goal tree, without building
-// the DNF: at each OR, keep whichever disjunct has the lowest summed
-// optimistic cost; at each AND, take the union of its children.
+// the DNF: at each AND take the union of the children, and at each OR keep
+// whichever disjunct is cheapest. `out` doubles as the accumulator and as the
+// set of literals already committed.
 //
 // Returns false when the goal is unreachable in the relaxed planning graph.
 // That verdict is *exact*, matching what enumerating every branch would say:
@@ -176,6 +177,15 @@ inline constexpr std::size_t MAX_ENUMERATED_DNF_BRANCHES = 1024;
 // some OR has all of its disjuncts unreachable -- otherwise picking a
 // reachable disjunct at every OR yields a reachable branch. The reachability
 // test (known_fluents) is the same one ff_backward_optimistic applies.
+//
+// Disjuncts are ranked by *marginal* h_add: the summed optimistic_cost of the
+// literals they add that are not already committed. Scoring a disjunct in
+// isolation would charge full price for literals a sibling conjunct already
+// requires and which are therefore free here, and that is the main way a
+// per-disjunct score misranks. Summed (rather than max) optimistic_cost is
+// what makes this h_add exactly -- see heuristic_backward.hpp -- and h_add is
+// the component the returned value actually weights (lambda_max defaults to
+// 0, so ranking by max would optimise a term with no weight in the mix).
 //
 // Only the *selection* is greedy. Whatever conjunction comes out is then fed
 // to the ordinary backward pass, so h_ff and the probabilistic delta are
@@ -187,9 +197,14 @@ inline bool select_cheapest_branch(const GoalBase* goal,
                                    std::unordered_set<Fluent>& out) {
   if (!goal) return false;
 
-  auto literal_cost = [&forward](const std::unordered_set<Fluent>& fluents) {
+  // Cost of the literals in `candidate` that `committed` does not already
+  // hold. `candidate` is always a superset of `committed`, so this is the
+  // price of the disjunct that produced it.
+  auto marginal_cost = [&forward](const std::unordered_set<Fluent>& candidate,
+                                  const std::unordered_set<Fluent>& committed) {
     double total = 0.0;
-    for (const auto& f : fluents) {
+    for (const auto& f : candidate) {
+      if (committed.count(f)) continue;  // already paid for by a sibling
       auto it = forward.optimistic_cost.find(f);
       if (it == forward.optimistic_cost.end())
         return std::numeric_limits<double>::infinity();
@@ -212,8 +227,17 @@ inline bool select_cheapest_branch(const GoalBase* goal,
       return true;
     }
     case GoalType::AND: {
-      for (const auto& child : goal->children()) {
-        if (!select_cheapest_branch(child.get(), forward, out)) return false;
+      // Two passes so that choice-free children commit first. A subtree with
+      // dnf_branch_count() == 1 contributes the same literals no matter what
+      // is picked elsewhere, so committing it up front costs nothing and
+      // gives every OR decision below the largest possible committed set to
+      // measure its marginal cost against.
+      for (int pass = 0; pass < 2; ++pass) {
+        for (const auto& child : goal->children()) {
+          bool choice_free = child->dnf_branch_count() <= 1;
+          if (choice_free != (pass == 0)) continue;
+          if (!select_cheapest_branch(child.get(), forward, out)) return false;
+        }
       }
       return true;
     }
@@ -222,9 +246,11 @@ inline bool select_cheapest_branch(const GoalBase* goal,
       double best_cost = std::numeric_limits<double>::infinity();
       bool found = false;
       for (const auto& child : goal->children()) {
-        std::unordered_set<Fluent> candidate;
+        // Seed from `out` so nested ORs inside this disjunct see the same
+        // committed set and score their own choices against it too.
+        std::unordered_set<Fluent> candidate = out;
         if (!select_cheapest_branch(child.get(), forward, candidate)) continue;
-        double cost = literal_cost(candidate);
+        double cost = marginal_cost(candidate, out);
         if (!found || cost < best_cost) {
           best = std::move(candidate);
           best_cost = cost;
@@ -232,7 +258,7 @@ inline bool select_cheapest_branch(const GoalBase* goal,
         }
       }
       if (!found) return false;  // every disjunct unreachable
-      out.insert(best.begin(), best.end());
+      out = std::move(best);     // already contains everything `out` held
       return true;
     }
   }
@@ -346,6 +372,12 @@ inline std::vector<std::string> get_goal_relevant_action_names(
       relaxed.fluents().begin(), relaxed.fluents().end());
 
   auto forward = ff_forward_phase(initial_fluents, all_actions);
+  // Only the greedy branch selection reads optimistic_cost, and only above the
+  // enumeration cap; below it BranchView walks the cached DNF and this extra
+  // fixed point would be wasted work.
+  if (goal->dnf_branch_count() > MAX_ENUMERATED_DNF_BRANCHES) {
+    compute_optimistic_costs(forward);
+  }
 
   std::unordered_set<const Action*> keep;
   BranchView branch_view(goal, forward);

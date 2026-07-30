@@ -1120,6 +1120,55 @@ def test_heuristic_survives_a_goal_whose_dnf_cannot_be_built():
     assert ff_heuristic(state, goal, actions) == pytest.approx(10.0)
 
 
+def _overlap_domain(n_groups, literal_first):
+    """Each group forces `shared gk`, then offers a choice between `shared gk`
+    -- already forced, so free -- and a strictly cheaper `cheap gk`.
+
+    2 ** n_groups DNF branches, so selection takes the greedy path. Scoring a
+    disjunct in isolation prefers `cheap` (3 < 5); scoring it against what is
+    already committed prefers `shared`, which costs nothing more and is what
+    enumerating every branch would pick.
+    """
+    from railroad.core import AndGoal, Effect, LiteralGoal, Operator
+
+    def maker(name, predicate, duration):
+        return Operator(
+            name=name,
+            parameters=[("?r", "robot"), ("?i", "idx")],
+            preconditions=[F("free ?r")],
+            effects=[
+                Effect(time=0, resulting_fluents={~F("free ?r")}),
+                Effect(time=duration,
+                       resulting_fluents={F(f"{predicate} ?i"), F("free ?r")}),
+            ],
+        )
+
+    objects = {"robot": {"r1"}, "idx": {f"g{k}" for k in range(n_groups)}}
+    actions = (maker("slow", "shared", 5.0).instantiate(objects)
+               + maker("fast", "cheap", 3.0).instantiate(objects))
+    state = State(0.0, {F("free r1")}, [])
+
+    def group(k):
+        forced = LiteralGoal(F(f"shared g{k}"))
+        choice = _or(F(f"shared g{k}"), F(f"cheap g{k}"))
+        return AndGoal([forced, choice] if literal_first else [choice, forced])
+
+    return actions, state, AndGoal([group(k) for k in range(n_groups)])
+
+
+@pytest.mark.parametrize("literal_first", [True, False])
+def test_branch_selection_charges_only_the_marginal_cost(literal_first):
+    """A disjunct a sibling conjunct already requires must score as free.
+
+    Both child orderings must agree: choice-free conjuncts are committed
+    before any OR is resolved, so the OR sees `shared gk` either way. Isolated
+    scoring would take `cheap` in all 11 groups and return 88.
+    """
+    actions, state, goal = _overlap_domain(n_groups=11, literal_first=literal_first)
+    assert goal.dnf_branch_count() == 2 ** 11 > 1024  # MAX_ENUMERATED_DNF_BRANCHES
+    assert ff_heuristic(state, goal, actions) == pytest.approx(55.0)
+
+
 def test_greedy_selection_reports_unreachable_goals_as_infinite():
     """Unreachability must stay exact above the cap.
 
