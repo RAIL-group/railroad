@@ -368,6 +368,41 @@ def test_reserved_predicates_renamed():
     assert not any(f.name in ("waiting", "not-here") for f in fluents)
 
 
+def test_reserved_set_tracks_the_core_list():
+    """`at`/`found` are core-reserved too, and must be renamed with the rest.
+
+    The FF heuristic's at-implies-found rule turns a required `at X L` into a
+    required `found X` whenever `found X` is relaxed-reachable. A PDDL domain
+    carrying both predicates would silently get distorted heuristic values;
+    renaming `found` makes the rule unreachable, and `at` follows so this set
+    stays a straight copy of the core's rather than a drifting carve-out.
+    """
+    from railroad.core import RESERVED_PLANNING_PREDICATES
+    from railroad.pddl_converter.converter import _RESERVED_PREDICATES
+
+    assert RESERVED_PLANNING_PREDICATES <= _RESERVED_PREDICATES
+
+    domain = """
+    (define (domain d) (:requirements :strips)
+      (:predicates (at ?x ?l) (found ?x))
+      (:action look :parameters (?x ?l) :precondition (at ?x ?l)
+               :effect (found ?x))
+      (:action move :parameters (?x ?from ?to) :precondition (at ?x ?from)
+               :effect (and (not (at ?x ?from)) (at ?x ?to))))
+    """
+    problem = """
+    (define (problem p) (:domain d) (:objects k table shelf)
+      (:init (at k table)) (:goal (found k)))
+    """
+    converted = convert_texts(domain, problem)
+    fluents = converted.initial_state.fluents
+    assert F("pddl-at k table") in fluents  # `at` is dynamic here, so it survives
+    assert [f for f in fluents if f.name in ("at", "found")] == []
+    assert {f.name for f in converted.goal.get_all_literals()} == {"pddl-found"}
+    look = _get_action(converted, "look k table")
+    assert F("pddl-at k table") in look.preconditions
+
+
 def test_unbound_variable_rejected():
     domain = """
     (define (domain d) (:requirements :strips)
@@ -437,7 +472,9 @@ def test_self_loop_grounding_preserves_fluent():
     self_loop = _get_action(converted, "fly plane apt apt")
     (successor, prob), = transition(converted.initial_state, self_loop)
     assert prob == pytest.approx(1.0)
-    assert F("at plane apt") in successor.fluents
+    # `at` is one of the core's reserved names, so it is renamed (see
+    # test_reserved_predicates_renamed).
+    assert F("pddl-at plane apt") in successor.fluents
 
 
 # ============================================================================

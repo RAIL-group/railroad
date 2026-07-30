@@ -63,7 +63,7 @@ additions or renames stay invisible until you run
 | goals: `and`/`or`/`not`/`forall`/`exists` over literals | railroad `AndGoal`/`OrGoal`/negated-literal goal trees |
 | type hierarchy | flattened: `objects_by_type[t]` contains objects of `t` and all subtypes |
 | `(= ?x ?y)` / `(not (= ?x ?y))` | evaluated while grounding (bindings filtered) |
-| predicates named `free`, `waiting`, or `not-*` | transparently renamed with a `pddl-` prefix. `free` and `waiting` are keywords to the railroad core: `free X` means "agent X is available" and drives the concurrency machinery (a free agent makes the state a decision point; the synthetic serializing agent relies on exactly this). A PDDL domain's `free` is an ordinary predicate with unrelated meaning — gripper's `(free ?gripper)` says a hand is empty — and left unrenamed it would make the core treat every gripper hand as a schedulable agent. `not-*` is reserved as the bookkeeping prefix for compiled negative preconditions. A domain that already contains both a reserved name and its `pddl-`-prefixed form is rejected (`predicate-rename-collision`) rather than silently merged |
+| predicates named `free`, `waiting`, `at`, `found`, or `not-*` | transparently renamed with a `pddl-` prefix. These are keywords to the railroad core (the set is taken from `railroad.core.RESERVED_PLANNING_PREDICATES` so it cannot drift). `free X` means "agent X is available" and drives the concurrency machinery — a free agent makes the state a decision point, which is exactly what the synthetic serializing agent relies on; `waiting` participates in the same machinery. A PDDL domain's `free` is an ordinary predicate with unrelated meaning — gripper's `(free ?gripper)` says a hand is empty — and left unrenamed it would make the core treat every gripper hand as a schedulable agent. `at`/`found` drive the FF heuristic's at-implies-found rule, which turns a required `at X L` into a required `found X` whenever `found X` is relaxed-reachable; renaming `found` is what defuses it (afterwards no reachable `found` fluent can exist), and `at` follows so the set stays a straight copy of the core's. `not-*` is reserved as the bookkeeping prefix for compiled negative preconditions. A domain that already contains both a reserved name and its `pddl-`-prefixed form is rejected (`predicate-rename-collision`) rather than silently merged |
 
 Grounding notes:
 
@@ -74,10 +74,14 @@ Grounding notes:
   to ~34k actions instead of a combinatorial blowup.
 - **Static material is compiled away** (see `railroad.core.ground_operators`):
   verified static preconditions are stripped from grounded actions, static
-  conjuncts of `when` conditions are evaluated per grounding, and static
-  facts nothing references at runtime (only goal-referenced ones survive)
-  are dropped from the initial state. Plans and reachability are unchanged —
-  states just stop carrying immutable facts through every hash and copy.
+  conjuncts of `when` conditions are evaluated per grounding, and *every*
+  static fact is dropped from the initial state. Nothing is left to read one:
+  grounding has removed the preconditions and conditions that did, and
+  `simplify_static_goal` has folded the goal's static literals against `:init`
+  (a satisfied one disappears, an unsatisfiable one collapses the goal to
+  `FalseGoal`, which `solve()` reports immediately). Plans and reachability
+  are unchanged — states just stop carrying immutable facts through every
+  hash and copy.
 - Unlike `Operator.instantiate`, the same object may bind several parameters
   (PDDL permits it; domains that need distinctness say `(not (= ?x ?y))`).
   Same-fluent add/delete pairs created by such bindings (e.g. `fly apt apt`)

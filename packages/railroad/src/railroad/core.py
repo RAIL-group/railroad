@@ -267,8 +267,25 @@ class Operator:
         # Grounding-time constraints (Eq/Neq) live beside ordinary fluent
         # preconditions in the input list, PDDL-style, but are split out:
         # they constrain which bindings exist rather than when actions apply.
-        self.preconditions = [p for p in preconditions if isinstance(p, Fluent)]
-        self.grounding_constraints = [p for p in preconditions if isinstance(p, Eq)]
+        # Anything else is rejected here: silently dropping it would *widen*
+        # the action set (the same failure mode _validate_operator_terms
+        # exists to catch), and an operator that is missing a guard it was
+        # written with fails far from the typo that caused it.
+        self.preconditions: List[Fluent] = []
+        self.grounding_constraints: List[Eq] = []
+        for p in preconditions:
+            if isinstance(p, Fluent):
+                self.preconditions.append(p)
+            elif isinstance(p, Eq):
+                self.grounding_constraints.append(p)
+            else:
+                raise TypeError(
+                    f"Operator {name!r} precondition {p!r} is a "
+                    f"{type(p).__name__}; preconditions must be Fluent "
+                    "(a state condition) or Eq/Neq (a grounding-time "
+                    "constraint). Use F(\"...\") to build a Fluent from a "
+                    "string."
+                )
         self.effects = effects
         self.extra_cost = extra_cost
 
@@ -1001,29 +1018,76 @@ def relevant_predicates(
 
 
 def project_state(state: State, relevant: Collection[str]) -> State:
-    """Drop fluents whose predicate nothing reads (see relevant_predicates)."""
+    """Drop fluents whose predicate nothing reads (see relevant_predicates).
+
+    The state's *queued* effects are projected too. Dropping a fluent from the
+    fluent set alone does not remove it from the search: an in-flight effect
+    that writes it re-introduces it the moment it fires, which is the same
+    reason :func:`project_action` has to strip action effects. States carrying
+    queued effects are the norm in a concurrent domain, not an edge case.
+
+    Effect *times* are untouched, so the queue keeps its heap ordering, and
+    branch conditions are untouched, so a projected effect still fires exactly
+    the branches the original would (every predicate a condition reads is
+    relevant by construction). An effect left with no surviving fluents is
+    kept: it still advances time, which is what creates decision points.
+    """
     names = set(relevant)
     fluents = {f for f in state.fluents if f.name in names}
-    if len(fluents) == len(state.fluents):
+    changed = len(fluents) != len(state.fluents)
+
+    upcoming: List[Tuple[float, GroundedEffect]] = []
+    for scheduled_time, effect in state.upcoming_effects:
+        projected, effect_changed = _project_grounded_effect(effect, names)
+        upcoming.append((scheduled_time, projected))
+        changed |= effect_changed
+
+    if not changed:
         return state
-    return State(state.time, fluents, list(state.upcoming_effects))
+    return State(state.time, fluents, upcoming)
 
 
 def _project_grounded_effect(
     effect: GroundedEffect, names: Set[str]
-) -> GroundedEffect:
+) -> Tuple[GroundedEffect, bool]:
+    """Strip writes of irrelevant predicates from one effect, branches included.
+
+    Returns (effect, changed); an effect that needed no projection keeps its
+    identity, so a state with nothing to drop is handed straight back.
+    """
     kept = {f for f in effect.resulting_fluents if f.name in names}
-    return GroundedEffect(
-        effect.time,
-        kept,
-        prob_effects=[
-            (branch.prob, [_project_grounded_effect(e, names) for e in branch.effects])
-            for branch in effect.prob_effects
-        ],
-        cond_effects=[
-            (branch.conditions, [_project_grounded_effect(e, names) for e in branch.effects])
-            for branch in effect.cond_effects
-        ],
+    changed = len(kept) != len(effect.resulting_fluents)
+
+    def project_branch(sub_effects):
+        nonlocal changed
+        out = []
+        for sub in sub_effects:
+            projected, sub_changed = _project_grounded_effect(sub, names)
+            out.append(projected)
+            changed |= sub_changed
+        return out
+
+    # Branches are rebuilt whole, empty ones included: dropping a branch would
+    # change the outcome distribution, not just the fluents in it.
+    prob_effects = [
+        (branch.prob, project_branch(branch.effects))
+        for branch in effect.prob_effects
+    ]
+    cond_effects = [
+        (branch.conditions, project_branch(branch.effects))
+        for branch in effect.cond_effects
+    ]
+
+    if not changed:
+        return effect, False
+    return (
+        GroundedEffect(
+            effect.time,
+            kept,
+            prob_effects=prob_effects,
+            cond_effects=cond_effects,
+        ),
+        True,
     )
 
 
@@ -1039,7 +1103,7 @@ def project_action(action: Action, relevant: Collection[str]) -> Action:
     names = set(relevant)
     return Action(
         set(action.preconditions),
-        [_project_grounded_effect(eff, names) for eff in action.effects],
+        [_project_grounded_effect(eff, names)[0] for eff in action.effects],
         name=action.name,
         extra_cost=action.extra_cost,
     )

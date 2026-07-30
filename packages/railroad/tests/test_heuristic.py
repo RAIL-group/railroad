@@ -1,3 +1,5 @@
+import time
+
 import pytest
 
 from railroad.core import (
@@ -1167,6 +1169,34 @@ def test_branch_selection_charges_only_the_marginal_cost(literal_first):
     actions, state, goal = _overlap_domain(n_groups=11, literal_first=literal_first)
     assert goal.dnf_branch_count() == 2 ** 11 > 1024  # MAX_ENUMERATED_DNF_BRANCHES
     assert ff_heuristic(state, goal, actions) == pytest.approx(55.0)
+
+
+def test_zero_branch_count_never_materialises_a_huge_sibling():
+    """A FalseGoal conjunct must not smuggle its siblings past the cap.
+
+    AND's count is a saturating product, so a FalseGoal child zeroes it — and
+    zero is *below* the cap no matter how large the other conjuncts are.
+    Enumerating there would call get_dnf_branches(), which expands children in
+    declaration order and would build the huge sibling in full before the
+    FalseGoal short-circuits it, which is precisely the out-of-memory abort
+    the cap exists to prevent. The count must be tested for zero first.
+
+    Timing is the only observable: materialising the sibling below measures
+    ~1.3s, while the correct path returns without touching it at all (<1ms).
+    """
+    from railroad.core import AndGoal
+    from railroad._bindings import FalseGoal
+
+    huge = AndGoal([_or(*[F(f"p{k} o{i}") for i in range(8)]) for k in range(6)])
+    assert huge.dnf_branch_count() == 8 ** 6 > 1024
+
+    goal = AndGoal([huge, FalseGoal()])  # huge first: the dangerous order
+    assert goal.dnf_branch_count() == 0
+
+    state = State(0.0, {F("free r1")}, [])
+    start = time.perf_counter()
+    assert ff_heuristic(state, goal, []) == float("inf")
+    assert time.perf_counter() - start < 0.2
 
 
 def test_greedy_selection_reports_unreachable_goals_as_infinite():

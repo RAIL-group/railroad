@@ -21,12 +21,17 @@ from railroad.core import (
 from railroad.planner import MCTSPlanner, seed_planner_rng
 
 
-def _search_domain(n_locs=12):
+def _search_domain(n_locs=12, robots=("r1",)):
     """Ring-connected search domain with two kinds of unread fluent.
 
     `connected` is static (no effect touches it); `log` is dynamic write-only
     (an effect adds it, nothing ever reads it) — only relevance analysis can
     drop the second.
+
+    With one robot a transition always drains the effect queue (it runs to a
+    state where a robot is free, and there is only one). Pass a second robot
+    to get states that carry in-flight effects, which is what a concurrent
+    domain looks like and what projecting queued effects is about.
     """
     locs = [f"L{i}" for i in range(n_locs)]
     connected = {
@@ -63,10 +68,11 @@ def _search_domain(n_locs=12):
             ),
         ],
     )
-    dynamic = {F("at r1 L0"), F("free r1")}
+    dynamic = {f for i, r in enumerate(robots)
+               for f in (F(f"at {r} {locs[i % n_locs]}"), F(f"free {r}"))}
     actions = ground_operators(
         [move, search],
-        {"robot": {"r1"}, "location": set(locs)},
+        {"robot": set(robots), "location": set(locs)},
         dynamic | connected,
     ).actions
     return actions, dynamic, connected
@@ -158,6 +164,109 @@ def test_project_state_keeps_time_and_queued_effects():
     assert len(projected.upcoming_effects) == 1
 
 
+def test_project_state_strips_writes_from_queued_effects():
+    """An in-flight effect must not re-add what the projection just dropped.
+
+    Projecting only the fluent set leaves the queued effect free to
+    reintroduce the irrelevant fluent the moment it fires — and a state with
+    queued effects is the normal case in a concurrent domain, not an edge one.
+    """
+    deep = GroundedEffect(0.0, {F("keep deep"), F("drop deep")})
+    queued = GroundedEffect(
+        1.0,
+        {F("keep top"), F("drop top")},
+        [(1.0, [deep])],
+        [({F("keep cond")}, [GroundedEffect(0.0, {F("drop c"), F("keep c")})])],
+    )
+    state = State(4.0, {F("keep x")}, [(5.0, queued)])
+    projected = project_state(state, {"keep"})
+
+    assert projected.time == 4.0
+    (scheduled_time, effect), = projected.upcoming_effects
+    assert scheduled_time == 5.0  # times untouched, so the heap stays valid
+    assert effect.time == 1.0
+    assert set(effect.resulting_fluents) == {F("keep top")}
+    # Branches are rebuilt whole: dropping one would change the outcome
+    # distribution, not just the fluents in it.
+    assert effect.prob_effects[0].prob == 1.0
+    assert set(effect.prob_effects[0].effects[0].resulting_fluents) == {F("keep deep")}
+    branch = effect.cond_effects[0]
+    assert set(branch.conditions) == {F("keep cond")}  # condition preserved
+    assert set(branch.effects[0].resulting_fluents) == {F("keep c")}
+
+
+def test_project_state_returns_the_same_state_when_nothing_drops():
+    """Identity is preserved so a no-op projection costs nothing downstream."""
+    queued = GroundedEffect(1.0, {F("keep later")})
+    state = State(4.0, {F("keep x")}, [(5.0, queued)])
+    assert project_state(state, {"keep"}) is state
+
+
+def test_projection_is_a_bisimulation_over_states_with_queued_effects():
+    """The invariant projection actually has to satisfy, checked exhaustively.
+
+    Comparing which action MCTS picks is the wrong instrument: projection
+    changes state hashes, so a finite-budget search may break ties differently
+    — that is true of projecting the fluent set alone and predates projecting
+    the queued effects. What must hold is semantic:
+
+        transition(S, a)  restricted to relevant predicates
+          ==  transition(project(S), project(a))
+
+    including successor times and probabilities. This drives it over states
+    built by firing random action prefixes, so they carry real in-flight
+    effects with probabilistic and conditional branches, and over every
+    applicable action in each.
+    """
+    import random
+
+    from railroad.core import transition
+
+    actions, dynamic, connected = _search_domain(n_locs=6, robots=("r1", "r2"))
+    goal = F("found Knife")
+    rng = random.Random(0)
+
+    def observable(state, names):
+        return (round(state.time, 9),
+                frozenset(f for f in state.fluents if f.name in names))
+
+    def outcomes(state, action, names):
+        out = {}
+        for succ, prob in transition(state, action):
+            key = observable(succ, names)
+            out[key] = round(out.get(key, 0.0) + prob, 9)
+        return out
+
+    compared = with_queued = 0
+    for _ in range(60):
+        state = State(0.0, dynamic | connected, [])
+        for _ in range(rng.randrange(0, 4)):
+            applicable = [a for a in actions if state.satisfies_precondition(a)]
+            if not applicable:
+                break
+            succs = transition(state, rng.choice(applicable))
+            state = rng.choices([s for s, _ in succs],
+                                weights=[p for _, p in succs], k=1)[0]
+
+        relevant = relevant_predicates(actions, goal, state.upcoming_effects)
+        projected = project_state(state, relevant)
+        if state.upcoming_effects:
+            with_queued += 1
+
+        for action in actions:
+            if not state.satisfies_precondition(action):
+                continue
+            compared += 1
+            assert outcomes(state, action, relevant) == outcomes(
+                projected, project_action(action, relevant), relevant
+            ), action.name
+
+    # `log` is written by the search effect and read by nothing, so the queued
+    # effects really are being rewritten rather than passed through.
+    assert "log" not in relevant_predicates(actions, goal)
+    assert with_queued > 10 and compared > 100
+
+
 def test_projection_does_not_change_the_chosen_action():
     """Projection is bisimulation-preserving, so the decision is identical."""
     actions, dynamic, connected = _search_domain()
@@ -170,6 +279,27 @@ def test_projection_does_not_change_the_chosen_action():
         planner = MCTSPlanner(actions, project_irrelevant=project)
         choices.append(planner(state, goal, max_iterations=800, max_depth=20))
     assert choices[0] == choices[1]
+
+
+def test_action_relevance_cache_matches_the_current_action_list():
+    """The cached action scan must never outlive the actions it scanned.
+
+    The scan is cached because it is a pure function of the converted actions
+    and costs ~65ms on a large problem. The one thing that reassigns those
+    actions mid-life is a goal carrying a negative fluent the mapping has not
+    seen, which re-converts every action — so that path has to drop the cache
+    too, and this pins the invariant on both sides of it.
+    """
+    actions, dynamic, connected = _search_domain()
+    state = State(0.0, dynamic | connected, [])
+    planner = MCTSPlanner(actions, project_irrelevant=True)
+
+    planner(state, F("found Knife"), max_iterations=50)
+    assert planner._actions_relevant == relevant_predicates(planner._converted_actions)
+
+    # A goal-only negative fluent: extends the mapping, re-converts the actions.
+    planner(state, ~F("searched loc0"), max_iterations=50)
+    assert planner._actions_relevant == relevant_predicates(planner._converted_actions)
 
 
 def test_projection_keeps_goal_over_an_otherwise_unread_predicate():

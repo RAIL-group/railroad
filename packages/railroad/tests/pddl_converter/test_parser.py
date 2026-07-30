@@ -152,3 +152,20 @@ def test_negated_compound_effect_reports_its_own_slug():
     with pytest.raises(UnsupportedPDDLError) as excinfo:
         parse_domain(_action_with(effect="(not (and (p) (q)))"))
     assert excinfo.value.reason == "negated-compound-condition"
+
+
+def test_timed_initial_literal_detection_requires_a_wrapped_literal():
+    """`(at 5 (p))` is a timed literal; `(at 1 room)` is an ordinary fact.
+
+    The numeric-first-argument test alone also matches an `at/2` fact whose
+    first argument is an all-digit object name, which would report a
+    perfectly convertible domain as unsupported.
+    """
+    with pytest.raises(UnsupportedPDDLError) as excinfo:
+        parse_problem("(define (problem p) (:domain d) (:init (at 5 (p))) (:goal (p)))")
+    assert excinfo.value.reason == "timed-initial-literals"
+
+    problem = parse_problem(
+        "(define (problem p) (:domain d) (:init (at 1 room)) (:goal (at 1 room)))"
+    )
+    assert problem.init_literals == [Literal("at", ("1", "room"))]

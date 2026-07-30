@@ -263,6 +263,30 @@ def test_eliminate_static_strips_and_reports():
     assert result.eliminated_predicates == {"connected", "landmark"}
 
 
+def test_non_fluent_precondition_is_rejected_loudly():
+    """Dropping it silently would *widen* the action set.
+
+    A precondition that is neither a Fluent nor an Eq/Neq is almost always a
+    typo (a bare string, a Goal). Ignoring it produces an operator missing a
+    guard it was written with, which surfaces as a wrong plan far from the
+    line that caused it — the same failure mode _validate_operator_terms
+    exists to catch one level down.
+
+    The annotation already rejects the literal below, hence the suppression;
+    the runtime check is what covers operators assembled dynamically, which
+    is how every converted PDDL domain builds them.
+    """
+    with pytest.raises(TypeError) as excinfo:
+        Operator(
+            name="go",
+            parameters=[("?r", "robot")],
+            preconditions=[F("free ?r"), "at ?r kitchen"],  # ty: ignore[invalid-argument-type]
+            effects=[Effect(1.0, resulting_fluents={F("done ?r")})],
+        )
+    assert "'go'" in str(excinfo.value)
+    assert "str" in str(excinfo.value)
+
+
 def test_unbound_precondition_variable_is_an_error():
     """A misspelled parameter must not silently disable a static constraint.
 

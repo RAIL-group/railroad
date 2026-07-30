@@ -246,20 +246,34 @@ class Environment(ABC):
         cannot see mutable state captured inside operator callables (duration
         or probability functions). Call this after mutating such state — e.g.
         swapping a belief/policy that operator probabilities read.
+
+        Not needed for :meth:`_is_valid_action`: that runs outside the cache,
+        on every call.
         """
         self._grounding_cache = None
 
     def get_actions(self) -> List[Action]:
-        """Ground available actions from operators (cached).
+        """Ground available actions from operators, then filter them.
 
         Grounds via :func:`railroad.core.ground_operators` with
         static-precondition pruning: verified static preconditions are
         stripped from the grounded actions. The facts themselves stay in the
         environment's state — see :attr:`static_facts` for why — so this call
-        never mutates :attr:`state`. The grounding is cached on (grounding
-        objects, static facts) and recomputed automatically when either
-        changes (e.g. revelation adding objects, or an interrupted move
-        registering a ``robot_loc``).
+        never mutates :attr:`state`.
+
+        Only the *grounding* is cached, on (grounding objects, static facts),
+        and it is recomputed when either changes (e.g. revelation adding
+        objects, or an interrupted move registering a ``robot_loc``). Those
+        are exactly the inputs grounding reads, so the key is complete for it.
+
+        :meth:`_is_valid_action` runs on every call, outside that cache. It is
+        a subclass hook that may read anything — ``UnknownSpaceEnvironment``
+        filters on live ``at`` fluents and on move costs derived from the
+        observed occupancy grid, neither of which the key can see. Caching the
+        filtered list would make that hook's correctness depend on some
+        unrelated caller happening to call :meth:`invalidate_grounding` often
+        enough. Re-filtering is one pass over an already-materialised list;
+        regrounding is the expensive part and is still avoided.
         """
         grounding_objects = self._grounding_objects()
         current_fluents = set(self.fluents)
@@ -273,23 +287,27 @@ class Environment(ABC):
             static_snapshot,
         )
         if self._grounding_cache is not None and self._grounding_cache[0] == cache_key:
-            return list(self._grounding_cache[1])
+            grounded = self._grounding_cache[1]
+        else:
+            result = ground_operators(
+                self._operators,
+                grounding_objects,
+                current_fluents,
+                allow_duplicate_bindings=False,
+                treat_dynamic=self._grounding_dynamic,
+            )
+            self._eliminated_predicates = result.eliminated_predicates
+            grounded = result.actions
+            self._grounding_cache = (cache_key, grounded)
 
-        result = ground_operators(
-            self._operators,
-            grounding_objects,
-            current_fluents,
-            allow_duplicate_bindings=False,
-            treat_dynamic=self._grounding_dynamic,
-        )
-        self._eliminated_predicates = result.eliminated_predicates
-
-        valid_actions = [a for a in result.actions if self._is_valid_action(a)]
+        valid_actions = [a for a in grounded if self._is_valid_action(a)]
 
         # Action names must be unique: the planner and get_action_by_name both
         # identify actions by name, so two distinct groundings sharing a name
         # (e.g. two operators that both produce "move r1 a goal" with different
-        # preconditions) are silently ambiguous. Fail loudly instead.
+        # preconditions) are silently ambiguous. Fail loudly instead. Checked
+        # on what is returned rather than on the grounding, since a filter that
+        # rejects one of a colliding pair leaves nothing ambiguous.
         seen: Dict[str, Action] = {}
         for action in valid_actions:
             other = seen.get(action.name)
@@ -303,8 +321,7 @@ class Environment(ABC):
                 )
             seen[action.name] = action
 
-        self._grounding_cache = (cache_key, valid_actions)
-        return list(valid_actions)
+        return valid_actions
 
     def _grounding_objects(self) -> Dict[str, Collection[str]]:
         """Hook: the object universe used to ground operators.
@@ -320,6 +337,12 @@ class Environment(ABC):
         The base filter is domain-agnostic (finite effect times, nonempty
         name); subclasses layer on domain conventions (see
         ObjectSearchEnvironment).
+
+        Runs on every :meth:`get_actions` call, outside the grounding cache,
+        so an override is free to consult live state — current fluents, a
+        sensed map, anything — without having to declare it anywhere or worry
+        about a stale cached verdict. It must stay cheap for that reason: it
+        is called once per grounded action per call.
         """
         if not action_times_finite(action):
             return False

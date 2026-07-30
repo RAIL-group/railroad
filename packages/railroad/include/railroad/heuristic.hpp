@@ -278,7 +278,20 @@ class BranchView {
 public:
   BranchView(const GoalBase* goal, const FFForwardResult& forward) {
     if (!goal) { source_ = &empty(); return; }
-    if (goal->dnf_branch_count() <= MAX_ENUMERATED_DNF_BRANCHES) {
+    const std::size_t count = goal->dnf_branch_count();
+
+    // Zero branches is FalseGoal-like: the DNF is empty, so there is nothing
+    // to build. This must be tested *before* the cap, not folded into it.
+    // AND's count is a saturating product and sat_mul annihilates on a zero,
+    // so `AND(<huge subtree>, FalseGoal)` counts 0 -- under the cap -- while
+    // the subtree it multiplies against is arbitrarily large. Taking the
+    // enumerating path there would call get_dnf_branches(), which
+    // materialises children in declaration order and would expand that
+    // subtree in full before the FalseGoal short-circuits it, which is
+    // exactly the out-of-memory abort the cap exists to prevent.
+    if (count == 0) { source_ = &empty(); return; }
+
+    if (count <= MAX_ENUMERATED_DNF_BRANCHES) {
       source_ = &goal->get_dnf_branches();
       return;
     }

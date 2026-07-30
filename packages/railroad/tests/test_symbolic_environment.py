@@ -545,6 +545,62 @@ def test_grounding_cache_regrounds_on_universe_change():
     assert "pick r1 kitchen Knife" in names
 
 
+def test_action_filter_sees_live_state_on_a_grounding_cache_hit():
+    """_is_valid_action runs outside the cache, so it may read dynamic state.
+
+    The cache key covers the object universe and static facts — exactly what
+    grounding reads — but _is_valid_action is a subclass hook that can consult
+    anything. UnknownSpaceEnvironment's filters on live `at` fluents and on
+    observed-grid move costs are the real instance. Caching the filtered list
+    would make those depend on some unrelated caller invalidating the cache
+    often enough; here nothing changes the key at all between calls, so a
+    cached filter verdict would be visible immediately.
+    """
+    move_op = Operator(
+        name="move",
+        parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F("at ?r ?from"), F("free ?r")],
+        effects=[
+            Effect(time=0.0, resulting_fluents={~F("free ?r"), ~F("at ?r ?from")}),
+            Effect(time=2.0, resulting_fluents={F("free ?r"), F("at ?r ?to")}),
+        ],
+    )
+
+    class BlockingEnvironment(SymbolicEnvironment):
+        blocked: set[str] = set()
+
+        def _is_valid_action(self, action):
+            if not super()._is_valid_action(action):
+                return False
+            return action.name.split()[-1] not in self.blocked
+
+    env = BlockingEnvironment(
+        state=State(0.0, {F("at r1 kitchen"), F("free r1")}, []),
+        objects_by_type={"robot": {"r1"}, "location": {"kitchen", "hall", "office"}},
+        operators=[move_op],
+    )
+
+    # `at` is dynamic, so grounding emits every ordered location pair and the
+    # runtime precondition decides which are applicable.
+    everything = {a.name for a in env.get_actions()}
+    assert everything == {
+        "move r1 kitchen hall", "move r1 kitchen office",
+        "move r1 hall kitchen", "move r1 hall office",
+        "move r1 office kitchen", "move r1 office hall",
+    }
+
+    # Nothing the cache key tracks has changed — no new objects, no static
+    # fact touched, no invalidate_grounding() call.
+    env.blocked = {"office"}
+    assert {a.name for a in env.get_actions()} == {
+        "move r1 kitchen hall", "move r1 hall kitchen", "move r1 office kitchen",
+        "move r1 office hall",
+    }
+
+    env.blocked = set()
+    assert {a.name for a in env.get_actions()} == everything
+
+
 def test_environment_static_preconditions_end_to_end():
     """Connected-domain exemplar: static facts constrain grounding and are
     stripped from grounded actions, while staying in the environment state."""
