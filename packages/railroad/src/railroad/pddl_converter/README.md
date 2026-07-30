@@ -159,7 +159,8 @@ incomplete run skips rather than reporting a green tick it did not earn.
 
 `solve()` on the **first instance** of each domain, seeds 0-2, 4000 MCTS
 iterations, at most 300 steps. `default` is the shipped configuration;
-`penalty` adds `dead_end_penalty=1e4`. Re-measured 2026-07-29.
+`penalty` adds `dead_end_penalty=1e4`. Re-measured 2026-07-29; `random` and
+`boxworld`, the two slowest, on 2026-07-30.
 
 Solve rates are **not** part of the checked contract — `test_ipc_sweep.py`
 verifies conversion only. They are recorded because "converts" and "is
@@ -168,7 +169,9 @@ usable" are different claims and the difference is worth knowing.
 A 10x budget (40,000 iterations) was also measured and **moved no domain in
 either direction**: every failure below is a heuristic or dead-end problem,
 not a search-effort one. The one thing it improved was plan *quality* —
-logistics finds 20 steps instead of 21.
+logistics finds 20 steps instead of 21. That sweep exceeded its wall-clock
+budget on `random` and `boxworld`, so those two are covered at 4000
+iterations only.
 
 **ipc-2000 — 11/12 convert, 11/11 solved**
 
@@ -183,7 +186,7 @@ logistics finds 20 steps instead of 21.
 | schedule-adl-{typed,untyped} | 49 | 3/3 | 3/3 | 2 steps; equality conditions |
 | elevator-adl-full-typed | — | — | — | unsupported: imply-conditions |
 
-**ippc-2006 (PPDDL) — 9/10 convert, 5/9 solved**
+**ippc-2006 (PPDDL) — 9/10 convert, 6/9 solved**
 
 | Domain | Actions | default | penalty | Notes |
 |---|---:|---|---|---|
@@ -195,7 +198,7 @@ logistics finds 20 steps instead of 21.
 | ex-blocksworld | 60 | 0/3 | 0/3 | dead ends (detonations) |
 | pitchcatch | 6 | 0/3 | 0/3 | 300-step ceiling |
 | tireworld | 62 | 0/3 | 0/3 | dead ends |
-| random | 2302 | — | — | not measured: >1200 s |
+| random | 2302 | 2/3 | 2/3 | 17-24 steps; one seed hits the 300-step ceiling (~99 s/seed) |
 | drive | — | — | — | unsupported: disjunctive-preconditions |
 
 **ippc-2008 (PPDDL) — 5/10 convert, 3/5 solved**
