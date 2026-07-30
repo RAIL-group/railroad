@@ -37,6 +37,7 @@ from railroad.core import (
     OrGoal,
     State,
     dynamic_predicates,
+    simplify_static_goal,
     ground_operators,
 )
 
@@ -192,6 +193,15 @@ def convert(domain: PDDLDomain, problem: PDDLProblem) -> ConvertedProblem:
     # the preconditions/conditions that read them, so only goal-referenced
     # static facts stay in the runtime state.
     dynamic = dynamic_predicates([comp.operator for comp in compiled_operators])
+
+    # Goals read static predicates too: an `exists ?c - city` gated by a static
+    # `destination ?b ?c` compiles to a disjunct per city, all but one of them
+    # unsatisfiable. Fold those away before anything downstream pays for them,
+    # then recompute the read set -- predicates the goal no longer mentions
+    # need not be kept in the runtime state either.
+    goal = simplify_static_goal(goal, init_fluents, dynamic)
+    goal_predicates = {f.name for f in goal.get_all_literals()}
+
     initial_fluents = {
         f for f in init_fluents if f.name in dynamic or f.name in goal_predicates
     }

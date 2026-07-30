@@ -352,6 +352,79 @@ def dynamic_predicates(operators: Sequence[Operator]) -> Set[str]:
     return dynamic
 
 
+def simplify_static_goal(
+    goal: Goal,
+    facts: Collection[Fluent],
+    dynamic: Collection[str],
+) -> Goal:
+    """Fold a goal's static literals into True/False using ``facts``.
+
+    A literal is *static* when no operator effect touches its predicate -- the
+    same test :func:`ground_operators` applies to preconditions -- so its truth
+    is fixed for the lifetime of the problem and can be decided against the
+    initial facts. Goals were the one place static material survived:
+    grounding compiles it out of preconditions, but nothing evaluated it here.
+
+    This is more than tidiness. PDDL renders "every box to the city that is its
+    destination" as an ``exists`` over cities gated by a static ``destination``
+    predicate, and the DNF expands that into one branch per city per box --
+    5**10 branches for ippc-2008/boxworld, of which exactly one is satisfiable.
+    Folded, the goal is a plain conjunction with a single branch.
+
+    ``dynamic`` is :func:`dynamic_predicates` output. Naming a predicate there
+    that something mutates outside operator effects would make this unsound,
+    which is the contract ``runtime_mutated_predicates()`` already governs.
+    """
+    from railroad._bindings import FalseGoal, GoalType, TrueGoal
+
+    fact_set = frozenset(facts)
+    dynamic_set = frozenset(dynamic)
+
+    def visit(node: Goal) -> Goal:
+        if isinstance(node, LiteralGoal):
+            fluent = node.fluent()
+            if fluent.name in dynamic_set:
+                return node
+            # Negation lives on the Fluent, so test the positive form and flip.
+            positive = ~fluent if fluent.negated else fluent
+            holds = (positive in fact_set) != fluent.negated
+            return TrueGoal() if holds else FalseGoal()
+
+        kind = node.get_type()
+
+        if kind == GoalType.AND:
+            kept = []
+            for child in node.children():
+                simplified = visit(child)
+                child_kind = simplified.get_type()
+                if child_kind == GoalType.FALSE_GOAL:
+                    return FalseGoal()  # one false conjunct decides the whole
+                if child_kind == GoalType.TRUE_GOAL:
+                    continue  # contributes no requirement
+                kept.append(simplified)
+            if not kept:
+                return TrueGoal()
+            return kept[0] if len(kept) == 1 else AndGoal(kept)
+
+        if kind == GoalType.OR:
+            kept = []
+            for child in node.children():
+                simplified = visit(child)
+                child_kind = simplified.get_type()
+                if child_kind == GoalType.TRUE_GOAL:
+                    return TrueGoal()
+                if child_kind == GoalType.FALSE_GOAL:
+                    continue  # unsatisfiable disjunct, drop it
+                kept.append(simplified)
+            if not kept:
+                return FalseGoal()
+            return kept[0] if len(kept) == 1 else OrGoal(kept)
+
+        return node  # TrueGoal / FalseGoal are already decided
+
+    return visit(goal)
+
+
 class GroundingStats:
     """Enumeration counters from one ground_operators() call.
 
