@@ -122,7 +122,6 @@ class ConvertedProblem:
     goal: Goal
     compiled_operators: List[CompiledOperator]
     _static_fluents: FrozenSet[Fluent] = field(default_factory=frozenset)
-    _goal_predicates: FrozenSet[str] = field(default_factory=frozenset)
     _actions: Optional[List[Action]] = None
 
     @property
@@ -138,7 +137,6 @@ class ConvertedProblem:
                 self._static_fluents,
                 allow_duplicate_bindings=True,
                 skip_on=(_UndefinedFunctionValue,),
-                runtime_referenced=self._goal_predicates,
             )
             self._actions = result.actions
         return self._actions
@@ -176,7 +174,6 @@ def convert(domain: PDDLDomain, problem: PDDLProblem) -> ConvertedProblem:
         _make_fluent(lit, rename) for lit in problem.init_literals
     }
     goal = _compile_goal(problem.goal, type_objects, rename)
-    goal_predicates = _goal_predicates(problem.goal, rename)
 
     # Facts consulted only while grounding: every init fact, plus identity
     # facts answering (= a b) conditions inside `when` branches (evaluated
@@ -189,22 +186,18 @@ def convert(domain: PDDLDomain, problem: PDDLProblem) -> ConvertedProblem:
             Fluent(EQ_PREDICATE, obj, obj) for obj in object_types
         )
 
-    # Static facts are compile-time material: grounding verifies and strips
-    # the preconditions/conditions that read them, so only goal-referenced
-    # static facts stay in the runtime state.
     dynamic = dynamic_predicates([comp.operator for comp in compiled_operators])
 
     # Goals read static predicates too: an `exists ?c - city` gated by a static
     # `destination ?b ?c` compiles to a disjunct per city, all but one of them
-    # unsatisfiable. Fold those away before anything downstream pays for them,
-    # then recompute the read set -- predicates the goal no longer mentions
-    # need not be kept in the runtime state either.
+    # unsatisfiable. Fold those away before anything downstream pays for them.
     goal = simplify_static_goal(goal, init_fluents, dynamic)
-    goal_predicates = {f.name for f in goal.get_all_literals()}
 
-    initial_fluents = {
-        f for f in init_fluents if f.name in dynamic or f.name in goal_predicates
-    }
+    # Static facts are now entirely compile-time material: grounding verifies
+    # and strips the preconditions/conditions that read them, and folding has
+    # left the goal reading only dynamic predicates. So nothing consults a
+    # static fact at runtime and none need to be carried in the state.
+    initial_fluents = {f for f in init_fluents if f.name in dynamic}
     initial_fluents.add(Fluent("free", agent))
 
     return ConvertedProblem(
@@ -217,7 +210,6 @@ def convert(domain: PDDLDomain, problem: PDDLProblem) -> ConvertedProblem:
         goal=goal,
         compiled_operators=compiled_operators,
         _static_fluents=frozenset(grounding_fluents),
-        _goal_predicates=frozenset(goal_predicates),
     )
 
 
@@ -844,27 +836,6 @@ def _check_variables_bound(
 # ============================================================================
 #  Goal compilation
 # ============================================================================
-
-
-def _goal_predicates(
-    node: Optional[ConditionNode], rename: Dict[str, str]
-) -> Set[str]:
-    """Predicates the goal reads at runtime (keeps their static facts)."""
-    out: Set[str] = set()
-
-    def visit(n: ConditionNode) -> None:
-        if isinstance(n, Literal):
-            out.add(rename.get(n.predicate, n.predicate))
-        elif isinstance(n, (And, Or)):
-            for c in n.children:
-                visit(c)
-        elif isinstance(n, (Forall, Exists)):
-            visit(n.body)
-        # Equals resolves to True/False at compile time; nothing to keep.
-
-    if node is not None:
-        visit(node)
-    return out
 
 
 def _compile_goal(
