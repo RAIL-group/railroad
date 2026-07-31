@@ -1134,34 +1134,6 @@ def extract_negative_goal_fluents(goal: Goal) -> Set[Fluent]:
     return negative_fluents
 
 
-def extract_all_negative_fluents(
-    actions: Optional[List[Action]] = None,
-    goal: Optional[Goal] = None
-) -> Set[Fluent]:
-    """Extract negative fluents from actions and/or goals.
-
-    This unified function collects all fluents that appear in negated form,
-    either as negative preconditions in actions or as negative literals in goals.
-    The returned fluents are in positive form (ready for mapping creation).
-
-    Args:
-        actions: Optional list of Action objects
-        goal: Optional Goal object
-
-    Returns:
-        Set of positive Fluent objects that appear negated in actions/goals.
-    """
-    negative_fluents = set()
-
-    if actions:
-        negative_fluents.update(extract_negative_preconditions(actions))
-
-    if goal:
-        negative_fluents.update(extract_negative_goal_fluents(goal))
-
-    return negative_fluents
-
-
 def create_positive_fluent_mapping(negative_fluents: Set[Fluent]) -> Dict[Fluent, Fluent]:
     """Create mapping from negative fluents to their positive "not-" versions.
 
