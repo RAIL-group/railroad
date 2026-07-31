@@ -117,14 +117,19 @@ Later deterministic years spot-check clean: ipc-2011
 `elevator-sequential-optimal` grounds to 1793 actions with function-valued
 costs mapped to durations.
 
-The authoritative per-domain list lives in
-`tests/pddl_converter/test_ipc_sweep.py`, which re-derives every status from
-the source repos and fails if one moves. It needs the GitHub API, so it is
-gated:
+These totals were measured on 2026-07-07 and are documentation, not a pinned
+contract — they describe third-party repositories that can change without
+notice. To re-derive them at any time:
 
 ```bash
-RAILROAD_PDDL_NETWORK_TESTS=1 uv run pytest -q -k ipc_sweep
+uv run railroad pddl check ipc-2000        # add --markdown for a table
 ```
+
+No test reaches the network. Checking that GitHub still serves a given domain
+tests github.com rather than railroad, and the 60/hour anonymous rate limit
+makes it flaky besides — a partial run cannot tell "upstream changed" apart
+from "we got throttled". The test suite covers the converter against vendored
+PDDL fixtures instead.
 
 ## Solving, and what it does not tell you
 
