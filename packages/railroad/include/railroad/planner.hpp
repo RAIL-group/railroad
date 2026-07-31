@@ -16,7 +16,6 @@
 #include <iostream>
 #include <iomanip>
 #include <optional>
-#include <queue>
 #include <random>
 #include <set>
 #include <sstream>
@@ -83,84 +82,6 @@ get_next_actions(const State &state, const std::vector<Action> &all_actions) {
   }
   if (!non_wait.empty()) return non_wait;
   return result;
-}
-
-using HeuristicFn = std::function<double(const State &)>;
-
-// For priority queue: (f, state)
-using QueueEntry = std::tuple<double, State>;
-
-// For backtracking
-using CameFromMap = std::unordered_map<State, std::pair<State, Action>>;
-
-inline std::vector<Action> reconstruct_path(const CameFromMap &came_from,
-                                            State current) {
-  std::vector<Action> path;
-  auto it = came_from.find(current);
-  while (it != came_from.end()) {
-    std::cerr << it->second.second.str() << std::endl;
-    path.push_back(it->second.second);
-    current = it->second.first;
-    it = came_from.find(current);
-  }
-  std::reverse(path.begin(), path.end());
-  return path;
-}
-
-inline std::optional<std::vector<Action>>
-astar(const State &start_state, const std::vector<Action> &all_actions,
-      const GoalPtr &goal,
-      HeuristicFn heuristic_fn = nullptr) {
-  std::priority_queue<QueueEntry, std::vector<QueueEntry>, std::greater<>>
-      open_heap;
-  std::unordered_set<std::size_t> closed_set;
-  std::unordered_map<std::size_t, std::pair<std::size_t, const Action *>>
-      came_from;
-
-  FFMemory ff_memory;
-  heuristic_fn = [&goal, &all_actions, &ff_memory](const State& s) -> double {
-    return ff_heuristic(s, goal.get(), all_actions, &ff_memory);
-  };
-
-  int counter = 0;
-  open_heap.emplace(0.0, start_state);
-
-  std::cerr << "Starting the main planning loop." << std::endl;
-  while (!open_heap.empty()) {
-    counter++;
-    QueueEntry top = open_heap.top();
-    State current = std::get<1>(top);
-    open_heap.pop();
-
-    if (closed_set.count(current.hash()))
-      continue;
-    closed_set.insert(current.hash());
-
-    if (goal->evaluate(current.fluents())) {
-      std::cerr << "Goal reached!! count: " << counter << std::endl;
-      return std::nullopt; // no path found
-                           // return reconstruct_path(came_from, current);
-    }
-
-    auto next_actions = get_next_actions(current, all_actions);
-    for (const auto action : next_actions) {
-      for (const auto &[successor, prob] : transition(current, action)) {
-        if (prob == 0.0)
-          continue;
-
-        double g = successor.time();
-
-        came_from[successor.hash()] = std::make_pair(current.hash(), action);
-
-        double h = heuristic_fn ? heuristic_fn(successor) : 0.0;
-        double f = g + h;
-
-        open_heap.emplace(f, std::move(successor));
-      }
-    }
-  }
-
-  return std::nullopt; // no path found
 }
 
 // ############## MCTS ###############

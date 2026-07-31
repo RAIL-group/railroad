@@ -17,7 +17,7 @@ The repository is organized as a monorepo with several interdependent packages:
 #### Core Planning (`packages/railroad/`)
 
 - **C++ Core** (`include/`, `src/railroad/_bindings.cpp`):
-  - A* search, MCTS planning
+  - MCTS planning
   - State management and action grounding
   - FF-like heuristic for forward planning
 - **Python Layer** (`src/railroad/`):
