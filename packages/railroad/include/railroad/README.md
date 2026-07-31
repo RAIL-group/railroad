@@ -5,17 +5,13 @@ Probabilistic PDDL planning system.
 
 ## Files
 
-- **core.hpp**: Core types (Fluent, Action, GroundedEffect, plus the
-  `ProbBranchWrapper`/`CondBranchWrapper` effect branches — probabilistic
-  outcomes and PDDL-`when`-style conditional branches)
-- **state.hpp**: State representation and transition function. Effect
-  application resolves branches at fire time: conditional branches are
-  evaluated against the state *before* the effect's own fluents apply (and
-  are optimistically assumed to hold under relaxation); deletes apply
-  before adds (PDDL semantics, so a same-fluent add/delete pair keeps the
-  fluent). Triggered/branched sub-effects are queued and applied *after*
-  their parent effect's fluents, so deletes-before-adds is per-effect, not
-  across an effect and its branches
+- **core.hpp**: Core types (Fluent, Action, GroundedEffect) plus the effect
+  branches — `ProbBranchWrapper` for probabilistic outcomes,
+  `CondBranchWrapper` for PDDL-`when`-style conditions
+- **state.hpp**: State representation and the transition function, which
+  resolves branches at fire time. Three ordering rules govern it: conditions
+  see the state *before* the effect's own fluents apply, deletes apply before
+  adds, and branch sub-effects apply *after* their parent effect
 - **goal.hpp**: Goal representation (LiteralGoal, AndGoal, OrGoal, etc.)
 - **heuristic_types.hpp**: shared FF data types — `Achiever`,
   `FFForwardResult`, `FFCacheKey`/`FFMemory`, and the `HeuristicFn` alias.

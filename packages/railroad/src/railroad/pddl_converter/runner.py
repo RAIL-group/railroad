@@ -58,7 +58,7 @@ def solve(
     *better* than reachable states, so domains that can strand the agent
     report failure even though the conversion is faithful. Setting a penalty
     that dominates typical plan costs (e.g. ``1e4``) makes those solvable —
-    see the converter README's planner notes for what it costs elsewhere.
+    see the converter README on solving for what it costs elsewhere.
     """
     start = _time.perf_counter()
     state = problem.initial_state

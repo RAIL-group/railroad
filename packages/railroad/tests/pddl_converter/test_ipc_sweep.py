@@ -1,9 +1,9 @@
 """Network-gated IPC compatibility sweep.
 
-The converter README publishes per-domain compatibility tables. They are the
-converter's contract with the IPC collections, but they were produced by
-hand, so nothing re-checks them when grounding changes. This test encodes
-them: it re-derives every status and compares against the table.
+The table below is the converter's contract with the IPC collections: the
+authoritative per-domain status, which the converter README summarises and
+defers to. This test re-derives every status from the source repos and fails
+if one moves, so grounding changes cannot silently invalidate it.
 
 The scope is deliberately *conversion*, not solving. Whether a planner
 happens to reach the goal on a given instance is a planner property, and
@@ -43,7 +43,6 @@ pytestmark = pytest.mark.skipif(
 
 
 # Status per domain, first instance: "ok", or "<error-kind>:<reason slug>".
-# Transcribed from the converter README's compatibility tables.
 EXPECTED_STATUS = {
     "ipc-2000": {
         "blocks-strips-typed": "ok",

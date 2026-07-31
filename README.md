@@ -203,15 +203,14 @@ goal = (F("found Knife") | F("found Spoon")) & ~F("at Cup table")
 
 ## Conditional Effects
 
-Effects can carry conditional branches (PDDL-style `when`): sub-effects
-applied only if their condition fluents hold at the moment the effect fires,
-evaluated *before* the effect's own fluents apply. Negated conditions use
-negation-as-absence.
+Effects can carry branches that fire only if their condition fluents hold
+when the effect does (PDDL-style `when`), checked *before* the effect's own
+fluents apply:
 
 ```python
-from railroad.core import Effect, Fluent as F, ForallEffect
+from railroad.core import Effect, Fluent as F
 
-# Explicit branches: dropping breaks the item -- but only if it's fragile.
+# Dropping breaks the item -- but only if it's fragile and unpadded.
 Effect(
     time=1.0,
     resulting_fluents={F("free ?r"), F("dropped ?x")},
@@ -220,57 +219,33 @@ Effect(
          [Effect(time=0, resulting_fluents={F("broken ?x")})]),
     ],
 )
-
-# Universally quantified (forall+when): moving the briefcase relocates
-# exactly the items inside it. ForallEffect expands into one conditional
-# branch per object of the quantified type at Operator.instantiate() time.
-Effect(
-    time=2.0,
-    resulting_fluents={F("at briefcase ?to"), F("not at briefcase ?from")},
-    forall_effects=[ForallEffect(
-        variables=[("?obj", "item")],
-        conditions={F("in ?obj")},
-        effects=[Effect(time=0, resulting_fluents={
-            F("at ?obj ?to"), F("not at ?obj ?from")})],
-    )],
-)
 ```
 
-Conditional branches compose freely with probabilistic ones (a probabilistic
-outcome's sub-effects may themselves be conditional, and vice versa). See the
-`feature_examples` benchmarks for small end-to-end demonstrations.
+`ForallEffect` is the universally quantified form (`forall`+`when`) — one
+branch per object of the quantified type, expanded at `instantiate()` time,
+for effects like "moving the briefcase relocates whatever is inside it".
+Conditional and probabilistic branches nest freely in either order. The
+`feature_examples` benchmarks demonstrate both end to end.
 
 ## Action Costs Beyond Time
 
-Operators may carry a scalar `extra_cost`; the planner minimizes expected
-completion time **plus** accumulated extra cost, and the FF heuristic
-accounts for it when guiding search:
-
-```python
-toll_road = Operator(
-    name="take-toll-road",
-    parameters=[("?r", "robot")],
-    preconditions=[F("free ?r"), F("at ?r start")],
-    effects=[
-        Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?r start")}),
-        Effect(time=2.0, resulting_fluents={F("free ?r"), F("at ?r destination")}),
-    ],
-    extra_cost=10.0,  # fast (2s) but expensive: a free 6s back road wins
-)
-```
+Operators may carry a scalar `extra_cost`. The planner minimizes expected
+completion time **plus** accumulated cost, and the FF heuristic accounts for
+it when guiding search — so `Operator(..., extra_cost=10.0)` on a 2-second
+toll road loses to a free 6-second back road.
 
 ## Importing PDDL / PPDDL Problems
 
-International Planning Competition problems (classical PDDL and
-probabilistic PPDDL) can be downloaded, converted, and run directly:
+International Planning Competition problems, classical and probabilistic, can
+be downloaded, converted, and run directly:
 
 ```bash
 uv run railroad pddl check ipc-2000     # per-domain compatibility report
 uv run railroad pddl run --collection ipc-2000 --domain logistics-strips-typed --instance 1
 ```
 
-See `packages/railroad/src/railroad/pddl_converter/README.md` for mapping
-semantics and the supported/unsupported feature enumeration.
+See [the converter README](packages/railroad/src/railroad/pddl_converter/README.md)
+for mapping semantics and the supported-feature list.
 
 ## Running via this Repo
 
