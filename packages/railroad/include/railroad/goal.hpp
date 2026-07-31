@@ -93,24 +93,16 @@ public:
       std::numeric_limits<std::size_t>::max();
 
   // How many branches get_dnf_branches() *would* materialise, computed
-  // structurally without building any of them.
+  // structurally without building any of them. AND distributes over OR, so
+  // the count is a product: `(forall (?b - box) (exists (?c - city) ...))`
+  // over 10 boxes and 5 cities is 5^10 FluentSets, which exhausts memory.
+  // Callers about to walk the DNF check this first and fall back above a cap
+  // (see select_cheapest_branch in heuristic.hpp). Saturates at
+  // DNF_COUNT_SATURATED rather than overflowing.
   //
-  // AND distributes over OR, so the count is a product and grows
-  // exponentially in the number of conjoined disjunctions: a goal like
-  // `(forall (?b - box) (exists (?c - city) ...))` over 10 boxes and 5
-  // cities is 5^10 branches, each a FluentSet. Materialising that exhausts
-  // memory and takes the machine down with it, so callers that are about to
-  // walk the DNF should check this first and pick a cheaper strategy above
-  // some cap (see select_cheapest_branch in heuristic.hpp).
-  //
-  // Saturates at DNF_COUNT_SATURATED rather than overflowing: callers only
-  // compare against a cap, so an exact value beyond it is worthless.
-  //
-  // Zero is exact and means the DNF is empty (unsatisfiable): OR sums to 0
-  // only when every disjunct is empty, and AND's product is 0 only when some
-  // conjunct is, and either way get_dnf_branches() returns {}. Callers must
-  // test for it *before* the cap -- a zero from a FalseGoal conjunct is below
-  // any cap no matter how large its siblings are (see BranchView).
+  // Zero is exact and means the DNF is empty. Callers must test for it
+  // *before* the cap: a zero from a FalseGoal conjunct is below any cap no
+  // matter how large its siblings are (see BranchView).
   std::size_t dnf_branch_count() const {
     if (!cached_dnf_count_) {
       cached_dnf_count_ = compute_dnf_branch_count();

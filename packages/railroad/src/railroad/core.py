@@ -1,5 +1,5 @@
 # Re-import required dependencies due to kernel reset
-from typing import Callable, List, Tuple, Dict, Set, Union, Sequence, Collection, Mapping, Optional
+from typing import Callable, Iterator, List, Tuple, Dict, Set, Union, Sequence, Collection, Mapping, Optional
 import itertools
 import math
 
@@ -344,29 +344,26 @@ def _is_var(term: str) -> bool:
     return term.startswith("?")
 
 
-def _collect_dynamic_predicates(effect: Effect, out: Set[str]) -> None:
-    for fluent in effect.resulting_fluents:
-        out.add(fluent.name)
-    for _, sub_effects in effect.prob_effects:
-        for sub in sub_effects:
-            _collect_dynamic_predicates(sub, out)
-    # Conditional branches: only the effect side writes; conditions read.
-    for _, sub_effects in effect.cond_effects:
-        for sub in sub_effects:
-            _collect_dynamic_predicates(sub, out)
-    for forall in effect.forall_effects:
-        for sub in forall.effects:
-            _collect_dynamic_predicates(sub, out)
+def _walk(effect: Effect) -> Iterator[Effect]:
+    """Yield an ungrounded effect and every nested branch sub-effect."""
+    yield effect
+    branches = [subs for _, subs in effect.prob_effects]
+    branches += [subs for _, subs in effect.cond_effects]
+    branches += [forall.effects for forall in effect.forall_effects]
+    for sub in itertools.chain.from_iterable(branches):
+        yield from _walk(sub)
 
 
 def dynamic_predicates(operators: Sequence[Operator]) -> Set[str]:
     """Predicates touched by some effect of some operator (all others are
     static: their truth is fixed for the lifetime of the problem)."""
-    dynamic: Set[str] = set()
-    for op in operators:
-        for effect in op.effects:
-            _collect_dynamic_predicates(effect, dynamic)
-    return dynamic
+    return {
+        fluent.name
+        for op in operators
+        for effect in op.effects
+        for sub in _walk(effect)
+        for fluent in sub.resulting_fluents
+    }
 
 
 def simplify_static_goal(
@@ -492,34 +489,73 @@ class GroundingResult:
         self.stats = stats
 
 
-def _collect_condition_predicates(effect: Effect, out: Set[str]) -> None:
+def _condition_predicates(effect: Effect) -> Set[str]:
     """Predicates read by conditional-branch conditions (ungrounded form)."""
-    for conditions, sub_effects in effect.cond_effects:
-        for fluent in conditions:
-            out.add(fluent.name)
-        for sub in sub_effects:
-            _collect_condition_predicates(sub, out)
-    for forall in effect.forall_effects:
-        for fluent in forall.conditions:
-            out.add(fluent.name)
-        for sub in forall.effects:
-            _collect_condition_predicates(sub, out)
-    for _, sub_effects in effect.prob_effects:
-        for sub in sub_effects:
-            _collect_condition_predicates(sub, out)
+    names: Set[str] = set()
+    for sub in _walk(effect):
+        for conditions, _ in sub.cond_effects:
+            names.update(f.name for f in conditions)
+        for forall in sub.forall_effects:
+            names.update(f.name for f in forall.conditions)
+    return names
 
 
-def _effect_times_finite(effect: GroundedEffect) -> bool:
-    """Whether this effect and every nested branch sub-effect has a finite time."""
-    if not math.isfinite(effect.time):
-        return False
-    for branch in effect.prob_effects:
-        if not all(_effect_times_finite(sub) for sub in branch.effects):
-            return False
+def _walk_grounded(effect: GroundedEffect) -> Iterator[GroundedEffect]:
+    """Yield a grounded effect and every nested branch sub-effect."""
+    yield effect
+    for branch in itertools.chain(effect.prob_effects, effect.cond_effects):
+        for sub in branch.effects:
+            yield from _walk_grounded(sub)
+
+
+def _rebuild_grounded_effect(
+    effect: GroundedEffect,
+    fluents: Optional[Callable[[Set[Fluent]], Set[Fluent]]] = None,
+    conditions: Optional[Callable[[Set[Fluent]], Optional[Set[Fluent]]]] = None,
+) -> Tuple[GroundedEffect, bool]:
+    """Rewrite an effect tree, branches included, returning (effect, changed).
+
+    ``fluents`` rewrites each effect's own fluent set; ``conditions`` rewrites a
+    conditional branch's conditions, or returns ``None`` to drop the branch as
+    unfirable. Probabilistic branches are always kept, empty ones included:
+    dropping one changes the outcome distribution, not just its contents.
+    Nothing is rebuilt when neither hook changes anything, so an effect with no
+    work to do keeps its identity and callers can skip it.
+    """
+    original = set(effect.resulting_fluents)
+    kept = original if fluents is None else fluents(original)
+    changed = kept != original
+
+    def rebuild(sub_effects: List[GroundedEffect]) -> List[GroundedEffect]:
+        nonlocal changed
+        out = []
+        for sub in sub_effects:
+            new_sub, sub_changed = _rebuild_grounded_effect(sub, fluents, conditions)
+            out.append(new_sub)
+            changed |= sub_changed
+        return out
+
+    new_prob = [(branch.prob, rebuild(branch.effects)) for branch in effect.prob_effects]
+
+    new_cond: List[Tuple[Set[Fluent], List[GroundedEffect]]] = []
     for branch in effect.cond_effects:
-        if not all(_effect_times_finite(sub) for sub in branch.effects):
-            return False
-    return True
+        sub_effects = rebuild(branch.effects)
+        conds = set(branch.conditions)
+        new_conds = conds if conditions is None else conditions(conds)
+        if new_conds is None:
+            changed = True
+            continue
+        changed |= new_conds != conds
+        new_cond.append((new_conds, sub_effects))
+
+    if not changed:
+        return effect, False
+    return (
+        GroundedEffect(
+            effect.time, kept, prob_effects=new_prob, cond_effects=new_cond
+        ),
+        True,
+    )
 
 
 def action_times_finite(action: Action) -> bool:
@@ -530,21 +566,21 @@ def action_times_finite(action: Action) -> bool:
     inside a conditional or probabilistic branch would advance state time to
     infinity if that branch ever fired.
     """
-    return all(_effect_times_finite(eff) for eff in action.effects)
+    return all(
+        math.isfinite(sub.time)
+        for effect in action.effects
+        for sub in _walk_grounded(effect)
+    )
 
 
-def _collect_grounded_condition_predicates(
-    effect: GroundedEffect, out: Set[str]
-) -> None:
+def _grounded_condition_predicates(effect: GroundedEffect) -> Set[str]:
     """Predicates read by conditional-branch conditions (grounded form)."""
-    for branch in effect.cond_effects:
-        for fluent in branch.conditions:
-            out.add(fluent.name)
-        for sub in branch.effects:
-            _collect_grounded_condition_predicates(sub, out)
-    for branch in effect.prob_effects:
-        for sub in branch.effects:
-            _collect_grounded_condition_predicates(sub, out)
+    return {
+        fluent.name
+        for sub in _walk_grounded(effect)
+        for branch in sub.cond_effects
+        for fluent in branch.conditions
+    }
 
 
 def ground_operators(
@@ -623,7 +659,7 @@ def ground_operators(
     observed: Set[str] = {f.name for op in operators for f in op.preconditions}
     for op in operators:
         for effect in op.effects:
-            _collect_condition_predicates(effect, observed)
+            observed |= _condition_predicates(effect)
     observed |= {f.name for f in initial_fluents}
     static_predicates = observed - dynamic
 
@@ -669,7 +705,7 @@ def ground_operators(
             for f in a.preconditions:
                 referenced.add(f.name)
             for eff in a.effects:
-                _collect_grounded_condition_predicates(eff, referenced)
+                referenced |= _grounded_condition_predicates(eff)
         eliminable = {
             f
             for f in initial_fluents
@@ -689,49 +725,19 @@ def _simplify_grounded_effect(
 ) -> Tuple[GroundedEffect, bool]:
     """Evaluate static conjuncts of conditional-branch conditions.
 
-    Returns (effect, changed); the effect is rebuilt only when something
-    changed, so unmodified effects keep their identity.
+    A branch whose static conjuncts are false for this grounding can never
+    fire and is dropped; the rest keep only their dynamic conditions.
     """
-    changed = False
-    new_cond: List[Tuple[Set[Fluent], List[GroundedEffect]]] = []
-    for branch in effect.cond_effects:
-        sub_effects: List[GroundedEffect] = []
-        for sub in branch.effects:
-            new_sub, sub_changed = _simplify_grounded_effect(sub, facts, dynamic)
-            sub_effects.append(new_sub)
-            changed |= sub_changed
-        static_conds = [c for c in branch.conditions if c.name not in dynamic]
-        dynamic_conds = {c for c in branch.conditions if c.name in dynamic}
-        if static_conds:
-            changed = True
-            holds = all(
-                (tuple(c.args) in facts.get(c.name, ())) != c.negated
-                for c in static_conds
-            )
-            if not holds:
-                continue  # branch can never fire for this grounding
-        new_cond.append((dynamic_conds, sub_effects))
 
-    new_prob: List[Tuple[float, List[GroundedEffect]]] = []
-    for branch in effect.prob_effects:
-        sub_effects = []
-        for sub in branch.effects:
-            new_sub, sub_changed = _simplify_grounded_effect(sub, facts, dynamic)
-            sub_effects.append(new_sub)
-            changed |= sub_changed
-        new_prob.append((branch.prob, sub_effects))
+    def resolve(conds: Set[Fluent]) -> Optional[Set[Fluent]]:
+        holds = all(
+            (tuple(c.args) in facts.get(c.name, ())) != c.negated
+            for c in conds
+            if c.name not in dynamic
+        )
+        return {c for c in conds if c.name in dynamic} if holds else None
 
-    if not changed:
-        return effect, False
-    return (
-        GroundedEffect(
-            effect.time,
-            set(effect.resulting_fluents),
-            prob_effects=new_prob,
-            cond_effects=new_cond,
-        ),
-        True,
-    )
+    return _rebuild_grounded_effect(effect, conditions=resolve)
 
 
 def _compile_static_away(
@@ -1008,9 +1014,9 @@ def relevant_predicates(
         for fluent in action.preconditions:
             relevant.add(fluent.name)
         for effect in action.effects:
-            _collect_grounded_condition_predicates(effect, relevant)
+            relevant |= _grounded_condition_predicates(effect)
     for _, effect in upcoming_effects:
-        _collect_grounded_condition_predicates(effect, relevant)
+        relevant |= _grounded_condition_predicates(effect)
     if goal is not None:
         for fluent in goal.get_all_literals():
             relevant.add(fluent.name)
@@ -1050,44 +1056,9 @@ def project_state(state: State, relevant: Collection[str]) -> State:
 def _project_grounded_effect(
     effect: GroundedEffect, names: Set[str]
 ) -> Tuple[GroundedEffect, bool]:
-    """Strip writes of irrelevant predicates from one effect, branches included.
-
-    Returns (effect, changed); an effect that needed no projection keeps its
-    identity, so a state with nothing to drop is handed straight back.
-    """
-    kept = {f for f in effect.resulting_fluents if f.name in names}
-    changed = len(kept) != len(effect.resulting_fluents)
-
-    def project_branch(sub_effects):
-        nonlocal changed
-        out = []
-        for sub in sub_effects:
-            projected, sub_changed = _project_grounded_effect(sub, names)
-            out.append(projected)
-            changed |= sub_changed
-        return out
-
-    # Branches are rebuilt whole, empty ones included: dropping a branch would
-    # change the outcome distribution, not just the fluents in it.
-    prob_effects = [
-        (branch.prob, project_branch(branch.effects))
-        for branch in effect.prob_effects
-    ]
-    cond_effects = [
-        (branch.conditions, project_branch(branch.effects))
-        for branch in effect.cond_effects
-    ]
-
-    if not changed:
-        return effect, False
-    return (
-        GroundedEffect(
-            effect.time,
-            kept,
-            prob_effects=prob_effects,
-            cond_effects=cond_effects,
-        ),
-        True,
+    """Strip writes of irrelevant predicates from one effect, branches included."""
+    return _rebuild_grounded_effect(
+        effect, fluents=lambda fs: {f for f in fs if f.name in names}
     )
 
 
@@ -1232,41 +1203,15 @@ def _augment_fluents_for_mapping(
 def _augment_grounded_effect_for_mapping(
     effect: GroundedEffect, neg_to_pos_mapping: Dict[Fluent, Fluent]
 ) -> GroundedEffect:
-    """Recursively augment a GroundedEffect (and its probabilistic and
-    conditional branches) with "not-" bookkeeping fluents.
+    """Add "not-" bookkeeping fluents throughout an effect tree.
 
     Conditional branch *conditions* are left untouched: they read the state
     directly with negation-as-absence, so they need no bookkeeping.
     """
-    augmented_fluents = _augment_fluents_for_mapping(
-        effect.resulting_fluents, neg_to_pos_mapping
-    )
-    converted_prob_effects = [
-        (
-            prob_branch.prob,
-            [
-                _augment_grounded_effect_for_mapping(e, neg_to_pos_mapping)
-                for e in prob_branch.effects
-            ],
-        )
-        for prob_branch in effect.prob_effects
-    ]
-    converted_cond_effects = [
-        (
-            cond_branch.conditions,
-            [
-                _augment_grounded_effect_for_mapping(e, neg_to_pos_mapping)
-                for e in cond_branch.effects
-            ],
-        )
-        for cond_branch in effect.cond_effects
-    ]
-    return GroundedEffect(
-        time=effect.time,
-        resulting_fluents=augmented_fluents,
-        prob_effects=converted_prob_effects,
-        cond_effects=converted_cond_effects,
-    )
+    return _rebuild_grounded_effect(
+        effect,
+        fluents=lambda fs: _augment_fluents_for_mapping(fs, neg_to_pos_mapping),
+    )[0]
 
 
 def convert_state_to_positive_preconditions(
