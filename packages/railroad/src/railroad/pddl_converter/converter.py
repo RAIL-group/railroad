@@ -450,56 +450,38 @@ def _compile_precondition(
     counter: itertools.count,
 ) -> _CompiledPrecondition:
     out = _CompiledPrecondition()
-    if node is not None:
-        _compile_precondition_into(node, type_objects, context, counter, out)
-    return out
 
-
-def _compile_precondition_into(
-    node: ConditionNode,
-    type_objects: Dict[str, Set[str]],
-    context: str,
-    counter: itertools.count,
-    out: _CompiledPrecondition,
-) -> None:
-    if isinstance(node, Literal):
-        out.literals.append(node)
-    elif isinstance(node, Equals):
-        out.equalities.append(node)
-    elif isinstance(node, And):
-        for c in node.children:
-            _compile_precondition_into(c, type_objects, context, counter, out)
-    elif isinstance(node, Or):
-        raise UnsupportedPDDLError(
-            "disjunctive-preconditions", f"(or ...) in {context}"
-        )
-    elif isinstance(node, Forall):
-        for mapping in _quantifier_expansions(node.variables, type_objects):
-            _compile_precondition_into(
-                _substitute_condition(node.body, mapping),
-                type_objects,
-                context,
-                counter,
-                out,
+    def visit(node: ConditionNode) -> None:
+        if isinstance(node, Literal):
+            out.literals.append(node)
+        elif isinstance(node, Equals):
+            out.equalities.append(node)
+        elif isinstance(node, And):
+            for c in node.children:
+                visit(c)
+        elif isinstance(node, Or):
+            raise UnsupportedPDDLError(
+                "disjunctive-preconditions", f"(or ...) in {context}"
             )
-    elif isinstance(node, Exists):
-        # Lift the quantified variables into extra operator parameters: the
-        # grounder enumerates witnesses, so the action is applicable iff some
-        # binding satisfies the body.
-        mapping = {}
-        for var, typ in node.variables:
-            fresh = f"{var}-e{next(counter)}"
-            mapping[var] = fresh
-            out.extra_parameters.append((fresh, typ))
-        _compile_precondition_into(
-            _substitute_condition(node.body, mapping),
-            type_objects,
-            context,
-            counter,
-            out,
-        )
-    else:
-        raise PDDLParseError(f"Unexpected condition node in {context}: {node!r}")
+        elif isinstance(node, Forall):
+            for mapping in _quantifier_expansions(node.variables, type_objects):
+                visit(_substitute_condition(node.body, mapping))
+        elif isinstance(node, Exists):
+            # Lift the quantified variables into extra operator parameters: the
+            # grounder enumerates witnesses, so the action is applicable iff
+            # some binding satisfies the body.
+            mapping = {}
+            for var, typ in node.variables:
+                fresh = f"{var}-e{next(counter)}"
+                mapping[var] = fresh
+                out.extra_parameters.append((fresh, typ))
+            visit(_substitute_condition(node.body, mapping))
+        else:
+            raise PDDLParseError(f"Unexpected condition node in {context}: {node!r}")
+
+    if node is not None:
+        visit(node)
+    return out
 
 
 # ============================================================================
@@ -531,74 +513,68 @@ def _compile_effect(
     nested_in: Optional[str] = None,
 ) -> _CompiledEffect:
     out = _CompiledEffect()
-    _compile_effect_into(node, type_objects, context, nested_in, out)
-    return out
 
-
-def _compile_effect_into(
-    node: EffectNode,
-    type_objects: Dict[str, Set[str]],
-    context: str,
-    nested_in: Optional[str],
-    out: _CompiledEffect,
-) -> None:
-    if isinstance(node, Literal):
-        out.literals.append(node)
-    elif isinstance(node, EffectAnd):
-        for c in node.children:
-            _compile_effect_into(c, type_objects, context, nested_in, out)
-    elif isinstance(node, EffectForall):
-        for mapping in _quantifier_expansions(node.variables, type_objects):
-            _compile_effect_into(
-                _substitute_effect(node.body, mapping),
-                type_objects,
-                context,
-                nested_in,
-                out,
-            )
-    elif isinstance(node, Probabilistic):
-        total = 0.0
-        branches: List[Tuple[float, _CompiledEffect]] = []
-        for prob, branch_node in node.branches:
-            if prob < -PROBABILITY_TOLERANCE or prob > 1 + PROBABILITY_TOLERANCE:
-                raise PDDLParseError(f"Probability {prob} out of range in {context}")
-            total += prob
-            branches.append(
-                (
-                    prob,
-                    _compile_effect(
-                        branch_node, type_objects, context, "probabilistic"
-                    ),
+    def visit(node: EffectNode) -> None:
+        if isinstance(node, Literal):
+            out.literals.append(node)
+        elif isinstance(node, EffectAnd):
+            for c in node.children:
+                visit(c)
+        elif isinstance(node, EffectForall):
+            for mapping in _quantifier_expansions(node.variables, type_objects):
+                visit(_substitute_effect(node.body, mapping))
+        elif isinstance(node, Probabilistic):
+            total = 0.0
+            branches: List[Tuple[float, _CompiledEffect]] = []
+            for prob, branch_node in node.branches:
+                if prob < -PROBABILITY_TOLERANCE or prob > 1 + PROBABILITY_TOLERANCE:
+                    raise PDDLParseError(
+                        f"Probability {prob} out of range in {context}"
+                    )
+                total += prob
+                branches.append(
+                    (
+                        prob,
+                        _compile_effect(
+                            branch_node, type_objects, context, "probabilistic"
+                        ),
+                    )
                 )
+            if total > 1 + PROBABILITY_TOLERANCE:
+                raise PDDLParseError(f"Probabilities sum to {total} > 1 in {context}")
+            out.prob_groups.append(branches)
+        elif isinstance(node, When):
+            conditions = _compile_when_condition(node.condition, type_objects, context)
+            sub_effect = _compile_effect(
+                node.effect, type_objects, context, "conditional"
             )
-        if total > 1 + PROBABILITY_TOLERANCE:
-            raise PDDLParseError(
-                f"Probabilities sum to {total} > 1 in {context}"
-            )
-        out.prob_groups.append(branches)
-    elif isinstance(node, When):
-        conditions = _compile_when_condition(node.condition, type_objects, context)
-        sub_effect = _compile_effect(node.effect, type_objects, context, "conditional")
-        out.cond_groups.append((conditions, sub_effect))
-    elif isinstance(node, Increase):
-        if node.function == "reward":
-            raise UnsupportedPDDLError("rewards", f"(increase (reward) ...) in {context}")
-        if node.function != "total-cost":
-            raise UnsupportedPDDLError(
-                "numeric-effects", f"(increase ({node.function} ...) ...) in {context}"
-            )
-        if node.args:
-            raise UnsupportedPDDLError(
-                "numeric-effects", f"parameterized total-cost in {context}"
-            )
-        if nested_in is not None:
-            raise UnsupportedPDDLError(
-                f"{nested_in}-cost",
-                f"(increase (total-cost) ...) inside a {nested_in} branch in {context}",
-            )
-        out.cost_terms.append(node.amount)
-    else:
-        raise PDDLParseError(f"Unexpected effect node in {context}: {node!r}")
+            out.cond_groups.append((conditions, sub_effect))
+        elif isinstance(node, Increase):
+            if node.function == "reward":
+                raise UnsupportedPDDLError(
+                    "rewards", f"(increase (reward) ...) in {context}"
+                )
+            if node.function != "total-cost":
+                raise UnsupportedPDDLError(
+                    "numeric-effects",
+                    f"(increase ({node.function} ...) ...) in {context}",
+                )
+            if node.args:
+                raise UnsupportedPDDLError(
+                    "numeric-effects", f"parameterized total-cost in {context}"
+                )
+            if nested_in is not None:
+                raise UnsupportedPDDLError(
+                    f"{nested_in}-cost",
+                    f"(increase (total-cost) ...) inside a {nested_in} branch"
+                    f" in {context}",
+                )
+            out.cost_terms.append(node.amount)
+        else:
+            raise PDDLParseError(f"Unexpected effect node in {context}: {node!r}")
+
+    visit(node)
+    return out
 
 
 def _compile_when_condition(

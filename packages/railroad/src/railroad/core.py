@@ -604,23 +604,15 @@ def ground_operators(
     ``initial_fluents`` as soon as their variables are bound, pruning the
     enumeration early.
 
-    By default grounding also compiles static material away, which never changes plans or reachability — only what states and
-    actions carry at runtime:
+    Actions with non-finite effect times are dropped: an ``inf`` duration
+    marks a statically impossible action (a move between unconnected
+    locations, say). Branch sub-effect times count too, and the filter runs
+    after condition simplification so a dropped branch cannot condemn its
+    action.
 
-    - ``simplify_conditions``: static conjuncts of conditional-branch
-      (PDDL ``when``) conditions are evaluated per grounding — a false
-      conjunct drops the branch, true conjuncts are removed.
-    - ``check_negated_static``: negated static preconditions prune bindings
-      too (a never-applicable action is never created).
-    - ``eliminate_static``: verified static preconditions are stripped from
-      grounded actions, and ``eliminable_fluents`` reports the static facts
-      no grounded action references (callers may drop them from the state).
-      A caller that reads static facts elsewhere is responsible for keeping
-      them; goals do not, since :func:`simplify_static_goal` folds static
-      goal literals at compile time.
-
-    Pass ``False`` to inspect the un-rewritten grounding (debugging, or
-    structural tests).
+    Grounding also compiles static material away by default. This never
+    changes plans or reachability, only what states and actions carry at
+    runtime; pass ``False`` to inspect the un-rewritten grounding.
 
     Args:
         allow_duplicate_bindings: if True, the same object may bind several
@@ -635,10 +627,17 @@ def ground_operators(
             effect touches them — required when the execution environment
             mutates them out-of-band (e.g. ObjectSearchEnvironment's
             revelation adds ``revealed``/``found``/``at`` fluents).
-    Actions with non-finite effect times are dropped (an ``inf`` duration
-    marks a statically impossible action, e.g. a move between unknown
-    locations); branch sub-effect times count too, and the filter runs after
-    condition simplification so a dropped branch cannot condemn its action.
+        simplify_conditions: evaluate static conjuncts of conditional-branch
+            (PDDL ``when``) conditions per grounding — a false conjunct drops
+            the branch, true conjuncts are removed.
+        check_negated_static: let negated static preconditions prune bindings
+            too, so a never-applicable action is never created.
+        eliminate_static: strip verified static preconditions from grounded
+            actions, and report via ``eliminable_fluents`` the static facts no
+            grounded action references (callers may drop them from the state).
+            A caller that reads static facts elsewhere must keep them; goals
+            need not, since :func:`simplify_static_goal` folds static goal
+            literals at compile time.
 
     Raises:
         ValueError: if an operator names a parameter type absent from
