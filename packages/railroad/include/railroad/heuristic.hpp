@@ -157,41 +157,31 @@ inline const std::vector<std::unordered_set<Fluent>>& extract_or_branches(const 
   return goal->get_dnf_branches();
 }
 
-// Above this many DNF branches, ff_heuristic stops enumerating them and picks
-// one greedily instead (see select_cheapest_branch). The DNF is a *product*
-// over conjoined disjunctions, so this is not a slow path being avoided --
-// past a few thousand branches, materialising them exhausts memory and takes
-// the machine down. Below the cap nothing changes: the exhaustive minimum
-// remains the contract wherever it is affordable.
+// Above this many DNF branches, ff_heuristic picks one greedily instead of
+// enumerating (see select_cheapest_branch). Not a slow path being avoided:
+// the DNF is a *product*, so past a few thousand branches materialising them
+// exhausts memory. Below the cap the exhaustive minimum remains the contract.
 inline constexpr std::size_t MAX_ENUMERATED_DNF_BRANCHES = 1024;
 
-// Greedily choose one conjunctive goal set from a goal tree, without building
-// the DNF: at each AND take the union of the children, and at each OR keep
-// whichever disjunct is cheapest. `out` doubles as the accumulator and as the
-// set of literals already committed.
+// Greedily choose one conjunctive goal set without building the DNF: union
+// the children at each AND, keep the cheapest disjunct at each OR. `out` is
+// both the accumulator and the set of literals already committed.
 //
-// Returns false when the goal is unreachable in the relaxed planning graph.
-// That verdict is *exact*, matching what enumerating every branch would say:
-// the exhaustive minimum is infinite iff every branch contains an unreachable
-// literal, and since the choices at each OR are independent, that holds iff
-// some OR has all of its disjuncts unreachable -- otherwise picking a
-// reachable disjunct at every OR yields a reachable branch. The reachability
-// test (known_fluents) is the same one ff_backward_optimistic applies.
+// Returns false when the goal is unreachable. That verdict is *exact*: the
+// exhaustive minimum is infinite iff every branch holds an unreachable
+// literal, which -- the choices at each OR being independent -- holds iff
+// some OR has all its disjuncts unreachable. The reachability test
+// (known_fluents) is the one ff_backward_optimistic applies.
 //
 // Disjuncts are ranked by *marginal* h_add: the summed optimistic_cost of the
-// literals they add that are not already committed. Scoring a disjunct in
-// isolation would charge full price for literals a sibling conjunct already
-// requires and which are therefore free here, and that is the main way a
-// per-disjunct score misranks. Summed (rather than max) optimistic_cost is
-// what makes this h_add exactly -- see heuristic_backward.hpp -- and h_add is
-// the component the returned value actually weights (lambda_max defaults to
-// 0, so ranking by max would optimise a term with no weight in the mix).
+// literals they add beyond what is already committed. Scoring in isolation
+// would charge full price for literals a sibling conjunct already requires,
+// which is the main way a per-disjunct score misranks. Summed (not max) cost
+// is what makes this h_add exactly, and h_add is the component the result
+// weights (lambda_max defaults to 0).
 //
-// Only the *selection* is greedy. Whatever conjunction comes out is then fed
-// to the ordinary backward pass, so h_ff and the probabilistic delta are
-// still computed over the union of the chosen literals -- with shared actions
-// counted once, which is precisely what a per-disjunct decomposition of the
-// cost would get wrong.
+// Only the *selection* is greedy: the chosen conjunction still goes through
+// the ordinary backward pass, so shared actions are counted once.
 inline bool select_cheapest_branch(const GoalBase* goal,
                                    const FFForwardResult& forward,
                                    std::unordered_set<Fluent>& out) {
