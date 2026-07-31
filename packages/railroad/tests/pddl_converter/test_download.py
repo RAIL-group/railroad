@@ -1,5 +1,4 @@
 import json
-import os
 
 import pytest
 
@@ -106,13 +105,8 @@ def test_fetch_domain_per_instance_domains(monkeypatch, tmp_path):
     assert fetched.domain_for(instance) == root / "domains" / "domain-1.pddl"
 
 
-@pytest.mark.skipif(
-    not os.environ.get("RAILROAD_PDDL_NETWORK_TESTS"),
-    reason="set RAILROAD_PDDL_NETWORK_TESTS=1 to hit the GitHub API",
-)
-def test_fetch_domain_network(monkeypatch, tmp_path):
-    monkeypatch.setenv(CACHE_DIR_ENV, str(tmp_path))
-    fetched = fetch_domain("ipc-2000", "blocks-strips-typed", max_instances=1)
-    assert fetched.domain_file is not None
-    assert fetched.domain_file.read_text().lstrip().startswith(";")
-    assert len(fetched.instances) == 1
+# No test here reaches the network. The download layer is exercised against
+# monkeypatched listings and the on-disk cache; checking that GitHub still
+# serves a given IPC domain tests github.com, not railroad, and pays for it
+# with a 60/hour anonymous rate limit. Use `railroad pddl check <collection>`
+# when you want to know what upstream is currently shipping.
