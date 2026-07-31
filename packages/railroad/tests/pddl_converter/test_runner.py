@@ -125,7 +125,7 @@ def test_negated_goal_literals_reach_the_heuristic():
     the preprocessing at the heuristic level, independent of which planner
     consumes it -- MCTS itself clamps h = inf to
     HEURISTIC_CANNOT_FIND_GOAL_PENALTY, so it cannot act on the distinction
-    (see the converter README's planner notes).
+    (see the converter README on solving).
     """
     from railroad.core import get_action_by_name, transition
     from railroad.pddl_converter import convert_texts
