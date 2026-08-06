@@ -49,6 +49,7 @@ class ProcTHOREnvironment(OccupancyGridPathingMixin, ObjectSearchEnvironment, AB
         seed: int,
         state: State,
         objects_by_type: Dict[str, Set[str]],
+        object_seed: int | None = None,
         operators: List[Operator] | None = None,
         resolution: float = 0.05,
         validate: bool = True,
@@ -64,7 +65,7 @@ class ProcTHOREnvironment(OccupancyGridPathingMixin, ObjectSearchEnvironment, AB
             resolution: Grid resolution in meters
             validate: Whether to validate objects/locations exist in scene
         """
-        self.scene = ProcTHORScene(seed=seed, resolution=resolution)
+        self.scene = ProcTHORScene(seed=seed, object_seed=object_seed, resolution=resolution)
 
         location_registry = LocationRegistry(
             {

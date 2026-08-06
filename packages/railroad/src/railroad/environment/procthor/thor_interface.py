@@ -1,5 +1,4 @@
 """AI2-THOR interface for ProcTHOR environments."""
-
 import copy
 import io
 import json
@@ -8,6 +7,7 @@ import pickle
 import random
 import tempfile
 import warnings
+from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -102,6 +102,7 @@ class ThorInterface:
 
     Args:
         seed: Random seed for scene selection
+        object_seed: Random seed for randomizing the locations of the objects within the scene
         resolution: Grid resolution in meters
         preprocess: Whether to filter containers
         use_cache: Whether to use cached data
@@ -110,23 +111,36 @@ class ThorInterface:
     def __init__(
         self,
         seed: int,
+        object_seed: int | None = None,
         resolution: float = 0.05,
+        remove_duplicates: bool = False,
         preprocess: bool = True,
         use_cache: bool = True,
     ) -> None:
         self.seed = seed
+        self.object_seed = object_seed
         self.grid_resolution = resolution
         random.seed(seed)
 
-        self.scene = self._load_scene()
+        if object_seed is not None:
+            if self._check_for_randomized_scene():
+                self.scene = self._load_randomized_objects_scene()
+            else:
+                self._randomize_object_locations(preprocess)
+                self._save_randomized_scene()
+        else:
+            self.scene = self._load_scene()
         self.rooms = self.scene['rooms']
         self.agent = self.scene['metadata']['agent']
-
         self.containers = self.scene['objects']
         if preprocess:
             self._preprocess_containers()
+        if remove_duplicates:
+            self._deduplicate_containers()
+            # update the scene to not include duplicate containers and children
+            self.scene['objects'] = copy.deepcopy(self.containers)
 
-        self.cached_data = self._load_cache() if use_cache else None
+        self.cached_data = self._load_cache(remove_duplicates) if use_cache else None
         if self.cached_data is None:
             # Generating a scene starts a Unity controller. Several of those at
             # once will take a machine down, and benchmark workers are separate
@@ -136,7 +150,7 @@ class ThorInterface:
             from ._scene_lock import scene_generation_lock
 
             with scene_generation_lock():
-                self.cached_data = self._load_cache() if use_cache else None
+                self.cached_data = self._load_cache(remove_duplicates) if use_cache else None
                 if self.cached_data is None:
                     from ai2thor.controller import Controller
                     from ._display import screen_at_least
@@ -164,8 +178,8 @@ class ThorInterface:
             self.controller = None
 
         self.occupancy_grid = self._get_occupancy_grid()
-        self.scene_graph = self._get_scene_graph()
         self.robot_pose = self._get_robot_pose()
+        self.scene_graph = self._get_scene_graph()
         self.known_cost = self._get_known_costs()
 
     def _render_px(self) -> int:
@@ -193,6 +207,60 @@ class ThorInterface:
             )
         return render_px
 
+    def _randomize_object_locations(self, preprocess: bool = True) -> None:
+        """
+        Helper function for randomizing object locations in a procthor-10k scene.
+        Apply pre-processing to ensure that objects are not place in containers
+        that will be removed from the resulting SymbolicEnvironment.
+        """
+        self.scene = self._load_scene()
+
+        if preprocess:
+            self.containers = self.scene['objects']
+            self._preprocess_containers()
+            self.scene['objects'] = copy.deepcopy(self.containers)
+
+        from ai2thor.controller import Controller
+        with Controller(scene=self.scene, gridSize=self.grid_resolution, width=480, height=480) as controller:
+            event = controller.step(
+                action="InitialRandomSpawn",
+                randomSeed=self.object_seed,
+                forceVisible=False,
+                placeStationary=True,
+                numPlacementAttempts=1000,
+                raise_for_failure=True,
+            )
+            self._update_object_locations(event)
+
+    def _update_object_locations(self, event) -> None:
+        """
+        Parses through a returned event's metadata from 
+        the Controller for an InitialRandomSpawn action to
+        update the scene's object locations.
+        """
+        # parse through event's objects metadata for updated object locations
+        containers = defaultdict(list)
+        for obj in event.metadata["objects"]:
+            # only pickupable objects are rearranged by the sim
+            if obj["pickupable"]:
+                container_name = obj["parentReceptacles"][0].split("_")[0]
+                containers[container_name].append(
+                    {
+                        "assetId": obj["assetId"],
+                        "id": obj["objectId"],
+                        "kinematic": False,
+                        "position": obj["position"],
+                        "rotation": obj["rotation"]
+                    }
+                )
+
+        # update scene
+        for container in self.scene["objects"]:
+            if "children" in container:
+                del container["children"]
+            if container["id"] in containers:
+                container["children"] = containers[container["id"]]
+
     def _preprocess_containers(self) -> None:
         """Filter containers and their children."""
         container_types = {c['id'].split('|')[0].lower() for c in self.containers}
@@ -208,6 +276,67 @@ class ThorInterface:
             c for c in self.containers
             if c['id'].split('|')[0].lower() not in IGNORE_CONTAINERS
         ]
+
+    def _deduplicate_containers(self) -> None:
+        """Deduplicates containers and their children."""
+        # keep the the container of each container type with the most children
+        keep_idxes = {}
+        for idx, container in enumerate(self.containers):
+            name = container['id'].split('|')[0].lower()
+            num_children = len(container.get("children", []))
+            more_children = name in keep_idxes and num_children > keep_idxes[name][0]
+            if more_children or name not in keep_idxes:
+                keep_idxes[name] = (num_children, idx)
+
+        deduped_containers = [self.containers[idx] for _, idx in keep_idxes.values()]
+
+        seen_children = set()
+        for container in deduped_containers:
+            if "children" in container:
+                deduped_children = []
+                for child in container["children"]:
+                    child_name = child["id"].split("|")[0].lower()
+                    if child_name not in seen_children:
+                        seen_children.add(child_name)
+                        deduped_children.append(child)
+                container["children"] = deduped_children
+
+        self.containers = deduped_containers
+
+    def _load_randomized_objects_scene(self) -> Dict[str, Any]:
+        """
+        Attempt to load scene from ProcTHOR-10k dataset with
+        object locations randomized.
+        """
+        data_dir = get_procthor_10k_dir() / 'randomized_scenes'
+
+        with open(
+            data_dir / f'scene_{self.seed}_{self.object_seed}.json',
+            'r'
+        ) as f:
+            return json.load(f)
+
+    def _check_for_randomized_scene(self) -> bool:
+        """
+        Helper function to check if the randomized objects scene
+        has been written out to file.
+        """
+        data_dir = get_procthor_10k_dir() / f'randomized_scenes'
+        scene_file = (
+            data_dir / f'scene_{self.seed}_{self.object_seed}.json'
+        )
+        return scene_file.exists()
+
+    def _save_randomized_scene(
+        self,
+        path: str = './resources/procthor-10k/randomized_scenes'
+    ) -> None:
+        """Cache randomized scene."""
+        save_dir = Path(path)
+        save_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"scene_{self.seed}_{self.object_seed}.json"
+        with open(save_dir / filename, 'w') as f:
+            json.dump(self.scene, f)
 
     def _load_scene(self) -> Dict[str, Any]:
         """Load scene from ProcTHOR-10k dataset."""
@@ -226,7 +355,9 @@ class ThorInterface:
         """
         return get_procthor_10k_dir() / 'cache'
 
-    def _save_and_get_cache(self, path: Optional[str] = None) -> Dict:
+    def _save_and_get_cache(
+        self, remove_duplicates: bool = False, path: Optional[str] = None
+    ) -> Dict:
         """Cache expensive computations."""
         image_ortho, extent_m = self._render_top_down_from_controller(orthographic=True)
         image_persp, _ = self._render_top_down_from_controller(orthographic=False)
@@ -243,8 +374,15 @@ class ThorInterface:
             'image_ortho_extent_m': extent_m,
         }
         save_dir = Path(path) if path is not None else self._cache_dir()
+        if remove_duplicates:
+            save_dir /= "deduped"
         save_dir.mkdir(parents=True, exist_ok=True)
-        self._write_cache_atomically(cache, save_dir / f'scene_{self.seed}.pkl')
+        filename = (
+            f'scene_{self.seed}.pkl'
+            if self.object_seed is None
+            else f'scene_{self.seed}_{self.object_seed}.pkl'
+        )
+        self._write_cache_atomically(cache, save_dir / filename)
         return cache
 
     @staticmethod
@@ -275,10 +413,18 @@ class ThorInterface:
             Path(temp_name).unlink(missing_ok=True)
             raise
 
-    def _load_cache(self, path: Optional[str] = None) -> Optional[Dict]:
+    def _load_cache(
+        self, remove_duplicates: bool = False, path: Optional[str] = None
+    ) -> Optional[Dict]:
         """Load cached scene data, treating an unreadable file as a miss."""
         base = Path(path) if path is not None else self._cache_dir()
-        cache_file = base / f'scene_{self.seed}.pkl'
+        if remove_duplicates:
+            base /= "deduped"
+        cache_file = (
+            base / f'scene_{self.seed}.pkl'
+            if self.object_seed is None
+            else base / f'scene_{self.seed}_{self.object_seed}.pkl'
+        )
         if not cache_file.exists():
             return None
         try:
@@ -394,8 +540,17 @@ class ThorInterface:
             'id': 'Apartment|0',
             'name': 'apartment',
             'position': (0, 0),
-            'type': [1, 0, 0, 0]
+            'type': [1, 0, 0, 0, 0]
         })
+
+        # Add robot node
+        robot_idx = graph.add_node({
+            'id': 'Robot|0',
+            'name': 'robot',
+            'position': self.robot_pose,
+            'type': [0, 1, 0, 0, 0]
+        })
+        graph.add_edge(apt_idx, robot_idx)
 
         # Add room nodes
         for room in self.rooms:
@@ -403,7 +558,7 @@ class ThorInterface:
                 'id': room['id'],
                 'name': room['roomType'].lower(),
                 'position': room['position'],
-                'type': [0, 1, 0, 0]
+                'type': [0, 0, 1, 0, 0]
             })
             graph.add_edge(apt_idx, room_idx)
 
@@ -421,13 +576,13 @@ class ThorInterface:
             room_id = utils.get_room_id(container['id'])
             room_node_idx = next(
                 idx for idx, node in graph.nodes.items()
-                if node['type'][1] == 1 and utils.get_room_id(node['id']) == room_id
+                if node['type'][2] == 1 and utils.get_room_id(node['id']) == room_id
             )
             cnt_idx = graph.add_node({
                 'id': container['id'],
                 'name': utils.get_generic_name(container['id']),
                 'position': container['position'],
-                'type': [0, 0, 1, 0]
+                'type': [0, 0, 0, 1, 0]
             })
             graph.add_edge(room_node_idx, cnt_idx)
 
@@ -441,7 +596,7 @@ class ThorInterface:
                         'id': obj['id'],
                         'name': utils.get_generic_name(obj['id']),
                         'position': obj['position'],
-                        'type': [0, 0, 0, 1]
+                        'type': [0, 0, 0, 0, 1]
                     })
                     graph.add_edge(cnt_idx, obj_idx)
 

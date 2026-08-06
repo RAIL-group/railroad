@@ -71,7 +71,7 @@ def get_edges_for_connected_graph(
     edges_to_add = []
 
     # Find room node indices (between apartment and first container)
-    room_node_idx = list(range(1, graph["cnt_node_idx"][0]))
+    room_node_idx = list(range(2, graph["cnt_node_idx"][0]))
 
     # Extract room-only edges
     filtered_edges = [

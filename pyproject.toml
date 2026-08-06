@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     # Local packages
-    "railroad[all]",
+    "railroad[all,bench,procthor]",
     "environments",
     # External dependencies
     "matplotlib",

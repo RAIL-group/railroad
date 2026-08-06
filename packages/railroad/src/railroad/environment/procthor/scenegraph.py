@@ -8,10 +8,11 @@ class SceneGraph:
     """Hierarchical scene graph for indoor environments.
 
     Node types (one-hot encoded):
-    - [1,0,0,0]: apartment
-    - [0,1,0,0]: room
-    - [0,0,1,0]: container
-    - [0,0,0,1]: object
+    - [1,0,0,0,0]: apartment
+    - [0,1,0,0,0]: robot
+    - [0,0,1,0,0]: room
+    - [0,0,0,1,0]: container
+    - [0,0,0,0,1]: object
     """
 
     def __init__(self) -> None:
@@ -105,19 +106,24 @@ class SceneGraph:
         return graph_copy
 
     @property
-    def room_indices(self) -> List[int]:
+    def robot_indices(self) -> List[int]:
         """Get indices of all room nodes."""
         return self.get_node_indices_by_type(1)
 
     @property
+    def room_indices(self) -> List[int]:
+        """Get indices of all room nodes."""
+        return self.get_node_indices_by_type(2)
+
+    @property
     def container_indices(self) -> List[int]:
         """Get indices of all container nodes."""
-        return self.get_node_indices_by_type(2)
+        return self.get_node_indices_by_type(3)
 
     @property
     def object_indices(self) -> List[int]:
         """Get indices of all object nodes."""
-        return self.get_node_indices_by_type(3)
+        return self.get_node_indices_by_type(4)
 
     def get_adjacent_nodes_idx(
         self,
@@ -140,5 +146,9 @@ class SceneGraph:
         node_type = self.nodes[node_idx]['type'].index(1)
         if node_type == 0:
             return None  # Apartment has no parent
-        parent_nodes_idx = self.get_adjacent_nodes_idx(node_idx, filter_by_type=node_type - 1)
+        parent_type = 0 if node_type in [1, 2] else node_type - 1
+        parent_nodes_idx = self.get_adjacent_nodes_idx(node_idx, filter_by_type=parent_type)
+        # for objects, if no parent was found from the containers, check to see if a robot is holding it
+        if node_type == 4 and not parent_nodes_idx:
+            parent_nodes_idx = self.get_adjacent_nodes_idx(node_idx, filter_by_type=1)
         return parent_nodes_idx[0] if parent_nodes_idx else None
