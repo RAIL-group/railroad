@@ -30,7 +30,7 @@ def prepare_fcnn_input(
     for obj in objects_to_find:
         idx = graph.add_node({
             "name": obj,
-            "type": [0, 0, 0, 1],
+            "type": [0, 0, 0, 0, 1],
         })
         objs_idx.append(idx)
 

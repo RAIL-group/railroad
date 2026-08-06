@@ -8,6 +8,7 @@ dependencies = [
     # Local packages
     "railroad[all,bench,procthor]",
     "environments",
+    "interruption",
     # External dependencies
     "matplotlib",
     "pyqt5",
@@ -26,6 +27,7 @@ dependencies = [
 [tool.uv.sources]
 railroad = { path = "packages/railroad", editable = true }
 environments = { path = "packages/environments", editable = true }
+interruption = { path = "packages/interruption", editable = true }
 
 [tool.ty.src]
 exclude = ["**/scratch/**"]
@@ -34,6 +36,7 @@ exclude = ["**/scratch/**"]
 extra-paths = [
     "packages/railroad/src",
     "packages/environments/src",
+    "packages/interruption/src",
 ]
 
 [tool.pytest.ini_options]

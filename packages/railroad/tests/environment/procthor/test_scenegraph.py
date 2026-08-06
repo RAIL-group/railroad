@@ -8,7 +8,7 @@ def test_scenegraph_basic_operations():
     # Add apartment node
     idx_apt = sg.add_node({
         'id': 'apartment0',
-        'type': [1, 0, 0, 0],
+        'type': [1, 0, 0, 0, 0],
         'position': [0, 0],
         'name': 'apartment'
     })
@@ -16,7 +16,7 @@ def test_scenegraph_basic_operations():
     # Add room
     idx_room = sg.add_node({
         'id': 'bedroom0',
-        'type': [0, 1, 0, 0],
+        'type': [0, 0, 1, 0, 0],
         'position': [0, 1],
         'name': 'bedroom'
     })
@@ -25,7 +25,7 @@ def test_scenegraph_basic_operations():
     # Add container
     idx_container = sg.add_node({
         'id': 'bed0',
-        'type': [0, 0, 1, 0],
+        'type': [0, 0, 0, 1, 0],
         'position': [0, 1],
         'name': 'bed'
     })
@@ -34,7 +34,7 @@ def test_scenegraph_basic_operations():
     # Add object
     idx_obj = sg.add_node({
         'id': 'pillow0',
-        'type': [0, 0, 0, 1],
+        'type': [0, 0, 0, 0, 1],
         'position': [0, 1],
         'name': 'pillow'
     })
@@ -50,9 +50,9 @@ def test_scenegraph_basic_operations():
 def test_scenegraph_adjacency():
     """Test get_adjacent_nodes_idx and get_parent_node_idx."""
     sg = SceneGraph()
-    idx_apt = sg.add_node({'id': 'apt', 'type': [1, 0, 0, 0], 'position': [0, 0], 'name': 'apt'})
-    idx_room = sg.add_node({'id': 'room', 'type': [0, 1, 0, 0], 'position': [1, 0], 'name': 'room'})
-    idx_cnt = sg.add_node({'id': 'cnt', 'type': [0, 0, 1, 0], 'position': [2, 0], 'name': 'cnt'})
+    idx_apt = sg.add_node({'id': 'apt', 'type': [1, 0, 0, 0, 0], 'position': [0, 0], 'name': 'apt'})
+    idx_room = sg.add_node({'id': 'room', 'type': [0, 0, 1, 0, 0], 'position': [1, 0], 'name': 'room'})
+    idx_cnt = sg.add_node({'id': 'cnt', 'type': [0, 0, 0, 1, 0], 'position': [2, 0], 'name': 'cnt'})
     sg.add_edge(idx_apt, idx_room)
     sg.add_edge(idx_room, idx_cnt)
 
@@ -65,9 +65,9 @@ def test_scenegraph_adjacency():
 def test_scenegraph_object_free_copy():
     """Test get_object_free_graph removes objects."""
     sg = SceneGraph()
-    idx_apt = sg.add_node({'id': 'apt', 'type': [1, 0, 0, 0], 'position': [0, 0], 'name': 'apt'})
-    idx_cnt = sg.add_node({'id': 'cnt', 'type': [0, 0, 1, 0], 'position': [1, 0], 'name': 'cnt'})
-    idx_obj = sg.add_node({'id': 'obj', 'type': [0, 0, 0, 1], 'position': [1, 0], 'name': 'obj'})
+    idx_apt = sg.add_node({'id': 'apt', 'type': [1, 0, 0, 0, 0], 'position': [0, 0], 'name': 'apt'})
+    idx_cnt = sg.add_node({'id': 'cnt', 'type': [0, 0, 0, 1, 0], 'position': [1, 0], 'name': 'cnt'})
+    idx_obj = sg.add_node({'id': 'obj', 'type': [0, 0, 0, 0, 1], 'position': [1, 0], 'name': 'obj'})
     sg.add_edge(idx_apt, idx_cnt)
     sg.add_edge(idx_cnt, idx_obj)
 
