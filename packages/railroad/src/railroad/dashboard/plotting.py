@@ -21,9 +21,27 @@ def _canvas_buffer_writer_cls() -> Any:
 
     class _CanvasBufferWriter(FFMpegWriter):
         def grab_frame(self, **savefig_kwargs: Any) -> None:
+            if savefig_kwargs:
+                # The base class forwards these to savefig; this one never
+                # calls savefig, so honouring them silently is not an option.
+                raise TypeError(
+                    "_CanvasBufferWriter.grab_frame takes no savefig kwargs, "
+                    f"got {sorted(savefig_kwargs)}"
+                )
             proc: Any = self._proc  # ty: ignore[unresolved-attribute]
             canvas: Any = self.fig.canvas
-            proc.stdin.write(canvas.buffer_rgba())
+            buf = canvas.buffer_rgba()
+            # ffmpeg reads fixed-size frames off a raw stream, so a buffer of
+            # the wrong size would shear the whole video rather than fail.
+            width, height = self.frame_size
+            expected = width * height * 4
+            if buf.nbytes != expected:
+                raise RuntimeError(
+                    f"canvas buffer is {buf.nbytes} bytes but ffmpeg expects "
+                    f"{expected} ({width}x{height}); figure dpi drifted from "
+                    f"the writer's {self.dpi}"
+                )
+            proc.stdin.write(buf)
 
     return _CanvasBufferWriter
 
@@ -774,8 +792,11 @@ class _PlottingMixin:
             dpi: Resolution in dots per inch.
         """
         import numpy as np
+        import matplotlib as mpl
         import matplotlib.image as mimage
         import matplotlib.pyplot as plt
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.colors import to_rgba
 
         # Onboard camera imagery (duck-typed: env exposes pano_records with
         # .robot/.time/.image, e.g. VisualUnknownSpaceEnvironment)
@@ -795,6 +816,24 @@ class _PlottingMixin:
         # composites straight out of the canvas buffer, so the figure's dpi
         # has to match the writer's rather than being applied per savefig.
         fig.set_dpi(dpi)
+        # Bind an Agg canvas explicitly: the compositing below needs Agg's
+        # buffer_rgba/copy_from_bbox/restore_region, and an interactive canvas
+        # would re-derive dpi from its device pixel ratio and silently render
+        # at a size the writer is not expecting.
+        FigureCanvasAgg(fig)
+        # savefig applies `savefig.facecolor` and Animation.save pre-composited
+        # it onto white; rendering the canvas directly bypasses both, so do it
+        # here to keep non-default figure backgrounds looking the same.
+        facecolor = mpl.rcParams["savefig.facecolor"]
+        if facecolor == "auto":
+            facecolor = fig.get_facecolor()
+        red, green, blue, alpha = to_rgba(facecolor)
+        fig.set_facecolor((
+            alpha * red + 1 - alpha,
+            alpha * green + 1 - alpha,
+            alpha * blue + 1 - alpha,
+            1.0,
+        ))
 
         # One image artist per robot; frames are selected by capture time.
         onboard_artists: dict[str, Any] = {}
@@ -987,6 +1026,10 @@ class _PlottingMixin:
             """Index of the last snapshot at or before *current_time* (>= 0)."""
             return max(int(np.searchsorted(times, current_time, side="right")) - 1, 0)
 
+        # Which snapshot each image artist is currently holding, so repeated
+        # frames do not re-push identical data.
+        shown_idx = {"nav": -1, "overlay": -1}
+
         def _apply_frame(frame: int) -> tuple[tuple, tuple, tuple, int]:
             """Point every artist at its state for *frame*.
 
@@ -998,16 +1041,23 @@ class _PlottingMixin:
             title_artist.set_text(
                 f"Entity Trajectories  (cost = {current_time:>{t_width}.1f} / {t_end:.1f})"
             )
-            # Animated navigation grid
+            # Animated navigation grid. set_data copies and rescans the array,
+            # so only push it when the snapshot actually changes.
             nav_idx = -1
             if nav_grid_artist is not None and nav_times is not None:
                 nav_idx = _latest(nav_times, current_time)
-                nav_grid_artist.set_data(nav_grid_frames[nav_idx][1])
+                if nav_idx != shown_idx["nav"]:
+                    nav_grid_artist.set_data(nav_grid_frames[nav_idx][1])
+                    shown_idx["nav"] = nav_idx
             # Frontier-probability overlay
             overlay_idx = -1
             if frontier_overlay_artist is not None and overlay_times is not None:
                 overlay_idx = _latest(overlay_times, current_time)
-                frontier_overlay_artist.set_data(frontier_overlay_frames[overlay_idx][1])
+                if overlay_idx != shown_idx["overlay"]:
+                    frontier_overlay_artist.set_data(
+                        frontier_overlay_frames[overlay_idx][1]
+                    )
+                    shown_idx["overlay"] = overlay_idx
             for idx, entity in enumerate(entity_names):
                 # Update current position marker
                 pos = marker_positions[entity]
@@ -1023,14 +1073,14 @@ class _PlottingMixin:
                 if idx != onboard_frame_idx[robot]:
                     artist.set_data(onboard_by_robot[robot][idx].image)
                     onboard_frame_idx[robot] = idx
-            # Show/hide actions based on whether their start time has passed
-            n_actions_shown = 0
+            # Show/hide actions based on whether their start time has passed.
+            # Compared per action rather than by a sorted cutoff, so this does
+            # not quietly depend on actions_taken being in time order.
+            actions_shown: tuple[bool, ...] = ()
             if action_times is not None:
-                n_actions_shown = int(
-                    np.searchsorted(action_times, current_time, side="right")
-                )
-                for i, (txt, _act_time) in enumerate(action_texts):
-                    txt.set_alpha(1.0 if i < n_actions_shown else 0.0)
+                actions_shown = tuple(action_times <= current_time)
+                for shown, (txt, _act_time) in zip(actions_shown, action_texts):
+                    txt.set_alpha(1.0 if shown else 0.0)
             # Update goal literal colors based on latest snapshot <= current_time
             goal_idx = -1
             if goal_times is not None:
@@ -1044,7 +1094,7 @@ class _PlottingMixin:
                         txt.set_color("green" if satisfied else "red")
 
             return (
-                (goal_idx, n_actions_shown),          # chrome layer
+                (goal_idx, actions_shown),            # chrome layer
                 tuple(onboard_frame_idx.values()),    # onboard images
                 (nav_idx, overlay_idx),               # main-axes stack
                 n_trail,
@@ -1060,11 +1110,13 @@ class _PlottingMixin:
         # and the handful of artists that move every frame are drawn on top.
         # Artists cached in a layer are marked animated so a plain canvas draw
         # skips them and leaves them to be composited in the right order.
-        hot_artists: list[Any] = [*markers, *labels, title_artist]
-        if legend_artist is not None:
-            hot_artists.append(legend_artist)
+        hot_artists: list[Any] = [*markers, *labels, title_artist, legend_artist]
         # Draw them in the same order a full figure draw would, so anything
         # that overlaps still stacks the way it does in the static plot.
+        # Ordering only holds within a layer: a hot artist always lands on top
+        # of the stack raster, so anything added here that could overlap the
+        # trail or the location markers needs a zorder above them (the title
+        # is exempt only because it sits outside the axes box).
         hot_artists.sort(key=lambda a: a.get_zorder())
 
         stack_artists: list[Any] = [
@@ -1095,8 +1147,14 @@ class _PlottingMixin:
             a for a in layered if isinstance(a, mimage.AxesImage)
         ]
 
+        def _onboard_sizes() -> tuple:
+            return tuple(a.get_size() for a in onboard_list)
+
+        drawn_onboard_sizes = _onboard_sizes()
+
         def _draw_chrome() -> Any:
             """Full draw of everything that is not composited per frame."""
+            nonlocal drawn_onboard_sizes
             for artist in layered_images:
                 artist.set_visible(False)
             try:
@@ -1106,6 +1164,7 @@ class _PlottingMixin:
                     artist.set_visible(True)
             for artist in onboard_list:
                 fig.draw_artist(artist)
+            drawn_onboard_sizes = _onboard_sizes()
             return canvas.copy_from_bbox(fig.bbox)
 
         def _set_trail(lo: int, hi: int) -> None:
@@ -1125,22 +1184,33 @@ class _PlottingMixin:
             nonlocal chrome, stack, drawn_chrome, drawn_onboard, drawn_stack, drawn_trail
             chrome_key, onboard_key, stack_key, n_trail = _apply_frame(frame)
 
+            # True when the canvas already holds the chrome layer, so the
+            # stack rebuild below can skip restoring what is already there.
+            chrome_on_canvas = False
             if chrome is None or chrome_key != drawn_chrome:
                 chrome = _draw_chrome()
                 drawn_chrome, drawn_onboard, stack = chrome_key, onboard_key, None
+                chrome_on_canvas = True
             elif onboard_key != drawn_onboard:
-                # Each onboard image fully repaints its own axes, so it can be
-                # patched into the chrome layer without a full redraw.
-                canvas.restore_region(chrome)
-                for artist in onboard_list:
-                    fig.draw_artist(artist)
-                chrome = canvas.copy_from_bbox(fig.bbox)
+                # Patching an onboard image over the cached chrome only works
+                # while it repaints every pixel the previous one covered; a
+                # differently-sized frame needs the full redraw.
+                if _onboard_sizes() == drawn_onboard_sizes:
+                    canvas.restore_region(chrome)
+                    for artist in onboard_list:
+                        fig.draw_artist(artist)
+                    chrome = canvas.copy_from_bbox(fig.bbox)
+                else:
+                    chrome = _draw_chrome()
+                    drawn_chrome = chrome_key
                 drawn_onboard, stack = onboard_key, None
+                chrome_on_canvas = True
 
             if stack is None or stack_key != drawn_stack or n_trail < drawn_trail:
                 # Something under the trail moved (or the trail rewound, which
                 # happens after the poster frame): rebuild the stack on chrome.
-                canvas.restore_region(chrome)
+                if not chrome_on_canvas:
+                    canvas.restore_region(chrome)
                 for artist in stack_artists:
                     fig.draw_artist(artist)
                 _set_trail(0, n_trail)
