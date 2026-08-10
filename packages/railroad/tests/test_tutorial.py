@@ -552,7 +552,7 @@ def test_notebook_command_shows_the_jupyter_command_it_runs(
     assert seen[0][-1] == "--ServerApp.terminals_enabled=False", "arguments pass through"
     text = console.export_text()
     assert "uv run jupyter notebook language.ipynb" in text
-    assert "/notebooks/language.ipynb" in text, "the link opens the notebook itself"
+    assert "http://127.0.0.1:8888/" in text, "the address to open is printed"
 
 
 def test_the_notebook_is_started_for_the_machine_you_are_not_sitting_at():
@@ -565,8 +565,12 @@ def test_the_notebook_is_started_for_the_machine_you_are_not_sitting_at():
     assert argv[argv.index("--ip") + 1] == "0.0.0.0"
     # Notebook 7's one-document interface, opened at the document.
     assert argv[:2] != ["jupyter", "lab"]
+    # default_url is both what the interface opens and what '/' redirects to
+    # (jupyter_server registers that 302 whenever it differs from base_url),
+    # which is what lets the printed links stay bare addresses.
     assert f"--JupyterNotebookApp.default_url={launch.NOTEBOOK_URL_PATH}" in argv
-    assert all(launch.NOTEBOOK_URL_PATH in line for line in launch.notebook_urls())
+    printed = [line.split()[0] for line in launch.urls(8888)]
+    assert printed and all(link.endswith(":8888/") for link in printed), printed
 
 
 def test_an_argument_you_pass_replaces_the_default_rather_than_repeating_it():

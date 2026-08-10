@@ -193,10 +193,11 @@ def cmd_notebook(
 
     argv = launch.notebook_argv(extra)
     _echo(console, argv)
-    # If you moved the address or the port, Jupyter's own lines are the true
-    # ones and these would be a guess, so do not print a guess.
+    # Bare addresses: '/' redirects to the notebook, so the path would only
+    # make the link longer. If you moved the address or the port, Jupyter's own
+    # lines are the true ones and these would be a guess, so do not print one.
     if not any(arg.startswith(("--ip", "--port")) for arg in extra):
-        for line in launch.notebook_urls():
+        for line in launch.urls(launch.NOTEBOOK_PORT):
             console.print(f"[dim]{escape(line)}[/dim]")
     result = launch.run(playground, argv)
     if not result.ok:

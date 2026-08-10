@@ -39,9 +39,13 @@ NOTEBOOK_PORT = 8888
 NOTEBOOK_URL_PATH = f"/notebooks/{NOTEBOOK}"
 """Notebook 7's route to one document: menu, toolbar, cells, and nothing else.
 
+Handed to the interface as its ``default_url``, which is the address ``/``
+redirects to -- so the link anyone is given stays short and still opens the
+notebook rather than a file listing.
+
 The lab interface answers on the same server at ``/lab`` if you want the file
 browser and the tab bar, and at ``/doc/tree/<file>`` for its own one-document
-mode -- but this is the address a talk should be pointed at.
+mode.
 """
 
 
@@ -266,22 +270,6 @@ def bind_address(host: str = "auto") -> str:
     except ImportError:
         return "0.0.0.0"
     return resolve_host(host)
-
-
-def notebook_urls(port: int = NOTEBOOK_PORT) -> List[str]:
-    """Every address the primer can be opened at -- at the notebook itself.
-
-    Jupyter prints loopback and this host's name; from the laptop you are
-    actually looking at, neither is necessarily the one that resolves.
-    """
-    try:
-        from railroad.bench.dashboard.net import reachable_addresses
-    except ImportError:
-        return [f"  http://127.0.0.1:{port}{NOTEBOOK_URL_PATH}"]
-    return [
-        f"  http://{address}:{port}{NOTEBOOK_URL_PATH}".ljust(60) + f"({label})"
-        for address, label in reachable_addresses()
-    ]
 
 
 def urls(port: int = DEFAULT_PORT, host: str = "auto") -> List[str]:

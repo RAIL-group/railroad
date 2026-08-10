@@ -193,7 +193,7 @@ uv run railroad tutorial doctor   # check extras, scene cache, git, ffmpeg
 uv run railroad tutorial init     # scaffold ./railroad-tutorial
 cd railroad-tutorial
 uv run railroad tutorial notebook # language.ipynb: fluents, effects, transitions
-                                  # prints links straight into the notebook; no
+                                  # the address opens the notebook itself; no
                                   # browser and no token, so open it from anywhere
 uv run railroad tutorial          # the step you are on, and what to type
 ```
