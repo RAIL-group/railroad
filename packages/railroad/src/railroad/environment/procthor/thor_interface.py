@@ -109,22 +109,33 @@ class ThorInterface:
             json_list = list(f)
         return json.loads(json_list[self.seed])
 
-    def _save_and_get_cache(self, path: str = './resources/procthor-10k/cache') -> Dict:
+    def _cache_dir(self) -> Path:
+        """Where per-seed scene caches live.
+
+        Derived from the resources directory rather than hardcoded relative to
+        the working directory, so ``PROCTHOR_RESOURCES_DIR`` actually reaches
+        it. Without that, running from anywhere but the directory holding
+        ``resources/`` silently misses every cached scene and starts Unity.
+        """
+        return get_procthor_10k_dir() / 'cache'
+
+    def _save_and_get_cache(self, path: Optional[str] = None) -> Dict:
         """Cache expensive computations."""
         cache = {
             'reachable_positions': self._get_reachable_positions_from_controller(),
             'image_ortho': self._get_top_down_image_from_controller(orthographic=True),
             'image_persp': self._get_top_down_image_from_controller(orthographic=False)
         }
-        save_dir = Path(path)
+        save_dir = Path(path) if path is not None else self._cache_dir()
         save_dir.mkdir(parents=True, exist_ok=True)
         with open(save_dir / f'scene_{self.seed}.pkl', 'wb') as f:
             pickle.dump(cache, f)
         return cache
 
-    def _load_cache(self, path: str = './resources/procthor-10k/cache') -> Optional[Dict]:
+    def _load_cache(self, path: Optional[str] = None) -> Optional[Dict]:
         """Load cached scene data."""
-        cache_file = Path(path) / f'scene_{self.seed}.pkl'
+        base = Path(path) if path is not None else self._cache_dir()
+        cache_file = base / f'scene_{self.seed}.pkl'
         if not cache_file.exists():
             return None
         with open(cache_file, 'rb') as f:
