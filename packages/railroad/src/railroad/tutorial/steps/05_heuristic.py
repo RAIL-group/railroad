@@ -210,8 +210,8 @@ def run(case: BenchmarkCase) -> dict:
               iterations=case.mcts.iterations, c=case.mcts.c,
               h_mult=case.mcts.h_mult,
               lambda_add=case.lambda_add, lambda_ff=case.lambda_ff)
-    # --plot and --video draw the trajectories and the action list; the
-    # sweep skips them. LOCATIONS is what puts the rooms where we said.
+    # --save-plot and --save-video draw the trajectories and the action
+    # list; the sweep skips them. LOCATIONS puts the rooms where we said.
     outcome = tutorial.result(view)
     tutorial.show_plots(view, case, location_coords=LOCATIONS)
     return outcome

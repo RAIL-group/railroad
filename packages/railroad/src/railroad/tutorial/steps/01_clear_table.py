@@ -169,8 +169,8 @@ def run(case: BenchmarkCase) -> dict:
     env, goal = build()
     with tutorial.dashboard(case, goal, env, fluent_filter=relevant) as view:
         solve(env, goal, view, iterations=case.mcts.iterations, c=case.mcts.c)
-    # --plot and --video draw the trajectories and the action list; the
-    # sweep skips them. LOCATIONS is what puts the rooms where we said.
+    # --save-plot and --save-video draw the trajectories and the action
+    # list; the sweep skips them. LOCATIONS puts the rooms where we said.
     outcome = tutorial.result(view)
     tutorial.show_plots(view, case, location_coords=LOCATIONS)
     return outcome

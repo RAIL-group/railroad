@@ -200,7 +200,7 @@ uv run railroad tutorial          # the step you are on, and what to type
 ```bash
 uv run railroad tutorial run              # live, with the planner dashboard
 uv run railroad tutorial run --case 4     # one point of this step's sweep
-uv run railroad tutorial run --video x.mp4   # ...or --plot x.png, into media/
+uv run railroad tutorial run --save-video x.mp4   # or --save-plot x.png
 uv run railroad tutorial bench            # sweep every case, in parallel
 uv run railroad tutorial dashboard        # results in a browser; --status, --stop
 ```

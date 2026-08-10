@@ -292,22 +292,25 @@ def tutorial_init(directory: str | None, force: bool) -> None:
 
 
 _PASSTHROUGH = {"ignore_unknown_options": True, "allow_extra_args": True}
+# add_help_option=False so that --help reaches the thing being wrapped: the
+# useful help for 'tutorial run' is demo.py's own, and for 'tutorial bench' it
+# is 'benchmarks run'. This group's help still lists both commands.
 
 
-@tutorial.command("run", context_settings=_PASSTHROUGH)
+@tutorial.command("run", context_settings=_PASSTHROUGH, add_help_option=False)
 @click.argument("extra", nargs=-1, type=click.UNPROCESSED)
 def tutorial_run(extra: tuple[str, ...]) -> None:
-    """Run demo.py. Extra arguments go straight to it (--case, --list, --video)."""
+    """Run demo.py; arguments pass through to it (--help lists them)."""
     from railroad.tutorial import commands
     result = _tutorial_guard(commands.cmd_run)(_tutorial_console(), extra)
     if not result.ok:
         raise SystemExit(result.returncode)
 
 
-@tutorial.command("bench", context_settings=_PASSTHROUGH)
+@tutorial.command("bench", context_settings=_PASSTHROUGH, add_help_option=False)
 @click.argument("extra", nargs=-1, type=click.UNPROCESSED)
 def tutorial_bench(extra: tuple[str, ...]) -> None:
-    """Sweep this step. Extra arguments go to 'benchmarks run' (--parallel, --dry-run)."""
+    """Sweep this step; arguments pass through to 'benchmarks run' (--help lists them)."""
     from railroad.tutorial import commands
     result = _tutorial_guard(commands.cmd_bench)(_tutorial_console(), extra)
     if not result.ok:
@@ -789,15 +792,26 @@ def _make_example_command(name: str, info: ExampleInfo) -> None:
                 extra_kwargs["type"] = opt["type"]
             _run = click.option(option_name, param_name, default=opt.get("default"), show_default=True, help=opt.get("help", ""), **extra_kwargs)(_run)
 
-    # Global plot/video options for every example command
-    _run = click.option("--video-dpi", "video_dpi", type=int, default=150, show_default=True, help="Video resolution in dots per inch")(_run)
-    _run = click.option("--video-fps", "video_fps", type=int, default=60, show_default=True, help="Video frames per second")(_run)
-    _run = click.option("--save-video", "save_video", default=None, help="Save trajectory animation to file (e.g. out.mp4)")(_run)
-    _run = click.option("--show-plot", "show_plot", is_flag=True, default=False, help="Show trajectory plot interactively")(_run)
-    _run = click.option("--save-plot", "save_plot", default=None, help="Save trajectory plot to file (e.g. out.png)")(_run)
+    # Global plot/video options for every example command. Declared as data in
+    # railroad.dashboard so anything else that plans and then draws -- the
+    # tutorial's demo.py, for one -- offers the same flags spelled the same way.
+    from railroad.dashboard import MEDIA_OPTION_NAMES, MEDIA_OPTIONS
+
+    for media in reversed(MEDIA_OPTIONS):
+        if media.get("is_flag", False):
+            _run = click.option(media["name"], media["param_name"], is_flag=True,
+                                default=media.get("default", False),
+                                help=media.get("help", ""))(_run)
+        else:
+            media_kwargs: dict[str, Any] = {}
+            if "type" in media:
+                media_kwargs["type"] = media["type"]
+            _run = click.option(media["name"], media["param_name"],
+                                default=media.get("default"), show_default=True,
+                                help=media.get("help", ""), **media_kwargs)(_run)
     # Option group panels (last applied = displayed first)
     _run = click.option_panel("Options", options=[opt["name"] for opt in options] + ["--help"])(_run)
-    _run = click.option_panel("Plot/video options", options=["--save-plot", "--show-plot", "--save-video", "--video-fps", "--video-dpi"])(_run)
+    _run = click.option_panel("Plot/video options", options=MEDIA_OPTION_NAMES)(_run)
 
 
 # Register each example as a direct subcommand

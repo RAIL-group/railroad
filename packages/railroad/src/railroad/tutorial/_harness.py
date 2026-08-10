@@ -66,20 +66,17 @@ def dashboard(case: Any, goal: Any, env: Any, *, fluent_filter=None) -> Iterator
 
 
 def show_plots(view: Any, case: Any, **kwargs: Any) -> None:
-    """Draw the trajectory plot and video -- for a live run only.
+    """Draw whatever the command line asked for -- for a live run only.
 
     A sweep runs dozens of these at once in processes with no display, and
-    every one of them would be writing over the same file. Extra keywords go
-    to :meth:`PlannerDashboard.show_plots`; ``location_coords`` is the useful
-    one, for environments that do not carry coordinates of their own.
+    every one of them would be writing over the same file, so it does nothing
+    there. Extra keywords go to :meth:`PlannerDashboard.show_plots`;
+    ``location_coords`` is the useful one, for environments that do not carry
+    coordinates of their own.
     """
     if not getattr(case, "live", False):
         return
-    view.show_plots(
-        save_plot=getattr(case, "plot", None),
-        save_video=getattr(case, "video", None),
-        **kwargs,
-    )
+    view.show_plots(**{**getattr(case, "media", {}), **kwargs})
 
 
 def result(view: Any, **extra: Any) -> Dict[str, Any]:
@@ -105,10 +102,8 @@ def result(view: Any, **extra: Any) -> Dict[str, Any]:
 # -- running one case by hand ------------------------------------------------
 
 
-def _media_path(name: Optional[str]) -> Optional[str]:
+def _media_path(name: str) -> str:
     """A bare filename goes where the dashboard serves it; a path is left alone."""
-    if name is None:
-        return None
     if Path(name).parent != Path("."):
         return name
     Path(MEDIA_DIR).mkdir(exist_ok=True)
@@ -152,18 +147,25 @@ def _announce(step: str, outcome: Dict[str, Any]) -> None:
 
 
 def _parse(argv: Optional[Sequence[str]], cases: List[Dict[str, Any]]) -> argparse.Namespace:
+    """This step's own command line: two flags of its own, plus the shared ones.
+
+    The plot and video flags are the ones ``railroad example`` has always had
+    -- ``--save-plot``, ``--save-video``, ``--video-dpi`` and the rest --
+    declared once in :mod:`railroad.dashboard` and borrowed here, so there is
+    one spelling to remember across the whole tool. Bare filenames land in
+    ``media/``, which is what the results dashboard serves.
+    """
+    from railroad.dashboard import add_to_argparse
+
     parser = argparse.ArgumentParser(
         description="Run one case of this step live. The sweep over every case "
-                    "is 'uv run railroad benchmarks run -i demo.py --tags tutorial'.",
+                    "is 'uv run railroad tutorial bench'.",
     )
     parser.add_argument("--case", type=int, default=0, metavar="N",
                         help=f"which case to run (0-{max(len(cases) - 1, 0)})")
     parser.add_argument("--list", action="store_true",
                         help="print the cases and exit")
-    parser.add_argument("--video", metavar="PATH",
-                        help=f"save an MP4 of the run (bare names go to {MEDIA_DIR}/)")
-    parser.add_argument("--plot", metavar="PATH",
-                        help="save a trajectory plot")
+    add_to_argparse(parser)
     return parser.parse_args(None if argv is None else list(argv))
 
 
@@ -190,11 +192,12 @@ def main(bench: Any, argv: Optional[Sequence[str]] = None) -> Optional[Dict[str,
     if not 0 <= args.case < len(cases):
         raise SystemExit(f"--case must be between 0 and {len(cases) - 1}")
 
+    from railroad.dashboard import media_kwargs
+
     params = dict(cases[args.case])
     case = BenchmarkCase(bench.name, args.case, 0, params)
     case.live = True
-    case.video = _media_path(args.video)
-    case.plot = _media_path(args.plot)
+    case.media = media_kwargs(vars(args), relocate=_media_path)
 
     print(f"case {args.case}: {_describe(params)}")
     outcome = bench.fn(case)

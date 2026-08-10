@@ -534,7 +534,7 @@ def cmd_doctor(console: Console) -> bool:
     record(shutil.which("git") is not None, "git on PATH",
            "used to merge your live edits when advancing a step")
     record(shutil.which("ffmpeg") is not None, "ffmpeg on PATH",
-           "needed only for --video")
+           "needed only for --save-video")
     emacs = shutil.which("emacsclient")
     record(True, f"emacsclient: {'found' if emacs else 'not found'}",
            "optional; buffers still refresh via global-auto-revert-mode")

@@ -11,7 +11,7 @@ step 04, lock and all -- and it is also, line for line, what
 by hand is what the library was doing anyway. And the find probability is now a
 *callable* rather than the flat 0.5, which is the seam step 07 pulls on.
 
-    uv run python demo.py --video house.mp4
+    uv run railroad tutorial run --save-video house.mp4
 
 renders the run over the scene's top-down view, into media/.
 """

@@ -51,7 +51,7 @@ class StepInfo(TypedDict):
     """What the benchmark sweeps over, or ``""`` when the step has none."""
 
     media: str
-    """Stem for ``--plot``/``--video`` output, or ``""`` when nothing is drawn.
+    """Stem for ``--save-plot``/``--save-video``, or ``""`` when nothing is drawn.
 
     Step 00 has no environment and no dashboard, so it has nothing to draw.
     """
@@ -218,7 +218,7 @@ STEPS: List[StepInfo] = [
             "the containers of a generated home.",
             "This search operator is the one from step 04, lock and all -- and "
             "it is also, line for line, operators.construct_search_operator.",
-            "'tutorial run --video house.mp4' renders the run over the scene's "
+            "'tutorial run --save-video house.mp4' renders the run over the scene's "
             "top-down view, into media/, which the dashboard serves. About 15 "
             "seconds on top of the run, so it is something you can do live.",
             "Seed 8613 is chosen for pace: 8 containers ground out to ~440 "
@@ -293,9 +293,10 @@ def command_lines(step: StepInfo) -> List[Command]:
     if step["media"]:
         stem = step["media"]
         rows += [
-            Command("", f"{me} run --plot {stem}.png",
+            Command("", f"{me} run --save-plot {stem}.png",
                     "trajectories and the action list, into media/"),
-            Command("", f"{me} run --video {stem}.mp4", "or animate the whole run"),
+            Command("", f"{me} run --save-video {stem}.mp4",
+                    "or animate the whole run"),
         ]
     if step["sweep"]:
         rows += [

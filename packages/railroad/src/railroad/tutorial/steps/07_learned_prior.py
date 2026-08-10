@@ -13,7 +13,7 @@ Nothing else changes -- not one line of the operators. The find probability is
 a callable of (robot, location, object) either way, which is the whole point:
 swapping a hand-written estimate for a learned one is a change to one function.
 
-    uv run python demo.py --video learned.mp4
+    uv run railroad tutorial run --save-video learned.mp4
 """
 
 import random

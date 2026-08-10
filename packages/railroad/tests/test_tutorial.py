@@ -384,7 +384,7 @@ def test_card_shows_every_way_to_run_this_step(playground, console):
     commands.cmd_card(console, playground)
     text = console.export_text()
     for expected in ("tutorial run", "tutorial run --list", "tutorial run --case",
-                     "tutorial run --plot", "tutorial run --video",
+                     "tutorial run --save-plot", "tutorial run --save-video",
                      "tutorial bench", "tutorial dashboard", "tutorial next"):
         assert expected in text, expected
     assert "--parallel" not in text, "auto-detect is enough; do not pin it"
@@ -440,7 +440,7 @@ def test_the_primer_offers_no_sweep(playground):
 
     rows = command_lines(get_step(STEPS[0]["id"]))
     assert not any("bench" in row.command for row in rows)
-    assert not any("--plot" in row.command for row in rows), "nothing to draw"
+    assert not any("--save-plot" in row.command for row in rows), "nothing to draw"
     assert any(row.command.endswith("tutorial run") for row in rows)
 
 
@@ -571,10 +571,54 @@ def test_bare_media_names_land_where_the_dashboard_serves_them(playground, monke
     monkeypatch.chdir(playground.root)
     seen = []
     tutorial.main(_fake_benchmark([{"num_robots": 2}], seen),
-                  ["--video", "house.mp4", "--plot", "/tmp/elsewhere.png"])
-    assert seen[0].video == "media/house.mp4"
-    assert seen[0].plot == "/tmp/elsewhere.png", "an explicit path is left alone"
+                  ["--save-video", "house.mp4", "--save-plot", "/tmp/elsewhere.png"])
+    assert seen[0].media["save_video"] == "media/house.mp4"
+    assert seen[0].media["save_plot"] == "/tmp/elsewhere.png", "a path is left alone"
     assert media.media_dir() == playground.media_dir
+
+
+def test_the_demo_and_the_examples_offer_the_same_media_flags():
+    """One spelling across the tool: --save-video here is --save-video there.
+
+    Both sides are checked against the shared declaration rather than against
+    each other, so this fails if either stops borrowing it.
+    """
+    from railroad.cli import main as cli
+    from railroad.dashboard import MEDIA_OPTION_NAMES
+    from railroad.tutorial._harness import _parse
+
+    example_group = cli.commands["example"]
+    example = example_group.commands["clear-table"]  # ty: ignore[unresolved-attribute]
+    example_flags = {flag for param in example.params for flag in param.opts}
+    assert set(MEDIA_OPTION_NAMES) <= example_flags
+
+    args = _parse(["--save-video", "x.mp4", "--save-plot", "x.png",
+                   "--video-dpi", "80", "--show-plot"], [{}])
+    assert args.save_video == "x.mp4"
+    assert args.save_plot == "x.png"
+    assert args.video_dpi == 80
+    assert args.show_plot is True
+    assert args.video_fps == 60, "the base default, inherited rather than restated"
+
+
+def test_only_the_media_options_you_asked_for_are_passed_on():
+    """An untouched flag must not override what a step passes to show_plots."""
+    from railroad.dashboard import media_kwargs
+
+    assert media_kwargs({"save_plot": None, "show_plot": False,
+                         "save_video": None, "video_fps": 60,
+                         "video_dpi": 150}) == {}
+    asked = media_kwargs({"save_video": "out.mp4", "video_dpi": 80,
+                          "video_fps": 60})
+    assert asked == {"save_video": "out.mp4", "video_dpi": 80}
+
+
+def test_media_paths_can_be_relocated_but_flags_cannot():
+    from railroad.dashboard import media_kwargs
+
+    got = media_kwargs({"save_video": "x.mp4", "video_dpi": 80},
+                       relocate=lambda name: f"media/{name}")
+    assert got == {"save_video": "media/x.mp4", "video_dpi": 80}
 
 
 # -- isolation ---------------------------------------------------------------

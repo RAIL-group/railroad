@@ -47,8 +47,8 @@ def register_media_routes(app) -> None:
         if not directory.is_dir():
             return _page(
                 f"<h1>no media yet</h1><p>Nothing in <code>{escape(str(directory))}"
-                "</code>. Render some with <code>uv run python demo.py "
-                "--video house.mp4</code>.</p>"
+                "</code>. Render some with <code>uv run railroad tutorial "
+                "run --save-video house.mp4</code>.</p>"
             )
         files = sorted(
             (p for p in directory.iterdir() if p.is_file()),

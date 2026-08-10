@@ -195,8 +195,8 @@ the plain command it expands to before it runs:
     uv run railroad tutorial run             run it, live
     uv run railroad tutorial run --list      the cases this step sweeps
     uv run railroad tutorial run --case 4    run one of them, live
-    uv run railroad tutorial run --plot x.png    trajectories, into media/
-    uv run railroad tutorial run --video x.mp4   or animate the whole run
+    uv run railroad tutorial run --save-plot x.png    trajectories, to media/
+    uv run railroad tutorial run --save-video x.mp4   or animate the run
 
     uv run railroad tutorial bench           sweep this step
     uv run railroad tutorial bench --dry-run what it would run
