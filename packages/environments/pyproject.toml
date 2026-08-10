@@ -10,7 +10,10 @@ license = "MIT"
 requires-python = ">=3.11"
 dependencies = [
     "railroad",  # Using the local 'railroad' package
-    "pyrobosim>=4.3.3",
+    # uv.lock is gitignored, so CI re-resolves every run; pyrobosim 5 moved
+    # gui.world_canvas, gui.options and navigation.visualization, which
+    # environments/pyrobosim.py imports. Ceiling until it is ported.
+    "pyrobosim>=4.3.3,<5",
     "imageio[ffmpeg]>=2.37.2",
 ]
 
