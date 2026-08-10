@@ -472,6 +472,8 @@ class _PlottingMixin:
         *,
         location_coords: dict[str, tuple[float, float]] | None = None,
         include_objects: bool = False,
+        trajectories: dict[str, tuple[list[tuple[float, float]], list[float]]]
+        | None = None,
     ) -> dict[str, Any]:
         """Interpolate entity positions at arbitrary query times.
 
@@ -482,6 +484,10 @@ class _PlottingMixin:
             times: Query times as a numpy array or list of floats.
             location_coords: Optional explicit location->(x,y) mapping.
             include_objects: If True, include non-robot entities.
+            trajectories: Already-built trajectories to interpolate. Building
+                them runs the environment's pathfinder over every leg, so
+                callers that have them should pass them rather than pay for
+                a second identical search.
 
         Returns:
             ``{entity_name: (N, 2) ndarray}`` of interpolated positions.
@@ -489,10 +495,11 @@ class _PlottingMixin:
         import numpy as np
 
         query_times = np.asarray(times, dtype=float)
-        trajectories, _env_coords = self._build_entity_trajectories(
-            location_coords=location_coords,
-            include_objects=include_objects,
-        )
+        if trajectories is None:
+            trajectories, _env_coords = self._build_entity_trajectories(
+                location_coords=location_coords,
+                include_objects=include_objects,
+            )
 
         result: dict[str, Any] = {}
         for entity, (waypoints, traj_times) in trajectories.items():
@@ -931,6 +938,7 @@ class _PlottingMixin:
         # Pre-compute low-res positions for the moving marker
         marker_positions = self.get_entity_positions_at_times(
             frame_times, location_coords=location_coords,
+            trajectories=trajectories,
         )
 
         # Location markers + labels (skip transient frontiers). Their content
