@@ -56,14 +56,27 @@ class ThorInterface:
 
         self.cached_data = self._load_cache() if use_cache else None
         if self.cached_data is None:
-            from ai2thor.controller import Controller
-            self.controller = Controller(
-                scene=self.scene,
-                gridSize=self.grid_resolution,
-                width=480,
-                height=480
-            )
-            self.cached_data = self._save_and_get_cache()
+            # Generating a scene starts a Unity controller. Several of those at
+            # once will take a machine down, and benchmark workers are separate
+            # processes, so this is a cross-process file lock rather than a
+            # threading one. Re-check the cache once we hold it: the process
+            # ahead of us in the queue may have generated this very scene.
+            from ._scene_lock import scene_generation_lock
+
+            with scene_generation_lock():
+                self.cached_data = self._load_cache() if use_cache else None
+                if self.cached_data is None:
+                    from ai2thor.controller import Controller
+                    self.controller = Controller(
+                        scene=self.scene,
+                        gridSize=self.grid_resolution,
+                        width=480,
+                        height=480
+                    )
+                    self.cached_data = self._save_and_get_cache()
+                else:
+                    print("-----------Using cached procthor data-----------")
+                    self.controller = None
         else:
             print("-----------Using cached procthor data-----------")
             self.controller = None
