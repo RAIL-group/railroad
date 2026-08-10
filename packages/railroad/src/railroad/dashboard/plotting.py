@@ -10,6 +10,24 @@ if TYPE_CHECKING:
     from .dashboard import PlannerDashboard
 
 
+def _canvas_buffer_writer_cls() -> Any:
+    """Return an ``FFMpegWriter`` that pipes the canvas buffer as-is.
+
+    ``MovieWriter.grab_frame`` routes through ``fig.savefig``, which
+    re-rasterises the whole figure. ``save_video`` has already composited the
+    frame into the canvas buffer, so those bytes go straight to ffmpeg.
+    """
+    from matplotlib.animation import FFMpegWriter
+
+    class _CanvasBufferWriter(FFMpegWriter):
+        def grab_frame(self, **savefig_kwargs: Any) -> None:
+            proc: Any = self._proc  # ty: ignore[unresolved-attribute]
+            canvas: Any = self.fig.canvas
+            proc.stdin.write(canvas.buffer_rgba())
+
+    return _CanvasBufferWriter
+
+
 class _PlottingMixin:
     """Mixin containing all matplotlib plotting methods for PlannerDashboard."""
 
@@ -756,8 +774,8 @@ class _PlottingMixin:
             dpi: Resolution in dots per inch.
         """
         import numpy as np
+        import matplotlib.image as mimage
         import matplotlib.pyplot as plt
-        from matplotlib.animation import FuncAnimation
 
         # Onboard camera imagery (duck-typed: env exposes pano_records with
         # .robot/.time/.image, e.g. VisualUnknownSpaceEnvironment)
@@ -772,6 +790,11 @@ class _PlottingMixin:
         if result is None:
             return
         fig, ax, sidebar_ax, trajectories, env_coords, t_end, onboard_axes = result
+
+        # Render at the output resolution from the start. The frame loop
+        # composites straight out of the canvas buffer, so the figure's dpi
+        # has to match the writer's rather than being applied per savefig.
+        fig.set_dpi(dpi)
 
         # One image artist per robot; frames are selected by capture time.
         onboard_artists: dict[str, Any] = {}
@@ -871,7 +894,10 @@ class _PlottingMixin:
             frame_times, location_coords=location_coords,
         )
 
-        # Static background: location markers + labels (skip transient frontiers)
+        # Location markers + labels (skip transient frontiers). Their content
+        # never changes, but they sit above the navigation grid, so they are
+        # kept in a list to be redrawn whenever that grid does.
+        location_artists: list[Any] = []
         plotted_locs: set[str] = set()
         for positions in self._entity_positions.values():
             for _, loc_name, stored_coords in positions:
@@ -882,12 +908,14 @@ class _PlottingMixin:
                     continue
                 coord = stored_coords if stored_coords is not None else env_coords.get(loc_name)
                 if coord is not None:
-                    ax.plot(coord[0], coord[1], "ks", markersize=4, zorder=4)
-                    ax.annotate(
+                    location_artists.extend(
+                        ax.plot(coord[0], coord[1], "ks", markersize=4, zorder=4)
+                    )
+                    location_artists.append(ax.annotate(
                         loc_name, coord,
                         fontsize=5, color="brown",
                         xytext=(3, 3), textcoords="offset points",
-                    )
+                    ))
 
         # Render sidebar (colorbars, goals, actions hidden initially)
         goal_text_artists, action_texts = self._render_sidebar(
@@ -921,10 +949,15 @@ class _PlottingMixin:
             markers.append(marker)
             labels.append(label)
 
-        # Single shared trail scatter artist
+        # Single shared trail scatter artist. The per-element antialias list
+        # is length 2 (rather than the default scalar) so that Collection.draw
+        # never takes its single-element "stamp one marker" shortcut: that
+        # shortcut antialiases slightly differently, which would show up
+        # whenever a frame happens to add exactly one trail point.
         trail_scatter = ax.scatter([], [], s=[], zorder=5, alpha=1.0)
+        trail_scatter.set_antialiased([True, True])
 
-        ax.legend(fontsize=7, loc="upper right")
+        legend_artist = ax.legend(fontsize=7, loc="upper right")
         # Fixed-width title so it doesn't jump during animation
         t_width = len(f"{t_end:.1f}")
         title_artist = ax.set_title(
@@ -940,92 +973,218 @@ class _PlottingMixin:
         y_range = ax.get_ylim()
         label_offset = (y_range[1] - y_range[0]) * 0.02
 
-        def _update(frame: int):
+        # Snapshot time axes, so each frame can binary-search its state
+        # instead of rescanning every snapshot.
+        nav_times = np.array([t for t, _ in nav_grid_frames]) if nav_grid_frames else None
+        overlay_times = (
+            np.array([t for t, _ in frontier_overlay_frames])
+            if frontier_overlay_frames else None
+        )
+        goal_times = np.array([t for t, _ in goal_snapshots]) if goal_snapshots else None
+        action_times = np.array([t for _, t in action_texts]) if action_texts else None
+
+        def _latest(times: Any, current_time: float) -> int:
+            """Index of the last snapshot at or before *current_time* (>= 0)."""
+            return max(int(np.searchsorted(times, current_time, side="right")) - 1, 0)
+
+        def _apply_frame(frame: int) -> tuple[tuple, tuple, tuple, int]:
+            """Point every artist at its state for *frame*.
+
+            Returns one key per cached layer plus the number of visible trail
+            points, which is what the render loop uses to work out how much of
+            the previous frame it can keep.
+            """
             current_time = frame_times[frame]
             title_artist.set_text(
                 f"Entity Trajectories  (cost = {current_time:>{t_width}.1f} / {t_end:.1f})"
             )
-            # Update animated navigation grid
-            if nav_grid_artist is not None and nav_grid_frames:
-                latest_rgb = nav_grid_frames[0][1]
-                for snap_time, rgb in nav_grid_frames:
-                    if snap_time <= current_time:
-                        latest_rgb = rgb
-                    else:
-                        break
-                nav_grid_artist.set_data(latest_rgb)
-            # Update frontier-probability overlay
-            if frontier_overlay_artist is not None:
-                latest_rgba = frontier_overlay_frames[0][1]
-                for snap_time, rgba in frontier_overlay_frames:
-                    if snap_time <= current_time:
-                        latest_rgba = rgba
-                    else:
-                        break
-                frontier_overlay_artist.set_data(latest_rgba)
+            # Animated navigation grid
+            nav_idx = -1
+            if nav_grid_artist is not None and nav_times is not None:
+                nav_idx = _latest(nav_times, current_time)
+                nav_grid_artist.set_data(nav_grid_frames[nav_idx][1])
+            # Frontier-probability overlay
+            overlay_idx = -1
+            if frontier_overlay_artist is not None and overlay_times is not None:
+                overlay_idx = _latest(overlay_times, current_time)
+                frontier_overlay_artist.set_data(frontier_overlay_frames[overlay_idx][1])
             for idx, entity in enumerate(entity_names):
                 # Update current position marker
                 pos = marker_positions[entity]
                 markers[idx].set_data([pos[frame, 0]], [pos[frame, 1]])
                 # Update label position (just above the marker)
                 labels[idx].set_position((pos[frame, 0], pos[frame, 1] + label_offset))
-            # Update combined trail: mask points up to current time
-            mask = combined_times <= current_time
-            trail_scatter.set_offsets(combined_xy[mask])
-            trail_scatter.set_sizes(combined_sizes[mask])
-            trail_scatter.set_facecolors(combined_colors[mask])
+            # Trail points up to the current time. combined_times is sorted,
+            # so the visible set is always a prefix.
+            n_trail = int(np.searchsorted(combined_times, current_time, side="right"))
             # Update onboard images to the latest capture <= current_time
             for robot, artist in onboard_artists.items():
-                idx = int(np.searchsorted(onboard_times[robot], current_time, side="right")) - 1
-                idx = max(idx, 0)
+                idx = _latest(onboard_times[robot], current_time)
                 if idx != onboard_frame_idx[robot]:
                     artist.set_data(onboard_by_robot[robot][idx].image)
                     onboard_frame_idx[robot] = idx
             # Show/hide actions based on whether their start time has passed
-            for txt, act_time in action_texts:
-                txt.set_alpha(1.0 if current_time >= act_time else 0.0)
+            n_actions_shown = 0
+            if action_times is not None:
+                n_actions_shown = int(
+                    np.searchsorted(action_times, current_time, side="right")
+                )
+                for i, (txt, _act_time) in enumerate(action_texts):
+                    txt.set_alpha(1.0 if i < n_actions_shown else 0.0)
             # Update goal literal colors based on latest snapshot <= current_time
-            current_goals: dict[str, bool] = {}
-            for snap_time, snap_goals in goal_snapshots:
-                if snap_time <= current_time:
-                    current_goals = snap_goals
-                else:
-                    break
-            for txt, literal_str in goal_text_artists:
-                if literal_str is not None:
-                    satisfied = current_goals.get(literal_str, False)
-                    txt.set_color("green" if satisfied else "red")
-            artists = markers + labels + [trail_scatter, title_artist]
-            if nav_grid_artist is not None:
-                artists.append(nav_grid_artist)
-            if frontier_overlay_artist is not None:
-                artists.append(frontier_overlay_artist)
-            artists += list(onboard_artists.values())
-            artists += [txt for txt, _ in action_texts]
-            artists += [txt for txt, _ in goal_text_artists]
-            return artists
+            goal_idx = -1
+            if goal_times is not None:
+                current_goals: dict[str, bool] = {}
+                if goal_times[0] <= current_time:
+                    goal_idx = _latest(goal_times, current_time)
+                    current_goals = goal_snapshots[goal_idx][1]
+                for txt, literal_str in goal_text_artists:
+                    if literal_str is not None:
+                        satisfied = current_goals.get(literal_str, False)
+                        txt.set_color("green" if satisfied else "red")
 
-        anim = FuncAnimation(fig, _update, frames=n_frames, blit=False, interval=1000 / fps)
+            return (
+                (goal_idx, n_actions_shown),          # chrome layer
+                tuple(onboard_frame_idx.values()),    # onboard images
+                (nav_idx, overlay_idx),               # main-axes stack
+                n_trail,
+            )
 
-        from matplotlib.animation import FFMpegWriter
-        writer = FFMpegWriter(fps=fps)
+        # Frames are composited out of two cached rasters rather than redrawn:
+        #
+        #   chrome  axes frames, ticks, sidebar and the onboard images -- a
+        #           full canvas draw, needed only when the sidebar changes
+        #   stack   chrome plus the navigation grid, frontier overlay,
+        #           location markers and the trail drawn so far
+        #
+        # and the handful of artists that move every frame are drawn on top.
+        # Artists cached in a layer are marked animated so a plain canvas draw
+        # skips them and leaves them to be composited in the right order.
+        hot_artists: list[Any] = [*markers, *labels, title_artist]
+        if legend_artist is not None:
+            hot_artists.append(legend_artist)
+        # Draw them in the same order a full figure draw would, so anything
+        # that overlaps still stacks the way it does in the static plot.
+        hot_artists.sort(key=lambda a: a.get_zorder())
+
+        stack_artists: list[Any] = [
+            a for a in (nav_grid_artist, frontier_overlay_artist) if a is not None
+        ]
+        if stack_artists:
+            # The grid images cover the whole data area, and a real draw puts
+            # the frame and tick marks on top of them, so those have to be
+            # replayed above the images rather than left in the chrome layer.
+            stack_artists += [*ax.spines.values(), ax.xaxis, ax.yaxis]
+        stack_artists += location_artists
+        stack_artists.sort(key=lambda a: a.get_zorder())
+
+        onboard_list = list(onboard_artists.values())
+        canvas = fig.canvas
+
+        # Artists composited by hand each frame. Marking them animated keeps
+        # them out of a plain canvas draw -- except AxesImages, which
+        # Axes.draw deliberately keeps, so those are hidden for that pass
+        # instead. (Hiding the rest would move the title, whose placement
+        # consults the tick bboxes.)
+        layered: list[Any] = [
+            *stack_artists, *onboard_list, *hot_artists, trail_scatter,
+        ]
+        for artist in layered:
+            artist.set_animated(True)
+        layered_images = [
+            a for a in layered if isinstance(a, mimage.AxesImage)
+        ]
+
+        def _draw_chrome() -> Any:
+            """Full draw of everything that is not composited per frame."""
+            for artist in layered_images:
+                artist.set_visible(False)
+            try:
+                canvas.draw()
+            finally:
+                for artist in layered_images:
+                    artist.set_visible(True)
+            for artist in onboard_list:
+                fig.draw_artist(artist)
+            return canvas.copy_from_bbox(fig.bbox)
+
+        def _set_trail(lo: int, hi: int) -> None:
+            trail_scatter.set_offsets(combined_xy[lo:hi])
+            trail_scatter.set_sizes(combined_sizes[lo:hi])
+            trail_scatter.set_facecolors(combined_colors[lo:hi])
+
+        chrome: Any = None
+        stack: Any = None
+        drawn_chrome: tuple | None = None
+        drawn_onboard: tuple | None = None
+        drawn_stack: tuple | None = None
+        drawn_trail = 0
+
+        def _render(frame: int) -> None:
+            """Composite one frame into the canvas buffer."""
+            nonlocal chrome, stack, drawn_chrome, drawn_onboard, drawn_stack, drawn_trail
+            chrome_key, onboard_key, stack_key, n_trail = _apply_frame(frame)
+
+            if chrome is None or chrome_key != drawn_chrome:
+                chrome = _draw_chrome()
+                drawn_chrome, drawn_onboard, stack = chrome_key, onboard_key, None
+            elif onboard_key != drawn_onboard:
+                # Each onboard image fully repaints its own axes, so it can be
+                # patched into the chrome layer without a full redraw.
+                canvas.restore_region(chrome)
+                for artist in onboard_list:
+                    fig.draw_artist(artist)
+                chrome = canvas.copy_from_bbox(fig.bbox)
+                drawn_onboard, stack = onboard_key, None
+
+            if stack is None or stack_key != drawn_stack or n_trail < drawn_trail:
+                # Something under the trail moved (or the trail rewound, which
+                # happens after the poster frame): rebuild the stack on chrome.
+                canvas.restore_region(chrome)
+                for artist in stack_artists:
+                    fig.draw_artist(artist)
+                _set_trail(0, n_trail)
+                fig.draw_artist(trail_scatter)
+                stack = canvas.copy_from_bbox(fig.bbox)
+                drawn_stack, drawn_trail = stack_key, n_trail
+            else:
+                canvas.restore_region(stack)
+                if n_trail > drawn_trail:
+                    # The trail only ever grows here, so draw the new points
+                    # and fold them into the stack for the next frame.
+                    _set_trail(drawn_trail, n_trail)
+                    fig.draw_artist(trail_scatter)
+                    stack = canvas.copy_from_bbox(fig.bbox)
+                    drawn_trail = n_trail
+
+            for artist in hot_artists:
+                fig.draw_artist(artist)
+
+        def _frames() -> Any:
+            """Yield frame indices, with a progress bar when interactive."""
+            if _is_ci_environment():
+                yield from range(n_frames)
+                return
+            from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
+            with Progress(
+                TextColumn("[bold blue]Saving video"),
+                BarColumn(),
+                TextColumn("{task.percentage:>3.0f}%"),
+                TimeRemainingColumn(),
+            ) as progress:
+                task = progress.add_task("frames", total=n_frames)
+                for frame in range(n_frames):
+                    yield frame
+                    progress.update(task, completed=frame + 1)
+
+        writer = _canvas_buffer_writer_cls()(fps=fps)
 
         interrupted = False
         try:
-            if not _is_ci_environment():
-                from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
-                with Progress(
-                    TextColumn("[bold blue]Saving video"),
-                    BarColumn(),
-                    TextColumn("{task.percentage:>3.0f}%"),
-                    TimeRemainingColumn(),
-                ) as progress:
-                    task = progress.add_task("frames", total=n_frames)
-                    def _progress_cb(current_frame: int, total_frames: int) -> None:
-                        progress.update(task, completed=current_frame)
-                    anim.save(path, writer=writer, dpi=dpi, progress_callback=_progress_cb)
-            else:
-                anim.save(path, writer=writer, dpi=dpi)
+            with writer.saving(fig, path, dpi):
+                for frame in _frames():
+                    _render(frame)
+                    writer.grab_frame()
         except KeyboardInterrupt:
             interrupted = True
         except subprocess.CalledProcessError as exc:
