@@ -1,19 +1,26 @@
 """Launching things: the demo, its sweep, and the dashboard.
 
-Everything is a subprocess. The demo especially: a fresh interpreter each time
-means no stale module state between saves, the child inherits the terminal so
-the live dashboard renders properly, and a syntax error introduced mid-edit
-prints a traceback instead of taking the watch pane down with it.
+Everything is a subprocess, run **from inside the playground**. That one choice
+is what keeps the tutorial self-contained: ``mlflow.db``, ``mlruns/``, the
+benchmark cache and the media directory are all resolved relative to the
+working directory, so putting the working directory in the playground gives the
+tutorial its own of each. Existing results are untouched, and the dashboard
+opened from here shows this tutorial and nothing else.
 
-The working directory is inherited, never set. ``mlflow.db``, ``mlruns/``,
-``.benchmark_cache/`` and the ProcTHOR scene cache are all resolved relative to
-it, so the tutorial has to run from wherever those live -- normally the
-repository root.
+The exception is the ProcTHOR resource tree -- a gigabyte of scenes, models and
+the scene cache -- which is borrowed from wherever ``init`` was run via
+``PROCTHOR_RESOURCES_DIR`` rather than copied.
+
+A fresh interpreter per run also means no stale module state between saves, the
+child inherits the terminal so the live dashboard renders properly, and a
+syntax error introduced mid-edit prints a traceback instead of taking the watch
+pane down with it.
 """
 
 from __future__ import annotations
 
 import os
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -27,6 +34,8 @@ EXPERIMENT = "railroad-tutorial"
 """Every sweep accumulates here, so the dashboard is one page you refresh."""
 
 DASHBOARD_URL = "http://127.0.0.1:8050/"
+MEDIA_ENV = "RAILROAD_TUTORIAL_MEDIA_DIR"
+PROCTHOR_ENV = "PROCTHOR_RESOURCES_DIR"
 
 DEFAULT_PARALLEL = 12
 """Deliberately below ``cpu_count() - 2``: a sweep that eats every core makes
@@ -41,7 +50,32 @@ def _railroad(*args: str) -> List[str]:
 def _env_for(playground: Playground) -> dict:
     env = dict(os.environ)
     env[ENV_DIR] = str(playground.root)
+    env[MEDIA_ENV] = str(playground.media_dir)
+    resources = playground.resources_dir
+    if resources.is_dir():
+        env[PROCTHOR_ENV] = str(resources)
     return env
+
+
+def format_command(argv: Sequence[str], cwd: Optional[Path] = None) -> str:
+    """The same thing, as you would type it.
+
+    Printed before every run so the tutorial shows its working: nothing here is
+    a special mode, it is the ordinary CLI with ordinary arguments.
+    """
+    parts = list(argv)
+    if parts[:3] == [sys.executable, "-m", "railroad.cli"]:
+        parts = ["railroad", *parts[3:]]
+    elif parts and parts[0] == sys.executable:
+        parts = ["python", *parts[1:]]
+    if cwd is not None:
+        try:
+            where = cwd.relative_to(Path.cwd())
+        except ValueError:
+            where = cwd
+        if str(where) != ".":
+            return f"cd {shlex.quote(str(where))} && " + shlex.join(parts)
+    return shlex.join(parts)
 
 
 @dataclass(frozen=True)
@@ -54,30 +88,18 @@ class RunResult:
         return self.returncode == 0
 
 
-def run_demo(
-    playground: Playground, extra_args: Sequence[str] = ()
-) -> RunResult:
-    """Run ``demo.py`` to completion, inheriting this terminal.
-
-    *extra_args* is forwarded verbatim; the later steps read ``--video`` and
-    ``--plot`` from it via :func:`railroad.tutorial.media_args`.
-    """
-    started = perf_counter()
-    completed = subprocess.run(
-        [sys.executable, str(playground.demo), *extra_args],
-        env=_env_for(playground),
-    )
-    return RunResult(completed.returncode, perf_counter() - started)
+def demo_argv(playground: Playground, extra_args: Sequence[str] = ()) -> List[str]:
+    return [sys.executable, playground.demo.name, *extra_args]
 
 
-def run_sweep(
+def sweep_argv(
     playground: Playground,
     *,
     parallel: int = DEFAULT_PARALLEL,
     repeat_max: Optional[int] = None,
     dry_run: bool = False,
-) -> RunResult:
-    """Run the current step's benchmark sweep.
+) -> List[str]:
+    """The benchmark command for the current step.
 
     Selection is by the ``tutorial`` tag rather than by name: ``--include``
     adds ``demo.py`` to the benchmarks discovered from entry points, and
@@ -85,7 +107,7 @@ def run_sweep(
     """
     args = [
         "benchmarks", "run",
-        "--include", str(playground.demo),
+        "--include", playground.demo.name,
         "--tags", "tutorial",
         "--experiment", EXPERIMENT,
         "--run-name", f"step{playground.current_step_id}",
@@ -95,9 +117,37 @@ def run_sweep(
         args += ["--repeat-max", str(repeat_max)]
     if dry_run:
         args.append("--dry-run")
+    return _railroad(*args)
+
+
+def dashboard_argv(host: str = "auto", port: int = 8050) -> List[str]:
+    return _railroad("benchmarks", "dashboard", "--host", host, "--port", str(port))
+
+
+def _run(playground: Playground, argv: Sequence[str]) -> RunResult:
     started = perf_counter()
-    completed = subprocess.run(_railroad(*args), env=_env_for(playground))
+    completed = subprocess.run(
+        list(argv), env=_env_for(playground), cwd=str(playground.root)
+    )
     return RunResult(completed.returncode, perf_counter() - started)
+
+
+def run_demo(playground: Playground, extra_args: Sequence[str] = ()) -> RunResult:
+    """Run ``demo.py`` to completion, inheriting this terminal."""
+    return _run(playground, demo_argv(playground, extra_args))
+
+
+def run_sweep(
+    playground: Playground,
+    *,
+    parallel: int = DEFAULT_PARALLEL,
+    repeat_max: Optional[int] = None,
+    dry_run: bool = False,
+) -> RunResult:
+    """Run the current step's benchmark sweep."""
+    return _run(playground, sweep_argv(
+        playground, parallel=parallel, repeat_max=repeat_max, dry_run=dry_run
+    ))
 
 
 def start_dashboard(
@@ -105,13 +155,16 @@ def start_dashboard(
 ) -> subprocess.Popen:
     """Start the benchmark dashboard in the background.
 
-    Its output goes to ``dashboard.log`` in the playground; a Flask server
-    logging into the middle of a talk is not what anyone wants to look at.
+    Run from the playground, so it reads the playground's ``mlflow.db`` and
+    serves the playground's media -- this tutorial's results and nothing else.
+    Its own output goes to ``dashboard.log``; a Flask server logging into the
+    middle of a talk is not what anyone wants to look at.
     """
     log = (playground.root / "dashboard.log").open("ab")
     return subprocess.Popen(
-        _railroad("benchmarks", "dashboard", "--host", host, "--port", str(port)),
+        dashboard_argv(host, port),
         env=_env_for(playground),
+        cwd=str(playground.root),
         stdout=log,
         stderr=subprocess.STDOUT,
         stdin=subprocess.DEVNULL,
@@ -139,7 +192,5 @@ def open_browser(url: str = DASHBOARD_URL) -> None:
 
 def editor_command(path: Path) -> List[str]:
     """``$VISUAL``/``$EDITOR`` split into a command, defaulting to vi."""
-    import shlex
-
     editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
     return [*shlex.split(editor), str(path)]

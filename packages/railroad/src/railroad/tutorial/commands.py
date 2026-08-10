@@ -26,16 +26,19 @@ from ._playground import (
     init_playground,
 )
 from ._run import (
-    DASHBOARD_URL,
     DEFAULT_PARALLEL,
-    dashboard_urls,
     EXPERIMENT,
     RunResult,
+    dashboard_argv,
+    dashboard_urls,
+    demo_argv,
     editor_command,
+    format_command,
     open_browser,
     run_demo,
     run_sweep,
     start_dashboard,
+    sweep_argv,
 )
 from ._steps import STEPS, get_step, neighbour, step_index
 
@@ -112,6 +115,32 @@ def cmd_init(console: Console, directory: Optional[str], force: bool) -> None:
 # -- running -----------------------------------------------------------------
 
 
+def _echo(console: Console, argv: Sequence[str], cwd: Optional[Path] = None) -> None:
+    """Show the command before running it.
+
+    Nothing the tutorial does is a special mode -- it is the ordinary CLI with
+    ordinary arguments, and the fastest way to make that believable is to print
+    the line you could have typed yourself.
+
+    ``soft_wrap`` leaves the wrapping to the terminal: rich would otherwise
+    break a long command across lines by inserting newlines into it, and the
+    whole point is that you can select the line and run it.
+    """
+    console.print(f"[dim]$ {escape(format_command(argv, cwd))}[/dim]",
+                  soft_wrap=True)
+
+
+def _media_path(playground: Playground, name: str) -> str:
+    """Put a bare filename where the dashboard will serve it.
+
+    ``--video house.mp4`` should turn up at /media/ without anyone having to
+    know the directory; an explicit path is left alone.
+    """
+    if Path(name).parent != Path("."):
+        return name
+    return str(playground.media_dir.relative_to(playground.root) / name)
+
+
 def cmd_run(
     console: Console,
     playground: Optional[Playground] = None,
@@ -122,9 +151,10 @@ def cmd_run(
     playground = playground or find_playground()
     extra: List[str] = []
     if video:
-        extra += ["--video", video]
+        extra += ["--video", _media_path(playground, video)]
     if plot:
-        extra += ["--plot", plot]
+        extra += ["--plot", _media_path(playground, plot)]
+    _echo(console, demo_argv(playground, extra), playground.root)
     result = run_demo(playground, extra)
     if not result.ok:
         console.print(f"[red]demo.py exited {result.returncode}[/red]")
@@ -321,8 +351,11 @@ def cmd_bench(
     if not step["sweep"]:
         console.print(f"[yellow]step {step['id']} has no sweep[/yellow]")
         return RunResult(0, 0.0)
-    console.print(f"[bold]sweep[/bold] {step['sweep']}  "
+    console.print(f"[bold]sweep[/bold] {escape(step['sweep'])}  "
                   f"[dim]({parallel} workers → experiment {EXPERIMENT})[/dim]")
+    _echo(console, sweep_argv(playground, parallel=parallel,
+                              repeat_max=repeat_max, dry_run=dry_run),
+          playground.root)
     result = run_sweep(
         playground, parallel=parallel, repeat_max=repeat_max, dry_run=dry_run
     )
@@ -333,8 +366,10 @@ def cmd_bench(
 
 def cmd_dashboard(console: Console, playground: Optional[Playground] = None) -> None:
     playground = playground or find_playground()
+    _echo(console, dashboard_argv(), playground.root)
     start_dashboard(playground)
-    console.print("[green]dashboard[/green]")
+    console.print("[green]dashboard[/green]  "
+                  "[dim](this playground's results only)[/dim]")
     for line in dashboard_urls():
         console.print(f"[dim]{escape(line)}[/dim]")
     console.print(f"[dim]log: {playground.root / 'dashboard.log'}[/dim]")
@@ -413,8 +448,17 @@ def cmd_doctor(console: Console) -> bool:
         checks.append((ok, label, detail))
 
     cwd = Path.cwd()
+    try:
+        playground = find_playground()
+    except PlaygroundError:
+        playground = None
+
+    # The playground keeps its own mlflow.db and media; what it needs from out
+    # here is the ProcTHOR resource tree.
+    resources = playground.resources_dir if playground else cwd / "resources"
     record(True, f"working directory: {cwd}",
-           "mlflow.db, mlruns/ and the ProcTHOR cache all resolve from here")
+           "the tutorial runs from its playground and keeps its results there; "
+           f"ProcTHOR scenes are read from {resources}")
 
     try:
         import railroad.bench  # noqa: F401
@@ -430,7 +474,7 @@ def cmd_doctor(console: Console) -> bool:
         record(False, "railroad[procthor] check failed", str(exc))
     else:
         if procthor_ok:
-            cache = cwd / "resources" / "procthor-10k" / "cache"
+            cache = resources / "procthor-10k" / "cache"
             seeds = sorted(p.stem.removeprefix("scene_")
                            for p in cache.glob("scene_*.pkl"))
             detail = (
@@ -453,10 +497,10 @@ def cmd_doctor(console: Console) -> bool:
     record(sys.stdin.isatty() and sys.stdout.isatty(), "attached to a terminal",
            "the live dashboard and the watch pane both need one")
 
-    try:
-        playground = find_playground()
-        record(True, f"playground: {playground.root}")
-    except PlaygroundError:
+    if playground is not None:
+        record(True, f"playground: {playground.root}",
+               "its own mlflow.db, mlruns/ and tutorial-media/ live here")
+    else:
         record(False, "no playground", "run 'railroad tutorial init'")
 
     all_ok = True

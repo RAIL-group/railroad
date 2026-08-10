@@ -378,6 +378,61 @@ def test_compare_omits_the_delta_across_a_change_of_problem(playground, console)
     assert "+30.0" not in text
 
 
+# -- isolation and the printed commands --------------------------------------
+
+
+def test_init_records_where_the_resources_live(playground, tmp_path):
+    """Everything is created in the playground; only ProcTHOR is borrowed."""
+    assert playground.home == Path.cwd().resolve()
+    assert playground.resources_dir == Path.cwd().resolve() / "resources"
+    assert playground.media_dir.is_dir()
+
+
+def test_subprocess_environment_points_at_the_playground(playground):
+    from railroad.tutorial._run import MEDIA_ENV, PROCTHOR_ENV, _env_for
+
+    env = _env_for(playground)
+    assert env[ENV_DIR] == str(playground.root)
+    assert env[MEDIA_ENV] == str(playground.media_dir)
+    # PROCTHOR_RESOURCES_DIR is only set when there is a tree to point at.
+    if playground.resources_dir.is_dir():
+        assert env[PROCTHOR_ENV] == str(playground.resources_dir)
+
+
+def test_sweep_command_is_relative_so_it_runs_inside_the_playground(playground):
+    from railroad.tutorial._run import EXPERIMENT, sweep_argv
+
+    argv = sweep_argv(playground, parallel=4)
+    assert "--include" in argv and argv[argv.index("--include") + 1] == "demo.py"
+    assert argv[argv.index("--experiment") + 1] == EXPERIMENT
+    assert argv[argv.index("--tags") + 1] == "tutorial"
+
+
+def test_format_command_reads_like_something_you_would_type(playground, tmp_path):
+    from railroad.tutorial._run import demo_argv, format_command, sweep_argv
+
+    demo = format_command(demo_argv(playground), playground.root)
+    assert demo.endswith("python demo.py")
+    assert demo.startswith("cd ")
+
+    sweep = format_command(sweep_argv(playground, parallel=4), playground.root)
+    assert "railroad benchmarks run" in sweep
+    assert sys.executable not in sweep, "should not print an absolute interpreter"
+
+
+def test_format_command_omits_the_cd_when_already_there(playground, monkeypatch):
+    from railroad.tutorial._run import demo_argv, format_command
+
+    monkeypatch.chdir(playground.root)
+    assert format_command(demo_argv(playground), playground.root) == "python demo.py"
+
+
+def test_bare_media_names_land_where_the_dashboard_serves_them(playground):
+    assert commands._media_path(playground, "house.mp4") == "tutorial-media/house.mp4"
+    assert commands._media_path(playground, "/tmp/x.mp4") == "/tmp/x.mp4"
+    assert commands._media_path(playground, "out/x.mp4") == "out/x.mp4"
+
+
 def test_pane_panel_shows_the_step_and_the_keys(playground, console):
     from railroad.tutorial._watch import KEYMAP, Pane
 

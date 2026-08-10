@@ -67,6 +67,28 @@ class Playground:
     def runs_path(self) -> Path:
         return self.root / "runs.jsonl"
 
+    @property
+    def media_dir(self) -> Path:
+        """Where plots and videos go; also what the dashboard serves."""
+        return self.root / "tutorial-media"
+
+    @property
+    def home(self) -> Path:
+        """The directory ``init`` was run from.
+
+        The playground is its own world -- its own ``mlflow.db``, ``mlruns/``
+        and benchmark cache -- so the tutorial cannot disturb existing results
+        and the dashboard shows only this run. The one thing it borrows from
+        outside is the ProcTHOR resource tree, which is a gigabyte of scenes
+        and models nobody wants a second copy of.
+        """
+        recorded = self.read_state().get("home")
+        return Path(recorded) if recorded else self.root
+
+    @property
+    def resources_dir(self) -> Path:
+        return self.home / "resources"
+
     # -- state ---------------------------------------------------------------
 
     def read_state(self) -> Dict[str, Any]:
@@ -195,7 +217,20 @@ advance, and `railroad tutorial goto <n> --force` takes the pristine snapshot
 of any step.
 
 Steps 06 and 07 need `railroad[procthor]`. Run `railroad tutorial doctor` the
-morning of, from the directory holding `mlflow.db` and `resources/`.
+morning of, from the directory holding `resources/`.
+
+## This directory is its own world
+
+Everything runs from here, so `mlflow.db`, `mlruns/`, `.benchmark_cache/` and
+`tutorial-media/` are all created *inside* this directory. Sweeps cannot
+disturb results you already had, and the dashboard opened from the tutorial
+shows this tutorial and nothing else. Delete the directory and it is all gone.
+
+The one thing borrowed from outside is the ProcTHOR resource tree (a gigabyte
+of scenes and models), read from wherever `init` was run.
+
+Every command is printed before it runs, so nothing here is a special mode --
+it is the ordinary CLI, and you can type any of those lines yourself.
 """
 
 
@@ -229,7 +264,11 @@ def init_playground(root: Path, *, force: bool = False) -> Playground:
 
     first = STEPS[0]["id"]
     shutil.copyfile(playground.pristine_path(first), playground.demo)
-    playground.write_state({"step": first})
+    # Remember where we came from: that is where the ProcTHOR scenes live, and
+    # everything else (mlflow.db, mlruns/, the benchmark cache) is created
+    # inside the playground so this tutorial cannot touch existing results.
+    playground.write_state({"step": first, "home": str(Path.cwd().resolve())})
+    playground.media_dir.mkdir(exist_ok=True)
     (root / "README.md").write_text(README)
     playground.runs_path.touch()
     return playground
