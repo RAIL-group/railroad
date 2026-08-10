@@ -76,11 +76,13 @@ class TestIncrementalScatter:
         chunked = self._render(fig, [(0, 5), (5, 6), (6, 12)])
         assert np.array_equal(whole, chunked)
 
-    def test_default_antialias_takes_the_shortcut(self, fig):
-        """Documents *why* the antialias list is set.
+    def test_reports_whether_the_antialias_workaround_still_matters(self, fig):
+        """Records whether the shortcut being guarded against is still live.
 
-        Without it a single-point draw diverges. If this ever stops being
-        true the workaround is obsolete, not broken -- but we want to know.
+        Skips rather than fails when it is not: whether matplotlib renders a
+        one-element collection differently is a property of the installed
+        version, not of this repo, so it must not break CI on a version bump.
+        The invariant that actually matters is asserted above.
         """
         ax = fig.add_subplot(111)
         ax.set_xlim(0, 1)
@@ -98,10 +100,12 @@ class TestIncrementalScatter:
 
         fig.clear()
         correct = self._render(fig, [(0, 12)])
-        assert not np.array_equal(shortcut, correct), (
-            "matplotlib no longer renders single-element collections "
-            "differently; the set_antialiased workaround can be removed"
-        )
+        if np.array_equal(shortcut, correct):
+            pytest.skip(
+                f"matplotlib {matplotlib.__version__} renders one-element "
+                "collections like larger ones; the set_antialiased call in "
+                "save_video is now a no-op and could be dropped"
+            )
 
 
 class TestAnimatedArtistFiltering:
@@ -119,25 +123,32 @@ class TestAnimatedArtistFiltering:
         with_line = _buffer(fig)
         assert not np.array_equal(without, with_line)
 
-    def test_animated_images_are_drawn_anyway(self, fig):
-        """Why images get set_visible(False) rather than the animated flag.
+    def test_hiding_an_image_keeps_it_out_of_the_draw(self, fig):
+        """The property save_video relies on for the grids and camera views.
 
-        Axes.draw exempts AxesImage from its animated filter, so relying on
-        the flag alone would composite the grids twice.
+        It hides images instead of flagging them animated because that is
+        the one approach that holds either way: matplotlib 3.10's Axes.draw
+        exempts AxesImage from its animated filter (so the flag alone would
+        composite the grids twice), while 3.11 honours it. Hiding excludes
+        them on both, so only that is asserted here.
         """
         ax = fig.add_subplot(111)
         image = ax.imshow(np.zeros((4, 4, 3)))
-        image.set_animated(True)
         fig.canvas.draw()
-        animated = _buffer(fig)
+        visible = _buffer(fig)
 
         image.set_visible(False)
         fig.canvas.draw()
         hidden = _buffer(fig)
-        assert not np.array_equal(animated, hidden), (
-            "Axes.draw now honours the animated flag for AxesImage; the "
-            "set_visible dance in save_video can be simplified"
-        )
+        assert not np.array_equal(visible, hidden)
+
+        # ...and drawing it explicitly afterwards puts it back, which is how
+        # the chrome layer composites it.
+        image.set_visible(True)
+        image.set_animated(True)
+        fig.canvas.restore_region(fig.canvas.copy_from_bbox(fig.bbox))
+        fig.draw_artist(image)
+        assert np.array_equal(visible, _buffer(fig))
 
 
 class TestRegionCaching:
