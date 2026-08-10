@@ -308,10 +308,16 @@ def tutorial_watch(parallel: int | None, no_editor_sync: bool) -> None:
 
 
 @tutorial.command("run")
-def tutorial_run() -> None:
+@click.option("--video", type=click.Path(), default=None,
+              help="Render an MP4 of the run (steps that support it)")
+@click.option("--plot", type=click.Path(), default=None,
+              help="Save a trajectory plot of the run")
+def tutorial_run(video: str | None, plot: str | None) -> None:
     """Run demo.py once."""
     from railroad.tutorial import commands
-    result = _tutorial_guard(commands.cmd_run)(_tutorial_console())
+    result = _tutorial_guard(commands.cmd_run)(
+        _tutorial_console(), video=video, plot=plot
+    )
     if not result.ok:
         raise SystemExit(result.returncode)
 

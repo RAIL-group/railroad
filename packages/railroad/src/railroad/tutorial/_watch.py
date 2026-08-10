@@ -1,11 +1,16 @@
-"""The pane that sits next to your editor.
+"""The pane that sits below your editor.
 
-It does two things: re-runs ``demo.py`` whenever you save it, and turns single
-keypresses into tutorial commands, so nothing has to be typed mid-sentence.
+A status panel pinned to the bottom of the terminal, with everything else --
+diffs, run output, sweep progress -- scrolling above it. Single keypresses drive
+the tutorial, so nothing has to be typed mid-sentence.
 
-Output is append-only rather than a full-screen live view. The demo's own
-dashboard already takes over the screen while it runs, and scrollback is worth
-more than a tidy frame when someone asks about a number from two steps ago.
+Runs are **manual**. Saving ``demo.py`` marks the panel as edited; pressing `r`
+is what runs it. Re-running on every save sounds convenient and is not: a save
+lands mid-thought, and a twenty-second ProcTHOR run starting on its own while
+you are still talking is worse than no automation at all.
+
+The panel is a transient ``rich.Live``, torn down around any child process so
+the demo's own full-screen dashboard gets the terminal to itself.
 """
 
 from __future__ import annotations
@@ -20,31 +25,33 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator, Optional, Tuple
 
-from rich.console import Console
+from rich.console import Console, Group
+from rich.live import Live
 from rich.markup import escape
+from rich.panel import Panel
+from rich.text import Text
 
 from . import commands as cmd
 from ._playground import Playground
 from ._run import (
     DASHBOARD_URL,
     DEFAULT_PARALLEL,
-    RunResult,
     editor_command,
     open_browser,
     start_dashboard,
 )
 from ._steps import get_step, neighbour
 
-POLL_SECONDS = 0.25
+POLL_SECONDS = 0.2
 SETTLE_SECONDS = 0.15
 """Editors often write in more than one syscall; let the file stop moving."""
 
 KEYMAP = (
+    ("r", "run"),
     ("n", "next"),
     ("p", "prev"),
     ("k", "peek"),
     ("d", "diff"),
-    ("r", "run"),
     ("b", "sweep"),
     ("o", "dashboard"),
     ("c", "compare"),
@@ -138,21 +145,175 @@ def _summary(playground: Playground, step_id: str) -> Optional[str]:
             parts.append(f"(step {previous['id']} was {earlier['cost']:.1f}s)")
     parts.append(f"{len(record.get('actions', []))} actions")
     if not record.get("goal_reached"):
-        parts.append("[red]goal not reached[/red]")
+        parts.append("goal not reached")
     return " · ".join(parts)
 
 
-def banner(console: Console, playground: Playground) -> None:
-    step = get_step(playground.current_step_id)
-    console.rule(f"[bold]step {step['id']} · {escape(step['title'])}[/bold]")
-    console.print(f"  {escape(step['point'])}")
-    summary = _summary(playground, step["id"])
-    if summary:
-        console.print(f"  {summary}")
-    if step["sweep"]:
-        console.print(f"  [dim]sweep: {escape(step['sweep'])}[/dim]")
-    console.print(f"[dim]watching {playground.demo.name} — save to re-run[/dim]")
-    console.print("[dim]" + "  ".join(f"{key} {name}" for key, name in KEYMAP) + "[/dim]")
+class Pane:
+    """The bottom panel and the key loop that drives it."""
+
+    def __init__(
+        self,
+        console: Console,
+        playground: Playground,
+        *,
+        parallel: int = DEFAULT_PARALLEL,
+        editor_sync: bool = True,
+    ) -> None:
+        self.console = console
+        self.playground = playground
+        self.parallel = parallel
+        self.editor_sync = editor_sync
+        self.edited = False
+        self._signature = _signature(playground.demo)
+        self._dashboard: Optional[subprocess.Popen] = None
+
+    # -- rendering -----------------------------------------------------------
+
+    def panel(self) -> Panel:
+        step = get_step(self.playground.current_step_id)
+        body = Text()
+        body.append(escape(step["point"]) + "\n", style="dim")
+
+        summary = _summary(self.playground, step["id"])
+        if summary:
+            body.append(summary + "\n")
+        if step["sweep"]:
+            body.append(f"sweep: {escape(step['sweep'])}\n", style="dim")
+
+        if self.edited:
+            body.append("demo.py edited — press r to run\n", style="yellow")
+        else:
+            body.append(f"watching {self.playground.demo.name}\n", style="dim")
+
+        keys = Text()
+        for key, name in KEYMAP:
+            keys.append(f" {key} ", style="reverse")
+            keys.append(f"{name}  ", style="dim")
+        return Panel(
+            Group(body, keys),
+            title=f"step {step['id']} · {escape(step['title'])}",
+            title_align="left",
+            border_style="blue",
+        )
+
+    # -- the loop ------------------------------------------------------------
+
+    def run(self) -> None:
+        if not sys.stdin.isatty():
+            raise NotATerminal(
+                "railroad tutorial watch needs a terminal; use "
+                "'railroad tutorial run' for a one-shot run"
+            )
+        try:
+            with KeyReader() as keys, Live(
+                self.panel(),
+                console=self.console,
+                refresh_per_second=8,
+                transient=True,
+            ) as live:
+                self._loop(keys, live)
+        except KeyboardInterrupt:
+            self.console.print()
+        finally:
+            if self._dashboard is not None and self._dashboard.poll() is None:
+                self._dashboard.terminate()
+        self.console.print("[dim]bye[/dim]")
+
+    def _loop(self, keys: KeyReader, live: Live) -> None:
+        @contextmanager
+        def scrolling() -> Iterator[None]:
+            """Drop the panel so output lands cleanly, then put it back.
+
+            Keeps cbreak, so a confirmation prompt can still read one key.
+            """
+            live.stop()
+            try:
+                yield
+            finally:
+                live.start(refresh=True)
+
+        @contextmanager
+        def child() -> Iterator[None]:
+            """As above, and hand the terminal back: the demo's own dashboard
+            takes the whole screen and wants a cooked tty."""
+            with scrolling(), keys.cooked():
+                yield
+
+        def ask(prompt: str) -> str:
+            self.console.print(f"{prompt} [y/N/f] ", end="", markup=False)
+            while True:
+                key = keys.poll(1.0)
+                if key is None:
+                    continue
+                self.console.print(key, markup=False)
+                return {"y": "yes", "f": "force"}.get(key.lower(), "no")
+
+        while True:
+            key = keys.poll(POLL_SECONDS)
+
+            if key is None:
+                current = _signature(self.playground.demo)
+                if current is not None and current != self._signature:
+                    self._signature = _settled_signature(self.playground.demo)
+                    self.edited = True
+                    live.update(self.panel(), refresh=True)
+                continue
+
+            key = key.lower()
+            if key == "q":
+                return
+            self._handle(key, scrolling, child, ask)
+            live.update(self.panel(), refresh=True)
+
+    def _handle(self, key, scrolling, child, ask) -> None:
+        console = self.console
+        playground = self.playground
+
+        if key == "r":
+            with child():
+                cmd.cmd_run(console, playground)
+            self._signature = _signature(playground.demo)
+            self.edited = False
+        elif key in ("n", "p"):
+            with scrolling():
+                moved = cmd.cmd_step(
+                    console, 1 if key == "n" else -1,
+                    playground=playground, ask=ask, editor_sync=self.editor_sync,
+                )
+            self._signature = _signature(playground.demo)
+            # Advancing rewrites demo.py, so the panel should say what it says
+            # after any other edit: there is something new to run.
+            self.edited = bool(moved)
+        elif key == "k":
+            with scrolling():
+                cmd.cmd_peek(console, playground)
+        elif key == "d":
+            with scrolling():
+                cmd.cmd_diff(console, None, playground)
+        elif key == "b":
+            with child():
+                cmd.cmd_bench(console, playground=playground, parallel=self.parallel)
+        elif key == "o":
+            if self._dashboard is None or self._dashboard.poll() is not None:
+                self._dashboard = start_dashboard(playground)
+                console.print(f"[green]dashboard[/green] {DASHBOARD_URL}")
+            else:
+                console.print(f"[dim]dashboard already up at {DASHBOARD_URL}[/dim]")
+            open_browser()
+        elif key == "c":
+            with scrolling():
+                cmd.cmd_compare(console, playground)
+        elif key == "u":
+            with scrolling():
+                cmd.cmd_undo(console, playground)
+            self._signature = _signature(playground.demo)
+            self.edited = True
+        elif key == "e":
+            with child():
+                subprocess.run(editor_command(playground.demo))
+            self._signature = _signature(playground.demo)
+            self.edited = True
 
 
 def watch(
@@ -163,96 +324,7 @@ def watch(
     editor_sync: bool = True,
 ) -> None:
     """Run the pane until ``q``."""
-    if not sys.stdin.isatty():
-        raise NotATerminal(
-            "railroad tutorial watch needs a terminal; use 'railroad tutorial run' "
-            "for a one-shot run"
-        )
-
-    dashboard: Optional[subprocess.Popen] = None
-    signature = _signature(playground.demo)
-    banner(console, playground)
-
-    try:
-        with KeyReader() as keys:
-
-            def ask(prompt: str) -> str:
-                console.print(f"{prompt} [y/N/f] ", end="", markup=False)
-                while True:
-                    key = keys.poll(1.0)
-                    if key is None:
-                        continue
-                    console.print(key, markup=False)
-                    return {"y": "yes", "f": "force"}.get(key.lower(), "no")
-
-            def run_demo_now() -> RunResult:
-                with keys.cooked():
-                    return cmd.cmd_run(console, playground)
-
-            while True:
-                key = keys.poll(POLL_SECONDS)
-
-                if key is None:
-                    current = _signature(playground.demo)
-                    if current is not None and current != signature:
-                        signature = _settled_signature(playground.demo)
-                        console.rule("[dim]saved[/dim]")
-                        run_demo_now()
-                        banner(console, playground)
-                    continue
-
-                key = key.lower()
-                if key == "q":
-                    break
-                if key in ("n", "p"):
-                    moved = cmd.cmd_step(
-                        console, 1 if key == "n" else -1,
-                        playground=playground, ask=ask, editor_sync=editor_sync,
-                    )
-                    if moved:
-                        signature = _signature(playground.demo)
-                        run_demo_now()
-                    banner(console, playground)
-                elif key == "k":
-                    cmd.cmd_peek(console, playground)
-                elif key == "d":
-                    cmd.cmd_diff(console, None, playground)
-                elif key == "r":
-                    run_demo_now()
-                    banner(console, playground)
-                elif key == "b":
-                    with keys.cooked():
-                        cmd.cmd_bench(console, playground=playground, parallel=parallel)
-                    banner(console, playground)
-                elif key == "o":
-                    if dashboard is None or dashboard.poll() is not None:
-                        dashboard = start_dashboard(playground)
-                        console.print(
-                            f"[green]dashboard[/green] {DASHBOARD_URL}  "
-                            f"[dim](log: {playground.root / 'dashboard.log'})[/dim]"
-                        )
-                    else:
-                        console.print(f"[dim]dashboard already up at {DASHBOARD_URL}[/dim]")
-                    open_browser()
-                elif key == "c":
-                    cmd.cmd_compare(console, playground)
-                elif key == "u":
-                    cmd.cmd_undo(console, playground)
-                    signature = _signature(playground.demo)
-                    banner(console, playground)
-                elif key == "e":
-                    with keys.cooked():
-                        subprocess.run(editor_command(playground.demo))
-                    signature = _signature(playground.demo)
-                    banner(console, playground)
-                elif key in ("?", "h"):
-                    banner(console, playground)
-    except KeyboardInterrupt:
-        console.print()
-    finally:
-        if dashboard is not None and dashboard.poll() is None:
-            dashboard.terminate()
-    console.print("[dim]bye[/dim]")
+    Pane(console, playground, parallel=parallel, editor_sync=editor_sync).run()
 
 
-__all__ = ["NotATerminal", "banner", "watch"]
+__all__ = ["NotATerminal", "Pane", "watch"]

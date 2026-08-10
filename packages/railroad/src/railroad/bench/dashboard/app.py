@@ -10,6 +10,7 @@ import dash_bootstrap_components as dbc
 from .styles import STYLE_CLASSES
 from .layouts import create_main_layout
 from .callbacks import register_callbacks
+from .media import register_media_routes
 
 
 def create_app() -> dash.Dash:
@@ -46,6 +47,7 @@ def create_app() -> dash.Dash:
 
     app.layout = create_main_layout()
     register_callbacks(app)
+    register_media_routes(app)
 
     return app
 

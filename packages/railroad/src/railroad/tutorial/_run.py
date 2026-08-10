@@ -19,7 +19,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
-from typing import List, Optional
+from typing import List, Optional, Sequence
 
 from ._playground import ENV_DIR, Playground
 
@@ -54,11 +54,17 @@ class RunResult:
         return self.returncode == 0
 
 
-def run_demo(playground: Playground) -> RunResult:
-    """Run ``demo.py`` to completion, inheriting this terminal."""
+def run_demo(
+    playground: Playground, extra_args: Sequence[str] = ()
+) -> RunResult:
+    """Run ``demo.py`` to completion, inheriting this terminal.
+
+    *extra_args* is forwarded verbatim; the later steps read ``--video`` and
+    ``--plot`` from it via :func:`railroad.tutorial.media_args`.
+    """
     started = perf_counter()
     completed = subprocess.run(
-        [sys.executable, str(playground.demo)],
+        [sys.executable, str(playground.demo), *extra_args],
         env=_env_for(playground),
     )
     return RunResult(completed.returncode, perf_counter() - started)

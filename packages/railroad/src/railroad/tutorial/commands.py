@@ -88,9 +88,20 @@ def cmd_init(console: Console, directory: Optional[str], force: bool) -> None:
 # -- running -----------------------------------------------------------------
 
 
-def cmd_run(console: Console, playground: Optional[Playground] = None) -> RunResult:
+def cmd_run(
+    console: Console,
+    playground: Optional[Playground] = None,
+    *,
+    video: Optional[str] = None,
+    plot: Optional[str] = None,
+) -> RunResult:
     playground = playground or find_playground()
-    result = run_demo(playground)
+    extra: List[str] = []
+    if video:
+        extra += ["--video", video]
+    if plot:
+        extra += ["--plot", plot]
+    result = run_demo(playground, extra)
     if not result.ok:
         console.print(f"[red]demo.py exited {result.returncode}[/red]")
     return result
@@ -125,6 +136,22 @@ def render_patch(
         console.print(f"  [dim]· {escape(note)}[/dim]")
     if to_step["sweep"]:
         console.print(f"  [dim]sweep: {escape(to_step['sweep'])}[/dim]")
+
+
+def _warn_about_extras(console: Console, step_id: str) -> None:
+    """Say so before the step is applied, not when the run fails."""
+    if get_step(step_id)["requires"] != "procthor":
+        return
+    try:
+        from railroad.environment.procthor import is_available
+        available = is_available()
+    except ImportError:
+        available = False
+    if not available:
+        console.print(
+            "[yellow]this step needs railroad\\[procthor]; it will apply, but "
+            "the run will fail until that extra is installed[/yellow]"
+        )
 
 
 def cmd_peek(console: Console, playground: Optional[Playground] = None) -> None:
@@ -162,6 +189,7 @@ def cmd_goto(
 
     if show_patch:
         render_patch(console, playground, current, target_id)
+    _warn_about_extras(console, target_id)
 
     if not force:
         answer = (ask or _plain_ask)("apply?")

@@ -42,6 +42,9 @@ class StepInfo(TypedDict):
     wrong reading.
     """
 
+    requires: str
+    """Optional extra this step needs (``"procthor"``), or ``""`` for none."""
+
     notes: List[str]
     """Talking points, printed by ``peek`` so nothing has to be memorised."""
 
@@ -52,6 +55,7 @@ STEPS: List[StepInfo] = [
         "title": "the language",
         "filename": "00_language.py",
         "problem": "",
+        "requires": "",
         "point": "Fluents, states, timed effects, and what a transition actually does.",
         "sweep": "",
         "notes": [
@@ -68,6 +72,7 @@ STEPS: List[StepInfo] = [
         "title": "clear the table",
         "filename": "01_clear_table.py",
         "problem": "clear-table",
+        "requires": "",
         "point": "A whole problem: operators, a negated goal, and the plan-act loop.",
         "sweep": "mcts.iterations x c",
         "notes": [
@@ -88,6 +93,7 @@ STEPS: List[StepInfo] = [
         "title": "add a second robot",
         "filename": "02_two_robots.py",
         "problem": "clear-table",
+        "requires": "",
         "point": "Concurrency for free: one more object of type robot, and time drops.",
         "sweep": "num_robots x mcts.iterations",
         "notes": [
@@ -105,6 +111,7 @@ STEPS: List[StepInfo] = [
         "title": "hide the objects",
         "filename": "03_hidden_objects.py",
         "problem": "house-search",
+        "requires": "",
         "point": "Probabilistic search, a flat prior, and a failure mode to find.",
         "sweep": "num_robots x mcts.iterations",
         "notes": [
@@ -125,6 +132,7 @@ STEPS: List[StepInfo] = [
         "title": "one searcher per room",
         "filename": "04_search_lock.py",
         "problem": "house-search",
+        "requires": "",
         "point": "A lock predicate, and the A/B that shows why it is not optional.",
         "sweep": "use_search_lock x num_robots",
         "notes": [
@@ -144,6 +152,7 @@ STEPS: List[StepInfo] = [
         "title": "the value function",
         "filename": "05_heuristic.py",
         "problem": "big-house-search",
+        "requires": "",
         "point": "h_add/h_ff mixing, the multiplier, and the probabilistic retry delta.",
         "sweep": "(lambda_add, lambda_ff) x mcts.h_mult",
         "notes": [
@@ -160,6 +169,54 @@ STEPS: List[StepInfo] = [
             "Look at the violins, not the means: pure h_add has a standard "
             "deviation of 12-15 against 2.6 for the balanced mix. Cheap and "
             "noisy versus steady. This is what the distribution plots are for.",
+        ],
+    },
+    {
+        "id": "06",
+        "title": "a real house",
+        "filename": "06_procthor.py",
+        "problem": "procthor-8613",
+        "requires": "procthor",
+        "point": "Same operators, real geometry: a ProcTHOR home and Theta* travel times.",
+        "sweep": "scene_seed x num_robots",
+        "notes": [
+            "The operators barely change. Their *numbers* do: move times are "
+            "Theta* paths over the scene's occupancy grid, and the locations are "
+            "the containers of a generated home.",
+            "construct_search_operator already carries the lock from step 04 -- "
+            "the library version of the operator we wrote by hand.",
+            "'railroad tutorial run --video house.mp4' renders the run over the "
+            "scene's top-down view.",
+            "Seed 8613 is chosen for pace: 8 containers ground out to ~440 "
+            "actions with two robots, about 25 seconds. 8616 is prettier and "
+            "does not finish inside MAX_STEPS at this budget.",
+        ],
+    },
+    {
+        "id": "07",
+        "title": "stop cheating",
+        "filename": "07_learned_prior.py",
+        "problem": "procthor-8612",
+        "requires": "procthor",
+        "point": "Swap the oracle prior for the packaged network. One function changes.",
+        "sweep": "use_learned_prior x scene_seed",
+        "notes": [
+            "Step 06's prior read scene.object_locations -- an oracle wearing a "
+            "probability's clothes. This one has never seen the answer: it is a "
+            "small net over SBERT embeddings of the names, shipped with the "
+            "package.",
+            "The table prints before any planning, and it is the step. On 8612 "
+            "it ranks the true container first for both targets (cellphone 0.454 "
+            "on the dresser, desklamp 0.400 on the diningtable) and all but rules "
+            "out the toilet. On 8613 a fork gets 0.825 on the countertop, while a "
+            "pen spreads 0.41/0.37/0.36 over three flat surfaces -- which is the "
+            "right answer for a pen.",
+            "And it loses to the oracle, which is the honest result: 322.8 vs "
+            "437.4 on 8612, 344.2 vs 554.9 on 8613, where it also finishes only "
+            "two runs in three. The oracle is an upper bound nothing deployable "
+            "can reach; the gap is what the uncertainty costs.",
+            "Nothing else changes: the find probability is a callable of "
+            "(robot, location, object) either way.",
         ],
     },
 ]

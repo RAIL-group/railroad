@@ -22,6 +22,7 @@ from ._playground import (
     init_playground,
     is_playground,
 )
+from ._media import media_args
 from ._report import report
 from ._steps import STEPS, StepInfo, get_step, neighbour, step_ids, step_index
 
@@ -36,6 +37,7 @@ __all__ = [
     "get_step",
     "init_playground",
     "is_playground",
+    "media_args",
     "neighbour",
     "report",
     "step_ids",

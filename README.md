@@ -178,6 +178,28 @@ uv run railroad example <name>
   - Add `--interruptible-moves` to allow rerouting robots mid-transit
 - **`frontier-search`** -- Explore unknown space and search discovered sites for objects (requires `railroad[procthor]`)
 
+## Guided Tutorial
+
+An eight-step tour that builds a problem up from operators, driven from a single
+editable file:
+
+```bash
+uv run railroad tutorial doctor   # check extras, scene cache, git, ffmpeg
+uv run railroad tutorial init     # scaffold ./railroad-tutorial
+uv run railroad tutorial watch    # the pane: r run, n next, b sweep, o dashboard
+```
+
+`demo.py` is the only file you open. `next` prints the diff to the following
+step, then three-way merges it into whatever you currently have, so anything you
+changed while explaining it survives. Each step carries its own benchmark sweep,
+so the same edit drives both the single run and the distribution behind it, and
+every sweep accumulates into one MLflow experiment.
+
+The arc: the state semantics, clear-the-table, a second robot, hidden objects,
+the per-room search lock, the heuristic knobs, a ProcTHOR home, and finally
+swapping the hand-tuned find-probability for the packaged learned model. The
+last two need `railroad[procthor]`.
+
 ## Key Concepts
 
 - **Fluent** -- A fact about the world: `F("at robot1 kitchen")`, `F("free robot1")`

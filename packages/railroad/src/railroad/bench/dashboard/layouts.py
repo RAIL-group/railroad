@@ -296,7 +296,11 @@ def build_experiment_list_layout(experiments: list[dict]) -> list:
         ]
 
     # Build formatted output with Rich-style colors
-    children = []
+    children = [
+        html.A("→ tutorial media (plots / videos)", href="/media/",
+               className="link", style={"display": "block",
+                                        "marginBottom": "1rem"}),
+    ]
 
     # Header
     children.append(html.Pre(

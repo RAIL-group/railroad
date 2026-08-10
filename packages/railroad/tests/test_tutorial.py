@@ -32,6 +32,35 @@ from railroad.tutorial import commands
 SHIPPED_STEPS = Path(commands.__file__).parent / "steps"
 
 
+def _procthor_available() -> bool:
+    try:
+        from railroad.environment.procthor import is_available
+    except ImportError:
+        return False
+    return is_available()
+
+
+def step_params():
+    """One param per step, skipped or marked slow according to what it needs.
+
+    The ProcTHOR steps load a scene and plan over several hundred grounded
+    actions, so they are minutes rather than seconds.
+    """
+    params = []
+    for step in STEPS:
+        marks = []
+        if step["requires"] == "procthor":
+            marks.append(pytest.mark.slow)
+            marks.append(
+                pytest.mark.skipif(
+                    not _procthor_available(),
+                    reason="railroad[procthor] not installed",
+                )
+            )
+        params.append(pytest.param(step, id=step["id"], marks=marks))
+    return params
+
+
 @pytest.fixture
 def playground(tmp_path):
     return init_playground(tmp_path / "playground")
@@ -70,7 +99,7 @@ def test_neighbour_stops_at_both_ends():
     assert following is not None and following["id"] == step_ids()[1]
 
 
-@pytest.mark.parametrize("step", STEPS, ids=lambda s: s["id"])
+@pytest.mark.parametrize("step", step_params())
 def test_snapshot_registers_exactly_its_own_benchmark(step, monkeypatch):
     """Importing a snapshot must register its sweep and run nothing.
 
@@ -273,7 +302,7 @@ def test_stepping_past_the_end_is_a_message_not_a_crash(playground, console):
 # -- running the demos -------------------------------------------------------
 
 
-@pytest.mark.parametrize("step", STEPS, ids=lambda s: s["id"])
+@pytest.mark.parametrize("step", step_params())
 def test_step_runs_headless_and_files_a_record(step, playground, tmp_path):
     """Each snapshot must run to completion outside a terminal.
 

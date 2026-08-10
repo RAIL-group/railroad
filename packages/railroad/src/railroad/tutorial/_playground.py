@@ -170,10 +170,11 @@ README = """\
 `demo.py` is the only file you edit. Keep it open in your editor with
 `(global-auto-revert-mode 1)` so it refreshes when a step is applied.
 
-Run the pane next to it:
+Run the pane below it:
 
     railroad tutorial watch
 
+    r  run demo.py
     n  next step (shows the patch first, then merges your edits)
     p  previous step
     k  peek at the next patch without applying it
@@ -182,11 +183,19 @@ Run the pane next to it:
     o  open the benchmark dashboard
     c  compare every run so far
     u  undo the last advance
+    e  open demo.py in $EDITOR
     q  quit
 
-Saving `demo.py` re-runs it. Everything is recoverable: `u` restores the file
-as it was before the last advance, and `railroad tutorial goto <n> --force`
-takes the pristine snapshot of any step.
+Saving `demo.py` marks the panel as edited; `r` is what runs it. Nothing runs
+on its own, so a save landing mid-sentence does not start a demo you were not
+ready for.
+
+Everything is recoverable: `u` restores the file as it was before the last
+advance, and `railroad tutorial goto <n> --force` takes the pristine snapshot
+of any step.
+
+Steps 06 and 07 need `railroad[procthor]`. Run `railroad tutorial doctor` the
+morning of, from the directory holding `mlflow.db` and `resources/`.
 """
 
 
