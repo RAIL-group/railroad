@@ -41,6 +41,7 @@ class BenchmarkRunner:
         case_filter: Optional[str] = None,
         include_files: Optional[List[str]] = None,
         run_name: Optional[str] = None,
+        experiment_name: Optional[str] = None,
     ):
         """
         Initialize benchmark runner.
@@ -54,6 +55,10 @@ class BenchmarkRunner:
             case_filter: Filter cases by matching against benchmark name and parameters (default: None)
             include_files: List of additional benchmark files to load (default: None)
             run_name: Human-readable name for this benchmark run (default: None, auto-generated from timestamp)
+            experiment_name: MLflow experiment to write into, used verbatim. Runs
+                accumulate into it across invocations, so successive sweeps land
+                on one dashboard page. Default None appends a timestamp to
+                ``run_name`` instead, giving every invocation its own experiment.
         """
         self.benchmarks = benchmarks
         self.repeat_max = repeat_max
@@ -65,6 +70,7 @@ class BenchmarkRunner:
         self.case_filter = case_filter
         self.include_files = include_files
         self.run_name = run_name
+        self.experiment_name = experiment_name
 
     def create_plan(self) -> ExecutionPlan:
         """
@@ -137,7 +143,7 @@ class BenchmarkRunner:
             tasks = filtered_tasks
 
         # Gather provenance metadata
-        metadata = self._collect_metadata()
+        metadata = self._collect_metadata(num_benchmarks=len(benchmarks))
 
         # Flatten benchmark descriptions into individual tags
         # (MLflow tags must be string key-value pairs)
@@ -193,7 +199,7 @@ class BenchmarkRunner:
             # Fall back to simple substring match if expression is invalid
             return filter_expr.lower() in search_str
 
-    def _collect_metadata(self) -> dict:
+    def _collect_metadata(self, num_benchmarks: Optional[int] = None) -> dict:
         """
         Collect environment provenance metadata.
 
@@ -241,7 +247,11 @@ class BenchmarkRunner:
             "run_name": self.run_name if self.run_name is not None else "None",
             "repeat_max": self.repeat_max if self.repeat_max is not None else "None",
             "parallel_workers": self.parallel,
-            "num_benchmarks": len(self.benchmarks),
+            # The count that ran, not the count discovered: with --tags or
+            # --include, those differ and the header should match the plan.
+            "num_benchmarks": (
+                num_benchmarks if num_benchmarks is not None else len(self.benchmarks)
+            ),
             "include_files": self.include_files,
         }
 
@@ -265,9 +275,13 @@ class BenchmarkRunner:
         Returns:
             Completed execution plan with results
         """
-        # Create MLflow experiment, named by user if provided else timestamped
+        # Create MLflow experiment. An explicit experiment_name is used verbatim
+        # so repeated invocations accumulate into it; otherwise each run gets its
+        # own timestamped experiment.
         timestamp = int(time.time())
-        if self.run_name:
+        if self.experiment_name:
+            experiment_name = self.experiment_name
+        elif self.run_name:
             experiment_name = f"{self.run_name}_{timestamp}"
         else:
             experiment_name = f"railroad_bench_{timestamp}"

@@ -33,3 +33,6 @@ mlruns
 mlflow.db
 .worktrees/
 .benchmark_cache/
+
+# Scaffolded tutorial playgrounds
+/railroad-tutorial/

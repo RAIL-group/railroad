@@ -87,6 +87,9 @@ def benchmarks() -> None:
               help="Include benchmark file(s) in addition to entry points (can be repeated)")
 @click.option("--run-name", default=None,
               help="Human-readable name for this benchmark run (used in MLflow experiment name)")
+@click.option("--experiment", default=None,
+              help="MLflow experiment to write into, used verbatim. Repeated runs accumulate "
+                   "into it instead of each getting its own timestamped experiment.")
 def benchmarks_run(
     case_filter: str | None,
     repeat_max: int | None,
@@ -96,6 +99,7 @@ def benchmarks_run(
     mlflow_uri: str | None,
     include: tuple[str, ...],
     run_name: str | None,
+    experiment: str | None,
 ) -> None:
     """Run PDDL planning benchmarks."""
     import sys
@@ -123,6 +127,7 @@ def benchmarks_run(
         case_filter=case_filter,
         include_files=include_files,
         run_name=run_name,
+        experiment_name=experiment,
     )
 
     # Create plan
@@ -230,6 +235,193 @@ def benchmarks_cache_flush(experiment: str | None) -> None:
         compact.invalidate_all()
         compact.remove_all_stamps()
         click.echo("Flushed all benchmark caches and stamps.")
+
+
+# =============================================================================
+# Tutorial command group
+# =============================================================================
+
+
+def _tutorial_console():
+    from rich.console import Console
+    return Console()
+
+
+def _tutorial_guard(fn):
+    """Turn a missing/broken playground into a one-line message, not a stack."""
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        from railroad.tutorial import PlaygroundError
+        try:
+            return fn(*args, **kwargs)
+        except PlaygroundError as exc:
+            raise click.ClickException(str(exc)) from exc
+
+    return wrapper
+
+
+@main.group(invoke_without_command=True)
+@click.pass_context
+def tutorial(ctx: click.Context) -> None:
+    """A guided, terminal-only tour driven from one editable file."""
+    if ctx.invoked_subcommand is None:
+        from railroad.tutorial import commands
+        _tutorial_guard(commands.cmd_status)(_tutorial_console())
+
+
+@tutorial.command("init")
+@click.argument("directory", required=False, type=click.Path())
+@click.option("--force", is_flag=True, default=False,
+              help="Reset an existing playground (demo.py is snapshotted first)")
+def tutorial_init(directory: str | None, force: bool) -> None:
+    """Scaffold a playground (default: ./railroad-tutorial)."""
+    from railroad.tutorial import commands
+    _tutorial_guard(commands.cmd_init)(_tutorial_console(), directory, force)
+
+
+@tutorial.command("watch")
+@click.option("--parallel", type=int, default=None,
+              help="Workers for the sweep key (default: 12, below the core count "
+                   "so the machine stays usable while presenting)")
+@click.option("--no-editor-sync", is_flag=True, default=False,
+              help="Do not ask emacsclient to reload the buffer and move point")
+def tutorial_watch(parallel: int | None, no_editor_sync: bool) -> None:
+    """Re-run demo.py on save; single keys drive the tutorial."""
+    from railroad.tutorial import _watch, find_playground
+    from railroad.tutorial._run import DEFAULT_PARALLEL
+
+    @_tutorial_guard
+    def go() -> None:
+        try:
+            _watch.watch(
+                _tutorial_console(),
+                find_playground(),
+                parallel=parallel if parallel is not None else DEFAULT_PARALLEL,
+                editor_sync=not no_editor_sync,
+            )
+        except _watch.NotATerminal as exc:
+            raise click.ClickException(str(exc)) from exc
+
+    go()
+
+
+@tutorial.command("run")
+def tutorial_run() -> None:
+    """Run demo.py once."""
+    from railroad.tutorial import commands
+    result = _tutorial_guard(commands.cmd_run)(_tutorial_console())
+    if not result.ok:
+        raise SystemExit(result.returncode)
+
+
+@tutorial.command("edit")
+def tutorial_edit() -> None:
+    """Open demo.py in $VISUAL/$EDITOR."""
+    from railroad.tutorial import commands
+    _tutorial_guard(commands.cmd_edit)(_tutorial_console())
+
+
+def _advance_options(fn):
+    fn = click.option("--force", is_flag=True, default=False,
+                      help="Take the step's version verbatim, discarding local "
+                           "edits (recoverable with 'tutorial undo')")(fn)
+    fn = click.option("--no-editor-sync", is_flag=True, default=False,
+                      help="Do not ask emacsclient to reload the buffer")(fn)
+    return fn
+
+
+@tutorial.command("next")
+@_advance_options
+def tutorial_next(force: bool, no_editor_sync: bool) -> None:
+    """Show the next step's patch, then merge it into demo.py."""
+    from railroad.tutorial import commands
+    _tutorial_guard(commands.cmd_step)(
+        _tutorial_console(), 1, force=force, editor_sync=not no_editor_sync
+    )
+
+
+@tutorial.command("prev")
+@_advance_options
+def tutorial_prev(force: bool, no_editor_sync: bool) -> None:
+    """Go back a step, same show-then-merge path."""
+    from railroad.tutorial import commands
+    _tutorial_guard(commands.cmd_step)(
+        _tutorial_console(), -1, force=force, editor_sync=not no_editor_sync
+    )
+
+
+@tutorial.command("goto")
+@click.argument("step")
+@_advance_options
+def tutorial_goto(step: str, force: bool, no_editor_sync: bool) -> None:
+    """Jump to STEP (e.g. 02)."""
+    from railroad.tutorial import commands
+    _tutorial_guard(commands.cmd_goto)(
+        _tutorial_console(), step, force=force, editor_sync=not no_editor_sync
+    )
+
+
+@tutorial.command("peek")
+def tutorial_peek() -> None:
+    """Show the next step's patch without applying it."""
+    from railroad.tutorial import commands
+    _tutorial_guard(commands.cmd_peek)(_tutorial_console())
+
+
+@tutorial.command("diff")
+@click.option("--steps", nargs=2, type=str, default=None,
+              help="Canonical diff between two steps, e.g. --steps 01 02")
+def tutorial_diff(steps: tuple[str, str] | None) -> None:
+    """Your edits on top of the current step, or any step-to-step diff."""
+    from railroad.tutorial import commands
+    _tutorial_guard(commands.cmd_diff)(_tutorial_console(), steps or None)
+
+
+@tutorial.command("undo")
+def tutorial_undo() -> None:
+    """Restore demo.py from before the last advance."""
+    from railroad.tutorial import commands
+    _tutorial_guard(commands.cmd_undo)(_tutorial_console())
+
+
+@tutorial.command("bench")
+@click.option("--parallel", type=int, default=None, help="Number of workers")
+@click.option("--repeat-max", type=int, default=None, help="Cap repeats per case")
+@click.option("--dry-run", is_flag=True, default=False, help="Show the plan only")
+def tutorial_bench(parallel: int | None, repeat_max: int | None, dry_run: bool) -> None:
+    """Run the current step's benchmark sweep."""
+    from railroad.tutorial import commands
+    from railroad.tutorial._run import DEFAULT_PARALLEL
+    _tutorial_guard(commands.cmd_bench)(
+        _tutorial_console(),
+        parallel=parallel if parallel is not None else DEFAULT_PARALLEL,
+        repeat_max=repeat_max,
+        dry_run=dry_run,
+    )
+
+
+@tutorial.command("dashboard")
+def tutorial_dashboard() -> None:
+    """Start the benchmark dashboard in the background."""
+    from railroad.tutorial import commands
+    _tutorial_guard(commands.cmd_dashboard)(_tutorial_console())
+
+
+@tutorial.command("compare")
+def tutorial_compare() -> None:
+    """Most recent run of each step, with the change in plan cost."""
+    from railroad.tutorial import commands
+    _tutorial_guard(commands.cmd_compare)(_tutorial_console())
+
+
+@tutorial.command("doctor")
+def tutorial_doctor() -> None:
+    """Check the things that ruin a live demo."""
+    from railroad.tutorial import commands
+    if not commands.cmd_doctor(_tutorial_console()):
+        raise SystemExit(1)
 
 
 # =============================================================================

@@ -66,6 +66,9 @@ where = ["src"]
 railroad = [
     "*.pyi",
     "environment/procthor/resources/models/*.pt",
+    # Tutorial step snapshots are data, not importable modules: they are copied
+    # into a playground and run as scripts.
+    "tutorial/steps/*.py",
 ]
 
 [tool.pytest.ini_options]
