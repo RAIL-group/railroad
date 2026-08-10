@@ -100,7 +100,9 @@ def run_sweep(
     return RunResult(completed.returncode, perf_counter() - started)
 
 
-def start_dashboard(playground: Playground) -> subprocess.Popen:
+def start_dashboard(
+    playground: Playground, *, host: str = "auto", port: int = 8050
+) -> subprocess.Popen:
     """Start the benchmark dashboard in the background.
 
     Its output goes to ``dashboard.log`` in the playground; a Flask server
@@ -108,12 +110,21 @@ def start_dashboard(playground: Playground) -> subprocess.Popen:
     """
     log = (playground.root / "dashboard.log").open("ab")
     return subprocess.Popen(
-        _railroad("benchmarks", "dashboard"),
+        _railroad("benchmarks", "dashboard", "--host", host, "--port", str(port)),
         env=_env_for(playground),
         stdout=log,
         stderr=subprocess.STDOUT,
         stdin=subprocess.DEVNULL,
     )
+
+
+def dashboard_urls(port: int = 8050) -> List[str]:
+    """Where a dashboard bound to every interface can be reached."""
+    try:
+        from railroad.bench.dashboard.net import ALL_INTERFACES, url_lines
+    except ImportError:
+        return [f"  {DASHBOARD_URL}"]
+    return url_lines(ALL_INTERFACES, port)
 
 
 def open_browser(url: str = DASHBOARD_URL) -> None:

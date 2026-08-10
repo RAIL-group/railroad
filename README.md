@@ -41,6 +41,11 @@ uv run railroad benchmarks run <filter>  # Runs all with <filter> string
 uv run railroad benchmarks dashboard
 ```
 
+The dashboard answers on every interface, so viewing it from a phone or another
+machine on a VPN needs no setup -- it prints the URLs that work, including your
+tailnet address. `--host tailscale` binds only that address, `--host 127.0.0.1`
+keeps it to this machine, and `--port` moves it.
+
 ProcTHOR is an optional install via `railroad[procthor]`. To run the example from above and generate a video:
 ```bash
 uv add "railroad[procthor] @ git+https://github.com/RAIL-group/railroad.git#subdirectory=packages/railroad"

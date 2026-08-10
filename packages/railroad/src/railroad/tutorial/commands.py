@@ -28,6 +28,7 @@ from ._playground import (
 from ._run import (
     DASHBOARD_URL,
     DEFAULT_PARALLEL,
+    dashboard_urls,
     EXPERIMENT,
     RunResult,
     editor_command,
@@ -333,8 +334,10 @@ def cmd_bench(
 def cmd_dashboard(console: Console, playground: Optional[Playground] = None) -> None:
     playground = playground or find_playground()
     start_dashboard(playground)
-    console.print(f"[green]dashboard[/green] {DASHBOARD_URL}  "
-                  f"[dim](log: {playground.root / 'dashboard.log'})[/dim]")
+    console.print("[green]dashboard[/green]")
+    for line in dashboard_urls():
+        console.print(f"[dim]{escape(line)}[/dim]")
+    console.print(f"[dim]log: {playground.root / 'dashboard.log'}[/dim]")
     open_browser()
 
 

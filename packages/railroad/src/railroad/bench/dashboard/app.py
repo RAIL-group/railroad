@@ -11,6 +11,7 @@ from .styles import STYLE_CLASSES
 from .layouts import create_main_layout
 from .callbacks import register_callbacks
 from .media import register_media_routes
+from .net import DEFAULT_PORT, is_loopback, resolve_host, url_lines
 
 
 def create_app() -> dash.Dash:
@@ -87,10 +88,19 @@ def _reloader_scope() -> dict:
     return {"exclude_patterns": exclude, "extra_files": extra_files}
 
 
-def main():
-    """Entry point for benchmarks-dashboard command."""
+def main(host: str = "auto", port: int = DEFAULT_PORT):
+    """Entry point for benchmarks-dashboard command.
+
+    Binds every interface by default, as it always has, so viewing the
+    dashboard from a phone or another machine on your tailnet needs no setup --
+    only the right URL, which is now printed.
+    """
+    bind = resolve_host(host)
     print("\nStarting Dash server...")
-    print("Open http://127.0.0.1:8050/ in your browser")
+    print("Open one of these:")
+    for line in url_lines(bind, port):
+        print(line)
+
     run_options: dict = {}
     try:
         run_options = _reloader_scope()
@@ -98,7 +108,21 @@ def main():
         # Any path/Werkzeug-signature surprise: fall back to the default
         # (watch-everything) reloader rather than failing to start.
         print(f"(reloader scoping disabled: {e})")
-    app.run(debug=True, dev_tools_ui=False, host="0.0.0.0", **run_options)
+
+    # Hot reload stays on everywhere; the interactive debugger does not. It
+    # executes arbitrary code in whatever process it is attached to, and this
+    # server answers on interfaces other than loopback.
+    local_only = is_loopback(bind)
+    if not local_only:
+        print("  (interactive debugger off -- not bound to loopback)")
+    app.run(
+        debug=True,
+        dev_tools_ui=False,
+        host=bind,
+        port=port,
+        use_debugger=local_only,
+        **run_options,
+    )
 
 
 if __name__ == "__main__":

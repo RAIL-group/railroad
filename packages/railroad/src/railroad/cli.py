@@ -144,10 +144,20 @@ def benchmarks_run(
 
 
 @benchmarks.command("dashboard")
-def benchmarks_dashboard() -> None:
+@click.option("--host", default="auto", show_default=True,
+              help="Address to bind. 'auto' answers on every interface (so a "
+                   "tailnet or LAN view just works), 'tailscale' binds only "
+                   "your tailnet address, or give one explicitly such as "
+                   "127.0.0.1 for local-only.")
+@click.option("--port", type=int, default=8050, show_default=True,
+              help="Port to serve on")
+def benchmarks_dashboard(host: str, port: int) -> None:
     """Launch the benchmark visualization dashboard."""
     from railroad.bench.dashboard.app import main as run_dashboard
-    run_dashboard()
+    try:
+        run_dashboard(host=host, port=port)
+    except RuntimeError as exc:
+        raise click.ClickException(str(exc)) from exc
 
 
 @benchmarks.command("compact")
