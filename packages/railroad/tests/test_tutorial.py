@@ -434,7 +434,9 @@ def test_printed_commands_are_typeable(playground):
     assert launch.pretty(launch.bench_argv()).startswith(
         "uv run railroad benchmarks run -i demo.py"
     )
-    assert launch.pretty(launch.notebook_argv()) == "uv run jupyter lab language.ipynb"
+    assert launch.pretty(launch.notebook_argv()).startswith(
+        "uv run jupyter lab language.ipynb"
+    )
     assert sys.executable not in launch.pretty(launch.dashboard_argv())
 
 
@@ -545,9 +547,33 @@ def test_notebook_command_shows_the_jupyter_command_it_runs(
         launch, "run",
         lambda pg, argv: seen.append(list(argv)) or launch.RunResult(0),
     )
-    assert commands.cmd_notebook(console, ["--no-browser"], playground).ok
-    assert seen[0][-2:] == ["language.ipynb", "--no-browser"], "arguments pass through"
-    assert "uv run jupyter lab language.ipynb --no-browser" in console.export_text()
+    assert commands.cmd_notebook(console, ["--LabApp.news_url=None"], playground).ok
+    assert seen[0][-1] == "--LabApp.news_url=None", "arguments pass through"
+    assert "uv run jupyter lab language.ipynb" in console.export_text()
+
+
+def test_the_notebook_is_started_for_the_machine_you_are_not_sitting_at():
+    """Started over ssh, viewed from a laptop: no browser here, no token to copy."""
+    from railroad.tutorial import _launch as launch
+
+    argv = launch.notebook_argv()
+    assert "--no-browser" in argv
+    assert "--IdentityProvider.token=" in argv
+    assert argv[argv.index("--ip") + 1] == "0.0.0.0"
+
+
+def test_an_argument_you_pass_replaces_the_default_rather_than_repeating_it():
+    """traitlets rejects a repeated argument outright; last-one-wins is not a thing."""
+    from railroad.tutorial import _launch as launch
+
+    argv = launch.notebook_argv(["--port", "8899"])
+    assert argv.count("--port") == 1 and "8888" not in argv
+
+    argv = launch.notebook_argv(["--ip=127.0.0.1"])
+    assert "--ip" not in argv and "--ip=127.0.0.1" in argv
+
+    argv = launch.notebook_argv(["--IdentityProvider.token=secret"])
+    assert "--IdentityProvider.token=" not in argv
 
 
 def test_notebook_command_says_how_to_get_jupyter(playground, console, monkeypatch):

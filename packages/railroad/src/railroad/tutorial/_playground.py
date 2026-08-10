@@ -207,6 +207,11 @@ on its own -- fluents, timed effects, and what a transition actually does:
 
     uv run railroad tutorial notebook   open language.ipynb in Jupyter
 
+That starts Jupyter for the machine you are *not* sitting at: no browser, every
+interface, and no token, so the printed address opens from anywhere that can
+reach this host. `notebook --ip 127.0.0.1` closes it back down to loopback, and
+`notebook --IdentityProvider.token=secret` puts the key back.
+
 After that it is `demo.py`, the only file you edit; keep it open with
 `(global-auto-revert-mode 1)` so it refreshes when a step is applied.
 

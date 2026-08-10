@@ -33,6 +33,8 @@ from ._steps import DEMO_FILE, EXPERIMENT, NOTEBOOK, RUNNER
 DASHBOARD_STATE = ".dashboard.json"
 DASHBOARD_LOG = "dashboard.log"
 DEFAULT_PORT = 8050
+NOTEBOOK_PORT = 8888
+"""JupyterLab's own default, so the URL is the one people expect."""
 
 
 def _module(module: str, *args: str) -> List[str]:
@@ -74,13 +76,33 @@ def dashboard_argv(host: str = "auto", port: int = DEFAULT_PORT) -> List[str]:
     return _railroad("benchmarks", "dashboard", "--host", host, "--port", str(port))
 
 
-def notebook_argv(extra: Sequence[str] = ()) -> List[str]:
+def notebook_argv(
+    extra: Sequence[str] = (), *, host: str = "auto", port: int = NOTEBOOK_PORT
+) -> List[str]:
     """JupyterLab on the language primer, in the foreground.
 
-    Unlike the results dashboard this is not backgrounded: it prints the URL
-    with the token in it, and Ctrl-C is how you stop it.
+    The defaults assume the machine running this is not the machine you are
+    looking at, which is the normal case here: no browser to launch, every
+    interface answered, and no token to copy out of a log.
+
+    Each default is *dropped* when you pass the same argument, rather than
+    being followed by yours -- traitlets rejects a repeated argument outright
+    rather than letting the last one win. So ``--ip 127.0.0.1`` closes it back
+    down, and ``--IdentityProvider.token=secret`` puts the key back.
+
+    Unlike the results dashboard this is not backgrounded: Ctrl-C stops it.
     """
-    return _module("jupyter", "lab", NOTEBOOK, *extra)
+    supplied = {arg.split("=", 1)[0] for arg in extra}
+    argv: List[str] = []
+    if not supplied & {"--no-browser", "--browser"}:
+        argv.append("--no-browser")
+    if "--ip" not in supplied:
+        argv += ["--ip", bind_address(host)]
+    if "--port" not in supplied:
+        argv += ["--port", str(port)]
+    if not supplied & {"--IdentityProvider.token", "--ServerApp.token"}:
+        argv.append("--IdentityProvider.token=")
+    return _module("jupyter", "lab", NOTEBOOK, *argv, *extra)
 
 
 def pretty(argv: Sequence[str]) -> str:
@@ -215,6 +237,19 @@ def stop(playground: Playground, *, timeout: float = 5.0) -> Optional[int]:
     # It ignored the polite request; it is a development server, not a database.
     os.killpg(group, signal.SIGKILL)
     return board.pid
+
+
+def bind_address(host: str = "auto") -> str:
+    """Turn a host name into an address to bind, as the dashboard does.
+
+    ``auto`` is every interface, which is what makes a server started over ssh
+    visible from the laptop you are actually looking at.
+    """
+    try:
+        from railroad.bench.dashboard.net import resolve_host
+    except ImportError:
+        return "0.0.0.0"
+    return resolve_host(host)
 
 
 def urls(port: int = DEFAULT_PORT, host: str = "auto") -> List[str]:

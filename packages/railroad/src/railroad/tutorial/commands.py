@@ -173,6 +173,9 @@ def cmd_notebook(
     are things you want to poke at one at a time, which is the one thing a
     script is bad at. It blocks until you stop Jupyter -- that is Jupyter's
     shape, not ours.
+
+    It is started for the remote case: no browser, every interface, no token.
+    See :func:`_launch.notebook_argv` for how to narrow that back down.
     """
     playground = playground or find_playground()
     if not playground.notebook.exists():
@@ -188,6 +191,12 @@ def cmd_notebook(
 
     argv = launch.notebook_argv(extra)
     _echo(console, argv)
+    # Jupyter prints its own URLs, but only loopback and this host's name;
+    # from another machine the tailnet address is the one that works. If you
+    # moved the address or the port, Jupyter's own lines are the true ones.
+    if not any(arg.startswith(("--ip", "--port")) for arg in extra):
+        for line in launch.urls(launch.NOTEBOOK_PORT):
+            console.print(f"[dim]{escape(line)}[/dim]")
     result = launch.run(playground, argv)
     if not result.ok:
         console.print(f"[red]jupyter exited {result.returncode}[/red]")
