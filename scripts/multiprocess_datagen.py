@@ -36,7 +36,7 @@ from railroad.core import (
 from railroad.environment.procthor.resources import get_procthor_10k_dir
 from railroad.environment.procthor.scenegraph import SceneGraph
 
-NUM_DATUM = 10000
+NUM_DATUM = 1000
 DATA_GENERATION_SEED = 37
 PROCTHOR_SEED = 201
 

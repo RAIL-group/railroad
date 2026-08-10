@@ -10,6 +10,8 @@ license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "railroad[bench,procthor]",  # Using the local 'railroad' package
+    "torch_geometric",
+    "tensorboard",
 ]
 
 [project.entry-points."railroad.benchmarks"]
