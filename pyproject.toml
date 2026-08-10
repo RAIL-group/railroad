@@ -28,7 +28,11 @@ railroad = { path = "packages/railroad", editable = true }
 environments = { path = "packages/environments", editable = true }
 
 [tool.ty.src]
-exclude = ["**/scratch/**"]
+# railroad-tutorial/ is a scaffolded playground: a copy of the tutorial steps
+# that a presenter edits live, plus every pre-edit snapshot under .history/.
+# Type-checking somebody's half-finished live edit is noise, and a talk left
+# mid-sentence should not fail the repository's checks.
+exclude = ["**/scratch/**", "railroad-tutorial/**"]
 
 [tool.ty.environment]
 extra-paths = [
