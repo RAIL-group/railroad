@@ -75,14 +75,10 @@ def show_plots(view: Any, case: Any, **kwargs: Any) -> None:
     """
     if not getattr(case, "live", False):
         return
-    # 30fps at 100dpi rather than the library's 60/150. Rendering is the slow
-    # part of making a video -- 53 seconds here against 134 -- and nobody has
-    # ever wanted a smoother animation of a robot crossing a room. Pass
-    # video_fps/video_dpi to get the nicer one for something you are keeping.
     view.show_plots(
         save_plot=getattr(case, "plot", None),
         save_video=getattr(case, "video", None),
-        **{"video_fps": 30, "video_dpi": 100, **kwargs},
+        **kwargs,
     )
 
 

@@ -219,9 +219,8 @@ STEPS: List[StepInfo] = [
             "This search operator is the one from step 04, lock and all -- and "
             "it is also, line for line, operators.construct_search_operator.",
             "'tutorial run --video house.mp4' renders the run over the scene's "
-            "top-down view, into media/, which the dashboard serves. Rendering "
-            "costs minutes against the run's 30 seconds, so start it and keep "
-            "talking -- or record one before the session.",
+            "top-down view, into media/, which the dashboard serves. About 15 "
+            "seconds on top of the run, so it is something you can do live.",
             "Seed 8613 is chosen for pace: 8 containers ground out to ~440 "
             "actions with two robots, about 25 seconds. 8616 is prettier and "
             "does not finish inside MAX_STEPS at this budget.",
@@ -296,8 +295,7 @@ def command_lines(step: StepInfo) -> List[Command]:
         rows += [
             Command("", f"{me} run --plot {stem}.png",
                     "trajectories and the action list, into media/"),
-            Command("", f"{me} run --video {stem}.mp4",
-                    "or animate it -- about a minute to render"),
+            Command("", f"{me} run --video {stem}.mp4", "or animate the whole run"),
         ]
     if step["sweep"]:
         rows += [
