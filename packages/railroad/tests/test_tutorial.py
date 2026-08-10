@@ -113,9 +113,6 @@ def test_snapshot_registers_exactly_its_own_benchmark(step, monkeypatch):
     load_benchmark_files([str(SHIPPED_STEPS / step["filename"])])
     registered = list(registry._BENCHMARKS)
 
-    if not step["sweep"]:
-        assert registered == []
-        return
     assert len(registered) == 1
     assert registered[0].cases, "a sweep with no cases would silently run nothing"
     assert "tutorial" in registered[0].tags, (
@@ -144,6 +141,13 @@ def test_find_playground_prefers_the_env_var(playground, monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv(ENV_DIR, str(playground.root))
     assert find_playground().root == playground.root
+
+
+def test_a_playground_from_an_older_arc_says_so(playground):
+    """Step 00 used to be a script; it is a notebook now, and its id is gone."""
+    playground.write_state({"step": "00"})
+    with pytest.raises(PlaygroundError, match="init --force"):
+        playground.current_step_id
 
 
 def test_find_playground_explains_itself_when_missing(monkeypatch, tmp_path):
@@ -214,9 +218,8 @@ def test_merge_reports_a_conflict_on_the_same_line():
 
 def test_advance_preserves_a_live_edit(playground, console):
     """The whole point: a value tuned mid-talk survives moving on."""
-    first, second = STEPS[1]["id"], STEPS[2]["id"]
-    commands.cmd_goto(console, first, playground=playground, force=True,
-                      editor_sync=False)
+    first, second = STEPS[0]["id"], STEPS[1]["id"]
+    assert playground.current_step_id == first
 
     # A constant both snapshots share, well away from anything the patch edits.
     knob = "PICK_TIME = 5.0"
@@ -235,6 +238,7 @@ def test_advance_preserves_a_live_edit(playground, console):
     assert playground.current_step_id == second
     # The step's own change landed alongside it.
     only_in_second = "NUM_ROBOTS = 2"
+    assert only_in_second not in playground.pristine_text(first)
     assert only_in_second in playground.pristine_text(second)
     assert only_in_second in result
 
@@ -321,8 +325,6 @@ def test_step_runs_headless_and_files_a_record(step, playground, tmp_path):
     assert completed.returncode == 0, completed.stderr[-2000:]
 
     records = playground.read_runs()
-    if step["id"] == STEPS[0]["id"]:
-        return  # the language primer has no dashboard, so nothing to file
     assert records and records[-1]["step"] == step["id"]
     assert records[-1]["goal_reached"] is True
     assert records[-1]["cost"] > 0
@@ -432,16 +434,19 @@ def test_printed_commands_are_typeable(playground):
     assert launch.pretty(launch.bench_argv()).startswith(
         "uv run railroad benchmarks run -i demo.py"
     )
+    assert launch.pretty(launch.notebook_argv()) == "uv run jupyter lab language.ipynb"
     assert sys.executable not in launch.pretty(launch.dashboard_argv())
 
 
-def test_the_primer_offers_no_sweep(playground):
+def test_only_the_first_step_points_back_at_the_notebook(playground):
+    """The primer is where you start, and after that it is behind you."""
     from railroad.tutorial import command_lines
 
-    rows = command_lines(get_step(STEPS[0]["id"]))
-    assert not any("bench" in row.command for row in rows)
-    assert not any("--save-plot" in row.command for row in rows), "nothing to draw"
-    assert any(row.command.endswith("tutorial run") for row in rows)
+    first = [row.command for row in command_lines(get_step(STEPS[0]["id"]))]
+    assert any(command.endswith("tutorial notebook") for command in first)
+    for step in STEPS[1:]:
+        commands_here = [row.command for row in command_lines(step)]
+        assert not any("notebook" in command for command in commands_here), step["id"]
 
 
 def test_notes_are_separate_from_the_card(playground, console):
@@ -452,12 +457,106 @@ def test_notes_are_separate_from_the_card(playground, console):
     assert "tutorial run" not in text
 
 
-def test_every_drawing_step_names_its_media_and_the_primer_does_not():
+def test_every_step_sweeps_and_names_its_media():
+    """Every step of the arc is a program with a sweep; the primer is a notebook.
+
+    The card prints --save-plot and 'bench' lines unconditionally, which is
+    only honest while this holds.
+    """
     for step in STEPS:
-        if step["id"] == STEPS[0]["id"]:
-            assert not step["media"], "the primer has no environment to draw"
-        else:
-            assert step["media"], f"step {step['id']} has nothing to save as"
+        assert step["sweep"], f"step {step['id']} has nothing to sweep"
+        assert step["media"], f"step {step['id']} has nothing to save as"
+
+
+# -- the language primer, which is a notebook rather than a step -------------
+
+
+SHIPPED_NOTEBOOK = Path(commands.__file__).parent / "language.ipynb"
+
+
+def _code_cells(path):
+    return [cell for cell in json.loads(path.read_text())["cells"]
+            if cell["cell_type"] == "code"]
+
+
+def test_the_notebook_runs_top_to_bottom():
+    """It is the first thing anyone sees, so a stale cell is a broken talk.
+
+    Executing the source is the whole check: the cells build states and
+    transition them, and any drift in the core API shows up as an exception
+    here rather than in front of a room.
+    """
+    namespace: dict = {}
+    cells = _code_cells(SHIPPED_NOTEBOOK)
+    for cell in cells:
+        source = "".join(cell["source"])
+        exec(compile(source, f"language.ipynb::{cell['id']}", "exec"), namespace)
+    assert len(cells) >= 5
+
+    # The prose around these two cells is the headline claim of the whole
+    # tutorial: dispatching does not advance the clock, and the world only
+    # moves once nobody is free. If that stops holding, the notebook lies.
+    assert namespace["after_r1"].time == 0.0
+    assert namespace["after_r2"].time == 5.0
+
+
+def test_the_notebook_is_valid_against_the_nbformat_schema():
+    """Structurally openable, not just parseable as JSON."""
+    nbformat = pytest.importorskip("nbformat")  # only with railroad[tutorial]
+    nbformat.validate(nbformat.read(str(SHIPPED_NOTEBOOK), as_version=4))
+
+
+def test_the_notebook_ships_with_no_stored_output():
+    """A talk starts from an empty notebook, not from last time's numbers."""
+    for cell in _code_cells(SHIPPED_NOTEBOOK):
+        assert cell["outputs"] == [], cell["id"]
+        assert cell["execution_count"] is None, cell["id"]
+
+
+def test_init_gives_you_your_own_copy_of_the_notebook(playground):
+    assert playground.notebook.is_file()
+    assert playground.notebook.read_bytes() == SHIPPED_NOTEBOOK.read_bytes()
+
+
+def test_reinit_keeps_the_notebook_you_scribbled_in(playground):
+    """--force resets demo.py, which has a step to be restored from. This has not."""
+    playground.notebook.write_text('{"cells": [], "mine": true}')
+    init_playground(playground.root, force=True)
+
+    kept = list(playground.history_dir.glob("*-language.ipynb"))
+    assert len(kept) == 1
+    assert '"mine": true' in kept[0].read_text()
+    assert playground.notebook.read_bytes() == SHIPPED_NOTEBOOK.read_bytes()
+
+
+def test_the_card_starts_you_in_the_notebook(playground, console):
+    commands.cmd_card(console, playground)
+    assert "tutorial notebook" in console.export_text()
+
+
+def test_notebook_command_shows_the_jupyter_command_it_runs(
+    playground, console, monkeypatch
+):
+    from railroad.tutorial import _launch as launch
+
+    seen = []
+    monkeypatch.setattr(commands, "find_spec", lambda name: object())
+    monkeypatch.setattr(
+        launch, "run",
+        lambda pg, argv: seen.append(list(argv)) or launch.RunResult(0),
+    )
+    assert commands.cmd_notebook(console, ["--no-browser"], playground).ok
+    assert seen[0][-2:] == ["language.ipynb", "--no-browser"], "arguments pass through"
+    assert "uv run jupyter lab language.ipynb --no-browser" in console.export_text()
+
+
+def test_notebook_command_says_how_to_get_jupyter(playground, console, monkeypatch):
+    """jupyterlab is an extra, so its absence has to be a sentence, not a traceback."""
+    monkeypatch.setattr(commands, "find_spec", lambda name: None)
+    assert not commands.cmd_notebook(console, (), playground).ok
+    text = console.export_text()
+    assert "railroad[tutorial]" in text
+    assert "uv run --with jupyterlab" in text
 
 
 # -- the dashboard, which outlives the command that starts it ----------------
@@ -642,7 +741,6 @@ def test_init_survives_having_no_resources_to_link(tmp_path, monkeypatch):
     assert not playground.resources_dir.exists()
 
 
-def test_every_step_declares_a_problem_except_the_primer():
+def test_every_step_declares_a_problem():
     for step in STEPS:
-        if step["sweep"]:
-            assert step["problem"], f"step {step['id']} needs a problem tag"
+        assert step["problem"], f"step {step['id']} needs a problem tag"

@@ -297,6 +297,16 @@ _PASSTHROUGH = {"ignore_unknown_options": True, "allow_extra_args": True}
 # is 'benchmarks run'. This group's help still lists both commands.
 
 
+@tutorial.command("notebook", context_settings=_PASSTHROUGH, add_help_option=False)
+@click.argument("extra", nargs=-1, type=click.UNPROCESSED)
+def tutorial_notebook(extra: tuple[str, ...]) -> None:
+    """Open language.ipynb in Jupyter; arguments pass through to 'jupyter lab'."""
+    from railroad.tutorial import commands
+    result = _tutorial_guard(commands.cmd_notebook)(_tutorial_console(), extra)
+    if not result.ok:
+        raise SystemExit(result.returncode)
+
+
 @tutorial.command("run", context_settings=_PASSTHROUGH, add_help_option=False)
 @click.argument("extra", nargs=-1, type=click.UNPROCESSED)
 def tutorial_run(extra: tuple[str, ...]) -> None:

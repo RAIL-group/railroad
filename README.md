@@ -185,17 +185,18 @@ uv run railroad example <name>
 
 ## Guided Tutorial
 
-An eight-step tour that builds a problem up from operators, driven from a single
-editable file:
+A notebook on the language itself, then a seven-step tour that builds a problem
+up from operators, driven from a single editable file:
 
 ```bash
 uv run railroad tutorial doctor   # check extras, scene cache, git, ffmpeg
 uv run railroad tutorial init     # scaffold ./railroad-tutorial
 cd railroad-tutorial
+uv run railroad tutorial notebook # language.ipynb: fluents, effects, transitions
 uv run railroad tutorial          # the step you are on, and what to type
 ```
 
-`demo.py` is the only file you open. Three commands run it:
+After the notebook, `demo.py` is the only file you open. Four commands run it:
 
 ```bash
 uv run railroad tutorial run              # live, with the planner dashboard

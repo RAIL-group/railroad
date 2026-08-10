@@ -3,8 +3,8 @@
 ``railroad.cli`` is a thin click wrapper over these. Keeping the logic here
 means it is testable without a terminal.
 
-``run``, ``bench`` and ``dashboard`` are short names for commands you could
-type yourself, and each prints the longer one it expands to before running it.
+``notebook``, ``run``, ``bench`` and ``dashboard`` are short names for commands
+you could type yourself, and each prints the longer one it expands to first.
 That is the deal: convenient to type mid-sentence, and never pretending to be
 something other than the ordinary CLI. Everything else here does the job a
 script cannot do for itself -- saying what to type, and moving ``demo.py``
@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+from importlib.util import find_spec
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
@@ -31,7 +32,14 @@ from ._playground import (
     find_playground,
     init_playground,
 )
-from ._steps import STEPS, command_lines, get_step, neighbour, step_index
+from ._steps import (
+    NOTEBOOK,
+    STEPS,
+    command_lines,
+    get_step,
+    neighbour,
+    step_index,
+)
 
 Ask = Callable[[str], str]
 """Prompt the presenter; return ``"yes"``, ``"no"`` or ``"force"``."""
@@ -135,6 +143,8 @@ def cmd_init(console: Console, directory: Optional[str], force: bool) -> None:
     console.print()
     console.print(f"  [bold]cd {where}[/bold]   "
                   "[dim]everything runs from inside the playground[/dim]")
+    console.print("  [bold]uv run railroad tutorial notebook[/bold]   "
+                  "[dim]the language itself, before any of the arc[/dim]")
     console.print("  [bold]uv run railroad tutorial[/bold]   "
                   "[dim]what step you are on, and what to type[/dim]")
 
@@ -150,6 +160,38 @@ def _echo(console: Console, argv: Sequence[str]) -> None:
     point is that you can select the line and run it yourself.
     """
     console.print(f"[dim]$ {escape(launch.pretty(argv))}[/dim]", soft_wrap=True)
+
+
+def cmd_notebook(
+    console: Console,
+    extra: Sequence[str] = (),
+    playground: Optional[Playground] = None,
+) -> launch.RunResult:
+    """Open the language primer in Jupyter. Arguments pass through to it.
+
+    The notebook comes before the arc: fluents, timed effects and transitions
+    are things you want to poke at one at a time, which is the one thing a
+    script is bad at. It blocks until you stop Jupyter -- that is Jupyter's
+    shape, not ours.
+    """
+    playground = playground or find_playground()
+    if not playground.notebook.exists():
+        console.print(f"[yellow]{NOTEBOOK} is not in this playground[/yellow]  "
+                      "[dim]uv run railroad tutorial init --force puts it back[/dim]")
+        return launch.RunResult(1)
+    if find_spec("jupyterlab") is None:
+        console.print("[red]jupyterlab is not installed[/red]  "
+                      "[dim]it comes with railroad\\[tutorial][/dim]")
+        console.print("[dim]or, without installing anything: "
+                      f"uv run --with jupyterlab jupyter lab {NOTEBOOK}[/dim]")
+        return launch.RunResult(1)
+
+    argv = launch.notebook_argv(extra)
+    _echo(console, argv)
+    result = launch.run(playground, argv)
+    if not result.ok:
+        console.print(f"[red]jupyter exited {result.returncode}[/red]")
+    return result
 
 
 def cmd_run(
@@ -175,9 +217,6 @@ def cmd_bench(
     """Sweep this step, with the include/tag/experiment arguments filled in."""
     playground = playground or find_playground()
     step = get_step(playground.current_step_id)
-    if not step["sweep"]:
-        console.print(f"[yellow]step {step['id']} has no sweep[/yellow]")
-        return launch.RunResult(0)
     console.print(f"[bold]sweep[/bold] {escape(step['sweep'])}")
     argv = launch.bench_argv(extra)
     _echo(console, argv)
@@ -531,6 +570,8 @@ def cmd_doctor(console: Console) -> bool:
             record(False, "railroad[procthor] missing",
                    "steps 06-07 need it; earlier steps do not")
 
+    record(find_spec("jupyterlab") is not None, "jupyterlab installed",
+           f"needed for 'tutorial notebook', which opens {NOTEBOOK}")
     record(shutil.which("git") is not None, "git on PATH",
            "used to merge your live edits when advancing a step")
     record(shutil.which("ffmpeg") is not None, "ffmpeg on PATH",

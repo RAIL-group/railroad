@@ -44,8 +44,13 @@ railsim = [
     "moderngl",
     "shapely>=2.1.2",
 ]
+tutorial = [
+    # 'railroad tutorial notebook' opens the language primer; everything else
+    # in the tutorial is the ordinary CLI.
+    "jupyterlab",
+]
 all = [
-    "railroad[test,bench,procthor,railsim]",
+    "railroad[test,bench,procthor,railsim,tutorial]",
 ]
 
 [project.scripts]
@@ -67,8 +72,9 @@ railroad = [
     "*.pyi",
     "environment/procthor/resources/models/*.pt",
     # Tutorial step snapshots are data, not importable modules: they are copied
-    # into a playground and run as scripts.
+    # into a playground and run as scripts. Same for the language notebook.
     "tutorial/steps/*.py",
+    "tutorial/*.ipynb",
 ]
 
 [tool.pytest.ini_options]

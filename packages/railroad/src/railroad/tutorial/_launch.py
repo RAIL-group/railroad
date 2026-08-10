@@ -1,6 +1,6 @@
-"""Running the demo, the sweep, and the dashboard -- from the playground.
+"""Running the notebook, the demo, the sweep and the dashboard -- from the playground.
 
-Three thin wrappers, and one thing they all do: print the command they are
+Four thin wrappers, and one thing they all do: print the command they are
 about to run. A wrapper that hides what it does teaches you the wrapper, so
 ``railroad tutorial bench`` shows the ``railroad benchmarks run`` line it
 expands to. Short to type, and still honest about what it is.
@@ -28,16 +28,24 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 from ._playground import Playground
-from ._steps import DEMO_FILE, EXPERIMENT, RUNNER
+from ._steps import DEMO_FILE, EXPERIMENT, NOTEBOOK, RUNNER
 
 DASHBOARD_STATE = ".dashboard.json"
 DASHBOARD_LOG = "dashboard.log"
 DEFAULT_PORT = 8050
 
 
+def _module(module: str, *args: str) -> List[str]:
+    """A console script, through this interpreter.
+
+    ``python -m jupyter lab`` rather than ``jupyter lab``, so which environment
+    it lands in is never a question of what happens to be on PATH.
+    """
+    return [sys.executable, "-m", module, *args]
+
+
 def _railroad(*args: str) -> List[str]:
-    """The CLI, through this interpreter, so the environment is never in doubt."""
-    return [sys.executable, "-m", "railroad.cli", *args]
+    return _module("railroad.cli", *args)
 
 
 def demo_argv(extra: Sequence[str] = ()) -> List[str]:
@@ -66,6 +74,15 @@ def dashboard_argv(host: str = "auto", port: int = DEFAULT_PORT) -> List[str]:
     return _railroad("benchmarks", "dashboard", "--host", host, "--port", str(port))
 
 
+def notebook_argv(extra: Sequence[str] = ()) -> List[str]:
+    """JupyterLab on the language primer, in the foreground.
+
+    Unlike the results dashboard this is not backgrounded: it prints the URL
+    with the token in it, and Ctrl-C is how you stop it.
+    """
+    return _module("jupyter", "lab", NOTEBOOK, *extra)
+
+
 def pretty(argv: Sequence[str]) -> str:
     """The same command, as you would type it.
 
@@ -74,8 +91,9 @@ def pretty(argv: Sequence[str]) -> str:
     would undercut the point of printing at all.
     """
     parts = list(argv)
-    if parts[:3] == [sys.executable, "-m", "railroad.cli"]:
-        parts = ["railroad", *parts[3:]]
+    if parts[:2] == [sys.executable, "-m"]:
+        entry = {"railroad.cli": "railroad"}.get(parts[2], parts[2])
+        parts = [entry, *parts[3:]]
     elif parts and parts[0] == sys.executable:
         parts = ["python", *parts[1:]]
     return f"{RUNNER} {shlex.join(parts)}"

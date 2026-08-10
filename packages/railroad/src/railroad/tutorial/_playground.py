@@ -3,6 +3,7 @@
 Layout::
 
     railroad-tutorial/
+      language.ipynb the primer: fluents, effects, transitions
       demo.py        the only file you open
       README.md      what to type, for the morning of
       media/         plots and videos; the dashboard serves this
@@ -33,7 +34,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ._steps import DEMO_FILE, MEDIA_DIR, STEPS, get_step
+from ._steps import DEMO_FILE, MEDIA_DIR, NOTEBOOK, STEPS, get_step
 
 ENV_DIR = "RAILROAD_TUTORIAL_DIR"
 DEFAULT_DIRNAME = "railroad-tutorial"
@@ -48,6 +49,10 @@ def _shipped_steps_dir() -> Path:
     return Path(__file__).parent / "steps"
 
 
+def _shipped_notebook() -> Path:
+    return Path(__file__).parent / NOTEBOOK
+
+
 @dataclass(frozen=True)
 class Playground:
     """A scaffolded tutorial directory."""
@@ -57,6 +62,11 @@ class Playground:
     @property
     def demo(self) -> Path:
         return self.root / DEMO_FILE
+
+    @property
+    def notebook(self) -> Path:
+        """The language primer -- your copy of it, to scribble in."""
+        return self.root / NOTEBOOK
 
     @property
     def steps_dir(self) -> Path:
@@ -100,6 +110,14 @@ class Playground:
         step_id = self.read_state().get("step")
         if not isinstance(step_id, str):
             raise PlaygroundError(f"no current step recorded in {self.state_path}")
+        if step_id not in {step["id"] for step in STEPS}:
+            # A playground scaffolded by an older railroad, whose arc had steps
+            # this one does not. Worth a sentence rather than a KeyError.
+            raise PlaygroundError(
+                f"{self.state_path} says step {step_id}, which this railroad does "
+                "not have. 'uv run railroad tutorial init --force' resets the "
+                "playground; demo.py is snapshotted to .history first."
+            )
         return step_id
 
     def set_current_step(self, step_id: str) -> None:
@@ -184,8 +202,13 @@ def find_playground(explicit: Optional[Path] = None) -> Playground:
 README = """\
 # railroad tutorial
 
-Work from inside this directory. `demo.py` is the only file you edit; keep it
-open with `(global-auto-revert-mode 1)` so it refreshes when a step is applied.
+Work from inside this directory. Start in the notebook, which is the language
+on its own -- fluents, timed effects, and what a transition actually does:
+
+    uv run railroad tutorial notebook   open language.ipynb in Jupyter
+
+After that it is `demo.py`, the only file you edit; keep it open with
+`(global-auto-revert-mode 1)` so it refreshes when a step is applied.
 
     uv run railroad tutorial            what step you are on, and what to type
 
@@ -205,8 +228,9 @@ the plain command it expands to before it runs:
     uv run railroad tutorial dashboard --stop
 
 Arguments you add are passed straight through -- to `demo.py` for `run`, to
-`railroad benchmarks run` for `bench` -- so `bench --parallel 8` and
-`run --case 2` both work without the tutorial having to know about them.
+`railroad benchmarks run` for `bench`, to `jupyter lab` for `notebook` -- so
+`bench --parallel 8`, `run --case 2` and `notebook --no-browser` all work
+without the tutorial having to know about them.
 
 Moving through the tutorial is the part a script does for you:
 
@@ -235,6 +259,28 @@ gigabyte and nobody wants two of them. Steps 06 and 07 need
 """
 
 
+def _install_notebook(playground: Playground, *, force: bool) -> bool:
+    """Put the presenter's own copy of the language primer in the playground.
+
+    Never silently overwritten. A notebook accumulates whatever you tried in
+    it while talking, and unlike ``demo.py`` there is no step to restore it
+    from -- so ``--force`` refreshes it only after keeping the old one in
+    ``.history/``.
+    """
+    source = _shipped_notebook()
+    if not source.exists():  # pragma: no cover - packaging error
+        return False
+    if playground.notebook.exists():
+        if not force or playground.notebook.read_bytes() == source.read_bytes():
+            return False
+        playground.history_dir.mkdir(parents=True, exist_ok=True)
+        kept = len(list(playground.history_dir.glob(f"*-{NOTEBOOK}")))
+        shutil.copyfile(playground.notebook,
+                        playground.history_dir / f"{kept:04d}-{NOTEBOOK}")
+    shutil.copyfile(source, playground.notebook)
+    return True
+
+
 def _link_resources(root: Path, source: Path) -> bool:
     """Point the playground at the ProcTHOR scenes without copying them.
 
@@ -253,7 +299,7 @@ def _link_resources(root: Path, source: Path) -> bool:
 
 
 def init_playground(root: Path, *, force: bool = False) -> Playground:
-    """Scaffold a playground at *root* and put it on step 00."""
+    """Scaffold a playground at *root* and put it on the first step."""
     root = root.expanduser()
     if root.exists() and not root.is_dir():
         raise PlaygroundError(f"{root} exists and is not a directory")
@@ -283,6 +329,7 @@ def init_playground(root: Path, *, force: bool = False) -> Playground:
     first = STEPS[0]["id"]
     shutil.copyfile(playground.pristine_path(first), playground.demo)
     playground.write_state({"step": first})
+    _install_notebook(playground, force=force)
     playground.media_dir.mkdir(exist_ok=True)
     _link_resources(playground.root, Path.cwd() / "resources")
     (root / "README.md").write_text(README)

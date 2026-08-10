@@ -6,6 +6,11 @@ is an ordinary command -- ``uv run python demo.py``, ``uv run railroad
 benchmarks run``, ``uv run railroad benchmarks dashboard`` -- printed for you
 by ``uv run railroad tutorial`` rather than hidden behind a wrapper.
 
+Before the arc there is ``language.ipynb``: fluents, timed effects and what a
+transition actually does, one cell at a time. Those are small enough to hold
+in your head and the wrong shape for a script, so they are a notebook, opened
+with ``uv run railroad tutorial notebook``. Everything after it is a program.
+
 The tutorial itself does the one thing a script cannot do for you: advancing.
 ``uv run railroad tutorial next`` shows the canonical diff between two steps --
 that diff is the unit of the talk -- and then three-way merges it into whatever
@@ -31,6 +36,7 @@ from ._playground import (
 )
 from ._steps import (
     EXPERIMENT,
+    NOTEBOOK,
     RUNNER,
     STEPS,
     Command,
@@ -48,6 +54,7 @@ __all__ = [
     "ENV_DIR",
     "EXPERIMENT",
     "MEDIA_DIR",
+    "NOTEBOOK",
     "Playground",
     "PlaygroundError",
     "RUNNER",

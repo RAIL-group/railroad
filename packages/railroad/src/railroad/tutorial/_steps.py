@@ -20,6 +20,15 @@ EXPERIMENT = "railroad-tutorial"
 DEMO_FILE = "demo.py"
 """The one file you edit."""
 
+NOTEBOOK = "language.ipynb"
+"""The primer that comes before the arc.
+
+Fluents, states and transitions are small enough to hold in your head, and
+they are the wrong shape for a script: you want to poke at one, print it, and
+try the next thing. That is a notebook. The steps below are all *programs*,
+which is why they are files you run.
+"""
+
 RUNNER = "uv run"
 """Everything in this repository runs through uv, the tutorial included.
 
@@ -48,13 +57,10 @@ class StepInfo(TypedDict):
     """One line: what this step demonstrates."""
 
     sweep: str
-    """What the benchmark sweeps over, or ``""`` when the step has none."""
+    """What the benchmark sweeps over. Every step has a sweep."""
 
     media: str
-    """Stem for ``--save-plot``/``--save-video``, or ``""`` when nothing is drawn.
-
-    Step 00 has no environment and no dashboard, so it has nothing to draw.
-    """
+    """Stem for ``--save-plot`` / ``--save-video``, e.g. ``two-robots``."""
 
     problem: str
     """Which problem this step solves.
@@ -73,24 +79,6 @@ class StepInfo(TypedDict):
 
 
 STEPS: List[StepInfo] = [
-    {
-        "id": "00",
-        "title": "the language",
-        "filename": "00_language.py",
-        "problem": "",
-        "requires": "",
-        "point": "Fluents, states, timed effects, and what a transition actually does.",
-        "sweep": "",
-        "media": "",
-        "notes": [
-            "Two spellings of a fluent are the same object; ~f is negation.",
-            "An Action is a list of effects at times, not a single instant.",
-            "Dispatch r1 and the clock stays at 0 -- r2 is still free to act.",
-            "Dispatch r2 and time jumps to 5: transition() runs the world "
-            "forward until somebody is free again.",
-            "prob_effects makes transition() return a distribution, not a state.",
-        ],
-    },
     {
         "id": "01",
         "title": "clear the table",
@@ -284,28 +272,27 @@ def command_lines(step: StepInfo) -> List[Command]:
     actually happening underneath.
     """
     me = f"{RUNNER} railroad tutorial"
-    rows = [Command("run it", f"{me} run", f"the same as: {RUNNER} python {DEMO_FILE}")]
-    if step["sweep"]:
-        rows += [
-            Command("", f"{me} run --list", "the parameter cases this step sweeps"),
-            Command("", f"{me} run --case 4", "run one of them, live"),
-        ]
-    if step["media"]:
-        stem = step["media"]
-        rows += [
-            Command("", f"{me} run --save-plot {stem}.png",
-                    "trajectories and the action list, into media/"),
-            Command("", f"{me} run --save-video {stem}.mp4",
-                    "or animate the whole run"),
-        ]
-    if step["sweep"]:
-        rows += [
-            Command("sweep it", f"{me} bench", step["sweep"]),
-            Command("see it", f"{me} dashboard",
-                    "start it; --status and --stop from here too"),
-        ]
-    rows.append(Command("move on", f"{me} next",
-                        "shows the patch, then merges your edits"))
+    stem = step["media"]
+    rows = []
+    if step["id"] == STEPS[0]["id"]:
+        # Only on the first step: the primer is where you start, and after that
+        # it is behind you.
+        rows.append(Command("read it", f"{me} notebook",
+                            "fluents, effects, transition -- in Jupyter"))
+    rows += [
+        Command("run it", f"{me} run", f"the same as: {RUNNER} python {DEMO_FILE}"),
+        Command("", f"{me} run --list", "the parameter cases this step sweeps"),
+        Command("", f"{me} run --case 4", "run one of them, live"),
+        Command("", f"{me} run --save-plot {stem}.png",
+                "trajectories and the action list, into media/"),
+        Command("", f"{me} run --save-video {stem}.mp4",
+                "or animate the whole run"),
+        Command("sweep it", f"{me} bench", step["sweep"]),
+        Command("see it", f"{me} dashboard",
+                "start it; --status and --stop from here too"),
+        Command("move on", f"{me} next",
+                "shows the patch, then merges your edits"),
+    ]
     return rows
 
 
