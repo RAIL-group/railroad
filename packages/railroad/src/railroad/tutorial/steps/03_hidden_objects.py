@@ -1,9 +1,9 @@
 """Step 03 -- hide the objects.
 
 The objects are no longer in the initial state; the robots have to look. That
-means a probabilistic operator, and a prior over where things are -- which here
-is flat, because we genuinely have no idea. (Step 07 replaces it with a learned
-one.)
+buys one new operator, and with it a probabilistic effect and a prior over
+where things are -- flat here, because we genuinely have no idea. (Step 07
+replaces it with a learned one.)
 
 Two conventions of ObjectSearchEnvironment are doing work now. Search outcomes
 resolve against ground truth rather than sampling, so a bad prior costs time but
@@ -13,19 +13,16 @@ actually there becomes known, and the location can never be searched again.
 Watch what two robots do with that.
 """
 
-import time
 from functools import reduce
 from operator import and_
 
 import numpy as np
-from rich.console import Console
 
+from railroad import tutorial
 from railroad.bench import BenchmarkCase, benchmark
 from railroad.core import Effect, Fluent as F, Operator, State, get_action_by_name
-from railroad.dashboard import PlannerDashboard
 from railroad.environment import ObjectSearchEnvironment
 from railroad.planner import MCTSPlanner
-from railroad.tutorial import report
 
 LOCATIONS = {
     "living_room": (0.0, 0.0),
@@ -71,18 +68,19 @@ class HouseSearch(ObjectSearchEnvironment):
                 ),
             ],
         )
-        # Look for one object in one place. The branch that finds it is what the
-        # planner reasons about; the environment decides which branch actually
-        # fires, from TRUE_LOCATIONS.
+        # Look for one object in one place. `prob_effects` is the whole of the
+        # uncertainty: two branches, weighted, and whichever fires is applied
+        # after this effect's own fluents. The planner reasons over both; the
+        # environment picks the real one from TRUE_LOCATIONS.
         search = Operator(
             name="search",
             parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
             preconditions=[
                 F("at ?r ?loc"),
                 F("free ?r"),
-                F("not revealed ?loc"),
-                F("not searched ?loc ?obj"),
-                F("not found ?obj"),
+                ~F("revealed ?loc"),
+                ~F("searched ?loc ?obj"),
+                ~F("found ?obj"),
             ],
             effects=[
                 Effect(time=0, resulting_fluents={~F("free ?r")}),
@@ -125,7 +123,7 @@ def build(num_robots: int = NUM_ROBOTS):
     return env, goal
 
 
-def solve(env, goal, dashboard, *, iterations: int, c: float) -> bool:
+def solve(env, goal, view, *, iterations: int, c: float) -> bool:
     """Replan every time a robot frees up; return whether the goal was met."""
     for _ in range(MAX_STEPS):
         if goal.evaluate(env.state.fluents):
@@ -134,10 +132,10 @@ def solve(env, goal, dashboard, *, iterations: int, c: float) -> bool:
         planner = MCTSPlanner(actions)
         name = planner(env.state, goal, max_iterations=iterations, c=c, max_depth=20)
         if name == "NONE":
-            dashboard.console.print("[yellow]Planner returned NONE.[/yellow]")
+            view.console.print("[yellow]Planner returned NONE.[/yellow]")
             return False
         env.act(get_action_by_name(actions, name))
-        dashboard.update(planner, name)
+        view.update(planner, name)
     return goal.evaluate(env.state.fluents)
 
 
@@ -145,19 +143,12 @@ def relevant(fluent) -> bool:
     return any(word in fluent.name for word in ("at", "found", "searched"))
 
 
-def demo() -> None:
-    env, goal = build()
-    with PlannerDashboard(goal, env, fluent_filter=relevant) as dashboard:
-        solve(env, goal, dashboard, iterations=4000, c=300)
-    report(dashboard, step="03")
-
-
-if __name__ == "__main__":
-    demo()
-
-
-# ---- sweep: press b ---------------------------------------------------------
-# Adding robots stopped paying. Look at the action list from a two- or
+# ---- one function, two ways to run it ---------------------------------------
+# `python demo.py` runs case 0 of the sweep below, live, with the dashboard.
+# `railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
+# times over, in parallel. Same code either way.
+#
+# Adding robots has stopped paying. Look at the action list from a two- or
 # three-robot run: nothing stops two of them searching the same room at the same
 # time, and a flat prior makes that look like a good idea -- two draws at 0.5
 # beat one. It is not. One search reveals everything in the room.
@@ -169,30 +160,20 @@ if __name__ == "__main__":
     repeat=4,
     timeout=60.0,
 )
-def bench_hidden_objects(case: BenchmarkCase) -> dict:
+def run(case: BenchmarkCase) -> dict:
     env, goal = build(case.num_robots)
-    console = Console(record=True, force_terminal=True, width=120)
-    dashboard = PlannerDashboard(
-        goal, env, fluent_filter=relevant, print_on_exit=False, console=console
-    )
-    started = time.perf_counter()
-    solve(env, goal, dashboard, iterations=case.mcts.iterations, c=case.mcts.c)
-    dashboard.print_history()
-    actions = [name for name, _ in dashboard.actions_taken]
-    searches = [name for name in actions if name.startswith("search")]
-    return {
-        "success": goal.evaluate(env.state.fluents),
-        "plan_cost": float(env.state.time),
-        "wall_time": time.perf_counter() - started,
-        "actions_count": len(actions),
-        # Three rooms hold something; every search past that was wasted effort.
-        "searches": len(searches),
-        "log_html": console.export_html(inline_styles=True),
-    }
+    with tutorial.dashboard(case, goal, env, fluent_filter=relevant) as view:
+        solve(env, goal, view, iterations=case.mcts.iterations, c=case.mcts.c)
+    return tutorial.result(view)
 
 
-bench_hidden_objects.add_cases([
+run.add_cases([
+    # Case 0 is what `python demo.py` runs, so the two-robot team comes first.
     {"num_robots": num_robots, "mcts.iterations": iterations, "mcts.c": 300}
-    for num_robots in (1, 2, 3)
-    for iterations in (400, 1000, 4000)
+    for num_robots in (2, 1, 3)
+    for iterations in (4000, 1000, 400)
 ])
+
+
+if __name__ == "__main__":
+    tutorial.main(run)

@@ -5,19 +5,17 @@ an MLflow artifact -- it is written to a directory by whoever ran the demo.
 This adds a plain index over that directory on the dashboard's own port, so a
 talk needs one browser tab rather than a browser and a video player.
 
-The directory is ``./tutorial-media`` relative to the working directory, which
-means the dashboard and whatever wrote the file have to agree on it -- the same
-convention ``mlflow.db`` and the ProcTHOR scene cache already follow. Override
-with ``RAILROAD_TUTORIAL_MEDIA_DIR``.
+The directory is ``./media`` relative to the working directory -- the same
+convention ``mlflow.db`` and the ProcTHOR scene cache already follow, so
+running both the demo and the dashboard from the same place is all it takes to
+make them agree.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
-ENV_DIR = "RAILROAD_TUTORIAL_MEDIA_DIR"
-DEFAULT_DIRNAME = "tutorial-media"
+DIRNAME = "media"
 
 VIDEO_SUFFIXES = {".mp4", ".webm", ".mov"}
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif"}
@@ -25,7 +23,7 @@ IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".gif"}
 
 def media_dir() -> Path:
     """Where demo plots and videos are looked for."""
-    return Path(os.environ.get(ENV_DIR) or Path.cwd() / DEFAULT_DIRNAME)
+    return Path.cwd() / DIRNAME
 
 
 def _page(body: str) -> str:
@@ -49,7 +47,7 @@ def register_media_routes(app) -> None:
         if not directory.is_dir():
             return _page(
                 f"<h1>no media yet</h1><p>Nothing in <code>{escape(str(directory))}"
-                "</code>. Render some with <code>railroad tutorial run "
+                "</code>. Render some with <code>python demo.py "
                 "--video house.mp4</code>.</p>"
             )
         files = sorted(

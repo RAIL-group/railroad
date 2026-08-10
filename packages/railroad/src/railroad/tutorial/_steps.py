@@ -12,7 +12,20 @@ taking the snapshot verbatim.
 
 from __future__ import annotations
 
-from typing import List, Optional, TypedDict
+from typing import List, NamedTuple, Optional, TypedDict
+
+EXPERIMENT = "railroad-tutorial"
+"""Every sweep accumulates here, so the dashboard is one page you refresh."""
+
+DEFAULT_PARALLEL = 12
+"""Deliberately below ``cpu_count() - 2``: a sweep that eats every core makes
+the machine you are presenting from unusable."""
+
+DEMO_FILE = "demo.py"
+"""The one file you edit."""
+
+MEDIA_DIR = "media"
+"""Where plots and videos go, and what the dashboard serves."""
 
 
 class StepInfo(TypedDict):
@@ -22,7 +35,7 @@ class StepInfo(TypedDict):
     """Two-digit ordinal, also the CLI handle (``railroad tutorial goto 02``)."""
 
     title: str
-    """Short label shown in the watch pane header."""
+    """Short label, shown wherever the step is named."""
 
     filename: str
     """Snapshot filename under ``railroad/tutorial/steps/``."""
@@ -31,14 +44,17 @@ class StepInfo(TypedDict):
     """One line: what this step demonstrates."""
 
     sweep: str
-    """What pressing ``b`` sweeps over, or ``""`` when the step has no benchmark."""
+    """What the benchmark sweeps over, or ``""`` when the step has none."""
+
+    media: str
+    """Suggested ``--video`` filename, or ``""`` when the step draws nothing."""
 
     problem: str
     """Which problem this step solves.
 
     Plan costs are only comparable within one of these. Steps that change the
     world -- hiding the objects, moving to a bigger house -- start a new one, and
-    ``compare`` drops the delta across the boundary rather than inviting the
+    the step list drops the delta across the boundary rather than inviting the
     wrong reading.
     """
 
@@ -58,6 +74,7 @@ STEPS: List[StepInfo] = [
         "requires": "",
         "point": "Fluents, states, timed effects, and what a transition actually does.",
         "sweep": "",
+        "media": "",
         "notes": [
             "Two spellings of a fluent are the same object; ~f is negation.",
             "An Action is a list of effects at times, not a single instant.",
@@ -75,14 +92,16 @@ STEPS: List[StepInfo] = [
         "requires": "",
         "point": "A whole problem: operators, a negated goal, and the plan-act loop.",
         "sweep": "mcts.iterations x c",
+        "media": "",
         "notes": [
             "move is written out by hand so both halves of a durative action "
             "are visible: lose free/at at t=0, regain them at t=d.",
-            "pick and place come from railroad.operators -- same shape.",
+            "pick and place are written out too -- same shape, plus the "
+            "just-picked / just-placed pair that stops a robot undoing itself.",
             "The goal is a conjunction of *negated* literals: nothing on the table.",
             "The loop replans every time a robot frees up. That is the whole "
             "control structure; there is no plan to execute, only a next action.",
-            "Press b: there is a search floor. Around 10-25 iterations the run "
+            "In the sweep: there is a search floor. Around 10-25 iterations the run "
             "fails outright, and where that floor sits depends on c -- a larger "
             "exploration constant wastes more of a small budget. Past ~100 "
             "iterations, more search buys nothing on a problem this small.",
@@ -96,11 +115,14 @@ STEPS: List[StepInfo] = [
         "requires": "",
         "point": "Concurrency for free: one more object of type robot, and time drops.",
         "sweep": "num_robots x mcts.iterations",
+        "media": "",
         "notes": [
-            "The diff is four lines. No operator changes at all -- concurrency "
-            "is a property of the state semantics, not of the actions.",
+            "Only one line of the problem changes: NUM_ROBOTS. Not one "
+            "operator is touched -- concurrency is a property of the state "
+            "semantics, not of the actions. The rest of the diff is prose and "
+            "the sweep's new axis.",
             "Watch the Braille timeline: the two rows overlap.",
-            "Press b: 1 -> 2 -> 3 robots roughly halves and halves again. With "
+            "In the sweep: 1 -> 2 -> 3 robots roughly halves and halves again. With "
             "three robots and three objects each takes one, and because the goal "
             "only asks that nothing *remain* on the table, the run ends at the "
             "last pick -- one trip plus one pick, nothing ever put away.",
@@ -114,6 +136,7 @@ STEPS: List[StepInfo] = [
         "requires": "",
         "point": "Probabilistic search, a flat prior, and a failure mode to find.",
         "sweep": "num_robots x mcts.iterations",
+        "media": "",
         "notes": [
             "The objects leave the initial state; the robots have to look. That "
             "buys a probabilistic effect and a prior over where things are.",
@@ -135,6 +158,7 @@ STEPS: List[StepInfo] = [
         "requires": "",
         "point": "A lock predicate, and the A/B that shows why it is not optional.",
         "sweep": "use_search_lock x num_robots",
+        "media": "",
         "notes": [
             "Three lines: a lock-search precondition, the lock taken at t=0, "
             "released when the search completes.",
@@ -155,6 +179,7 @@ STEPS: List[StepInfo] = [
         "requires": "",
         "point": "h_add/h_ff mixing, the multiplier, and the probabilistic retry delta.",
         "sweep": "(lambda_add, lambda_ff) x mcts.h_mult",
+        "media": "",
         "notes": [
             "MCTS scores a state with lambda_add*h_add + lambda_max*h_max + "
             "lambda_ff*h_ff, plus a retry delta. Both relaxations assume an "
@@ -179,14 +204,17 @@ STEPS: List[StepInfo] = [
         "requires": "procthor",
         "point": "Same operators, real geometry: a ProcTHOR home and Theta* travel times.",
         "sweep": "scene_seed x num_robots",
+        "media": "house.mp4",
         "notes": [
             "The operators barely change. Their *numbers* do: move times are "
             "Theta* paths over the scene's occupancy grid, and the locations are "
             "the containers of a generated home.",
-            "construct_search_operator already carries the lock from step 04 -- "
-            "the library version of the operator we wrote by hand.",
-            "'railroad tutorial run --video house.mp4' renders the run over the "
-            "scene's top-down view.",
+            "This search operator is the one from step 04, lock and all -- and "
+            "it is also, line for line, operators.construct_search_operator.",
+            "'python demo.py --video house.mp4' renders the run over the "
+            "scene's top-down view, into media/, which the dashboard serves. "
+            "Rendering costs minutes against the run's 30 seconds, so start it "
+            "and keep talking -- or record one before the session.",
             "Seed 8613 is chosen for pace: 8 containers ground out to ~440 "
             "actions with two robots, about 25 seconds. 8616 is prettier and "
             "does not finish inside MAX_STEPS at this budget.",
@@ -200,6 +228,7 @@ STEPS: List[StepInfo] = [
         "requires": "procthor",
         "point": "Swap the oracle prior for the packaged network. One function changes.",
         "sweep": "use_learned_prior x scene_seed",
+        "media": "learned.mp4",
         "notes": [
             "Step 06's prior read scene.object_locations -- an oracle wearing a "
             "probability's clothes. This one has never seen the answer: it is a "
@@ -227,6 +256,51 @@ STEPS: List[StepInfo] = [
         ],
     },
 ]
+
+
+class Command(NamedTuple):
+    """One row of the card: what you would type, and why."""
+
+    label: str
+    """Left-hand goal (``run it``), or ``""`` to continue the row above."""
+
+    command: str
+    comment: str
+
+
+def command_lines(step: StepInfo, *, parallel: int = DEFAULT_PARALLEL) -> List[Command]:
+    """Every way to run *step*, as commands you could have typed yourself.
+
+    This is the how-to half of the tutorial and the reason there is no wrapper
+    around any of it: watching somebody press a key teaches nothing about
+    running a sweep. Ordered by how often you want them, and phrased by goal
+    rather than by tool.
+    """
+    rows = [Command("run it", f"python {DEMO_FILE}", "")]
+    if step["sweep"]:
+        rows += [
+            Command("", f"python {DEMO_FILE} --list",
+                    "the parameter cases this step sweeps"),
+            Command("", f"python {DEMO_FILE} --case 4", "run one of them, live"),
+        ]
+    if step["media"]:
+        rows.append(Command("", f"python {DEMO_FILE} --video {step['media']}",
+                            "...and record it, into media/"))
+    if step["sweep"]:
+        rows += [
+            # --tags is load-bearing: --include *adds* demo.py to the benchmarks
+            # found through entry points, so without a filter the whole repo
+            # comes along for the ride.
+            Command("sweep it",
+                    f"railroad benchmarks run -i {DEMO_FILE} --tags tutorial "
+                    f"--experiment {EXPERIMENT} --parallel {parallel}",
+                    step["sweep"]),
+            Command("see it", "railroad benchmarks dashboard",
+                    "this playground's results only"),
+        ]
+    rows.append(Command("move on", "railroad tutorial next",
+                        "shows the patch, then merges your edits"))
+    return rows
 
 
 def step_ids() -> List[str]:

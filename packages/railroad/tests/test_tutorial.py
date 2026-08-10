@@ -5,7 +5,6 @@ presenter is live-editing, so "your edit survived" and "it refused rather than
 mangling" are the properties that matter.
 """
 
-import io
 import json
 import os
 import subprocess
@@ -120,8 +119,8 @@ def test_snapshot_registers_exactly_its_own_benchmark(step, monkeypatch):
     assert len(registered) == 1
     assert registered[0].cases, "a sweep with no cases would silently run nothing"
     assert "tutorial" in registered[0].tags, (
-        "the watch pane selects by the 'tutorial' tag; without it, pressing b "
-        "would run every benchmark in the repo"
+        "the printed sweep command selects by the 'tutorial' tag; without it, "
+        "--include would drag in every benchmark in the repo"
     )
 
 
@@ -235,7 +234,7 @@ def test_advance_preserves_a_live_edit(playground, console):
     assert "PICK_TIME = 7.0" in result, "the live edit was lost"
     assert playground.current_step_id == second
     # The step's own change landed alongside it.
-    only_in_second = "NUM_ROBOTS"
+    only_in_second = "NUM_ROBOTS = 2"
     assert only_in_second in playground.pristine_text(second)
     assert only_in_second in result
 
@@ -352,120 +351,183 @@ def test_doctor_does_not_let_rich_eat_the_extra_names(console, monkeypatch, tmp_
     assert "railroad[procthor]" in text
 
 
-def test_compare_reports_the_change_between_steps(playground, console):
-    playground.append_run({"step": "01", "cost": 44.3, "actions": ["a"],
+def test_step_list_reports_the_change_between_steps(playground, console):
+    playground.append_run({"step": "01", "cost": 44.3, "actions": 1,
                            "goal_reached": True, "wall": 0.6})
-    playground.append_run({"step": "02", "cost": 22.1, "actions": ["a", "b"],
+    playground.append_run({"step": "02", "cost": 22.1, "actions": 2,
                            "goal_reached": True, "wall": 1.4})
-    commands.cmd_compare(console, playground)
+    commands.cmd_steps(console, playground)
     text = console.export_text()
     assert "44.3" in text and "22.1" in text and "-22.2" in text
 
 
-def test_compare_omits_the_delta_across_a_change_of_problem(playground, console):
+def test_step_list_omits_the_delta_across_a_change_of_problem(playground, console):
     """Costs from different worlds are not comparable, so do not subtract them."""
     pairs = [(a, b) for a, b in zip(STEPS, STEPS[1:])
              if a["problem"] and a["problem"] != b["problem"]]
     assert pairs, "expected at least one problem boundary in the arc"
     before, after = pairs[0]
-    playground.append_run({"step": before["id"], "cost": 10.0, "actions": [],
-                           "goal_reached": True})
-    playground.append_run({"step": after["id"], "cost": 40.0, "actions": [],
-                           "goal_reached": True})
-    commands.cmd_compare(console, playground)
+    playground.append_run({"step": before["id"], "cost": 10.0, "goal_reached": True})
+    playground.append_run({"step": after["id"], "cost": 40.0, "goal_reached": True})
+    commands.cmd_steps(console, playground)
     text = console.export_text()
     assert "40.0" in text
     assert "+30.0" not in text
 
 
-# -- isolation and the printed commands --------------------------------------
+# -- the card: real commands, not a wrapper ----------------------------------
 
 
-def test_init_records_where_the_resources_live(playground, tmp_path):
-    """Everything is created in the playground; only ProcTHOR is borrowed."""
-    assert playground.home == Path.cwd().resolve()
-    assert playground.resources_dir == Path.cwd().resolve() / "resources"
-    assert playground.media_dir.is_dir()
+def test_card_prints_commands_you_could_type_yourself(playground, console):
+    commands.cmd_goto(Console(quiet=True), "02", playground=playground,
+                      force=True, editor_sync=False)
+    commands.cmd_card(console, playground)
+    text = console.export_text()
+    assert "python demo.py" in text
+    assert "railroad benchmarks run -i demo.py" in text
+    assert "railroad benchmarks dashboard" in text
+    assert "railroad tutorial next" in text
+    assert "railroad tutorial run" not in text, "the wrappers are gone"
 
 
-def test_subprocess_environment_points_at_the_playground(playground):
-    from railroad.tutorial._run import MEDIA_ENV, PROCTHOR_ENV, _env_for
-
-    env = _env_for(playground)
-    assert env[ENV_DIR] == str(playground.root)
-    assert env[MEDIA_ENV] == str(playground.media_dir)
-    # PROCTHOR_RESOURCES_DIR is only set when there is a tree to point at.
-    if playground.resources_dir.is_dir():
-        assert env[PROCTHOR_ENV] == str(playground.resources_dir)
+def test_card_flags_local_edits(playground, console):
+    playground.demo.write_text(playground.demo.read_text() + "\n# tuned live\n")
+    commands.cmd_card(console, playground)
+    assert "local edits" in console.export_text()
 
 
-def test_sweep_command_is_relative_so_it_runs_inside_the_playground(playground):
-    from railroad.tutorial._run import EXPERIMENT, sweep_argv
+def test_sweep_command_selects_only_the_tutorial(playground):
+    from railroad.tutorial import EXPERIMENT, command_lines
 
-    argv = sweep_argv(playground, parallel=4)
-    assert "--include" in argv and argv[argv.index("--include") + 1] == "demo.py"
-    assert argv[argv.index("--experiment") + 1] == EXPERIMENT
-    assert argv[argv.index("--tags") + 1] == "tutorial"
-
-
-def test_format_command_reads_like_something_you_would_type(playground, tmp_path):
-    from railroad.tutorial._run import demo_argv, format_command, sweep_argv
-
-    demo = format_command(demo_argv(playground), playground.root)
-    assert demo.endswith("python demo.py")
-    assert demo.startswith("cd ")
-
-    sweep = format_command(sweep_argv(playground, parallel=4), playground.root)
-    assert "railroad benchmarks run" in sweep
-    assert sys.executable not in sweep, "should not print an absolute interpreter"
+    sweeps = [row.command for row in command_lines(get_step("02"))
+              if row.command.startswith("railroad benchmarks run")]
+    assert len(sweeps) == 1
+    # --include *adds* to entry-point discovery, so the tag filter is what keeps
+    # the whole repo's benchmarks out of a live sweep.
+    assert "--tags tutorial" in sweeps[0]
+    assert f"--experiment {EXPERIMENT}" in sweeps[0]
 
 
-def test_format_command_omits_the_cd_when_already_there(playground, monkeypatch):
-    from railroad.tutorial._run import demo_argv, format_command
+def test_the_primer_offers_no_sweep(playground):
+    from railroad.tutorial import command_lines
+
+    commands_for_primer = command_lines(get_step(STEPS[0]["id"]))
+    assert not any("benchmarks" in row.command for row in commands_for_primer)
+    assert any(row.command == "python demo.py" for row in commands_for_primer)
+
+
+def test_notes_are_separate_from_the_card(playground, console):
+    """Diataxis, in one assertion: how-to and explanation are different pages."""
+    commands.cmd_notes(console, "04", playground)
+    text = console.export_text()
+    assert "lock-search" in text
+    assert "python demo.py" not in text
+
+
+# -- running one case by hand ------------------------------------------------
+
+
+def _fake_benchmark(cases, seen):
+    from railroad.bench.registry import Benchmark
+
+    def fn(case):
+        seen.append(case)
+        return {"success": True, "plan_cost": 12.5, "wall_time": 0.25,
+                "actions_count": 7}
+
+    bench = Benchmark(fn=fn, name="demo::s02_two_robots")
+    bench.add_cases(cases)
+    return bench
+
+
+def test_main_runs_the_case_you_asked_for(playground, monkeypatch):
+    from railroad import tutorial
 
     monkeypatch.chdir(playground.root)
-    assert format_command(demo_argv(playground), playground.root) == "python demo.py"
+    seen = []
+    bench = _fake_benchmark([{"num_robots": 2}, {"num_robots": 1},
+                             {"num_robots": 3}], seen)
+    tutorial.main(bench, ["--case", "2"])
+
+    assert len(seen) == 1
+    assert seen[0].case_idx == 2
+    assert seen[0].num_robots == 3
+    # `live` is what tells the dashboard somebody is watching.
+    assert seen[0].live is True
 
 
-def test_bare_media_names_land_where_the_dashboard_serves_them(playground):
-    assert commands._media_path(playground, "house.mp4") == "tutorial-media/house.mp4"
-    assert commands._media_path(playground, "/tmp/x.mp4") == "/tmp/x.mp4"
-    assert commands._media_path(playground, "out/x.mp4") == "out/x.mp4"
+def test_main_defaults_to_case_zero(playground, monkeypatch):
+    from railroad import tutorial
+
+    monkeypatch.chdir(playground.root)
+    seen = []
+    tutorial.main(_fake_benchmark([{"num_robots": 2}, {"num_robots": 1}], seen), [])
+    assert seen[0].num_robots == 2, "case 0 is the configuration the step is about"
 
 
-def test_pane_panel_shows_the_step_and_the_keys(playground, console):
-    from railroad.tutorial._watch import KEYMAP, Pane
+def test_main_rejects_a_case_that_does_not_exist(playground, monkeypatch):
+    from railroad import tutorial
 
-    pane = Pane(console, playground)
-    console.print(pane.panel())
-    text = console.export_text()
-    step = get_step(playground.current_step_id)
-    assert step["title"] in text
-    for key, name in KEYMAP:
-        assert name in text, f"missing key {key} ({name})"
-    assert "run" in text
+    monkeypatch.chdir(playground.root)
+    with pytest.raises(SystemExit):
+        tutorial.main(_fake_benchmark([{"num_robots": 2}], []), ["--case", "9"])
 
 
-def test_pane_asks_for_a_manual_run_once_edited(playground, console):
-    """Saving must not start a run on its own; it asks."""
-    from railroad.tutorial._watch import Pane
+def test_main_lists_the_cases_without_running_them(playground, monkeypatch, capsys):
+    from railroad import tutorial
 
-    pane = Pane(console, playground)
-    console.print(pane.panel())
-    assert "press r to run" not in console.export_text()
-
-    pane.edited = True
-    fresh = Console(record=True, width=100, force_terminal=False)
-    fresh.print(pane.panel())
-    assert "press r to run" in fresh.export_text()
+    monkeypatch.chdir(playground.root)
+    seen = []
+    tutorial.main(_fake_benchmark([{"num_robots": 2}, {"num_robots": 1}], seen),
+                  ["--list"])
+    assert seen == []
+    out = capsys.readouterr().out
+    assert "num_robots=2" in out and "num_robots=1" in out
 
 
-def test_watch_refuses_without_a_terminal(playground, console, monkeypatch):
-    from railroad.tutorial import _watch
+def test_main_files_a_record_under_the_step_the_benchmark_names(playground, monkeypatch):
+    from railroad import tutorial
 
-    monkeypatch.setattr(_watch.sys, "stdin", io.StringIO())
-    with pytest.raises(_watch.NotATerminal, match="tutorial run"):
-        _watch.watch(console, playground)
+    monkeypatch.chdir(playground.root)
+    tutorial.main(_fake_benchmark([{"num_robots": 2}], []), [])
+    records = playground.read_runs()
+    assert records[-1]["step"] == "02", "the step id comes from the benchmark name"
+    assert records[-1]["cost"] == 12.5
+    assert records[-1]["goal_reached"] is True
+
+
+def test_bare_media_names_land_where_the_dashboard_serves_them(playground, monkeypatch):
+    from railroad import tutorial
+    from railroad.bench.dashboard import media
+
+    monkeypatch.chdir(playground.root)
+    seen = []
+    tutorial.main(_fake_benchmark([{"num_robots": 2}], seen),
+                  ["--video", "house.mp4", "--plot", "/tmp/elsewhere.png"])
+    assert seen[0].video == "media/house.mp4"
+    assert seen[0].plot == "/tmp/elsewhere.png", "an explicit path is left alone"
+    assert media.media_dir() == playground.media_dir
+
+
+# -- isolation ---------------------------------------------------------------
+
+
+def test_init_links_the_resources_and_makes_a_media_dir(tmp_path, monkeypatch):
+    """The playground is self-contained; only the ProcTHOR scenes are borrowed."""
+    home = tmp_path / "home"
+    (home / "resources" / "procthor-10k").mkdir(parents=True)
+    monkeypatch.chdir(home)
+
+    playground = init_playground(home / "railroad-tutorial")
+    assert playground.media_dir.is_dir()
+    assert playground.resources_dir.is_symlink()
+    assert (playground.resources_dir / "procthor-10k").is_dir()
+
+
+def test_init_survives_having_no_resources_to_link(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    playground = init_playground(tmp_path / "railroad-tutorial")
+    assert not playground.resources_dir.exists()
 
 
 def test_every_step_declares_a_problem_except_the_primer():

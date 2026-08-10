@@ -34,6 +34,5 @@ mlflow.db
 .worktrees/
 .benchmark_cache/
 
-# Scaffolded tutorial playgrounds
+# Scaffolded tutorial playgrounds (media, mlflow.db and mlruns/ live inside)
 /railroad-tutorial/
-/tutorial-media/

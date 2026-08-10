@@ -1,17 +1,21 @@
 """The tutorial's commands, free of any CLI framework.
 
-``railroad.cli`` is a thin click wrapper over these; the watch pane calls the
-same functions when you press a key. Keeping them here means the two entry
-points cannot drift, and the interesting logic is testable without a terminal.
+``railroad.cli`` is a thin click wrapper over these. Keeping the logic here
+means it is testable without a terminal.
+
+Nothing in this module runs a demo, a sweep or a dashboard. Those are ordinary
+commands, and :func:`cmd_card` prints them for the step you are on; a wrapper
+would only teach the audience the wrapper. What is left is the two jobs a
+script cannot do for itself: saying what to type, and moving ``demo.py`` from
+one step to the next without losing what you typed.
 """
 
 from __future__ import annotations
 
 import shutil
-import subprocess
 import sys
 from pathlib import Path
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence
 
 from rich.console import Console
 from rich.markup import escape
@@ -25,66 +29,79 @@ from ._playground import (
     find_playground,
     init_playground,
 )
-from ._run import (
-    DEFAULT_PARALLEL,
-    EXPERIMENT,
-    RunResult,
-    dashboard_argv,
-    dashboard_urls,
-    demo_argv,
-    editor_command,
-    format_command,
-    open_browser,
-    run_demo,
-    run_sweep,
-    start_dashboard,
-    sweep_argv,
-)
-from ._steps import STEPS, get_step, neighbour, step_index
+from ._steps import STEPS, command_lines, get_step, neighbour, step_index
 
 Ask = Callable[[str], str]
 """Prompt the presenter; return ``"yes"``, ``"no"`` or ``"force"``."""
 
 
 def _plain_ask(prompt: str) -> str:
-    """Line-based confirmation, for the non-interactive CLI entry points."""
     reply = input(f"{prompt} [y/N/f] ").strip().lower()
     return {"y": "yes", "yes": "yes", "f": "force"}.get(reply, "no")
 
 
-# -- status ------------------------------------------------------------------
+def _local_edits(playground: Playground) -> Optional[tuple[int, int]]:
+    """``(added, removed)`` against this step's snapshot, or ``None`` if clean."""
+    pristine = playground.pristine_text(playground.current_step_id)
+    current = playground.demo.read_text()
+    if current == pristine:
+        return None
+    return adv.diff_stat(pristine, current)
 
 
-def cmd_status(console: Console, playground: Optional[Playground] = None) -> None:
-    """Where we are and what the steps are."""
+def _latest_runs(playground: Playground) -> Dict[str, dict]:
+    """The most recent recorded run of each step."""
+    latest: Dict[str, dict] = {}
+    for record in playground.read_runs():
+        latest[record.get("step", "??")] = record
+    return latest
+
+
+# -- the card ----------------------------------------------------------------
+
+
+def cmd_card(console: Console, playground: Optional[Playground] = None) -> None:
+    """Where you are, and what to type. The default command.
+
+    Deliberately how-to and nothing else: no talking points, no rationale.
+    Those are ``notes``, which is a different question and a different command.
+    """
     playground = playground or find_playground()
-    current = playground.current_step_id
-    console.print(f"[bold]playground[/bold]  {playground.root}")
+    step = get_step(playground.current_step_id)
+    position = step_index(step["id"]) + 1
+
+    console.print(f"[bold]step {step['id']} of {len(STEPS):02d}[/bold] · "
+                  f"{escape(step['title'])}")
+    console.print(f"  [dim]{escape(step['point'])}[/dim]")
+    if Path.cwd().resolve() != playground.root:
+        console.print(f"  [yellow]cd {playground.root}[/yellow]  "
+                      f"[dim]these commands assume you are in there[/dim]")
     console.print()
-    width = max(len(step["title"]) for step in STEPS) + 2
-    for step in STEPS:
-        marker = "[bold green]>[/bold green]" if step["id"] == current else " "
-        style = "bold" if step["id"] == current else "dim"
-        title = escape(step["title"]).ljust(width)
-        console.print(f" {marker} [{style}]{step['id']}  {title}"
-                      f"{escape(step['point'])}[/{style}]")
+
+    for label, command, comment in command_lines(step):
+        # A trailing '#' comment is both an annotation and still a line you can
+        # select and run. soft_wrap keeps rich from inserting newlines into it.
+        note = f"  [dim]# {escape(comment)}[/dim]" if comment else ""
+        console.print(f"  [bold]{label:<10}[/bold]{escape(command)}{note}",
+                      soft_wrap=True)
+
     console.print()
-    edits = playground.demo.read_text() != playground.pristine_text(current)
+    edits = _local_edits(playground)
     if edits:
-        added, removed = adv.diff_stat(
-            playground.pristine_text(current), playground.demo.read_text()
-        )
-        console.print(f"[yellow]demo.py has local edits (+{added} -{removed})[/yellow]")
+        console.print(f"  [yellow]demo.py has local edits "
+                      f"(+{edits[0]} -{edits[1]})[/yellow]  "
+                      f"[dim]they survive 'next'; 'diff' shows them[/dim]")
     stale = _stale_snapshots(playground)
     if stale:
         console.print(
-            f"[yellow]{len(stale)} snapshot(s) differ from the installed "
+            f"  [yellow]{len(stale)} snapshot(s) differ from the installed "
             f"package ({', '.join(stale)})[/yellow]"
         )
-        console.print("[dim]The playground is frozen on purpose, so a talk cannot "
-                      "change under you. 'railroad tutorial init --force' takes "
-                      "the new ones.[/dim]")
-    console.print("Run [bold]railroad tutorial watch[/bold] beside your editor.")
+        console.print("  [dim]The playground is frozen on purpose, so a talk "
+                      "cannot change under you. 'railroad tutorial init "
+                      "--force' takes the new ones.[/dim]")
+    coming = "peek" if position < len(STEPS) else "steps"
+    console.print(f"  [dim]why: 'tutorial notes'   next: 'tutorial {coming}'[/dim]")
 
 
 def _stale_snapshots(playground: Playground) -> List[str]:
@@ -104,66 +121,85 @@ def _stale_snapshots(playground: Playground) -> List[str]:
 def cmd_init(console: Console, directory: Optional[str], force: bool) -> None:
     root = Path(directory) if directory else Path.cwd() / DEFAULT_DIRNAME
     playground = init_playground(root, force=force)
+    try:
+        where = playground.root.relative_to(Path.cwd())
+    except ValueError:
+        where = playground.root
     console.print(f"[green]scaffolded[/green] {playground.root}")
-    console.print(f"  {playground.demo.name} is on step {playground.current_step_id} "
-                  f"({get_step(playground.current_step_id)['title']})")
+    if playground.resources_dir.is_symlink():
+        console.print("  [dim]resources/ linked, so the ProcTHOR scenes are "
+                      "found from in there[/dim]")
     console.print()
-    console.print("Open it in your editor with (global-auto-revert-mode 1), then:")
-    console.print("  [bold]railroad tutorial watch[/bold]")
+    console.print(f"  [bold]cd {where}[/bold]   "
+                  "[dim]everything runs from inside the playground[/dim]")
+    console.print("  [bold]railroad tutorial[/bold]   "
+                  "[dim]what step you are on, and what to type[/dim]")
 
 
-# -- running -----------------------------------------------------------------
+# -- reference and explanation -----------------------------------------------
 
 
-def _echo(console: Console, argv: Sequence[str], cwd: Optional[Path] = None) -> None:
-    """Show the command before running it.
+def cmd_steps(console: Console, playground: Optional[Playground] = None) -> None:
+    """The whole arc, with the last recorded cost of each step."""
+    playground = playground or find_playground()
+    current = playground.current_step_id
+    latest = _latest_runs(playground)
 
-    Nothing the tutorial does is a special mode -- it is the ordinary CLI with
-    ordinary arguments, and the fastest way to make that believable is to print
-    the line you could have typed yourself.
+    table = Table(box=None, pad_edge=False)
+    for column in ("", "step", "", "cost", "Δ", "sweep"):
+        table.add_column(column, overflow="fold")
 
-    ``soft_wrap`` leaves the wrapping to the terminal: rich would otherwise
-    break a long command across lines by inserting newlines into it, and the
-    whole point is that you can select the line and run it.
-    """
-    console.print(f"[dim]$ {escape(format_command(argv, cwd))}[/dim]",
-                  soft_wrap=True)
+    previous: Optional[float] = None
+    previous_problem: Optional[str] = None
+    for step in STEPS:
+        record = latest.get(step["id"], {})
+        cost = record.get("cost")
+        # A delta across a change of problem would be meaningless: step 05 moves
+        # to a bigger house, so its cost has nothing to do with step 04's.
+        delta = ""
+        if (previous is not None and isinstance(cost, (int, float))
+                and step["problem"] == previous_problem):
+            change = cost - previous
+            delta = (f"[green]{change:+.1f}[/green]" if change < 0
+                     else f"[red]{change:+.1f}[/red]")
+        if isinstance(cost, (int, float)):
+            previous, previous_problem = cost, step["problem"]
+
+        style = "bold" if step["id"] == current else "dim"
+        needs = "  [procthor]" if step["requires"] else ""
+        table.add_row(
+            "[bold green]>[/bold green]" if step["id"] == current else " ",
+            f"[{style}]{step['id']}[/{style}]",
+            f"[{style}]{escape(step['title'] + needs)}[/{style}]",
+            f"{cost:.1f}s" if isinstance(cost, (int, float)) else "",
+            delta,
+            f"[dim]{escape(step['sweep'])}[/dim]",
+        )
+    console.print(table)
 
 
-def _media_path(playground: Playground, name: str) -> str:
-    """Put a bare filename where the dashboard will serve it.
-
-    ``--video house.mp4`` should turn up at /media/ without anyone having to
-    know the directory; an explicit path is left alone.
-    """
-    if Path(name).parent != Path("."):
-        return name
-    return str(playground.media_dir.relative_to(playground.root) / name)
-
-
-def cmd_run(
+def cmd_notes(
     console: Console,
+    step_id: Optional[str] = None,
     playground: Optional[Playground] = None,
-    *,
-    video: Optional[str] = None,
-    plot: Optional[str] = None,
-) -> RunResult:
+) -> None:
+    """Why this step exists -- the talking points, so nothing is memorised."""
     playground = playground or find_playground()
-    extra: List[str] = []
-    if video:
-        extra += ["--video", _media_path(playground, video)]
-    if plot:
-        extra += ["--plot", _media_path(playground, plot)]
-    _echo(console, demo_argv(playground, extra), playground.root)
-    result = run_demo(playground, extra)
-    if not result.ok:
-        console.print(f"[red]demo.py exited {result.returncode}[/red]")
-    return result
-
-
-def cmd_edit(console: Console, playground: Optional[Playground] = None) -> None:
-    playground = playground or find_playground()
-    subprocess.run(editor_command(playground.demo))
+    step = get_step(step_id or playground.current_step_id)
+    console.print(f"[bold]{step['id']} · {escape(step['title'])}[/bold]")
+    console.print(f"  {escape(step['point'])}")
+    console.print()
+    # A table rather than print(f"· {note}") purely for the hanging indent: a
+    # wrapped talking point that starts again at column 0 is hard to scan.
+    bullets = Table(box=None, pad_edge=False, show_header=False)
+    bullets.add_column(width=3)
+    bullets.add_column(overflow="fold")
+    for note in step["notes"]:
+        bullets.add_row("  ·", escape(note))
+    console.print(bullets)
+    if step["sweep"]:
+        console.print()
+        console.print(f"  [dim]sweep: {escape(step['sweep'])}[/dim]")
 
 
 # -- moving between steps ----------------------------------------------------
@@ -186,10 +222,6 @@ def render_patch(
     console.rule(f"step {to_id} · {escape(to_step['title'])}  (+{added} −{removed})")
     console.print(adv.colorize(diff))
     console.print(f"[dim]{escape(to_step['point'])}[/dim]")
-    for note in to_step["notes"]:
-        console.print(f"  [dim]· {escape(note)}[/dim]")
-    if to_step["sweep"]:
-        console.print(f"  [dim]sweep: {escape(to_step['sweep'])}[/dim]")
 
 
 def _warn_about_extras(console: Console, step_id: str) -> None:
@@ -209,6 +241,7 @@ def _warn_about_extras(console: Console, step_id: str) -> None:
 
 
 def cmd_peek(console: Console, playground: Optional[Playground] = None) -> None:
+    """The next patch and why it matters, without applying it."""
     playground = playground or find_playground()
     current = playground.current_step_id
     upcoming = neighbour(current, +1)
@@ -216,6 +249,8 @@ def cmd_peek(console: Console, playground: Optional[Playground] = None) -> None:
         console.print("[yellow]already on the last step[/yellow]")
         return
     render_patch(console, playground, current, upcoming["id"])
+    console.print()
+    cmd_notes(console, upcoming["id"], playground)
 
 
 def cmd_goto(
@@ -227,6 +262,7 @@ def cmd_goto(
     force: bool = False,
     editor_sync: bool = True,
     show_patch: bool = True,
+    show_card: bool = True,
 ) -> bool:
     """Show the patch, confirm, then merge it into ``demo.py``.
 
@@ -276,6 +312,9 @@ def cmd_goto(
         console.print(f"[green]{moved}[/green]  (your local edits were merged in)")
     else:
         console.print(f"[green]{moved}[/green]")
+    if show_card:
+        console.print()
+        cmd_card(console, playground)
     return True
 
 
@@ -335,108 +374,6 @@ def cmd_undo(console: Console, playground: Optional[Playground] = None) -> None:
     console.print(f"  now on step {playground.current_step_id}")
 
 
-# -- benchmarks --------------------------------------------------------------
-
-
-def cmd_bench(
-    console: Console,
-    *,
-    playground: Optional[Playground] = None,
-    parallel: int = DEFAULT_PARALLEL,
-    repeat_max: Optional[int] = None,
-    dry_run: bool = False,
-) -> RunResult:
-    playground = playground or find_playground()
-    step = get_step(playground.current_step_id)
-    if not step["sweep"]:
-        console.print(f"[yellow]step {step['id']} has no sweep[/yellow]")
-        return RunResult(0, 0.0)
-    console.print(f"[bold]sweep[/bold] {escape(step['sweep'])}  "
-                  f"[dim]({parallel} workers → experiment {EXPERIMENT})[/dim]")
-    _echo(console, sweep_argv(playground, parallel=parallel,
-                              repeat_max=repeat_max, dry_run=dry_run),
-          playground.root)
-    result = run_sweep(
-        playground, parallel=parallel, repeat_max=repeat_max, dry_run=dry_run
-    )
-    if not result.ok:
-        console.print(f"[red]sweep exited {result.returncode}[/red]")
-    return result
-
-
-def cmd_dashboard(console: Console, playground: Optional[Playground] = None) -> None:
-    playground = playground or find_playground()
-    _echo(console, dashboard_argv(), playground.root)
-    start_dashboard(playground)
-    console.print("[green]dashboard[/green]  "
-                  "[dim](this playground's results only)[/dim]")
-    for line in dashboard_urls():
-        console.print(f"[dim]{escape(line)}[/dim]")
-    console.print(f"[dim]log: {playground.root / 'dashboard.log'}[/dim]")
-    open_browser()
-
-
-def cmd_compare(console: Console, playground: Optional[Playground] = None) -> None:
-    """Most recent run of each step, with the change in plan cost."""
-    playground = playground or find_playground()
-    runs = playground.read_runs()
-    if not runs:
-        console.print("[yellow]no runs recorded yet[/yellow]")
-        return
-
-    latest = {}
-    for record in runs:
-        latest[record.get("step", "??")] = record
-
-    def order(step_id: str) -> int:
-        try:
-            return step_index(step_id)
-        except (KeyError, ValueError):
-            return len(STEPS)
-
-    table = Table(box=None, pad_edge=False)
-    for column in ("step", "", "cost", "Δ", "actions", "wall", ""):
-        table.add_column(column)
-
-    previous: Optional[float] = None
-    previous_problem: Optional[str] = None
-    for step_id in sorted(latest, key=order):
-        record = latest[step_id]
-        cost = record.get("cost")
-        known = order(step_id) < len(STEPS)
-        step = get_step(step_id) if known else None
-        problem = step["problem"] if step else None
-
-        # A delta across a change of problem would be meaningless: step 05 moves
-        # to a bigger house, so its cost has nothing to do with step 04's.
-        delta = ""
-        comparable = (
-            previous is not None
-            and problem is not None
-            and problem == previous_problem
-            and isinstance(cost, (int, float))
-        )
-        if comparable:
-            change = cost - previous
-            delta = (f"[green]{change:+.1f}[/green]" if change < 0
-                     else f"[red]{change:+.1f}[/red]")
-
-        wall = record.get("wall")
-        table.add_row(
-            step_id,
-            escape(step["title"]) if step else "",
-            f"{cost:.1f}s" if isinstance(cost, (int, float)) else "-",
-            delta,
-            str(len(record.get("actions", []))),
-            f"{wall:.1f}s" if isinstance(wall, (int, float)) else "-",
-            "" if record.get("goal_reached") else "[red]goal not reached[/red]",
-        )
-        if isinstance(cost, (int, float)):
-            previous = cost
-            previous_problem = problem
-    console.print(table)
-
-
 # -- pre-flight --------------------------------------------------------------
 
 
@@ -453,12 +390,10 @@ def cmd_doctor(console: Console) -> bool:
     except PlaygroundError:
         playground = None
 
-    # The playground keeps its own mlflow.db and media; what it needs from out
-    # here is the ProcTHOR resource tree.
     resources = playground.resources_dir if playground else cwd / "resources"
     record(True, f"working directory: {cwd}",
-           "the tutorial runs from its playground and keeps its results there; "
-           f"ProcTHOR scenes are read from {resources}")
+           "run everything from inside the playground: mlflow.db, mlruns/ and "
+           "media/ are all resolved from here")
 
     try:
         import railroad.bench  # noqa: F401
@@ -479,8 +414,8 @@ def cmd_doctor(console: Console) -> bool:
                            for p in cache.glob("scene_*.pkl"))
             detail = (
                 f"cached scenes: {', '.join(seeds)}" if seeds
-                else "no cached scenes -- the first load starts Unity and "
-                     "needs a GL context"
+                else f"no cached scenes under {cache} -- the first load starts "
+                     "Unity and needs a GL context"
             )
             record(bool(seeds), "railroad[procthor] installed", detail)
         else:
@@ -490,16 +425,16 @@ def cmd_doctor(console: Console) -> bool:
     record(shutil.which("git") is not None, "git on PATH",
            "used to merge your live edits when advancing a step")
     record(shutil.which("ffmpeg") is not None, "ffmpeg on PATH",
-           "needed only for --save-video")
+           "needed only for --video")
     emacs = shutil.which("emacsclient")
     record(True, f"emacsclient: {'found' if emacs else 'not found'}",
            "optional; buffers still refresh via global-auto-revert-mode")
     record(sys.stdin.isatty() and sys.stdout.isatty(), "attached to a terminal",
-           "the live dashboard and the watch pane both need one")
+           "the live planner dashboard needs one")
 
     if playground is not None:
         record(True, f"playground: {playground.root}",
-               "its own mlflow.db, mlruns/ and tutorial-media/ live here")
+               "its own mlflow.db, mlruns/ and media/ live here")
     else:
         record(False, "no playground", "run 'railroad tutorial init'")
 

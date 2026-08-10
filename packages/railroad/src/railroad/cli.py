@@ -278,7 +278,7 @@ def tutorial(ctx: click.Context) -> None:
     """A guided, terminal-only tour driven from one editable file."""
     if ctx.invoked_subcommand is None:
         from railroad.tutorial import commands
-        _tutorial_guard(commands.cmd_status)(_tutorial_console())
+        _tutorial_guard(commands.cmd_card)(_tutorial_console())
 
 
 @tutorial.command("init")
@@ -289,54 +289,6 @@ def tutorial_init(directory: str | None, force: bool) -> None:
     """Scaffold a playground (default: ./railroad-tutorial)."""
     from railroad.tutorial import commands
     _tutorial_guard(commands.cmd_init)(_tutorial_console(), directory, force)
-
-
-@tutorial.command("watch")
-@click.option("--parallel", type=int, default=None,
-              help="Workers for the sweep key (default: 12, below the core count "
-                   "so the machine stays usable while presenting)")
-@click.option("--no-editor-sync", is_flag=True, default=False,
-              help="Do not ask emacsclient to reload the buffer and move point")
-def tutorial_watch(parallel: int | None, no_editor_sync: bool) -> None:
-    """Re-run demo.py on save; single keys drive the tutorial."""
-    from railroad.tutorial import _watch, find_playground
-    from railroad.tutorial._run import DEFAULT_PARALLEL
-
-    @_tutorial_guard
-    def go() -> None:
-        try:
-            _watch.watch(
-                _tutorial_console(),
-                find_playground(),
-                parallel=parallel if parallel is not None else DEFAULT_PARALLEL,
-                editor_sync=not no_editor_sync,
-            )
-        except _watch.NotATerminal as exc:
-            raise click.ClickException(str(exc)) from exc
-
-    go()
-
-
-@tutorial.command("run")
-@click.option("--video", type=click.Path(), default=None,
-              help="Render an MP4 of the run (steps that support it)")
-@click.option("--plot", type=click.Path(), default=None,
-              help="Save a trajectory plot of the run")
-def tutorial_run(video: str | None, plot: str | None) -> None:
-    """Run demo.py once."""
-    from railroad.tutorial import commands
-    result = _tutorial_guard(commands.cmd_run)(
-        _tutorial_console(), video=video, plot=plot
-    )
-    if not result.ok:
-        raise SystemExit(result.returncode)
-
-
-@tutorial.command("edit")
-def tutorial_edit() -> None:
-    """Open demo.py in $VISUAL/$EDITOR."""
-    from railroad.tutorial import commands
-    _tutorial_guard(commands.cmd_edit)(_tutorial_console())
 
 
 def _advance_options(fn):
@@ -402,34 +354,19 @@ def tutorial_undo() -> None:
     _tutorial_guard(commands.cmd_undo)(_tutorial_console())
 
 
-@tutorial.command("bench")
-@click.option("--parallel", type=int, default=None, help="Number of workers")
-@click.option("--repeat-max", type=int, default=None, help="Cap repeats per case")
-@click.option("--dry-run", is_flag=True, default=False, help="Show the plan only")
-def tutorial_bench(parallel: int | None, repeat_max: int | None, dry_run: bool) -> None:
-    """Run the current step's benchmark sweep."""
+@tutorial.command("notes")
+@click.argument("step", required=False)
+def tutorial_notes(step: str | None) -> None:
+    """Why this step exists: the talking points behind it."""
     from railroad.tutorial import commands
-    from railroad.tutorial._run import DEFAULT_PARALLEL
-    _tutorial_guard(commands.cmd_bench)(
-        _tutorial_console(),
-        parallel=parallel if parallel is not None else DEFAULT_PARALLEL,
-        repeat_max=repeat_max,
-        dry_run=dry_run,
-    )
+    _tutorial_guard(commands.cmd_notes)(_tutorial_console(), step)
 
 
-@tutorial.command("dashboard")
-def tutorial_dashboard() -> None:
-    """Start the benchmark dashboard in the background."""
+@tutorial.command("steps")
+def tutorial_steps() -> None:
+    """The whole arc, with the last recorded cost of each step."""
     from railroad.tutorial import commands
-    _tutorial_guard(commands.cmd_dashboard)(_tutorial_console())
-
-
-@tutorial.command("compare")
-def tutorial_compare() -> None:
-    """Most recent run of each step, with the change in plan cost."""
-    from railroad.tutorial import commands
-    _tutorial_guard(commands.cmd_compare)(_tutorial_console())
+    _tutorial_guard(commands.cmd_steps)(_tutorial_console())
 
 
 @tutorial.command("doctor")

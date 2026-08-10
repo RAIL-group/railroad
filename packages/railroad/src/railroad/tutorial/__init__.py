@@ -1,45 +1,68 @@
 """A guided, terminal-only tour of railroad, driven from one editable file.
 
-``railroad tutorial init`` scaffolds a playground whose ``demo.py`` is the only
-file you open. ``railroad tutorial watch`` runs beside your editor: it re-runs
-``demo.py`` whenever you save it, and single keypresses advance through the
-steps, fire the current step's benchmark sweep, and open the dashboard.
+``railroad tutorial init`` scaffolds a playground; you ``cd`` into it and work
+there. ``demo.py`` is the only file you open, and everything you run is an
+ordinary command -- ``python demo.py``, ``railroad benchmarks run``,
+``railroad benchmarks dashboard`` -- printed for you by ``railroad tutorial``
+rather than hidden behind a wrapper.
 
-Advancing shows the canonical diff first -- that diff is the unit of the talk --
-and then three-way merges it into whatever you currently have on disk, so a
-value you tuned live survives moving on. See :mod:`railroad.tutorial._advance`.
+The tutorial itself does the one thing a script cannot do for you: advancing.
+``railroad tutorial next`` shows the canonical diff between two steps -- that
+diff is the unit of the talk -- and then three-way merges it into whatever you
+currently have on disk, so a value you tuned live survives moving on. See
+:mod:`railroad.tutorial._advance`.
 
-Step snapshots live in ``steps/`` and are plain, runnable Python; nothing in
-them depends on the tutorial machinery except the closing :func:`report` call.
+Step snapshots in ``steps/`` are plain, runnable Python. What they import from
+here is plumbing only (:mod:`railroad.tutorial._harness`): a dashboard that
+knows whether anyone is watching, and a ``main`` that runs one case of the
+step's own benchmark sweep by hand.
 """
 
+from ._harness import dashboard, main, result, show_plots
 from ._playground import (
     ENV_DIR,
     DEFAULT_DIRNAME,
+    MEDIA_DIR,
     Playground,
     PlaygroundError,
     find_playground,
     init_playground,
     is_playground,
 )
-from ._media import media_args
-from ._report import report
-from ._steps import STEPS, StepInfo, get_step, neighbour, step_ids, step_index
+from ._steps import (
+    DEFAULT_PARALLEL,
+    EXPERIMENT,
+    STEPS,
+    Command,
+    StepInfo,
+    command_lines,
+    get_step,
+    neighbour,
+    step_ids,
+    step_index,
+)
 
 __all__ = [
+    "Command",
     "DEFAULT_DIRNAME",
+    "DEFAULT_PARALLEL",
     "ENV_DIR",
+    "EXPERIMENT",
+    "MEDIA_DIR",
     "Playground",
     "PlaygroundError",
     "STEPS",
     "StepInfo",
+    "command_lines",
+    "dashboard",
     "find_playground",
     "get_step",
     "init_playground",
     "is_playground",
-    "media_args",
+    "main",
     "neighbour",
-    "report",
+    "result",
+    "show_plots",
     "step_ids",
     "step_index",
 ]

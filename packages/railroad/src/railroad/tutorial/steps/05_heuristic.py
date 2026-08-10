@@ -18,19 +18,16 @@ Search budget is pinned low on purpose: at 4000 iterations MCTS papers over a
 mediocre value function, and the differences vanish.
 """
 
-import time
 from functools import reduce
 from operator import and_
 
 import numpy as np
-from rich.console import Console
 
+from railroad import tutorial
 from railroad.bench import BenchmarkCase, benchmark
 from railroad.core import Effect, Fluent as F, Operator, State, get_action_by_name
-from railroad.dashboard import PlannerDashboard
 from railroad.environment import ObjectSearchEnvironment
 from railroad.planner import MCTSPlanner
-from railroad.tutorial import report
 
 # A bigger house, because the four-room version is too easy to tell value
 # functions apart on: at any budget worth using, every mix finds the same plan.
@@ -91,25 +88,26 @@ class HouseSearch(ObjectSearchEnvironment):
             ],
         )
         # The lock makes searching a room exclusive for as long as it takes.
-        locked = [F("not lock-search ?loc")] if self.use_search_lock else []
+        locked = [~F("lock-search ?loc")] if self.use_search_lock else []
         starting = {~F("free ?r")}
         finishing = {F("free ?r"), F("searched ?loc ?obj")}
         if self.use_search_lock:
             starting.add(F("lock-search ?loc"))
             finishing.add(~F("lock-search ?loc"))
 
-        # Look for one object in one place. The branch that finds it is what the
-        # planner reasons about; the environment decides which branch actually
-        # fires, from TRUE_LOCATIONS.
+        # Look for one object in one place. `prob_effects` is the whole of the
+        # uncertainty: two branches, weighted, and whichever fires is applied
+        # after this effect's own fluents. The planner reasons over both; the
+        # environment picks the real one from TRUE_LOCATIONS.
         search = Operator(
             name="search",
             parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
             preconditions=[
                 F("at ?r ?loc"),
                 F("free ?r"),
-                F("not revealed ?loc"),
-                F("not searched ?loc ?obj"),
-                F("not found ?obj"),
+                ~F("revealed ?loc"),
+                ~F("searched ?loc ?obj"),
+                ~F("found ?obj"),
                 *locked,
             ],
             effects=[
@@ -130,7 +128,8 @@ class HouseSearch(ObjectSearchEnvironment):
         return [move, search]
 
 
-def build(num_robots: int = NUM_ROBOTS, use_search_lock: bool = USE_SEARCH_LOCK):
+def build(num_robots: int = NUM_ROBOTS,
+          use_search_lock: bool = USE_SEARCH_LOCK):
     """The problem: who is around, what we are after, and what we already know."""
     robots = [f"robot{i + 1}" for i in range(num_robots)]
     # 'revealed' means "nothing left to learn here", so the start counts as done.
@@ -155,10 +154,10 @@ def build(num_robots: int = NUM_ROBOTS, use_search_lock: bool = USE_SEARCH_LOCK)
 
 
 def solve(
-    env, goal, dashboard, *,
+    env, goal, view, *,
     iterations: int,
     c: float,
-    h_mult: float = 5.0,
+    h_mult: float = 1.0,
     lambda_add: float = 0.5,
     lambda_ff: float = 0.5,
 ) -> bool:
@@ -170,16 +169,13 @@ def solve(
         # lambda_max is the third component (h_max) and defaults to 0; the
         # probabilistic-retry delta rides on top of whatever mix you pick.
         planner = MCTSPlanner(actions, lambda_add=lambda_add, lambda_ff=lambda_ff)
-        name = planner(
-            env.state, goal,
-            max_iterations=iterations, c=c, max_depth=20,
-            heuristic_multiplier=h_mult,
-        )
+        name = planner(env.state, goal, max_iterations=iterations, c=c, max_depth=20,
+                       heuristic_multiplier=h_mult)
         if name == "NONE":
-            dashboard.console.print("[yellow]Planner returned NONE.[/yellow]")
+            view.console.print("[yellow]Planner returned NONE.[/yellow]")
             return False
         env.act(get_action_by_name(actions, name))
-        dashboard.update(planner, name)
+        view.update(planner, name)
     return goal.evaluate(env.state.fluents)
 
 
@@ -187,19 +183,11 @@ def relevant(fluent) -> bool:
     return any(word in fluent.name for word in ("at", "found", "searched"))
 
 
-def demo() -> None:
-    env, goal = build()
-    with PlannerDashboard(goal, env, fluent_filter=relevant) as dashboard:
-        solve(env, goal, dashboard, iterations=SEARCH_BUDGET, c=300,
-              h_mult=5.0, lambda_add=0.5, lambda_ff=0.5)
-    report(dashboard, step="05")
-
-
-if __name__ == "__main__":
-    demo()
-
-
-# ---- sweep: press b ---------------------------------------------------------
+# ---- one function, two ways to run it ---------------------------------------
+# `python demo.py` runs case 0 of the sweep below, live, with the dashboard.
+# `railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
+# times over, in parallel. Same code either way.
+#
 # Three mixes of the relaxation against three multipliers, at a budget small
 # enough that the value function still decides things. Two things to look at:
 # h_mult=1 wins for every mix here (40.1 / 40.9 / 41.8, against 2-8s more at
@@ -215,34 +203,24 @@ if __name__ == "__main__":
     repeat=8,
     timeout=60.0,
 )
-def bench_heuristic(case: BenchmarkCase) -> dict:
+def run(case: BenchmarkCase) -> dict:
     env, goal = build()
-    console = Console(record=True, force_terminal=True, width=120)
-    dashboard = PlannerDashboard(
-        goal, env, fluent_filter=relevant, print_on_exit=False, console=console
-    )
-    started = time.perf_counter()
-    solve(
-        env, goal, dashboard,
-        iterations=case.mcts.iterations, c=case.mcts.c,
-        h_mult=case.mcts.h_mult,
-        lambda_add=case.lambda_add, lambda_ff=case.lambda_ff,
-    )
-    dashboard.print_history()
-    actions = [name for name, _ in dashboard.actions_taken]
-    return {
-        "success": goal.evaluate(env.state.fluents),
-        "plan_cost": float(env.state.time),
-        "wall_time": time.perf_counter() - started,
-        "actions_count": len(actions),
-        "searches": len([n for n in actions if n.startswith("search")]),
-        "log_html": console.export_html(inline_styles=True),
-    }
+    with tutorial.dashboard(case, goal, env, fluent_filter=relevant) as view:
+        solve(env, goal, view,
+              iterations=case.mcts.iterations, c=case.mcts.c,
+              h_mult=case.mcts.h_mult,
+              lambda_add=case.lambda_add, lambda_ff=case.lambda_ff)
+    return tutorial.result(view)
 
 
-bench_heuristic.add_cases([
+run.add_cases([
+    # Case 0 is what `python demo.py` runs: the balanced mix at h_mult=1.
     {"lambda_add": lambda_add, "lambda_ff": lambda_ff,
      "mcts.h_mult": h_mult, "mcts.iterations": SEARCH_BUDGET, "mcts.c": 300}
-    for lambda_add, lambda_ff in ((1.0, 0.0), (0.5, 0.5), (0.0, 1.0))
+    for lambda_add, lambda_ff in ((0.5, 0.5), (1.0, 0.0), (0.0, 1.0))
     for h_mult in (1.0, 2.0, 5.0)
 ])
+
+
+if __name__ == "__main__":
+    tutorial.main(run)

@@ -15,19 +15,16 @@ The flag is here so the sweep can run it both ways. With one robot expect
 nothing to change: a robot cannot contend with itself.
 """
 
-import time
 from functools import reduce
 from operator import and_
 
 import numpy as np
-from rich.console import Console
 
+from railroad import tutorial
 from railroad.bench import BenchmarkCase, benchmark
 from railroad.core import Effect, Fluent as F, Operator, State, get_action_by_name
-from railroad.dashboard import PlannerDashboard
 from railroad.environment import ObjectSearchEnvironment
 from railroad.planner import MCTSPlanner
-from railroad.tutorial import report
 
 LOCATIONS = {
     "living_room": (0.0, 0.0),
@@ -81,25 +78,26 @@ class HouseSearch(ObjectSearchEnvironment):
             ],
         )
         # The lock makes searching a room exclusive for as long as it takes.
-        locked = [F("not lock-search ?loc")] if self.use_search_lock else []
+        locked = [~F("lock-search ?loc")] if self.use_search_lock else []
         starting = {~F("free ?r")}
         finishing = {F("free ?r"), F("searched ?loc ?obj")}
         if self.use_search_lock:
             starting.add(F("lock-search ?loc"))
             finishing.add(~F("lock-search ?loc"))
 
-        # Look for one object in one place. The branch that finds it is what the
-        # planner reasons about; the environment decides which branch actually
-        # fires, from TRUE_LOCATIONS.
+        # Look for one object in one place. `prob_effects` is the whole of the
+        # uncertainty: two branches, weighted, and whichever fires is applied
+        # after this effect's own fluents. The planner reasons over both; the
+        # environment picks the real one from TRUE_LOCATIONS.
         search = Operator(
             name="search",
             parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
             preconditions=[
                 F("at ?r ?loc"),
                 F("free ?r"),
-                F("not revealed ?loc"),
-                F("not searched ?loc ?obj"),
-                F("not found ?obj"),
+                ~F("revealed ?loc"),
+                ~F("searched ?loc ?obj"),
+                ~F("found ?obj"),
                 *locked,
             ],
             effects=[
@@ -120,7 +118,8 @@ class HouseSearch(ObjectSearchEnvironment):
         return [move, search]
 
 
-def build(num_robots: int = NUM_ROBOTS, use_search_lock: bool = USE_SEARCH_LOCK):
+def build(num_robots: int = NUM_ROBOTS,
+          use_search_lock: bool = USE_SEARCH_LOCK):
     """The problem: who is around, what we are after, and what we already know."""
     robots = [f"robot{i + 1}" for i in range(num_robots)]
     # 'revealed' means "nothing left to learn here", so the start counts as done.
@@ -144,7 +143,7 @@ def build(num_robots: int = NUM_ROBOTS, use_search_lock: bool = USE_SEARCH_LOCK)
     return env, goal
 
 
-def solve(env, goal, dashboard, *, iterations: int, c: float) -> bool:
+def solve(env, goal, view, *, iterations: int, c: float) -> bool:
     """Replan every time a robot frees up; return whether the goal was met."""
     for _ in range(MAX_STEPS):
         if goal.evaluate(env.state.fluents):
@@ -153,10 +152,10 @@ def solve(env, goal, dashboard, *, iterations: int, c: float) -> bool:
         planner = MCTSPlanner(actions)
         name = planner(env.state, goal, max_iterations=iterations, c=c, max_depth=20)
         if name == "NONE":
-            dashboard.console.print("[yellow]Planner returned NONE.[/yellow]")
+            view.console.print("[yellow]Planner returned NONE.[/yellow]")
             return False
         env.act(get_action_by_name(actions, name))
-        dashboard.update(planner, name)
+        view.update(planner, name)
     return goal.evaluate(env.state.fluents)
 
 
@@ -164,18 +163,11 @@ def relevant(fluent) -> bool:
     return any(word in fluent.name for word in ("at", "found", "searched"))
 
 
-def demo() -> None:
-    env, goal = build()
-    with PlannerDashboard(goal, env, fluent_filter=relevant) as dashboard:
-        solve(env, goal, dashboard, iterations=4000, c=300)
-    report(dashboard, step="04")
-
-
-if __name__ == "__main__":
-    demo()
-
-
-# ---- sweep: press b ---------------------------------------------------------
+# ---- one function, two ways to run it ---------------------------------------
+# `python demo.py` runs case 0 of the sweep below, live, with the dashboard.
+# `railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
+# times over, in parallel. Same code either way.
+#
 # The A/B. Plan cost alone under-reports the fix: with two robots the wasted
 # search overlaps a useful one, so the makespan barely moves (18.9 -> 19.1) even
 # though a robot-search was thrown away. 'searches' is the honest measure --
@@ -190,30 +182,21 @@ if __name__ == "__main__":
     repeat=8,
     timeout=60.0,
 )
-def bench_search_lock(case: BenchmarkCase) -> dict:
+def run(case: BenchmarkCase) -> dict:
     env, goal = build(case.num_robots, use_search_lock=case.use_search_lock)
-    console = Console(record=True, force_terminal=True, width=120)
-    dashboard = PlannerDashboard(
-        goal, env, fluent_filter=relevant, print_on_exit=False, console=console
-    )
-    started = time.perf_counter()
-    solve(env, goal, dashboard, iterations=case.mcts.iterations, c=case.mcts.c)
-    dashboard.print_history()
-    actions = [name for name, _ in dashboard.actions_taken]
-    searches = [name for name in actions if name.startswith("search")]
-    return {
-        "success": goal.evaluate(env.state.fluents),
-        "plan_cost": float(env.state.time),
-        "wall_time": time.perf_counter() - started,
-        "actions_count": len(actions),
-        "searches": len(searches),
-        "log_html": console.export_html(inline_styles=True),
-    }
+    with tutorial.dashboard(case, goal, env, fluent_filter=relevant) as view:
+        solve(env, goal, view, iterations=case.mcts.iterations, c=case.mcts.c)
+    return tutorial.result(view)
 
 
-bench_search_lock.add_cases([
+run.add_cases([
+    # Case 0 is what `python demo.py` runs: two robots, lock on.
     {"num_robots": num_robots, "use_search_lock": use_search_lock,
      "mcts.iterations": 4000, "mcts.c": 300}
-    for num_robots in (1, 2, 3)
-    for use_search_lock in (False, True)
+    for num_robots in (2, 1, 3)
+    for use_search_lock in (True, False)
 ])
+
+
+if __name__ == "__main__":
+    tutorial.main(run)
