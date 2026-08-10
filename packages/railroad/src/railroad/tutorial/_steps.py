@@ -211,10 +211,17 @@ STEPS: List[StepInfo] = [
             "out the toilet. On 8613 a fork gets 0.825 on the countertop, while a "
             "pen spreads 0.41/0.37/0.36 over three flat surfaces -- which is the "
             "right answer for a pen.",
-            "And it loses to the oracle, which is the honest result: 322.8 vs "
-            "437.4 on 8612, 344.2 vs 554.9 on 8613, where it also finishes only "
-            "two runs in three. The oracle is an upper bound nothing deployable "
-            "can reach; the gap is what the uncertainty costs.",
+            "On 8612 the two are inside the noise of each other, and which one "
+            "looks better depends on the sample: 336.8 vs 339.4 at ten repeats, "
+            "341.8 vs 402.6 at eight. Do not claim a winner there.",
+            "On 8613 the model is clearly worse, and worse in the *tail*: about "
+            "340 against 450-475, standard deviation 24 against 256, and it "
+            "drops a run in eight or ten. A learned belief is not uniformly "
+            "worse; it is occasionally wrong and expensive when it is -- the "
+            "same reason step 05 wanted violins rather than means.",
+            "Worth admitting out loud: at three repeats this first looked like a "
+            "flat 35% penalty on both scenes. It is not. That is the sweep "
+            "earning its keep on the last slide of its own tutorial.",
             "Nothing else changes: the find probability is a callable of "
             "(robot, location, object) either way.",
         ],

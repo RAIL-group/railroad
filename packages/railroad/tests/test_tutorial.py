@@ -5,6 +5,7 @@ presenter is live-editing, so "your edit survived" and "it refused rather than
 mangling" are the properties that matter.
 """
 
+import io
 import json
 import os
 import subprocess
@@ -375,6 +376,41 @@ def test_compare_omits_the_delta_across_a_change_of_problem(playground, console)
     text = console.export_text()
     assert "40.0" in text
     assert "+30.0" not in text
+
+
+def test_pane_panel_shows_the_step_and_the_keys(playground, console):
+    from railroad.tutorial._watch import KEYMAP, Pane
+
+    pane = Pane(console, playground)
+    console.print(pane.panel())
+    text = console.export_text()
+    step = get_step(playground.current_step_id)
+    assert step["title"] in text
+    for key, name in KEYMAP:
+        assert name in text, f"missing key {key} ({name})"
+    assert "run" in text
+
+
+def test_pane_asks_for_a_manual_run_once_edited(playground, console):
+    """Saving must not start a run on its own; it asks."""
+    from railroad.tutorial._watch import Pane
+
+    pane = Pane(console, playground)
+    console.print(pane.panel())
+    assert "press r to run" not in console.export_text()
+
+    pane.edited = True
+    fresh = Console(record=True, width=100, force_terminal=False)
+    fresh.print(pane.panel())
+    assert "press r to run" in fresh.export_text()
+
+
+def test_watch_refuses_without_a_terminal(playground, console, monkeypatch):
+    from railroad.tutorial import _watch
+
+    monkeypatch.setattr(_watch.sys, "stdin", io.StringIO())
+    with pytest.raises(_watch.NotATerminal, match="tutorial run"):
+        _watch.watch(console, playground)
 
 
 def test_every_step_declares_a_problem_except_the_primer():

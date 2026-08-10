@@ -71,7 +71,30 @@ def cmd_status(console: Console, playground: Optional[Playground] = None) -> Non
             playground.pristine_text(current), playground.demo.read_text()
         )
         console.print(f"[yellow]demo.py has local edits (+{added} -{removed})[/yellow]")
+    stale = _stale_snapshots(playground)
+    if stale:
+        console.print(
+            f"[yellow]{len(stale)} snapshot(s) differ from the installed "
+            f"package ({', '.join(stale)})[/yellow]"
+        )
+        console.print("[dim]The playground is frozen on purpose, so a talk cannot "
+                      "change under you. 'railroad tutorial init --force' takes "
+                      "the new ones.[/dim]")
     console.print("Run [bold]railroad tutorial watch[/bold] beside your editor.")
+
+
+def _stale_snapshots(playground: Playground) -> List[str]:
+    """Step ids whose playground copy no longer matches the installed package."""
+    shipped = Path(__file__).parent / "steps"
+    stale = []
+    for step in STEPS:
+        packaged = shipped / step["filename"]
+        local = playground.steps_dir / step["filename"]
+        if not packaged.exists() or not local.exists():
+            continue
+        if packaged.read_bytes() != local.read_bytes():
+            stale.append(step["id"])
+    return stale
 
 
 def cmd_init(console: Console, directory: Optional[str], force: bool) -> None:

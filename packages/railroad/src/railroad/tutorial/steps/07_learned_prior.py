@@ -182,19 +182,25 @@ if __name__ == "__main__":
 
 
 # ---- sweep: press b ---------------------------------------------------------
-# The oracle against the model, on two houses, and the model loses. Measured
-# over 3 repeats: on 8612, 322.8 against 437.4; on 8613, 344.2 against 554.9,
-# and the learned prior finishes only two runs in three. That gap is the price
-# of not knowing -- the hand-tuned prior reads the answer off ground truth, so
-# it is an upper bound nothing deployable can reach. What the sweep measures is
-# how much the uncertainty costs, which is the number worth trying to shrink.
+# The oracle against the model, on two houses -- and a lesson about sample size.
+# At three repeats this looked like a flat 35% penalty on both scenes. It is not:
+#
+#   8612  336.8 vs 339.4 at n=10, but 341.8 vs 402.6 at n=8 -- inside the noise
+#   8613  ~340 vs 450-475, sd 24 vs 256, and the model drops a run in 8-10
+#
+# So the model holds its own where the objects are where you would guess, and
+# what it costs elsewhere is in the tail rather than the mean. That is the shape
+# of a learned belief: not uniformly worse, occasionally wrong and expensive
+# when it is. Same argument for violins over means as step 05.
+#
+# Takes about two minutes at --parallel 8.
 
 @benchmark(
     name="s07_learned_prior",
     description="Search-and-deliver in ProcTHOR homes, ground-truth prior vs the "
                 "packaged learned model.",
     tags=["tutorial"],
-    repeat=3,
+    repeat=8,
     timeout=300.0,
 )
 def bench_learned_prior(case: BenchmarkCase) -> dict:
