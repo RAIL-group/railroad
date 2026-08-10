@@ -184,8 +184,8 @@ def relevant(fluent) -> bool:
 
 
 # ---- one function, two ways to run it ---------------------------------------
-# `python demo.py` runs case 0 of the sweep below, live, with the dashboard.
-# `railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
+# `uv run python demo.py` runs case 0 of the sweep below, live, with the dashboard.
+# `uv run railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
 # times over, in parallel. Same code either way.
 #
 # Three mixes of the relaxation against three multipliers, at a budget small
@@ -214,7 +214,7 @@ def run(case: BenchmarkCase) -> dict:
 
 
 run.add_cases([
-    # Case 0 is what `python demo.py` runs: the balanced mix at h_mult=1.
+    # Case 0 is what `uv run python demo.py` runs: the balanced mix at h_mult=1.
     {"lambda_add": lambda_add, "lambda_ff": lambda_ff,
      "mcts.h_mult": h_mult, "mcts.iterations": SEARCH_BUDGET, "mcts.c": 300}
     for lambda_add, lambda_ff in ((0.5, 0.5), (1.0, 0.0), (0.0, 1.0))

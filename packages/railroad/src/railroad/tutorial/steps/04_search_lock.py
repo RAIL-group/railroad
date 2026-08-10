@@ -164,8 +164,8 @@ def relevant(fluent) -> bool:
 
 
 # ---- one function, two ways to run it ---------------------------------------
-# `python demo.py` runs case 0 of the sweep below, live, with the dashboard.
-# `railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
+# `uv run python demo.py` runs case 0 of the sweep below, live, with the dashboard.
+# `uv run railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
 # times over, in parallel. Same code either way.
 #
 # The A/B. Plan cost alone under-reports the fix: with two robots the wasted
@@ -190,7 +190,7 @@ def run(case: BenchmarkCase) -> dict:
 
 
 run.add_cases([
-    # Case 0 is what `python demo.py` runs: two robots, lock on.
+    # Case 0 is what `uv run python demo.py` runs: two robots, lock on.
     {"num_robots": num_robots, "use_search_lock": use_search_lock,
      "mcts.iterations": 4000, "mcts.c": 300}
     for num_robots in (2, 1, 3)

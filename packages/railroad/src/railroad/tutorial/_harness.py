@@ -1,8 +1,8 @@
 """The plumbing a step file imports, so the rest of it can be language.
 
 Every step is one ``@benchmark`` function serving two callers. Run
-``python demo.py`` and it plans once, live, with the terminal dashboard. Point
-``railroad benchmarks run`` at the same file and it plans every case in the
+``uv run python demo.py`` and it plans once, live, with the terminal dashboard. Point
+``uv run railroad benchmarks run`` at the same file and it plans every case in the
 sweep, many times over, in worker processes with no terminal at all. The three
 helpers here are what differ between those two worlds:
 
@@ -151,7 +151,7 @@ def _announce(step: str, outcome: Dict[str, Any]) -> None:
 def _parse(argv: Optional[Sequence[str]], cases: List[Dict[str, Any]]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run one case of this step live. The sweep over every case "
-                    "is 'railroad benchmarks run -i demo.py --tags tutorial'.",
+                    "is 'uv run railroad benchmarks run -i demo.py --tags tutorial'.",
     )
     parser.add_argument("--case", type=int, default=0, metavar="N",
                         help=f"which case to run (0-{max(len(cases) - 1, 0)})")

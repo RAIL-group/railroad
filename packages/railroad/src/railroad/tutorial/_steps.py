@@ -24,6 +24,14 @@ the machine you are presenting from unusable."""
 DEMO_FILE = "demo.py"
 """The one file you edit."""
 
+RUNNER = "uv run"
+"""Everything in this repository runs through uv, the tutorial included.
+
+Printed commands have to be commands: a card that says ``uv run python demo.py``
+in a checkout where the interpreter lives in a uv-managed environment is
+printing something that does not work.
+"""
+
 MEDIA_DIR = "media"
 """Where plots and videos go, and what the dashboard serves."""
 
@@ -32,7 +40,7 @@ class StepInfo(TypedDict):
     """One step of the tutorial."""
 
     id: str
-    """Two-digit ordinal, also the CLI handle (``railroad tutorial goto 02``)."""
+    """Two-digit ordinal, also the CLI handle (``uv run railroad tutorial goto 02``)."""
 
     title: str
     """Short label, shown wherever the step is named."""
@@ -211,7 +219,7 @@ STEPS: List[StepInfo] = [
             "the containers of a generated home.",
             "This search operator is the one from step 04, lock and all -- and "
             "it is also, line for line, operators.construct_search_operator.",
-            "'python demo.py --video house.mp4' renders the run over the "
+            "'uv run python demo.py --video house.mp4' renders the run over the "
             "scene's top-down view, into media/, which the dashboard serves. "
             "Rendering costs minutes against the run's 30 seconds, so start it "
             "and keep talking -- or record one before the session.",
@@ -276,15 +284,16 @@ def command_lines(step: StepInfo, *, parallel: int = DEFAULT_PARALLEL) -> List[C
     running a sweep. Ordered by how often you want them, and phrased by goal
     rather than by tool.
     """
-    rows = [Command("run it", f"python {DEMO_FILE}", "")]
+    rows = [Command("run it", f"{RUNNER} python {DEMO_FILE}", "")]
     if step["sweep"]:
         rows += [
-            Command("", f"python {DEMO_FILE} --list",
+            Command("", f"{RUNNER} python {DEMO_FILE} --list",
                     "the parameter cases this step sweeps"),
-            Command("", f"python {DEMO_FILE} --case 4", "run one of them, live"),
+            Command("", f"{RUNNER} python {DEMO_FILE} --case 4",
+                    "run one of them, live"),
         ]
     if step["media"]:
-        rows.append(Command("", f"python {DEMO_FILE} --video {step['media']}",
+        rows.append(Command("", f"{RUNNER} python {DEMO_FILE} --video {step['media']}",
                             "...and record it, into media/"))
     if step["sweep"]:
         rows += [
@@ -292,13 +301,13 @@ def command_lines(step: StepInfo, *, parallel: int = DEFAULT_PARALLEL) -> List[C
             # found through entry points, so without a filter the whole repo
             # comes along for the ride.
             Command("sweep it",
-                    f"railroad benchmarks run -i {DEMO_FILE} --tags tutorial "
+                    f"{RUNNER} railroad benchmarks run -i {DEMO_FILE} --tags tutorial "
                     f"--experiment {EXPERIMENT} --parallel {parallel}",
                     step["sweep"]),
-            Command("see it", "railroad benchmarks dashboard",
+            Command("see it", f"{RUNNER} railroad benchmarks dashboard",
                     "this playground's results only"),
         ]
-    rows.append(Command("move on", "railroad tutorial next",
+    rows.append(Command("move on", f"{RUNNER} railroad tutorial next",
                         "shows the patch, then merges your edits"))
     return rows
 

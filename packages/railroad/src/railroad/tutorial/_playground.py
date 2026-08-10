@@ -112,7 +112,8 @@ class Playground:
         path = self.steps_dir / get_step(step_id)["filename"]
         if not path.exists():
             raise PlaygroundError(
-                f"missing snapshot {path}; re-run 'railroad tutorial init --force'"
+                f"missing snapshot {path}; re-run "
+                "'uv run railroad tutorial init --force'"
             )
         return path
 
@@ -173,7 +174,7 @@ def find_playground(explicit: Optional[Path] = None) -> Playground:
         if is_playground(resolved):
             return Playground(resolved.resolve())
     raise PlaygroundError(
-        "no tutorial playground found. Run 'railroad tutorial init' from the "
+        "no tutorial playground found. Run 'uv run railroad tutorial init' from the "
         "repository root -- that is where the ProcTHOR resources are linked "
         f"from -- or point ${ENV_DIR} at an existing one."
     )
@@ -185,32 +186,32 @@ README = """\
 Work from inside this directory. `demo.py` is the only file you edit; keep it
 open with `(global-auto-revert-mode 1)` so it refreshes when a step is applied.
 
-    railroad tutorial            what step you are on, and what to type
+    uv run railroad tutorial            what step you are on, and what to type
 
 Everything you run is an ordinary command. Nothing here is a special mode:
 
-    python demo.py               run it, live
-    python demo.py --list        the parameter cases this step sweeps
-    python demo.py --case 4      run one of them by hand, live
-    python demo.py --video x.mp4 ...and record it, into media/
+    uv run python demo.py               run it, live
+    uv run python demo.py --list        the parameter cases this step sweeps
+    uv run python demo.py --case 4      run one of them by hand, live
+    uv run python demo.py --video x.mp4 ...and record it, into media/
 
-    railroad benchmarks run -i demo.py --tags tutorial \\
+    uv run railroad benchmarks run -i demo.py --tags tutorial \\
         --experiment railroad-tutorial --parallel 12
-    railroad benchmarks dashboard
+    uv run railroad benchmarks dashboard
 
 Moving through the tutorial is the part a script does for you:
 
-    railroad tutorial peek       the next patch, and why it matters
-    railroad tutorial next       show that patch, then merge it into demo.py
-    railroad tutorial notes      the talking points for this step
-    railroad tutorial diff       what you have changed since the snapshot
-    railroad tutorial undo       put demo.py back the way it was
+    uv run railroad tutorial peek    the next patch, and why it matters
+    uv run railroad tutorial next    show that patch, then merge it in
+    uv run railroad tutorial notes   the talking points for this step
+    uv run railroad tutorial diff    what you changed since the snapshot
+    uv run railroad tutorial undo    put demo.py back the way it was
 
 Advancing three-way merges the step's patch into the file as it actually
 stands, so a constant you tuned mid-sentence survives the move. On a genuine
 conflict it refuses rather than writing markers into a file you are about to
-run; `railroad tutorial goto <n> --force` takes the snapshot verbatim, and
-`undo` still works afterwards.
+run; `uv run railroad tutorial goto <n> --force` takes the snapshot verbatim,
+and `undo` still works afterwards.
 
 ## This directory is its own world
 
@@ -221,7 +222,7 @@ directory and it is all gone.
 
 `resources` is a symlink rather than a copy -- the ProcTHOR scenes are a
 gigabyte and nobody wants two of them. Steps 06 and 07 need
-`railroad[procthor]`; run `railroad tutorial doctor` the morning of.
+`railroad[procthor]`; run `uv run railroad tutorial doctor` the morning of.
 """
 
 

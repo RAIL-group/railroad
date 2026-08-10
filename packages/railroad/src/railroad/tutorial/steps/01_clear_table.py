@@ -148,8 +148,8 @@ def relevant(fluent) -> bool:
 
 
 # ---- one function, two ways to run it ---------------------------------------
-# `python demo.py` runs case 0 of the sweep below, live, with the dashboard.
-# `railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
+# `uv run python demo.py` runs case 0 of the sweep below, live, with the dashboard.
+# `uv run railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
 # times over, in parallel. Same code either way, so a value you tune here is
 # the value the sweep measures.
 #
@@ -173,7 +173,7 @@ def run(case: BenchmarkCase) -> dict:
 
 
 run.add_cases([
-    # Case 0 is what `python demo.py` runs, so the grid starts at the
+    # Case 0 is what `uv run python demo.py` runs, so the grid starts at the
     # configuration you would actually use and works down from there.
     {"mcts.iterations": iterations, "mcts.c": c}
     for c in (300, 100)

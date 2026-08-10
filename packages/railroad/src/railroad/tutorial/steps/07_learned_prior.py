@@ -13,7 +13,7 @@ Nothing else changes -- not one line of the operators. The find probability is
 a callable of (robot, location, object) either way, which is the whole point:
 swapping a hand-written estimate for a learned one is a change to one function.
 
-    python demo.py --video learned.mp4
+    uv run python demo.py --video learned.mp4
 """
 
 import random
@@ -251,8 +251,8 @@ def show_beliefs(env) -> None:
 
 
 # ---- one function, two ways to run it ---------------------------------------
-# `python demo.py` runs case 0 of the sweep below, live, with the dashboard.
-# `railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
+# `uv run python demo.py` runs case 0 of the sweep below, live, with the dashboard.
+# `uv run railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
 # times over, in parallel. Same code either way.
 #
 # The oracle against the model, on two houses -- and a lesson about sample size.
@@ -291,7 +291,7 @@ def run(case: BenchmarkCase) -> dict:
 
 
 run.add_cases([
-    # Case 0 is what `python demo.py` runs: seed 8612 with the learned prior.
+    # Case 0 is what `uv run python demo.py` runs: seed 8612 with the learned prior.
     {"scene_seed": scene_seed, "use_learned_prior": use_learned_prior,
      "mcts.iterations": SEARCH_BUDGET, "mcts.c": 300}
     for scene_seed in (8612, 8613)

@@ -1,15 +1,15 @@
 """A guided, terminal-only tour of railroad, driven from one editable file.
 
-``railroad tutorial init`` scaffolds a playground; you ``cd`` into it and work
-there. ``demo.py`` is the only file you open, and everything you run is an
-ordinary command -- ``python demo.py``, ``railroad benchmarks run``,
-``railroad benchmarks dashboard`` -- printed for you by ``railroad tutorial``
-rather than hidden behind a wrapper.
+``uv run railroad tutorial init`` scaffolds a playground; you ``cd`` into it
+and work there. ``demo.py`` is the only file you open, and everything you run
+is an ordinary command -- ``uv run python demo.py``, ``uv run railroad
+benchmarks run``, ``uv run railroad benchmarks dashboard`` -- printed for you
+by ``uv run railroad tutorial`` rather than hidden behind a wrapper.
 
 The tutorial itself does the one thing a script cannot do for you: advancing.
-``railroad tutorial next`` shows the canonical diff between two steps -- that
-diff is the unit of the talk -- and then three-way merges it into whatever you
-currently have on disk, so a value you tuned live survives moving on. See
+``uv run railroad tutorial next`` shows the canonical diff between two steps --
+that diff is the unit of the talk -- and then three-way merges it into whatever
+you currently have on disk, so a value you tuned live survives moving on. See
 :mod:`railroad.tutorial._advance`.
 
 Step snapshots in ``steps/`` are plain, runnable Python. What they import from
@@ -32,6 +32,7 @@ from ._playground import (
 from ._steps import (
     DEFAULT_PARALLEL,
     EXPERIMENT,
+    RUNNER,
     STEPS,
     Command,
     StepInfo,
@@ -51,6 +52,7 @@ __all__ = [
     "MEDIA_DIR",
     "Playground",
     "PlaygroundError",
+    "RUNNER",
     "STEPS",
     "StepInfo",
     "command_lines",

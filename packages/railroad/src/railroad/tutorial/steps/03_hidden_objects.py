@@ -144,8 +144,8 @@ def relevant(fluent) -> bool:
 
 
 # ---- one function, two ways to run it ---------------------------------------
-# `python demo.py` runs case 0 of the sweep below, live, with the dashboard.
-# `railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
+# `uv run python demo.py` runs case 0 of the sweep below, live, with the dashboard.
+# `uv run railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
 # times over, in parallel. Same code either way.
 #
 # Adding robots has stopped paying. Look at the action list from a two- or
@@ -168,7 +168,7 @@ def run(case: BenchmarkCase) -> dict:
 
 
 run.add_cases([
-    # Case 0 is what `python demo.py` runs, so the two-robot team comes first.
+    # Case 0 is what `uv run python demo.py` runs, so the two-robot team comes first.
     {"num_robots": num_robots, "mcts.iterations": iterations, "mcts.c": 300}
     for num_robots in (2, 1, 3)
     for iterations in (4000, 1000, 400)

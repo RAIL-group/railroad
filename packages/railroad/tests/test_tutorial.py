@@ -383,10 +383,10 @@ def test_card_prints_commands_you_could_type_yourself(playground, console):
                       force=True, editor_sync=False)
     commands.cmd_card(console, playground)
     text = console.export_text()
-    assert "python demo.py" in text
-    assert "railroad benchmarks run -i demo.py" in text
-    assert "railroad benchmarks dashboard" in text
-    assert "railroad tutorial next" in text
+    assert "uv run python demo.py" in text
+    assert "uv run railroad benchmarks run -i demo.py" in text
+    assert "uv run railroad benchmarks dashboard" in text
+    assert "uv run railroad tutorial next" in text
     assert "railroad tutorial run" not in text, "the wrappers are gone"
 
 
@@ -396,11 +396,24 @@ def test_card_flags_local_edits(playground, console):
     assert "local edits" in console.export_text()
 
 
+def test_every_printed_command_runs_through_uv():
+    """A card that prints something unrunnable is worse than no card.
+
+    This repository's interpreter lives in a uv-managed environment, so a bare
+    `python demo.py` is not a command anyone here can paste.
+    """
+    from railroad.tutorial import RUNNER, command_lines
+
+    for step in STEPS:
+        for row in command_lines(step):
+            assert row.command.startswith(f"{RUNNER} "), row.command
+
+
 def test_sweep_command_selects_only_the_tutorial(playground):
     from railroad.tutorial import EXPERIMENT, command_lines
 
     sweeps = [row.command for row in command_lines(get_step("02"))
-              if row.command.startswith("railroad benchmarks run")]
+              if "railroad benchmarks run" in row.command]
     assert len(sweeps) == 1
     # --include *adds* to entry-point discovery, so the tag filter is what keeps
     # the whole repo's benchmarks out of a live sweep.
@@ -413,7 +426,8 @@ def test_the_primer_offers_no_sweep(playground):
 
     commands_for_primer = command_lines(get_step(STEPS[0]["id"]))
     assert not any("benchmarks" in row.command for row in commands_for_primer)
-    assert any(row.command == "python demo.py" for row in commands_for_primer)
+    assert any(row.command == "uv run python demo.py"
+               for row in commands_for_primer)
 
 
 def test_notes_are_separate_from_the_card(playground, console):
@@ -421,7 +435,7 @@ def test_notes_are_separate_from_the_card(playground, console):
     commands.cmd_notes(console, "04", playground)
     text = console.export_text()
     assert "lock-search" in text
-    assert "python demo.py" not in text
+    assert "demo.py" not in text
 
 
 # -- running one case by hand ------------------------------------------------

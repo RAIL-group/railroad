@@ -98,10 +98,11 @@ def cmd_card(console: Console, playground: Optional[Playground] = None) -> None:
             f"package ({', '.join(stale)})[/yellow]"
         )
         console.print("  [dim]The playground is frozen on purpose, so a talk "
-                      "cannot change under you. 'railroad tutorial init "
+                      "cannot change under you. 'uv run railroad tutorial init "
                       "--force' takes the new ones.[/dim]")
     coming = "peek" if position < len(STEPS) else "steps"
-    console.print(f"  [dim]why: 'tutorial notes'   next: 'tutorial {coming}'[/dim]")
+    console.print(f"  [dim]why: uv run railroad tutorial notes"
+                  f"    next: uv run railroad tutorial {coming}[/dim]")
 
 
 def _stale_snapshots(playground: Playground) -> List[str]:
@@ -132,7 +133,7 @@ def cmd_init(console: Console, directory: Optional[str], force: bool) -> None:
     console.print()
     console.print(f"  [bold]cd {where}[/bold]   "
                   "[dim]everything runs from inside the playground[/dim]")
-    console.print("  [bold]railroad tutorial[/bold]   "
+    console.print("  [bold]uv run railroad tutorial[/bold]   "
                   "[dim]what step you are on, and what to type[/dim]")
 
 
@@ -298,7 +299,7 @@ def cmd_goto(
             f"and this step's patch. Nothing was written."
         )
         console.print("[dim]Take the step's version instead with "
-                      "'railroad tutorial goto "
+                      "'uv run railroad tutorial goto "
                       f"{target_id} --force' (undo still works afterwards).[/dim]")
         return False
     except adv.MergeUnavailable as exc:
@@ -436,7 +437,7 @@ def cmd_doctor(console: Console) -> bool:
         record(True, f"playground: {playground.root}",
                "its own mlflow.db, mlruns/ and media/ live here")
     else:
-        record(False, "no playground", "run 'railroad tutorial init'")
+        record(False, "no playground", "run 'uv run railroad tutorial init'")
 
     all_ok = True
     for ok, label, detail in checks:

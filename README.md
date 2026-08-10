@@ -196,19 +196,19 @@ uv run railroad tutorial          # the step you are on, and what to type
 ```
 
 `demo.py` is the only file you open, and everything you run is an ordinary
-command -- `python demo.py`, `railroad benchmarks run -i demo.py`,
-`railroad benchmarks dashboard` -- printed for you rather than hidden behind a
-wrapper. `railroad tutorial next` prints the diff to the following step, then
-three-way merges it into whatever you currently have, so anything you changed
-while explaining it survives.
+command -- `uv run python demo.py`, `uv run railroad benchmarks run -i demo.py`,
+`uv run railroad benchmarks dashboard` -- printed for you rather than hidden
+behind a wrapper. `uv run railroad tutorial next` prints the diff to the
+following step, then three-way merges it into whatever you currently have, so
+anything you changed while explaining it survives.
 
-Each step is one `@benchmark` function: `python demo.py` runs case 0 of its
-sweep live with the planner dashboard, `--case N` runs any other point of it,
-and `railroad benchmarks run` runs the lot in parallel. The same edit therefore
-drives both the single run and the distribution behind it, and every sweep
-accumulates into one MLflow experiment. Because you work from inside the
-playground, `mlflow.db`, `mlruns/` and `media/` are created there and existing
-results are untouched.
+Each step is one `@benchmark` function: `uv run python demo.py` runs case 0 of
+its sweep live with the planner dashboard, `--case N` runs any other point of
+it, and `uv run railroad benchmarks run` runs the lot in parallel. The same
+edit therefore drives both the single run and the distribution behind it, and
+every sweep accumulates into one MLflow experiment. Because you work from
+inside the playground, `mlflow.db`, `mlruns/` and `media/` are created there
+and existing results are untouched.
 
 The arc: the state semantics, clear-the-table, a second robot, hidden objects,
 the per-room search lock, the heuristic knobs, a ProcTHOR home, and finally

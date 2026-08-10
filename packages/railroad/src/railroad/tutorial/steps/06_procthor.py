@@ -11,7 +11,7 @@ step 04, lock and all -- and it is also, line for line, what
 by hand is what the library was doing anyway. And the find probability is now a
 *callable* rather than the flat 0.5, which is the seam step 07 pulls on.
 
-    python demo.py --video house.mp4
+    uv run python demo.py --video house.mp4
 
 renders the run over the scene's top-down view, into media/.
 """
@@ -216,8 +216,8 @@ def relevant(fluent) -> bool:
 
 
 # ---- one function, two ways to run it ---------------------------------------
-# `python demo.py` runs case 0 of the sweep below, live, with the dashboard.
-# `railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
+# `uv run python demo.py` runs case 0 of the sweep below, live, with the dashboard.
+# `uv run railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
 # times over, in parallel. Same code either way.
 #
 # Two houses, one and two robots. Scenes differ enough in size and layout that
@@ -246,7 +246,7 @@ def run(case: BenchmarkCase) -> dict:
 
 
 run.add_cases([
-    # Case 0 is what `python demo.py` runs: seed 8613 with two robots.
+    # Case 0 is what `uv run python demo.py` runs: seed 8613 with two robots.
     {"scene_seed": scene_seed, "num_robots": num_robots,
      "mcts.iterations": SEARCH_BUDGET, "mcts.c": 300}
     for scene_seed in (8613, 8612)
