@@ -3,11 +3,12 @@
 ``railroad.cli`` is a thin click wrapper over these. Keeping the logic here
 means it is testable without a terminal.
 
-Nothing in this module runs a demo, a sweep or a dashboard. Those are ordinary
-commands, and :func:`cmd_card` prints them for the step you are on; a wrapper
-would only teach the audience the wrapper. What is left is the two jobs a
-script cannot do for itself: saying what to type, and moving ``demo.py`` from
-one step to the next without losing what you typed.
+``run``, ``bench`` and ``dashboard`` are short names for commands you could
+type yourself, and each prints the longer one it expands to before running it.
+That is the deal: convenient to type mid-sentence, and never pretending to be
+something other than the ordinary CLI. Everything else here does the job a
+script cannot do for itself -- saying what to type, and moving ``demo.py``
+between steps without losing what you typed.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from rich.markup import escape
 from rich.table import Table
 
 from . import _advance as adv
+from . import _launch as launch
 from ._playground import (
     DEFAULT_DIRNAME,
     Playground,
@@ -135,6 +137,112 @@ def cmd_init(console: Console, directory: Optional[str], force: bool) -> None:
                   "[dim]everything runs from inside the playground[/dim]")
     console.print("  [bold]uv run railroad tutorial[/bold]   "
                   "[dim]what step you are on, and what to type[/dim]")
+
+
+# -- running things ----------------------------------------------------------
+
+
+def _echo(console: Console, argv: Sequence[str]) -> None:
+    """Show the command before running it.
+
+    ``soft_wrap`` leaves the wrapping to the terminal: rich would otherwise
+    break a long command across lines by inserting newlines into it, and the
+    point is that you can select the line and run it yourself.
+    """
+    console.print(f"[dim]$ {escape(launch.pretty(argv))}[/dim]", soft_wrap=True)
+
+
+def cmd_run(
+    console: Console,
+    extra: Sequence[str] = (),
+    playground: Optional[Playground] = None,
+) -> launch.RunResult:
+    """Run ``demo.py``. Arguments are passed straight through to it."""
+    playground = playground or find_playground()
+    argv = launch.demo_argv(extra)
+    _echo(console, argv)
+    result = launch.run(playground, argv)
+    if not result.ok:
+        console.print(f"[red]demo.py exited {result.returncode}[/red]")
+    return result
+
+
+def cmd_bench(
+    console: Console,
+    extra: Sequence[str] = (),
+    playground: Optional[Playground] = None,
+) -> launch.RunResult:
+    """Sweep this step, with the include/tag/experiment arguments filled in."""
+    playground = playground or find_playground()
+    step = get_step(playground.current_step_id)
+    if not step["sweep"]:
+        console.print(f"[yellow]step {step['id']} has no sweep[/yellow]")
+        return launch.RunResult(0)
+    console.print(f"[bold]sweep[/bold] {escape(step['sweep'])}")
+    argv = launch.bench_argv(extra)
+    _echo(console, argv)
+    result = launch.run(playground, argv)
+    if not result.ok:
+        console.print(f"[red]sweep exited {result.returncode}[/red]")
+    return result
+
+
+def cmd_dashboard(
+    console: Console,
+    *,
+    playground: Optional[Playground] = None,
+    port: int = launch.DEFAULT_PORT,
+    host: str = "auto",
+    status: bool = False,
+    stop: bool = False,
+) -> bool:
+    """Start the dashboard, ask after it, or tear it down.
+
+    It outlives the command that starts it, which is the whole point -- you
+    leave it open in a browser tab and refresh as sweeps land. Its pid is
+    recorded in the playground so the other two verbs have something to act on.
+    """
+    playground = playground or find_playground()
+    running = launch.recorded(playground)
+
+    if stop:
+        pid = launch.stop(playground)
+        if pid is None:
+            console.print("[yellow]no dashboard running[/yellow]")
+            return False
+        console.print(f"[green]stopped[/green] dashboard (pid {pid})")
+        return True
+
+    if status:
+        if running is None:
+            console.print("[yellow]no dashboard running[/yellow]")
+            tail = launch.log_tail(playground)
+            if tail:
+                console.print("[dim]last dashboard log:[/dim]")
+            for line in tail:
+                console.print(f"  [dim]{escape(line)}[/dim]")
+            return False
+        console.print(f"[green]running[/green] pid {running.pid}, port {running.port}")
+        for line in launch.urls(running.port, running.host):
+            console.print(f"[dim]{escape(line)}[/dim]")
+        return True
+
+    if running is not None:
+        console.print(f"[yellow]already running[/yellow] (pid {running.pid}, "
+                      f"port {running.port})")
+        for line in launch.urls(running.port, running.host):
+            console.print(f"[dim]{escape(line)}[/dim]")
+        return True
+
+    _echo(console, launch.dashboard_argv(host, port))
+    started = launch.start(playground, host=host, port=port)
+    console.print(f"[green]dashboard[/green] pid {started.pid}  "
+                  f"[dim](this playground's results only)[/dim]")
+    for line in launch.urls(port, host):
+        console.print(f"[dim]{escape(line)}[/dim]")
+    console.print(f"[dim]log: {launch.log_path(playground)}   "
+                  f"stop it with: railroad tutorial dashboard --stop[/dim]")
+    return True
 
 
 # -- reference and explanation -----------------------------------------------

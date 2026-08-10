@@ -195,20 +195,27 @@ cd railroad-tutorial
 uv run railroad tutorial          # the step you are on, and what to type
 ```
 
-`demo.py` is the only file you open, and everything you run is an ordinary
-command -- `uv run python demo.py`, `uv run railroad benchmarks run -i demo.py`,
-`uv run railroad benchmarks dashboard` -- printed for you rather than hidden
-behind a wrapper. `uv run railroad tutorial next` prints the diff to the
-following step, then three-way merges it into whatever you currently have, so
-anything you changed while explaining it survives.
+`demo.py` is the only file you open. Three commands run it:
 
-Each step is one `@benchmark` function: `uv run python demo.py` runs case 0 of
-its sweep live with the planner dashboard, `--case N` runs any other point of
-it, and `uv run railroad benchmarks run` runs the lot in parallel. The same
-edit therefore drives both the single run and the distribution behind it, and
-every sweep accumulates into one MLflow experiment. Because you work from
-inside the playground, `mlflow.db`, `mlruns/` and `media/` are created there
-and existing results are untouched.
+```bash
+uv run railroad tutorial run              # live, with the planner dashboard
+uv run railroad tutorial run --case 4     # one point of this step's sweep
+uv run railroad tutorial run --video x.mp4   # ...or --plot x.png, into media/
+uv run railroad tutorial bench            # sweep every case, in parallel
+uv run railroad tutorial dashboard        # results in a browser; --status, --stop
+```
+
+Each prints the plain command it expands to before running it, and forwards any
+extra arguments (`bench --parallel 8`, `run --list`), so nothing here is a mode
+you could not have driven yourself. `uv run railroad tutorial next` prints the
+diff to the following step, then three-way merges it into whatever you
+currently have, so anything you changed while explaining it survives.
+
+Each step is one `@benchmark` function, which is why `run` and `bench` are the
+same code: the value you tune live is the value the sweep measures. Every sweep
+accumulates into one MLflow experiment, and because you work from inside the
+playground, `mlflow.db`, `mlruns/` and `media/` are created there and existing
+results are untouched.
 
 The arc: the state semantics, clear-the-table, a second robot, hidden objects,
 the per-room search lock, the heuristic knobs, a ProcTHOR home, and finally

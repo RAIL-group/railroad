@@ -65,17 +65,24 @@ def dashboard(case: Any, goal: Any, env: Any, *, fluent_filter=None) -> Iterator
         view.print_history()
 
 
-def show_plots(view: Any, case: Any) -> None:
+def show_plots(view: Any, case: Any, **kwargs: Any) -> None:
     """Draw the trajectory plot and video -- for a live run only.
 
     A sweep runs dozens of these at once in processes with no display, and
-    every one of them would be writing over the same file.
+    every one of them would be writing over the same file. Extra keywords go
+    to :meth:`PlannerDashboard.show_plots`; ``location_coords`` is the useful
+    one, for environments that do not carry coordinates of their own.
     """
     if not getattr(case, "live", False):
         return
+    # 30fps at 100dpi rather than the library's 60/150. Rendering is the slow
+    # part of making a video -- 53 seconds here against 134 -- and nobody has
+    # ever wanted a smoother animation of a robot crossing a room. Pass
+    # video_fps/video_dpi to get the nicer one for something you are keeping.
     view.show_plots(
         save_plot=getattr(case, "plot", None),
         save_video=getattr(case, "video", None),
+        **{"video_fps": 30, "video_dpi": 100, **kwargs},
     )
 
 

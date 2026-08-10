@@ -291,6 +291,44 @@ def tutorial_init(directory: str | None, force: bool) -> None:
     _tutorial_guard(commands.cmd_init)(_tutorial_console(), directory, force)
 
 
+_PASSTHROUGH = {"ignore_unknown_options": True, "allow_extra_args": True}
+
+
+@tutorial.command("run", context_settings=_PASSTHROUGH)
+@click.argument("extra", nargs=-1, type=click.UNPROCESSED)
+def tutorial_run(extra: tuple[str, ...]) -> None:
+    """Run demo.py. Extra arguments go straight to it (--case, --list, --video)."""
+    from railroad.tutorial import commands
+    result = _tutorial_guard(commands.cmd_run)(_tutorial_console(), extra)
+    if not result.ok:
+        raise SystemExit(result.returncode)
+
+
+@tutorial.command("bench", context_settings=_PASSTHROUGH)
+@click.argument("extra", nargs=-1, type=click.UNPROCESSED)
+def tutorial_bench(extra: tuple[str, ...]) -> None:
+    """Sweep this step. Extra arguments go to 'benchmarks run' (--parallel, --dry-run)."""
+    from railroad.tutorial import commands
+    result = _tutorial_guard(commands.cmd_bench)(_tutorial_console(), extra)
+    if not result.ok:
+        raise SystemExit(result.returncode)
+
+
+@tutorial.command("dashboard")
+@click.option("--status", is_flag=True, default=False,
+              help="Report whether it is up, and where")
+@click.option("--stop", is_flag=True, default=False, help="Tear it down")
+@click.option("--port", type=int, default=8050, show_default=True)
+@click.option("--host", default="auto", show_default=True,
+              help="'auto' answers on every interface; 'tailscale' or an address binds one")
+def tutorial_dashboard(status: bool, stop: bool, port: int, host: str) -> None:
+    """Start the benchmark dashboard in the background, or check/stop it."""
+    from railroad.tutorial import commands
+    _tutorial_guard(commands.cmd_dashboard)(
+        _tutorial_console(), port=port, host=host, status=status, stop=stop
+    )
+
+
 def _advance_options(fn):
     fn = click.option("--force", is_flag=True, default=False,
                       help="Take the step's version verbatim, discarding local "

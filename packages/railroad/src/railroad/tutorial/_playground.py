@@ -11,6 +11,7 @@ Layout::
       .history/      snapshot of demo.py before every advance (undo)
       .state.json    which step demo.py is currently on
       runs.jsonl     one record per run, for the step list
+      .dashboard.json / dashboard.log   the background dashboard, if one is up
 
 You work *inside* this directory, and that is the whole isolation story:
 ``mlflow.db``, ``mlruns/``, ``.benchmark_cache/`` and ``media/`` are all
@@ -188,16 +189,24 @@ open with `(global-auto-revert-mode 1)` so it refreshes when a step is applied.
 
     uv run railroad tutorial            what step you are on, and what to type
 
-Everything you run is an ordinary command. Nothing here is a special mode:
+Everything runs through the tutorial namespace, and every one of these prints
+the plain command it expands to before it runs:
 
-    uv run python demo.py               run it, live
-    uv run python demo.py --list        the parameter cases this step sweeps
-    uv run python demo.py --case 4      run one of them by hand, live
-    uv run python demo.py --video x.mp4 ...and record it, into media/
+    uv run railroad tutorial run             run it, live
+    uv run railroad tutorial run --list      the cases this step sweeps
+    uv run railroad tutorial run --case 4    run one of them, live
+    uv run railroad tutorial run --plot x.png    trajectories, into media/
+    uv run railroad tutorial run --video x.mp4   or animate the whole run
 
-    uv run railroad benchmarks run -i demo.py --tags tutorial \\
-        --experiment railroad-tutorial --parallel 12
-    uv run railroad benchmarks dashboard
+    uv run railroad tutorial bench           sweep this step
+    uv run railroad tutorial bench --dry-run what it would run
+    uv run railroad tutorial dashboard       start it in the background
+    uv run railroad tutorial dashboard --status
+    uv run railroad tutorial dashboard --stop
+
+Arguments you add are passed straight through -- to `demo.py` for `run`, to
+`railroad benchmarks run` for `bench` -- so `bench --parallel 8` and
+`run --case 2` both work without the tutorial having to know about them.
 
 Moving through the tutorial is the part a script does for you:
 

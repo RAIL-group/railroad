@@ -378,16 +378,16 @@ def test_step_list_omits_the_delta_across_a_change_of_problem(playground, consol
 # -- the card: real commands, not a wrapper ----------------------------------
 
 
-def test_card_prints_commands_you_could_type_yourself(playground, console):
+def test_card_shows_every_way_to_run_this_step(playground, console):
     commands.cmd_goto(Console(quiet=True), "02", playground=playground,
                       force=True, editor_sync=False)
     commands.cmd_card(console, playground)
     text = console.export_text()
-    assert "uv run python demo.py" in text
-    assert "uv run railroad benchmarks run -i demo.py" in text
-    assert "uv run railroad benchmarks dashboard" in text
-    assert "uv run railroad tutorial next" in text
-    assert "railroad tutorial run" not in text, "the wrappers are gone"
+    for expected in ("tutorial run", "tutorial run --list", "tutorial run --case",
+                     "tutorial run --plot", "tutorial run --video",
+                     "tutorial bench", "tutorial dashboard", "tutorial next"):
+        assert expected in text, expected
+    assert "--parallel" not in text, "auto-detect is enough; do not pin it"
 
 
 def test_card_flags_local_edits(playground, console):
@@ -409,25 +409,39 @@ def test_every_printed_command_runs_through_uv():
             assert row.command.startswith(f"{RUNNER} "), row.command
 
 
-def test_sweep_command_selects_only_the_tutorial(playground):
-    from railroad.tutorial import EXPERIMENT, command_lines
+def test_bench_fills_in_the_include_tag_and_experiment(playground):
+    from railroad.tutorial import EXPERIMENT
+    from railroad.tutorial import _launch as launch
 
-    sweeps = [row.command for row in command_lines(get_step("02"))
-              if "railroad benchmarks run" in row.command]
-    assert len(sweeps) == 1
+    argv = launch.bench_argv(["--parallel", "8"])
+    assert argv[argv.index("-i") + 1] == "demo.py"
     # --include *adds* to entry-point discovery, so the tag filter is what keeps
     # the whole repo's benchmarks out of a live sweep.
-    assert "--tags tutorial" in sweeps[0]
-    assert f"--experiment {EXPERIMENT}" in sweeps[0]
+    assert argv[argv.index("--tags") + 1] == "tutorial"
+    assert argv[argv.index("--experiment") + 1] == EXPERIMENT
+    assert argv[-2:] == ["--parallel", "8"], "extra arguments pass through"
+
+
+def test_printed_commands_are_typeable(playground):
+    """A wrapper that hides what it runs teaches the wrapper, not the tool."""
+    from railroad.tutorial import _launch as launch
+
+    assert launch.pretty(launch.demo_argv(["--case", "4"])) == (
+        "uv run python demo.py --case 4"
+    )
+    assert launch.pretty(launch.bench_argv()).startswith(
+        "uv run railroad benchmarks run -i demo.py"
+    )
+    assert sys.executable not in launch.pretty(launch.dashboard_argv())
 
 
 def test_the_primer_offers_no_sweep(playground):
     from railroad.tutorial import command_lines
 
-    commands_for_primer = command_lines(get_step(STEPS[0]["id"]))
-    assert not any("benchmarks" in row.command for row in commands_for_primer)
-    assert any(row.command == "uv run python demo.py"
-               for row in commands_for_primer)
+    rows = command_lines(get_step(STEPS[0]["id"]))
+    assert not any("bench" in row.command for row in rows)
+    assert not any("--plot" in row.command for row in rows), "nothing to draw"
+    assert any(row.command.endswith("tutorial run") for row in rows)
 
 
 def test_notes_are_separate_from_the_card(playground, console):
@@ -435,7 +449,47 @@ def test_notes_are_separate_from_the_card(playground, console):
     commands.cmd_notes(console, "04", playground)
     text = console.export_text()
     assert "lock-search" in text
-    assert "demo.py" not in text
+    assert "tutorial run" not in text
+
+
+def test_every_drawing_step_names_its_media_and_the_primer_does_not():
+    for step in STEPS:
+        if step["id"] == STEPS[0]["id"]:
+            assert not step["media"], "the primer has no environment to draw"
+        else:
+            assert step["media"], f"step {step['id']} has nothing to save as"
+
+
+# -- the dashboard, which outlives the command that starts it ----------------
+
+
+def test_dashboard_reports_nothing_running_at_first(playground, console):
+    assert not commands.cmd_dashboard(console, playground=playground, status=True)
+    assert "no dashboard" in console.export_text()
+
+
+def test_stopping_a_dashboard_that_is_not_running_is_not_an_error(playground, console):
+    assert not commands.cmd_dashboard(console, playground=playground, stop=True)
+    assert "no dashboard" in console.export_text()
+
+
+def test_a_stale_record_is_cleared_rather_than_believed(playground):
+    """A pid from a previous boot must not stop you starting a new dashboard."""
+    from railroad.tutorial import _launch as launch
+
+    # A pid that cannot be running: 0 is never a user process here.
+    (playground.root / launch.DASHBOARD_STATE).write_text(
+        json.dumps({"pid": 2 ** 31 - 1, "port": 8050, "host": "auto"})
+    )
+    assert launch.recorded(playground) is None
+    assert not (playground.root / launch.DASHBOARD_STATE).exists()
+
+
+def test_a_corrupt_record_is_cleared_too(playground):
+    from railroad.tutorial import _launch as launch
+
+    (playground.root / launch.DASHBOARD_STATE).write_text("{ half-written")
+    assert launch.recorded(playground) is None
 
 
 # -- running one case by hand ------------------------------------------------

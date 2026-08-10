@@ -30,7 +30,6 @@ from ._playground import (
     is_playground,
 )
 from ._steps import (
-    DEFAULT_PARALLEL,
     EXPERIMENT,
     RUNNER,
     STEPS,
@@ -46,7 +45,6 @@ from ._steps import (
 __all__ = [
     "Command",
     "DEFAULT_DIRNAME",
-    "DEFAULT_PARALLEL",
     "ENV_DIR",
     "EXPERIMENT",
     "MEDIA_DIR",
