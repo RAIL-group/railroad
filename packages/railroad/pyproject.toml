@@ -46,8 +46,10 @@ railsim = [
 ]
 tutorial = [
     # 'railroad tutorial notebook' opens the language primer; everything else
-    # in the tutorial is the ordinary CLI.
-    "jupyterlab",
+    # in the tutorial is the ordinary CLI. Notebook 7 is a JupyterLab
+    # distribution -- one package on top of jupyterlab, for a document-centric
+    # interface with none of the lab furniture around it.
+    "notebook>=7",
 ]
 all = [
     "railroad[test,bench,procthor,railsim,tutorial]",

@@ -212,6 +212,11 @@ interface, and no token, so the printed address opens from anywhere that can
 reach this host. `notebook --ip 127.0.0.1` closes it back down to loopback, and
 `notebook --IdentityProvider.token=secret` puts the key back.
 
+The link lands *in the notebook*, in Notebook 7's one-document interface --
+menu, toolbar, cells, and nothing else around them. The same server also
+answers at `/lab` for the file browser and tab bar, and at
+`/doc/tree/language.ipynb` for lab's own one-document mode.
+
 After that it is `demo.py`, the only file you edit; keep it open with
 `(global-auto-revert-mode 1)` so it refreshes when a step is applied.
 

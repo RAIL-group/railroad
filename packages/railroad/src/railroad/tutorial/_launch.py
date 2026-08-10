@@ -34,7 +34,15 @@ DASHBOARD_STATE = ".dashboard.json"
 DASHBOARD_LOG = "dashboard.log"
 DEFAULT_PORT = 8050
 NOTEBOOK_PORT = 8888
-"""JupyterLab's own default, so the URL is the one people expect."""
+"""Jupyter's own default, so the URL is the one people expect."""
+
+NOTEBOOK_URL_PATH = f"/notebooks/{NOTEBOOK}"
+"""Notebook 7's route to one document: menu, toolbar, cells, and nothing else.
+
+The lab interface answers on the same server at ``/lab`` if you want the file
+browser and the tab bar, and at ``/doc/tree/<file>`` for its own one-document
+mode -- but this is the address a talk should be pointed at.
+"""
 
 
 def _module(module: str, *args: str) -> List[str]:
@@ -79,11 +87,17 @@ def dashboard_argv(host: str = "auto", port: int = DEFAULT_PORT) -> List[str]:
 def notebook_argv(
     extra: Sequence[str] = (), *, host: str = "auto", port: int = NOTEBOOK_PORT
 ) -> List[str]:
-    """JupyterLab on the language primer, in the foreground.
+    """Jupyter on the language primer, in the foreground.
 
-    The defaults assume the machine running this is not the machine you are
-    looking at, which is the normal case here: no browser to launch, every
-    interface answered, and no token to copy out of a log.
+    Notebook 7 rather than JupyterLab: the same server and the same packages,
+    but a document-centric interface -- no file browser, no tab bar, no
+    launcher -- which is what you want on a projector. ``default_url`` is what
+    lands a visitor *in the notebook* instead of in a file listing; both the
+    printed links and Jupyter's own then point at the document.
+
+    The rest of the defaults assume the machine running this is not the
+    machine you are looking at, which is the normal case here: no browser to
+    launch, every interface answered, and no token to copy out of a log.
 
     Each default is *dropped* when you pass the same argument, rather than
     being followed by yours -- traitlets rejects a repeated argument outright
@@ -94,6 +108,8 @@ def notebook_argv(
     """
     supplied = {arg.split("=", 1)[0] for arg in extra}
     argv: List[str] = []
+    if "--JupyterNotebookApp.default_url" not in supplied:
+        argv.append(f"--JupyterNotebookApp.default_url={NOTEBOOK_URL_PATH}")
     if not supplied & {"--no-browser", "--browser"}:
         argv.append("--no-browser")
     if "--ip" not in supplied:
@@ -102,7 +118,7 @@ def notebook_argv(
         argv += ["--port", str(port)]
     if not supplied & {"--IdentityProvider.token", "--ServerApp.token"}:
         argv.append("--IdentityProvider.token=")
-    return _module("jupyter", "lab", NOTEBOOK, *argv, *extra)
+    return _module("jupyter", "notebook", NOTEBOOK, *argv, *extra)
 
 
 def pretty(argv: Sequence[str]) -> str:
@@ -250,6 +266,22 @@ def bind_address(host: str = "auto") -> str:
     except ImportError:
         return "0.0.0.0"
     return resolve_host(host)
+
+
+def notebook_urls(port: int = NOTEBOOK_PORT) -> List[str]:
+    """Every address the primer can be opened at -- at the notebook itself.
+
+    Jupyter prints loopback and this host's name; from the laptop you are
+    actually looking at, neither is necessarily the one that resolves.
+    """
+    try:
+        from railroad.bench.dashboard.net import reachable_addresses
+    except ImportError:
+        return [f"  http://127.0.0.1:{port}{NOTEBOOK_URL_PATH}"]
+    return [
+        f"  http://{address}:{port}{NOTEBOOK_URL_PATH}".ljust(60) + f"({label})"
+        for address, label in reachable_addresses()
+    ]
 
 
 def urls(port: int = DEFAULT_PORT, host: str = "auto") -> List[str]:

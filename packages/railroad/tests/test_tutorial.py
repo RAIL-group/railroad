@@ -435,7 +435,7 @@ def test_printed_commands_are_typeable(playground):
         "uv run railroad benchmarks run -i demo.py"
     )
     assert launch.pretty(launch.notebook_argv()).startswith(
-        "uv run jupyter lab language.ipynb"
+        "uv run jupyter notebook language.ipynb"
     )
     assert sys.executable not in launch.pretty(launch.dashboard_argv())
 
@@ -547,9 +547,12 @@ def test_notebook_command_shows_the_jupyter_command_it_runs(
         launch, "run",
         lambda pg, argv: seen.append(list(argv)) or launch.RunResult(0),
     )
-    assert commands.cmd_notebook(console, ["--LabApp.news_url=None"], playground).ok
-    assert seen[0][-1] == "--LabApp.news_url=None", "arguments pass through"
-    assert "uv run jupyter lab language.ipynb" in console.export_text()
+    assert commands.cmd_notebook(console, ["--ServerApp.terminals_enabled=False"],
+                                 playground).ok
+    assert seen[0][-1] == "--ServerApp.terminals_enabled=False", "arguments pass through"
+    text = console.export_text()
+    assert "uv run jupyter notebook language.ipynb" in text
+    assert "/notebooks/language.ipynb" in text, "the link opens the notebook itself"
 
 
 def test_the_notebook_is_started_for_the_machine_you_are_not_sitting_at():
@@ -560,6 +563,10 @@ def test_the_notebook_is_started_for_the_machine_you_are_not_sitting_at():
     assert "--no-browser" in argv
     assert "--IdentityProvider.token=" in argv
     assert argv[argv.index("--ip") + 1] == "0.0.0.0"
+    # Notebook 7's one-document interface, opened at the document.
+    assert argv[:2] != ["jupyter", "lab"]
+    assert f"--JupyterNotebookApp.default_url={launch.NOTEBOOK_URL_PATH}" in argv
+    assert all(launch.NOTEBOOK_URL_PATH in line for line in launch.notebook_urls())
 
 
 def test_an_argument_you_pass_replaces_the_default_rather_than_repeating_it():
@@ -577,12 +584,12 @@ def test_an_argument_you_pass_replaces_the_default_rather_than_repeating_it():
 
 
 def test_notebook_command_says_how_to_get_jupyter(playground, console, monkeypatch):
-    """jupyterlab is an extra, so its absence has to be a sentence, not a traceback."""
+    """jupyter is an extra, so its absence has to be a sentence, not a traceback."""
     monkeypatch.setattr(commands, "find_spec", lambda name: None)
     assert not commands.cmd_notebook(console, (), playground).ok
     text = console.export_text()
     assert "railroad[tutorial]" in text
-    assert "uv run --with jupyterlab" in text
+    assert "uv run --with notebook" in text
 
 
 # -- the dashboard, which outlives the command that starts it ----------------

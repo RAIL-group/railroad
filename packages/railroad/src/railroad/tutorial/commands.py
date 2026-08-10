@@ -174,28 +174,29 @@ def cmd_notebook(
     script is bad at. It blocks until you stop Jupyter -- that is Jupyter's
     shape, not ours.
 
-    It is started for the remote case: no browser, every interface, no token.
-    See :func:`_launch.notebook_argv` for how to narrow that back down.
+    It is started for the remote case -- no browser, every interface, no token
+    -- in Notebook 7's one-document interface, with the printed links pointing
+    at the notebook rather than at a file listing. See
+    :func:`_launch.notebook_argv` for how to narrow any of that back down.
     """
     playground = playground or find_playground()
     if not playground.notebook.exists():
         console.print(f"[yellow]{NOTEBOOK} is not in this playground[/yellow]  "
                       "[dim]uv run railroad tutorial init --force puts it back[/dim]")
         return launch.RunResult(1)
-    if find_spec("jupyterlab") is None:
-        console.print("[red]jupyterlab is not installed[/red]  "
+    if find_spec("notebook") is None:
+        console.print("[red]jupyter is not installed[/red]  "
                       "[dim]it comes with railroad\\[tutorial][/dim]")
         console.print("[dim]or, without installing anything: "
-                      f"uv run --with jupyterlab jupyter lab {NOTEBOOK}[/dim]")
+                      f"uv run --with notebook jupyter notebook {NOTEBOOK}[/dim]")
         return launch.RunResult(1)
 
     argv = launch.notebook_argv(extra)
     _echo(console, argv)
-    # Jupyter prints its own URLs, but only loopback and this host's name;
-    # from another machine the tailnet address is the one that works. If you
-    # moved the address or the port, Jupyter's own lines are the true ones.
+    # If you moved the address or the port, Jupyter's own lines are the true
+    # ones and these would be a guess, so do not print a guess.
     if not any(arg.startswith(("--ip", "--port")) for arg in extra):
-        for line in launch.urls(launch.NOTEBOOK_PORT):
+        for line in launch.notebook_urls():
             console.print(f"[dim]{escape(line)}[/dim]")
     result = launch.run(playground, argv)
     if not result.ok:
@@ -579,7 +580,7 @@ def cmd_doctor(console: Console) -> bool:
             record(False, "railroad[procthor] missing",
                    "steps 06-07 need it; earlier steps do not")
 
-    record(find_spec("jupyterlab") is not None, "jupyterlab installed",
+    record(find_spec("notebook") is not None, "jupyter installed",
            f"needed for 'tutorial notebook', which opens {NOTEBOOK}")
     record(shutil.which("git") is not None, "git on PATH",
            "used to merge your live edits when advancing a step")
