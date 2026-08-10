@@ -1,11 +1,16 @@
-"""Step 02 -- add a second robot.
+"""Step 03 -- hide the objects.
 
-No operator changes at all. A robot is an object of type `robot` plus two
-initial fluents, and concurrency falls out of the state semantics: time only
-advances when nobody is free, so a second robot simply fills the gap.
+The objects are no longer in the initial state; the robots have to look. That
+means a probabilistic operator, and a prior over where things are -- which here
+is flat, because we genuinely have no idea. (Step 07 replaces it with a learned
+one.)
 
-Watch the Braille timeline in the summary -- the two rows overlap -- and the
-total cost against step 01.
+Two conventions of ObjectSearchEnvironment are doing work now. Search outcomes
+resolve against ground truth rather than sampling, so a bad prior costs time but
+never invents a discovery. And searching a location *reveals* it: everything
+actually there becomes known, and the location can never be searched again.
+
+Watch what two robots do with that.
 """
 
 import time
@@ -15,11 +20,10 @@ from operator import and_
 import numpy as np
 from rich.console import Console
 
-from railroad import operators
 from railroad.bench import BenchmarkCase, benchmark
 from railroad.core import Effect, Fluent as F, Operator, State, get_action_by_name
 from railroad.dashboard import PlannerDashboard
-from railroad.environment import SymbolicEnvironment
+from railroad.environment import ObjectSearchEnvironment
 from railroad.planner import MCTSPlanner
 from railroad.tutorial import report
 
@@ -32,9 +36,16 @@ LOCATIONS = {
 OBJECTS = ["Book", "Mug", "Vase"]
 NUM_ROBOTS = 2
 
+# Ground truth, known to the environment and not to the planner.
+TRUE_LOCATIONS = {
+    "table": {"Book"},
+    "kitchen": {"Mug"},
+    "shelf": {"Vase"},
+}
+
 ROBOT_VELOCITY = 1.0
-PICK_TIME = 5.0
-PLACE_TIME = 5.0
+SEARCH_TIME = 5.0
+FIND_PROB = 0.5
 MAX_STEPS = 40
 
 
@@ -44,14 +55,10 @@ def move_time(robot: str, loc_from: str, loc_to: str) -> float:
     return float(np.linalg.norm(a - b)) / ROBOT_VELOCITY
 
 
-class ClearTable(SymbolicEnvironment):
-    """Move, pick, place. Nothing is hidden and nothing is uncertain yet."""
+class HouseSearch(ObjectSearchEnvironment):
+    """Move and search. Where things are is now the whole problem."""
 
     def define_operators(self):
-        # Written out rather than taken from railroad.operators so that both
-        # halves of a durative action are visible: the robot stops being free
-        # and stops being anywhere at t=0, and both facts are restored at the
-        # destination when the move lands.
         move = Operator(
             name="move",
             parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
@@ -64,30 +71,55 @@ class ClearTable(SymbolicEnvironment):
                 ),
             ],
         )
-        return [
-            move,
-            operators.construct_pick_operator_blocking(PICK_TIME),
-            operators.construct_place_operator_blocking(PLACE_TIME),
-        ]
+        # Look for one object in one place. The branch that finds it is what the
+        # planner reasons about; the environment decides which branch actually
+        # fires, from TRUE_LOCATIONS.
+        search = Operator(
+            name="search",
+            parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
+            preconditions=[
+                F("at ?r ?loc"),
+                F("free ?r"),
+                F("not revealed ?loc"),
+                F("not searched ?loc ?obj"),
+                F("not found ?obj"),
+            ],
+            effects=[
+                Effect(time=0, resulting_fluents={~F("free ?r")}),
+                Effect(
+                    time=SEARCH_TIME,
+                    resulting_fluents={F("free ?r"), F("searched ?loc ?obj")},
+                    prob_effects=[
+                        (FIND_PROB, [Effect(
+                            time=0,
+                            resulting_fluents={F("found ?obj"), F("at ?obj ?loc")},
+                        )]),
+                        (1 - FIND_PROB, []),
+                    ],
+                ),
+            ],
+        )
+        return [move, search]
 
 
 def build(num_robots: int = NUM_ROBOTS):
-    """The problem: where things are, who is around, and what counts as done."""
+    """The problem: who is around, what we are after, and what we already know."""
     robots = [f"robot{i + 1}" for i in range(num_robots)]
-    fluents = {F(f"at {obj} table") for obj in OBJECTS}
+    # 'revealed' means "nothing left to learn here", so the start counts as done.
+    fluents = {F("revealed living_room")}
     for robot in robots:
         fluents |= {F(f"free {robot}"), F(f"at {robot} living_room")}
 
-    # "None of these objects is on the table" -- a conjunction of negations.
-    goal = reduce(and_, [~F(f"at {obj} table") for obj in OBJECTS])
+    goal = reduce(and_, [F(f"found {obj}") for obj in OBJECTS])
 
-    env = ClearTable(
+    env = HouseSearch(
         state=State(0.0, fluents, []),
         objects_by_type={
             "robot": set(robots),
             "location": set(LOCATIONS),
             "object": set(OBJECTS),
         },
+        true_object_locations=TRUE_LOCATIONS,
         seed=0,
     )
     return env, goal
@@ -110,14 +142,14 @@ def solve(env, goal, dashboard, *, iterations: int, c: float) -> bool:
 
 
 def relevant(fluent) -> bool:
-    return any(word in fluent.name for word in ("at", "holding"))
+    return any(word in fluent.name for word in ("at", "found", "searched"))
 
 
 def demo() -> None:
     env, goal = build()
     with PlannerDashboard(goal, env, fluent_filter=relevant) as dashboard:
         solve(env, goal, dashboard, iterations=4000, c=300)
-    report(dashboard, step="02")
+    report(dashboard, step="03")
 
 
 if __name__ == "__main__":
@@ -125,19 +157,19 @@ if __name__ == "__main__":
 
 
 # ---- sweep: press b ---------------------------------------------------------
-# Does the second robot pay for itself, and does a third? With three objects and
-# three robots the answer collapses: they all drive to the table and each picks
-# one. The goal only asks that nothing *remain* on the table, so the run ends at
-# the last pick -- one trip plus one pick, and nothing is ever put away.
+# Adding robots stopped paying. Look at the action list from a two- or
+# three-robot run: nothing stops two of them searching the same room at the same
+# time, and a flat prior makes that look like a good idea -- two draws at 0.5
+# beat one. It is not. One search reveals everything in the room.
 
 @benchmark(
-    name="s02_two_robots",
-    description="Clear a table with 1-3 robots; sweep team size and MCTS iterations.",
+    name="s03_hidden_objects",
+    description="Find three hidden objects with 1-3 robots and a flat prior.",
     tags=["tutorial"],
     repeat=4,
     timeout=60.0,
 )
-def bench_two_robots(case: BenchmarkCase) -> dict:
+def bench_hidden_objects(case: BenchmarkCase) -> dict:
     env, goal = build(case.num_robots)
     console = Console(record=True, force_terminal=True, width=120)
     dashboard = PlannerDashboard(
@@ -146,16 +178,20 @@ def bench_two_robots(case: BenchmarkCase) -> dict:
     started = time.perf_counter()
     solve(env, goal, dashboard, iterations=case.mcts.iterations, c=case.mcts.c)
     dashboard.print_history()
+    actions = [name for name, _ in dashboard.actions_taken]
+    searches = [name for name in actions if name.startswith("search")]
     return {
         "success": goal.evaluate(env.state.fluents),
         "plan_cost": float(env.state.time),
         "wall_time": time.perf_counter() - started,
-        "actions_count": len(dashboard.actions_taken),
+        "actions_count": len(actions),
+        # Three rooms hold something; every search past that was wasted effort.
+        "searches": len(searches),
         "log_html": console.export_html(inline_styles=True),
     }
 
 
-bench_two_robots.add_cases([
+bench_hidden_objects.add_cases([
     {"num_robots": num_robots, "mcts.iterations": iterations, "mcts.c": 300}
     for num_robots in (1, 2, 3)
     for iterations in (400, 1000, 4000)

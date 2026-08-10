@@ -57,10 +57,12 @@ def cmd_status(console: Console, playground: Optional[Playground] = None) -> Non
     current = playground.current_step_id
     console.print(f"[bold]playground[/bold]  {playground.root}")
     console.print()
+    width = max(len(step["title"]) for step in STEPS) + 2
     for step in STEPS:
         marker = "[bold green]>[/bold green]" if step["id"] == current else " "
         style = "bold" if step["id"] == current else "dim"
-        console.print(f" {marker} [{style}]{step['id']}  {escape(step['title']):<24}"
+        title = escape(step["title"]).ljust(width)
+        console.print(f" {marker} [{style}]{step['id']}  {title}"
                       f"{escape(step['point'])}[/{style}]")
     console.print()
     edits = playground.demo.read_text() != playground.pristine_text(current)
@@ -308,18 +310,32 @@ def cmd_compare(console: Console, playground: Optional[Playground] = None) -> No
         table.add_column(column)
 
     previous: Optional[float] = None
+    previous_problem: Optional[str] = None
     for step_id in sorted(latest, key=order):
         record = latest[step_id]
         cost = record.get("cost")
+        known = order(step_id) < len(STEPS)
+        step = get_step(step_id) if known else None
+        problem = step["problem"] if step else None
+
+        # A delta across a change of problem would be meaningless: step 05 moves
+        # to a bigger house, so its cost has nothing to do with step 04's.
         delta = ""
-        if previous is not None and isinstance(cost, (int, float)):
+        comparable = (
+            previous is not None
+            and problem is not None
+            and problem == previous_problem
+            and isinstance(cost, (int, float))
+        )
+        if comparable:
             change = cost - previous
-            delta = f"[green]{change:+.1f}[/green]" if change < 0 else f"[red]{change:+.1f}[/red]"
-        title = get_step(step_id)["title"] if order(step_id) < len(STEPS) else ""
+            delta = (f"[green]{change:+.1f}[/green]" if change < 0
+                     else f"[red]{change:+.1f}[/red]")
+
         wall = record.get("wall")
         table.add_row(
             step_id,
-            title,
+            escape(step["title"]) if step else "",
             f"{cost:.1f}s" if isinstance(cost, (int, float)) else "-",
             delta,
             str(len(record.get("actions", []))),
@@ -328,6 +344,7 @@ def cmd_compare(console: Console, playground: Optional[Playground] = None) -> No
         )
         if isinstance(cost, (int, float)):
             previous = cost
+            previous_problem = problem
     console.print(table)
 
 

@@ -74,6 +74,16 @@ class MLflowTracker:
             experiment = mlflow.get_experiment_by_name(name)  # type: ignore[possibly-missing-attribute]
             if experiment:
                 self.experiment_id = experiment.experiment_id
+                # A soft-deleted experiment is still returned by name, and
+                # MLflow will happily accept runs into it -- where nothing can
+                # see them, since searches skip deleted experiments. Restore it
+                # rather than silently discarding the run that is about to
+                # start. (Reachable via --experiment after a delete; the
+                # timestamped default names never collide.)
+                if experiment.lifecycle_stage == "deleted":
+                    mlflow.tracking.MlflowClient().restore_experiment(  # type: ignore[possibly-missing-attribute]
+                        self.experiment_id
+                    )
             else:
                 # Convert metadata to string tags (MLflow only supports string tags)
                 tags = {k: str(v) for k, v in metadata.items()}

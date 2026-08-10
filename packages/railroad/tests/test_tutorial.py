@@ -330,3 +330,25 @@ def test_compare_reports_the_change_between_steps(playground, console):
     commands.cmd_compare(console, playground)
     text = console.export_text()
     assert "44.3" in text and "22.1" in text and "-22.2" in text
+
+
+def test_compare_omits_the_delta_across_a_change_of_problem(playground, console):
+    """Costs from different worlds are not comparable, so do not subtract them."""
+    pairs = [(a, b) for a, b in zip(STEPS, STEPS[1:])
+             if a["problem"] and a["problem"] != b["problem"]]
+    assert pairs, "expected at least one problem boundary in the arc"
+    before, after = pairs[0]
+    playground.append_run({"step": before["id"], "cost": 10.0, "actions": [],
+                           "goal_reached": True})
+    playground.append_run({"step": after["id"], "cost": 40.0, "actions": [],
+                           "goal_reached": True})
+    commands.cmd_compare(console, playground)
+    text = console.export_text()
+    assert "40.0" in text
+    assert "+30.0" not in text
+
+
+def test_every_step_declares_a_problem_except_the_primer():
+    for step in STEPS:
+        if step["sweep"]:
+            assert step["problem"], f"step {step['id']} needs a problem tag"

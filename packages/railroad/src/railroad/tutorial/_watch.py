@@ -130,7 +130,9 @@ def _summary(playground: Playground, step_id: str) -> Optional[str]:
         return None
     parts = [f"cost {cost:.1f}s"]
     previous = neighbour(step_id, -1)
-    if previous is not None:
+    # Only worth quoting when the previous step solved the same problem; across
+    # a change of world the two numbers are not about the same thing.
+    if previous is not None and previous["problem"] == get_step(step_id)["problem"]:
         earlier = _last_run(playground, previous["id"])
         if earlier and isinstance(earlier.get("cost"), (int, float)):
             parts.append(f"(step {previous['id']} was {earlier['cost']:.1f}s)")

@@ -116,7 +116,7 @@ def demo() -> None:
     env, goal = build()
     with PlannerDashboard(goal, env, fluent_filter=relevant) as dashboard:
         solve(env, goal, dashboard, iterations=4000, c=300)
-    report(dashboard)
+    report(dashboard, step="01")
 
 
 if __name__ == "__main__":
