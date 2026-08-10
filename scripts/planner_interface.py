@@ -8,6 +8,7 @@ from railroad.core import (
     Fluent,
     LiteralGoal,
     State,
+    convert_goal_to_positive_preconditions,
     get_action_by_name,
     get_next_actions as _get_next_actions,
     transition as _transition,
@@ -17,6 +18,7 @@ from railroad.planner import AStarPlanner, MCTSPlanner
 
 __all__ = [
     "SimpleAction",
+    "SearchStats",
     "call_planner",
     "MCTSPlanner",
     "AStarPlanner",
@@ -24,9 +26,14 @@ __all__ = [
     "ExtraCostFn",
 ]
 
-# Signature for the extra-cost hook: (action, successor_state) -> float.
-# The action is the C++ Action object (use action.name to identify it).
-# The successor_state is the C++ State resulting from the action.
+# Signature for the extra-cost hook: (planner, action, successor_state) -> float.
+# `planner` is the CoordinationAStarPlanner instance running the search —
+# use `planner.heuristic_to_goal(successor, goal_str)` to estimate the
+# FF-heuristic cost to any other goal from the successor state, reusing the
+# actions/mapping already prepared for the current search.
+# `action` is the C++ Action just taken (use action.name to identify it, e.g.
+# to recover which robot is searching).
+# `successor` is the C++ State resulting from the action.
 # Return 0 to add no coordination cost (pure A* behaviour).
 ExtraCostFn = Callable[..., float]
 
@@ -38,6 +45,18 @@ class SimpleAction:
     preconditions: Set[str]
     add_effects: Set[str]
     del_effects: Set[str]
+
+
+@dataclass
+class SearchStats:
+    """How much of the state space a single CoordinationAStarPlanner search
+    actually explored -- set on the planner instance after plan_sequence()
+    returns (success or failure), and surfaced by call_planner via its
+    stats_out parameter.
+    """
+
+    states_expanded: int  # states popped off the open heap and processed (the closed set)
+    states_generated: int  # distinct states ever pushed onto the open heap (closed + still-open)
 
 
 def _fluent_to_str(f: Fluent) -> str:
@@ -60,15 +79,30 @@ def _str_to_fluent(s: str) -> Fluent:
     return Fluent(name, *args, negated=negated)
 
 
+def _goal_from_str(goal_str: str):
+    """Parse a '&'-joined fluent string into a LiteralGoal or AndGoal."""
+    goal_parts = [p.strip() for p in goal_str.split("&")]
+    if len(goal_parts) > 1:
+        return AndGoal([LiteralGoal(_str_to_fluent(p)) for p in goal_parts])
+    return LiteralGoal(_str_to_fluent(goal_str))
+
+
+def _action_duration(action) -> float:
+    """The operator's own stated duration: the time of its last effect."""
+    duration = 0.0
+    for eff in action.effects:
+        if eff.time > duration:
+            duration = eff.time
+    return duration
+
+
 def _action_to_simple(action) -> SimpleAction:
     """Convert a grounded Action to a SimpleAction for simulation."""
     preconds = {_fluent_to_str(f) for f in action.preconditions}
     add_eff: Set[str] = set()
     del_eff: Set[str] = set()
-    duration = 0.0
+    duration = _action_duration(action)
     for eff in sorted(action.effects, key=lambda e: e.time):
-        if eff.time > duration:
-            duration = eff.time
         for f in eff.resulting_fluents:
             f_str = _fluent_to_str(~f if f.negated else f)
             if f.negated:
@@ -100,14 +134,18 @@ class CoordinationAStarPlanner(AStarPlanner):
     that impose high coordination costs on other robots.
     """
 
-    def plan_sequence(
+    last_search_stats: Optional[SearchStats] = None
+
+    def _search(
         self,
-        state: State,
-        goal,
+        converted_state: State,
+        converted_goal,
         extra_cost_fn: Optional[ExtraCostFn] = None,
-    ) -> list:
-        """Run A* with the extra-cost hook and return the full plan."""
-        converted_state, converted_goal = self._prepare(state, goal)
+    ) -> tuple:
+        """Core A* loop over already-converted state/goal.
+
+        Returns (path, final_state), or ([], None) if the goal is unreachable.
+        """
         actions = self._converted_actions
 
         def h(s: State) -> float:
@@ -137,7 +175,10 @@ class CoordinationAStarPlanner(AStarPlanner):
                     path.append(act)
                     cur_hash = hash(parent)
                 path.reverse()
-                return path
+                self.last_search_stats = SearchStats(
+                    states_expanded=len(closed), states_generated=len(best_g),
+                )
+                return path, current
 
             for action in _get_next_actions(current, actions):
                 for successor, prob in _transition(current, action):
@@ -154,13 +195,65 @@ class CoordinationAStarPlanner(AStarPlanner):
                     best_g[s_hash] = g_new
                     came_from[s_hash] = (current, action)
 
-                    w = extra_cost_fn(action, successor) if extra_cost_fn else 0.0
+                    w = extra_cost_fn(self, action, successor) if extra_cost_fn else 0.0
                     counter += 1
                     _heapq.heappush(
                         open_heap, (g_new + h(successor) + w, counter, successor)
                     )
 
-        return []
+        self.last_search_stats = SearchStats(states_expanded=len(closed), states_generated=len(best_g))
+        return [], None
+
+    def heuristic_to_goal(self, state: State, goal_str: str) -> float:
+        """FF-heuristic estimate of the remaining cost to reach `goal_str` from `state`.
+
+        `state` is expected to already be in converted/positive-precondition
+        form (e.g. a search successor produced by this planner). Reuses the
+        actions/mapping already prepared for the current search rather than
+        re-preparing from scratch, so this is cheap to call repeatedly during
+        search (e.g. from an extra_cost_fn).
+        """
+        goal = _goal_from_str(goal_str)
+        self._ensure_mapping_includes_goal(goal)
+        converted_goal = convert_goal_to_positive_preconditions(goal, self._current_mapping)
+        return _ff_heuristic(state, converted_goal, self._converted_actions)
+
+    def simulate_time_to_goal(self, state: State, goal_str: str) -> Optional[float]:
+        """Actually plan (full, uncoordinated A*) from `state` to `goal_str`, and
+        return the total cost of that plan — the sum of each of its actions' own
+        duration (move, pick, place, cut, ...) — i.e. simulate completing the
+        task from here and add up what each step costs, rather than estimating it.
+
+        `state` is expected to already be in converted/positive-precondition
+        form (e.g. a search successor produced by this planner). Returns 0.0 if
+        `goal_str` is already satisfied, or None if it's unreachable from `state`
+        using this robot's actions alone.
+        """
+        goal = _goal_from_str(goal_str)
+        self._ensure_mapping_includes_goal(goal)
+        converted_goal = convert_goal_to_positive_preconditions(goal, self._current_mapping)
+
+        if converted_goal.evaluate(state.fluents):
+            return 0.0
+
+        # extra_cost_fn=None: the lookahead plan itself is plain A*, not
+        # recursively coordinated — it's just measuring "how long would this
+        # task take from here", not re-optimizing for other robots.
+        path, final_state = self._search(state, converted_goal)
+        if final_state is None:
+            return None
+        return sum(_action_duration(a) for a in path)
+
+    def plan_sequence(
+        self,
+        state: State,
+        goal,
+        extra_cost_fn: Optional[ExtraCostFn] = None,
+    ) -> list:
+        """Run A* with the extra-cost hook and return the full plan."""
+        converted_state, converted_goal = self._prepare(state, goal)
+        path, _ = self._search(converted_state, converted_goal, extra_cost_fn)
+        return path
 
     def __call__(self, state, goal, extra_cost_fn=None, **kwargs) -> str:
         plan = self.plan_sequence(state, goal, extra_cost_fn=extra_cost_fn)
@@ -176,6 +269,7 @@ def call_planner(
     use_stub: bool = False,
     planner_cls: type = MCTSPlanner,
     extra_cost_fn: Optional[ExtraCostFn] = None,
+    stats_out: Optional[Dict[str, int]] = None,
 ) -> Optional[List[SimpleAction]]:
     """
     Plan for a single robot from a snapshot of the world state.
@@ -186,6 +280,12 @@ def call_planner(
 
     extra_cost_fn is forwarded to CoordinationAStarPlanner.plan_sequence
     when planner_cls is CoordinationAStarPlanner; ignored otherwise.
+
+    stats_out, if given, is populated in place with
+    {"states_expanded": ..., "states_generated": ...} when planner_cls is
+    CoordinationAStarPlanner (see SearchStats) -- left untouched for plain
+    AStarPlanner or MCTSPlanner, and for the "goal already satisfied"/stub
+    early-outs below, since no search actually ran.
 
     Returns:
         None  — goal already satisfied in snapshot
@@ -211,11 +311,7 @@ def call_planner(
         fluents.add(_str_to_fluent(s))
     state = State(0.0, fluents)
 
-    goal_parts = [p.strip() for p in goal_str.split("&")]
-    if len(goal_parts) > 1:
-        goal = AndGoal([LiteralGoal(_str_to_fluent(p)) for p in goal_parts])
-    else:
-        goal = LiteralGoal(_str_to_fluent(goal_str))
+    goal = _goal_from_str(goal_str)
 
     if goal.evaluate(state.fluents):
         return None
@@ -228,6 +324,9 @@ def call_planner(
 
     if isinstance(planner, CoordinationAStarPlanner):
         raw_plan = planner.plan_sequence(state, goal, extra_cost_fn=extra_cost_fn)
+        if stats_out is not None and planner.last_search_stats is not None:
+            stats_out["states_expanded"] = planner.last_search_stats.states_expanded
+            stats_out["states_generated"] = planner.last_search_stats.states_generated
         if not raw_plan:
             return []
         return [_action_to_simple(get_action_by_name(all_actions, a.name)) for a in raw_plan]

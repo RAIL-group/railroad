@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \"import molmo_spaces, os; print\\(os.path.dirname\\(molmo_spaces.__file__\\)\\)\")",
+      "Bash(pip show *)"
+    ]
+  }
+}

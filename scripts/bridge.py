@@ -9,12 +9,15 @@ MuJoCo scenes (which are separately exported from the same underlying ProcTHOR
 houses) -- there is no valid grid-cell <-> MuJoCo-pose mapping between the two,
 so railroad's occupancy-grid module is not usable here. Rather than fabricate a
 mapping, this pipeline has railroad reason only over *order* (move, then pick,
-then move, then place) across two abstract location tokens ("pickup_site" and
-"destination_site"); MolmoSpaces owns every real coordinate, grasp pose, and
-placement pose for the house it loads. The one fact that does have to cross the
-boundary -- that the object railroad's plan is built around actually exists, at a
-real, finite pose, in the MolmoSpaces scene -- is checked explicitly by
-`assert_pickup_pose_matches_sim` below.
+then move, then place); MolmoSpaces owns every real coordinate, grasp pose, and
+placement pose for the house it loads. Locations are named with real receptacle
+names whenever they're known (see `plan_move_one_item`'s `pickup_location`), so
+a printed plan reads as "move robot0 start diningtable_..." rather than opaque
+placeholders; a placeholder ("pickup_site") is used only as a fallback when the
+object's current real location isn't known at planning time. The one fact that
+does have to cross the boundary -- that the object railroad's plan is built
+around actually exists, at a real, finite pose, in the MolmoSpaces scene -- is
+checked explicitly by `assert_pickup_pose_matches_sim` below.
 """
 
 from __future__ import annotations
@@ -24,7 +27,6 @@ import numpy as np
 ROBOT = "robot0"
 START_LOC = "start"
 PICKUP_SITE = "pickup_site"
-DESTINATION_SITE = "destination_site"
 
 
 # Assumed constant robot base cruising speed (m/s), used only to turn a real
@@ -36,37 +38,58 @@ DESTINATION_SITE = "destination_site"
 ASSUMED_ROBOT_BASE_SPEED_M_S = 0.5
 
 
-def plan_move_one_item(obj: str, receptacle: str, env, max_steps: int = 10) -> list[str]:
-    """Railroad symbolic plan for moving a single named object to the destination.
+def _build_move_one_item_problem(obj: str, destination: str, env, pickup_location: str | None):
+    """Shared setup for plan_move_one_item / plan_move_one_item_astar: a
+    SymbolicEnvironment + goal for moving `obj` to the real `destination`
+    receptacle, with move costs grounded in real measured distance.
 
-    railroad only reasons about *order* (move, then pick, then move, then
-    place) over abstract location tokens -- it does not know grasp poses,
-    IK, or collision geometry, all of which MolmoSpaces handles. But move
-    *durations* are grounded in real measured distance: a `LocationRegistry`
-    is built from the robot's actual base position and the real pickup/place
-    object positions in the loaded MolmoSpaces scene (see module docstring
-    for why railroad's own occupancy-grid module isn't used for this), and
-    `LocationRegistry.move_time_fn` turns straight-line distance between
-    those points into a duration via ASSUMED_ROBOT_BASE_SPEED_M_S.
+    `destination` is always a real receptacle name (its position comes
+    straight from the scene). `pickup_location` should be the object's real
+    current receptacle when the caller knows it (e.g. from
+    build_initial_fluents_from_scene's fluents) -- if omitted, a generic
+    "pickup_site" token is used instead, positioned at the object's own
+    location, since the object's real current receptacle isn't always known
+    at planning time (e.g. before a MolmoSpaces task has settled the scene).
+    A LocationRegistry built from these positions feeds
+    LocationRegistry.move_time_fn, which turns straight-line distance into a
+    duration via ASSUMED_ROBOT_BASE_SPEED_M_S.
+
+    Returns (SymbolicEnvironment, goal Fluent, resolved pickup_location).
     """
-    from railroad.core import Fluent as F, State, get_action_by_name
+    from railroad.core import Fluent as F, State
     from railroad.environment.symbolic import SymbolicEnvironment, LocationRegistry
-    from railroad.planner import MCTSPlanner
     from railroad import operators
 
     om = env.object_managers[env.current_batch_index]
     robot_base_xy = np.asarray(env.current_robot.robot_view.base.pose[:2, 3], dtype=float)
-    pickup_xy = np.asarray(om.get_object_by_name(obj).position[:2], dtype=float)
-    destination_xy = np.asarray(om.get_object_by_name(receptacle).position[:2], dtype=float)
+    if pickup_location is None:
+        pickup_location = PICKUP_SITE
+        pickup_xy = np.asarray(om.get_object_by_name(obj).position[:2], dtype=float)
+    else:
+        pickup_xy = np.asarray(om.get_object_by_name(pickup_location).position[:2], dtype=float)
+    destination_xy = np.asarray(om.get_object_by_name(destination).position[:2], dtype=float)
 
     registry = LocationRegistry(
         {
             START_LOC: robot_base_xy,
-            PICKUP_SITE: pickup_xy,
-            DESTINATION_SITE: destination_xy,
+            pickup_location: pickup_xy,
+            destination: destination_xy,
         }
     )
-    move_op = operators.construct_move_operator_blocking(
+    # Plain (non-blocking) move: the "_blocking" variant adds a "just-moved"
+    # precondition meant to stop a robot thrashing back and forth in
+    # multi-robot coordination problems, which doesn't apply to this
+    # single-robot, single-object, pure-ordering problem. Using it here
+    # created a real dead end: "just-moved" is set immediately on arrival but
+    # only clears via a delayed effect, which Environment.act() does not
+    # advance to on its own (it stops as soon as a robot is free again) --
+    # normally a subsequent pick/place's own longer duration flushes it as a
+    # side effect of time passing, but if MCTS's first move ever goes to the
+    # wrong site (plausible when pickup_site and destination_site happen to
+    # be nearly equidistant from the start), `pick` then fails (object isn't
+    # there) while `move` is blocked by `just-moved`, and the planner
+    # correctly reports no action is available.
+    move_op = operators.construct_move_operator(
         move_time=registry.move_time_fn(velocity=ASSUMED_ROBOT_BASE_SPEED_M_S)
     )
     pick_op = operators.construct_pick_operator_blocking(pick_time=5.0)
@@ -75,34 +98,87 @@ def plan_move_one_item(obj: str, receptacle: str, env, max_steps: int = 10) -> l
     initial_fluents = {
         F(f"at {ROBOT} {START_LOC}"),
         F(f"free {ROBOT}"),
-        F(f"at {obj} {PICKUP_SITE}"),
+        F(f"at {obj} {pickup_location}"),
     }
     state = State(0.0, initial_fluents, [])
-    env = SymbolicEnvironment(
+    senv = SymbolicEnvironment(
         state=state,
         objects_by_type={
             "robot": {ROBOT},
-            "location": {START_LOC, PICKUP_SITE, DESTINATION_SITE},
+            "location": {START_LOC, pickup_location, destination},
             "object": {obj},
         },
         operators=[move_op, pick_op, place_op],
     )
-    goal = F(f"at {obj} {DESTINATION_SITE}")
+    goal = F(f"at {obj} {destination}")
+    return senv, goal, pickup_location
+
+
+def plan_move_one_item(
+    obj: str,
+    destination: str,
+    env,
+    pickup_location: str | None = None,
+    max_steps: int = 10,
+) -> list[str]:
+    """Railroad MCTS plan for moving a single named object to the destination.
+
+    MCTSPlanner only returns the single next best action per call (see
+    railroad.planner.MCTSPlanner), so this re-plans from scratch after each
+    action until the goal is reached. See _build_move_one_item_problem for
+    how the problem (locations, move costs) is constructed.
+    """
+    from railroad.core import get_action_by_name
+    from railroad.planner import MCTSPlanner
+
+    senv, goal, _pickup_location = _build_move_one_item_problem(
+        obj, destination, env, pickup_location
+    )
 
     plan: list[str] = []
     for _ in range(max_steps):
-        if goal.evaluate(env.fluents):
+        if goal.evaluate(senv.fluents):
             return plan
-        all_actions = env.get_actions()
+        all_actions = senv.get_actions()
         mcts = MCTSPlanner(all_actions)
-        action_name = mcts(env.state, goal, max_iterations=5000, max_depth=15)
+        action_name = mcts(senv.state, goal, max_iterations=5000, max_depth=15)
         if action_name == "NONE":
             raise RuntimeError("Planner could not find a next action toward the goal.")
         action = get_action_by_name(all_actions, action_name)
-        env.act(action)
+        senv.act(action)
         plan.append(action_name)
 
     raise RuntimeError(f"Plan did not reach the goal within {max_steps} steps.")
+
+
+def plan_move_one_item_astar(
+    obj: str,
+    destination: str,
+    env,
+    pickup_location: str | None = None,
+) -> list[str]:
+    """Railroad A* plan for moving a single named object to the destination.
+
+    Unlike plan_move_one_item (MCTS), AStarPlanner.plan_sequence runs once and
+    returns the full, cost-optimal plan directly -- a good way to sanity-check
+    that the real measured move costs from _build_move_one_item_problem are
+    wired up correctly (A* is deterministic and provably optimal, so a wrong
+    or missing cost would show up as a wrong action ordering, not just
+    flakiness).
+    """
+    from railroad.planner import AStarPlanner
+
+    senv, goal, _pickup_location = _build_move_one_item_problem(
+        obj, destination, env, pickup_location
+    )
+    if goal.evaluate(senv.fluents):
+        return []
+
+    astar = AStarPlanner(senv.get_actions())
+    plan = astar.plan_sequence(senv.state, goal)
+    if not plan:
+        raise RuntimeError("A* found no plan to the goal.")
+    return [action.name for action in plan]
 
 
 # Translation layer: PickAndPlacePlannerPolicy runs the whole pick+place task as
@@ -198,7 +274,9 @@ def build_initial_fluents_from_scene(
 
 
 def compute_pairwise_travel_distances(
-    env, location_names: list[str]
+    env,
+    location_names: list[str],
+    position_overrides: dict[str, np.ndarray] | None = None,
 ) -> dict[tuple[str, str], float]:
     """Shortest collision-free travel distance (meters) between every pair of
     named locations, routed around real obstacles in the loaded MolmoSpaces
@@ -250,6 +328,10 @@ def compute_pairwise_travel_distances(
         env: MolmoSpaces environment with a loaded scene (task.env).
         location_names: Object/receptacle names (as returned by
             ObjectManager.get_receptacles()) to compute distances between.
+        position_overrides: Explicit (x, y[, z]) position for any name in
+            `location_names` that isn't a real scene object -- e.g. a robot's
+            current base position under a synthetic name like "start" --
+            bypassing the `om.get_object_by_name` lookup for that name.
 
     Returns:
         Dict mapping each unordered pair (name_a, name_b), name_a < name_b,
@@ -278,7 +360,10 @@ def compute_pairwise_travel_distances(
 
     grid_coords: dict[str, tuple[int, int]] = {}
     for name in location_names:
-        position = om.get_object_by_name(name).position
+        if position_overrides is not None and name in position_overrides:
+            position = position_overrides[name]
+        else:
+            position = om.get_object_by_name(name).position
         px = thormap.pos_m_to_px(np.asarray(position, dtype=float))
         row = int(np.clip(px[0], 0, free_mask.shape[0] - 1))
         col = int(np.clip(px[1], 0, free_mask.shape[1] - 1))
