@@ -20,10 +20,26 @@ dependencies = [
     "ty>=0.0.12",
 ]
 
+[tool.uv]
+# molmo-spaces depends on eva-decord on macOS, which ships wheels only for
+# cp38-cp311 (no sdist) -- it would cap this repo at Python 3.11. It is imported
+# only by molmo_spaces/utils/test_utils.py, which nothing here uses, so drop it
+# via an always-false marker instead. Harmless on Linux, which uses `decord`.
+override-dependencies = ["eva-decord; sys_platform == 'never'"]
+# toppra (pulled in by molmo-spaces) ships Linux-only wheels from 0.6.6 on, with
+# no sdist. 0.6.3 is the last release with an sdist, so it builds from source on
+# macOS. Same version the known-working rail-robot-sim-dev environment resolved.
+# warp-lang 1.15+ tightened wp.copy() dtype checking, which molmo_spaces'
+# warp_kinematics.ik() violates (RuntimeError: Incompatible array data types).
+# 1.14.0 is the last version its parallel IK works against.
+constraint-dependencies = ["toppra<=0.6.3", "warp-lang<=1.14.0"]
+
 [tool.uv.sources]
 railroad = { path = "packages/railroad", editable = true }
 environments = { path = "packages/environments", editable = true }
-molmo-spaces = { path = "/home/ridwan/molmospaces", editable = true }
+# MolmoSpaces is not on PyPI; uv fetches it from git. Pinned to the commit
+# known to work with these scripts -- unpinned it re-resolves to HEAD.
+molmo-spaces = { git = "https://github.com/allenai/molmospaces.git", rev = "fb49aef0750973bff8660e213612d06005f8a37f" }
 
 [tool.ty.src]
 exclude = ["**/scratch/**"]
