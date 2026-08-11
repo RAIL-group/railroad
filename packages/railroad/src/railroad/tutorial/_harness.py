@@ -183,7 +183,8 @@ def _announce(step: str, outcome: Dict[str, Any]) -> None:
     })
 
 
-def _parse(argv: Optional[Sequence[str]], cases: List[Dict[str, Any]]) -> argparse.Namespace:
+def _parse(argv: Optional[Sequence[str]], cases: List[Dict[str, Any]],
+           default_case: int = 0) -> argparse.Namespace:
     """This step's own command line: two flags of its own, plus the shared ones.
 
     The plot and video flags are the ones ``railroad example`` has always had
@@ -198,7 +199,7 @@ def _parse(argv: Optional[Sequence[str]], cases: List[Dict[str, Any]]) -> argpar
         description="Run one case of this step live. The sweep over every case "
                     "is 'uv run railroad tutorial bench'.",
     )
-    parser.add_argument("--case", type=int, default=0, metavar="N",
+    parser.add_argument("--case", type=int, default=default_case, metavar="N",
                         help=f"which case to run (0-{max(len(cases) - 1, 0)})")
     parser.add_argument("--list", action="store_true",
                         help="print the cases and exit")
@@ -206,7 +207,8 @@ def _parse(argv: Optional[Sequence[str]], cases: List[Dict[str, Any]]) -> argpar
     return parser.parse_args(None if argv is None else list(argv))
 
 
-def main(bench: Any, argv: Optional[Sequence[str]] = None) -> Optional[Dict[str, Any]]:
+def main(bench: Any, argv: Optional[Sequence[str]] = None, *,
+         default_case: int = 0) -> Optional[Dict[str, Any]]:
     """Run one case of *bench* live; return its metrics.
 
     *bench* is what ``@benchmark`` handed back: a ``Benchmark`` holding the
@@ -214,11 +216,18 @@ def main(bench: Any, argv: Optional[Sequence[str]] = None) -> Optional[Dict[str,
     configuration means the thing you demonstrate and the thing you sweep can
     never drift apart -- and that ``--case`` gives you every point of the sweep
     as something you can watch.
+
+    ``default_case`` is which one to run when nobody says. It exists because
+    the two orderings a sweep wants are not the same one: the dashboard reads
+    a sweep in case order, so an axis wants declaring smallest-first, while
+    the case you would show an audience is usually not the smallest. Declaring
+    the axis in the order it should be *read* and naming the case to *run*
+    gets both.
     """
     from railroad.bench import BenchmarkCase
 
     cases: List[Dict[str, Any]] = list(getattr(bench, "cases", None) or [{}])
-    args = _parse(argv, cases)
+    args = _parse(argv, cases, default_case)
 
     if args.list:
         print(f"{bench.name}: {len(cases)} case(s)")

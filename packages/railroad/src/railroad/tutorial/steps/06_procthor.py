@@ -206,9 +206,9 @@ run.add_cases([
     {"scene_seed": scene_seed, "num_robots": num_robots,
      "mcts.iterations": SEARCH_BUDGET, "mcts.h_mult": 2.0, "mcts.c": 300}
     for scene_seed in (8613, 8612)
-    for num_robots in (2, 1)
+    for num_robots in (1, 2)
 ])
 
 
 if __name__ == "__main__":
-    tutorial.main(run)
+    tutorial.main(run, default_case=1)

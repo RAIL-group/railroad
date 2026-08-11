@@ -166,10 +166,10 @@ def run(case: BenchmarkCase) -> dict:
 run.add_cases([
     {"num_robots": num_robots, "mcts.iterations": iterations,
      "mcts.h_mult": 5.0, "mcts.c": 300}
-    for num_robots in (2, 1, 3)
+    for num_robots in (1, 2, 3)
     for iterations in (4000, 1000, 400)
 ])
 
 
 if __name__ == "__main__":
-    tutorial.main(run)
+    tutorial.main(run, default_case=3)
