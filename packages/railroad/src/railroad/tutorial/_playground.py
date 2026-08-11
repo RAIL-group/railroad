@@ -280,12 +280,13 @@ sweeps, the costs in the step list and anything in `media/`, but never touches
 `demo.py`. Nothing here is recoverable, so it asks first, which is why a
 morning of rehearsed sweeps cannot go up in smoke by reflex.
 
-`peek`, `next` and `diff` show both versions of the whole file side by side and
-open it in `$PAGER` (`less -R -S -F -X` by default), so you can scroll, search
-and change the terminal's font size without the layout reflowing under you. The
-diff is laid out for a wide screen whatever size the terminal happens to be, and
-`less -S` scrolls sideways rather than folding lines -- so zooming out reveals
-more of the file rather than rearranging it. `PAGER=cat` turns paging off.
+`peek`, `next` and `diff <a> <b>` show both versions of the whole file side by
+side in a scrolling viewer: mouse wheel or `j`/`k` to scroll, space to page,
+`g`/`G` for the ends, `q` to quit. Resize the window and the diff is laid out
+again at the new width -- including dropping to a unified diff below 120
+columns, where two columns of Python stop being readable. Short diffs are
+printed inline rather than taking over the screen, and
+`RAILROAD_TUTORIAL_VIEWER=off` does that for all of them.
 
 Advancing three-way merges the step's patch into the file as it actually
 stands, so a constant you tuned mid-sentence survives the move. On a genuine

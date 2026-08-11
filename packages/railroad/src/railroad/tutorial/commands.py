@@ -27,6 +27,7 @@ from rich.text import Text
 
 from . import _advance as adv
 from . import _launch as launch
+from . import _viewer as viewer
 from ._playground import (
     DEFAULT_DIRNAME,
     Playground,
@@ -397,13 +398,15 @@ def render_patch(
     from_step, to_step = get_step(from_id), get_step(to_id)
     before, after = playground.pristine_text(from_id), playground.pristine_text(to_id)
     added, removed = adv.diff_stat(before, after)
-    adv.show_paged(console, Group(
+    # A callable of width, not a finished renderable: the viewer re-renders on
+    # resize, and two columns of code have to be laid out again to do that.
+    viewer.show(console, lambda width: Group(
         Rule(f"step {to_id} · {escape(to_step['title'])}  (+{added} −{removed})"),
         adv.side_by_side(
             before, after,
             f"step {from_id} ({from_step['title']})",
             f"step {to_id} ({to_step['title']})",
-            width=console.width,
+            width=width,
         ),
         Text(""),
         Text(to_step["point"], style="dim"),
@@ -547,7 +550,7 @@ def cmd_diff(
         f"step {current}",
         "your demo.py",
     )
-    adv.show_paged(console, Group(
+    viewer.show(console, lambda _width: Group(
         Rule(f"your edits on top of step {current}"),
         adv.colorize(diff),
     ))

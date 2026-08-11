@@ -17,18 +17,14 @@ somewhere to go back to.
 from __future__ import annotations
 
 import difflib
-import io
 import json
-import os
-import shlex
 import shutil
 import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, List, Optional
+from typing import List, Optional
 
-from rich.console import Console
 from rich.table import Table
 from rich.text import Text
 
@@ -231,56 +227,6 @@ def side_by_side(
             if right is not None else Text(""),
         )
     return table
-
-
-# -- the pager ---------------------------------------------------------------
-
-LESS_FLAGS = ["-R", "-S", "-F", "-X"]
-"""-R keeps the colour; -S chops rather than folding, so a line that does not
-fit cannot push the two columns out of step; -F -X together decline to take
-over the screen for something that already fits on it."""
-
-
-def pager_command() -> Optional[List[str]]:
-    """``$PAGER``, or ``less`` set up for this, or ``None`` if there is none."""
-    configured = os.environ.get("PAGER", "").strip()
-    if configured:
-        argv = shlex.split(configured)
-        # A bare `less` would print the escape codes rather than the colours.
-        if len(argv) == 1 and Path(argv[0]).name == "less":
-            argv += LESS_FLAGS
-        return argv
-    less = shutil.which("less")
-    return [less, *LESS_FLAGS] if less else None
-
-
-def show_paged(console: Console, renderable: Any) -> bool:
-    """Show *renderable* in a pager. Returns whether it paged.
-
-    Laid out for the terminal as it actually is. Rendering wider and letting
-    ``less -S`` scroll sideways sounds appealing -- zoom out, see more -- but
-    it opens with the right-hand column off the screen, which is the one thing
-    a before/after view must never do.
-
-    Without a pager, or with nobody at a terminal (a pipe, a recording console
-    under test), it prints inline instead.
-    """
-    command = pager_command() if console.is_terminal else None
-    if command is None:
-        console.print(renderable)
-        return False
-
-    # Capture rather than re-render: same console, so the same width and the
-    # same colours the terminal would have received.
-    with console.capture() as captured:
-        console.print(renderable)
-    try:
-        subprocess.run(command, input=captured.get(), text=True, check=False)
-    except (OSError, subprocess.SubprocessError):
-        # A missing or unrunnable pager should cost you the paging, not the diff.
-        console.print(renderable)
-        return False
-    return True
 
 
 def first_changed_line(from_text: str, to_text: str) -> int:

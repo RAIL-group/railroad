@@ -27,7 +27,15 @@ from railroad.tutorial import (
     step_ids,
 )
 from railroad.tutorial import _advance as adv
+from railroad.tutorial import _viewer as viewer
 from railroad.tutorial import commands
+
+
+def strip_ansi(text: str) -> str:
+    """Rendered lines carry styling; length assertions want the text."""
+    import re
+
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
 SHIPPED_STEPS = Path(commands.__file__).parent / "steps"
@@ -204,57 +212,89 @@ def test_side_by_side_falls_back_on_a_narrow_terminal():
     assert not isinstance(narrow, Table)
 
 
-# -- the pager ---------------------------------------------------------------
+# -- the viewer -------------------------------------------------------------
 
 
-def test_pager_command_honours_the_environment(monkeypatch):
-    monkeypatch.setenv("PAGER", "bat --plain")
-    assert adv.pager_command() == ["bat", "--plain"]
+def test_wheel_and_keys_map_to_scroll_actions():
+    """The mouse wheel is the reason this exists rather than a call to less."""
+    assert viewer.parse_key(b"\x1b[<64;10;20M") == "wheel-up"
+    assert viewer.parse_key(b"\x1b[<65;10;20M") == "wheel-down"
+    # Terminals that do not know the SGR encoding send the legacy form.
+    assert viewer.parse_key(b"\x1b[M" + bytes([64 + 32, 33, 33])) == "wheel-up"
+    assert viewer.parse_key(b"j") == "down"
+    assert viewer.parse_key(b"\x1b[B") == "down"
+    assert viewer.parse_key(b" ") == "page-down"
+    assert viewer.parse_key(b"q") == "quit"
+    assert viewer.parse_key(b"\x1b") == "quit"
+    assert viewer.parse_key(b"z") == ""
 
 
-def test_a_bare_less_still_gets_the_flags_it_needs(monkeypatch):
-    """Without -R it prints escape codes; without -S it folds the columns."""
-    monkeypatch.setenv("PAGER", "less")
-    command = adv.pager_command()
-    assert command is not None
-    assert command[0] == "less" and "-R" in command and "-S" in command
+def test_scrolling_stops_at_both_ends():
+    """100 lines, a 10-line window: the last useful top is 90."""
+    assert viewer.scroll_to(0, "up", 100, 10) == 0
+    assert viewer.scroll_to(0, "down", 100, 10) == 1
+    assert viewer.scroll_to(0, "wheel-down", 100, 10) == viewer.WHEEL_LINES
+    assert viewer.scroll_to(0, "page-down", 100, 10) == 10
+    assert viewer.scroll_to(95, "page-down", 100, 10) == 90
+    assert viewer.scroll_to(50, "bottom", 100, 10) == 90
+    assert viewer.scroll_to(50, "top", 100, 10) == 0
+    # Shorter than the window: there is nowhere to go.
+    assert viewer.scroll_to(0, "page-down", 5, 10) == 0
 
 
-def test_show_paged_prints_inline_when_nobody_is_watching(console):
-    """A recording console under test, or a pipe, must not launch a pager."""
-    assert not adv.show_paged(console, Text("printed inline"))
-    assert "printed inline" in console.export_text()
+def test_scrolling_ignores_keys_it_does_not_know():
+    assert viewer.scroll_to(7, "", 100, 10) == 7
 
 
-def test_show_paged_hands_over_what_the_terminal_would_have_shown(monkeypatch):
-    """Laid out for the real width: a wider layout opens off the right edge."""
-    monkeypatch.setenv("PAGER", "cat")
-    seen = {}
-
-    def fake_run(command, **kwargs):
-        seen["command"] = command
-        seen["input"] = kwargs.get("input", "")
-        return subprocess.CompletedProcess(command, 0)
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    console = Console(force_terminal=True, width=70)
-    assert adv.show_paged(console, Text("hello from the pager"))
-    assert seen["command"] == ["cat"]
-    assert "hello from the pager" in seen["input"]
-    widest = max(len(line) for line in seen["input"].splitlines())
-    assert widest <= console.width, "the pager was handed lines wider than the screen"
+def test_render_lines_lays_out_at_the_width_it_is_given():
+    """Resizing re-renders, which is the whole reason this takes a callable."""
+    console = Console(force_terminal=True, width=80)
+    build = lambda width: Text("x" * (width - 1))
+    assert len(strip_ansi(viewer.render_lines(console, build, 60)[0])) == 59
+    assert len(strip_ansi(viewer.render_lines(console, build, 140)[0])) == 139
 
 
-def test_a_broken_pager_costs_the_paging_not_the_diff(monkeypatch):
-    monkeypatch.setenv("PAGER", "definitely-not-a-pager")
+def test_rendered_rows_never_exceed_the_width_they_were_built_for(playground):
+    """A row wider than the terminal wraps, and a wrapped row breaks alignment."""
+    from rich.console import Group
+    from rich.rule import Rule
 
-    def fake_run(command, **kwargs):
-        raise OSError("no such pager")
+    before = playground.pristine_text(STEPS[0]["id"])
+    after = playground.pristine_text(STEPS[1]["id"])
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    def build(width):
+        return Group(Rule("patch"),
+                     adv.side_by_side(before, after, "a", "b", width=width))
+
+    console = Console(force_terminal=True, width=80)
+    for width in (110, 150, 200):
+        lines = viewer.render_lines(console, build, width)
+        widest = max(len(strip_ansi(line)) for line in lines)
+        assert widest <= width, f"{widest} > {width}"
+
+
+def test_viewer_prints_inline_when_nobody_is_watching(console):
+    """A recording console under test, or a pipe, must not take the screen."""
+    assert not viewer.show(console, lambda width: Text(f"laid out at {width}"))
+    assert f"laid out at {console.width}" in console.export_text()
+
+
+def test_viewer_can_be_switched_off(monkeypatch):
+    monkeypatch.setenv(viewer.VIEWER_ENV, "off")
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
     printing = Console(record=True, force_terminal=True, width=120)
-    assert not adv.show_paged(printing, Text("the diff itself"))
-    assert "the diff itself" in printing.export_text()
+    assert not viewer.show(printing, lambda _width: Text("printed inline"))
+    assert "printed inline" in printing.export_text()
+
+
+def test_content_that_already_fits_is_not_worth_a_takeover(monkeypatch):
+    """It would vanish from the scrollback the moment you quit."""
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(viewer, "terminal_size",
+                        lambda *a: os.terminal_size((120, 50)))
+    printing = Console(record=True, force_terminal=True, width=120)
+    assert not viewer.show(printing, lambda _width: Text("three\nshort\nlines"))
+    assert "three" in printing.export_text()
 
 
 # -- advancing ---------------------------------------------------------------
