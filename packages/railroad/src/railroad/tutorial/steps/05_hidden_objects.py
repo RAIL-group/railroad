@@ -25,7 +25,6 @@ LOCATIONS = {
 }
 OBJECTS = ["Book", "Mug", "Vase"]
 NUM_ROBOTS = 2
-USE_SEARCH_LOCK = True
 
 TRUE_LOCATIONS = {
     "table": {"Book"},
@@ -50,10 +49,6 @@ def move_time(robot: str, loc_from: str, loc_to: str) -> float:
 class HouseSearch(ObjectSearchEnvironment):
     """Move and search. Where things are is now the whole problem."""
 
-    def __init__(self, *args, use_search_lock: bool = USE_SEARCH_LOCK, **kwargs):
-        self.use_search_lock = use_search_lock
-        super().__init__(*args, **kwargs)
-
     def define_operators(self):
         move = Operator(
             name="move",
@@ -70,13 +65,6 @@ class HouseSearch(ObjectSearchEnvironment):
                        resulting_fluents={~F("just-moved ?r")}),
             ],
         )
-        locked = [~F("lock-search ?loc")] if self.use_search_lock else []
-        starting = {~F("free ?r")}
-        finishing = {F("free ?r"), F("searched ?loc ?obj")}
-        if self.use_search_lock:
-            starting.add(F("lock-search ?loc"))
-            finishing.add(~F("lock-search ?loc"))
-
         search = Operator(
             name="search",
             parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
@@ -86,13 +74,15 @@ class HouseSearch(ObjectSearchEnvironment):
                 ~F("revealed ?loc"),
                 ~F("searched ?loc ?obj"),
                 ~F("found ?obj"),
-                *locked,
+                ~F("lock-search ?loc"),
             ],
             effects=[
-                Effect(time=0, resulting_fluents=starting),
+                Effect(time=0, resulting_fluents={~F("free ?r"),
+                                                  F("lock-search ?loc")}),
                 Effect(
                     time=SEARCH_TIME,
-                    resulting_fluents=finishing,
+                    resulting_fluents={F("free ?r"), F("searched ?loc ?obj"),
+                                       ~F("lock-search ?loc")},
                     prob_effects=[
                         (FIND_PROB, [Effect(
                             time=0,
@@ -116,8 +106,7 @@ class HouseSearch(ObjectSearchEnvironment):
         return [move, search, no_op]
 
 
-def build(num_robots: int = NUM_ROBOTS,
-          use_search_lock: bool = USE_SEARCH_LOCK):
+def build(num_robots: int = NUM_ROBOTS):
     """The problem: who is around, what we are after, and what we already know."""
     robots = [f"robot{i + 1}" for i in range(num_robots)]
     fluents = {F("revealed living_room")}
@@ -134,7 +123,6 @@ def build(num_robots: int = NUM_ROBOTS,
             "object": set(OBJECTS),
         },
         true_object_locations=TRUE_LOCATIONS,
-        use_search_lock=use_search_lock,
         seed=0,
     )
     return env, goal
@@ -163,13 +151,13 @@ def relevant(fluent) -> bool:
 
 @benchmark(
     name="s05_hidden_objects",
-    description="Find three hidden objects, with and without the per-room search lock.",
+    description="Find three hidden objects with 1-3 robots; sweep team size.",
     tags=["tutorial"],
     repeat=8,
     timeout=60.0,
 )
 def run(case: BenchmarkCase) -> dict:
-    env, goal = build(case.num_robots, use_search_lock=case.use_search_lock)
+    env, goal = build(case.num_robots)
     with tutorial.dashboard(case, goal, env, fluent_filter=relevant) as view:
         solve(env, goal, view, iterations=case.mcts.iterations, c=case.mcts.c,
               h_mult=case.mcts.h_mult)
@@ -177,12 +165,11 @@ def run(case: BenchmarkCase) -> dict:
 
 
 run.add_cases([
-    {"num_robots": num_robots, "use_search_lock": use_search_lock,
+    {"num_robots": num_robots,
      "mcts.iterations": 4000, "mcts.h_mult": 5.0, "mcts.c": 300}
     for num_robots in (1, 2, 3)
-    for use_search_lock in (True, False)
 ])
 
 
 if __name__ == "__main__":
-    tutorial.main(run, default_case=2)
+    tutorial.main(run, default_case=1)

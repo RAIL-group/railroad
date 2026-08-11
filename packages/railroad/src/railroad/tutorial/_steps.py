@@ -207,7 +207,7 @@ STEPS: List[StepInfo] = [
         "problem": "house-search",
         "requires": "",
         "point": "Probabilistic search, a flat prior, and the lock that stops it being wasted.",
-        "sweep": "use_search_lock x num_robots",
+        "sweep": "num_robots",
         "media": "hidden-objects",
         "notes": [
             "The objects leave the initial state; the robots have to look. That "
@@ -217,24 +217,23 @@ STEPS: List[StepInfo] = [
             "discovery. And searching *reveals* a room -- everything there "
             "becomes known and the room closes for good.",
             "Which is what the lock is for. 'searched' only lands when a search "
-            "finishes, so nothing stops two robots searching one room at once, "
-            "and a flat prior makes two draws at 0.5 look better than one. It is "
-            "not: one search reveals the room, so the second robot was never "
-            "going to learn anything. Three lines fix it -- a lock-search "
-            "precondition, the lock taken at t=0, released when the search "
-            "completes.",
-            "Measured, 8 repeats: 1 robot 28.3 either way -- a robot cannot "
-            "contend with itself. 2 robots 19.2 with the lock against 22-23 "
-            "without. 3 robots 19.2 -> 13.5.",
-            "The spread moves too, and it is the more honest half: with the lock "
-            "the cost repeats exactly (sd 0.0 at two and three robots), without "
-            "it the same configuration scatters over about five seconds, because "
-            "which room gets double-searched is up to the sampling.",
+            "finishes, so nothing would stop two robots searching one room at "
+            "once, and a flat prior makes two draws at 0.5 look better than one. "
+            "It is not: one search reveals the room, so the second robot was "
+            "never going to learn anything. Three lines settle it -- a "
+            "lock-search precondition, the lock taken at t=0, released when the "
+            "search completes -- and they are not optional. A search you can "
+            "run unlocked is a search that can be bought twice, so the operator "
+            "carries the lock the way it carries 'at ?r ?loc'.",
+            "Measured, 8 repeats: 28.0 -> 19.2 -> 13.5 seconds at one, two and "
+            "three robots, 8 of 8 every time. Two and three robots repeat "
+            "exactly (sd 0.0); the one-robot number scatters by under a second, "
+            "which is the search order changing, not the plan.",
             "'searches' is the cleaner measure, and the one to put on the slide: "
-            "a flat 3.0 with the lock at any team size, against 3.0 / 3.8 / ~5.8 "
-            "without it. Three rooms hold something, so 3 is the floor. The lock "
-            "does not make robots faster; it stops them buying the same "
-            "information twice.",
+            "a flat 3.0 at every team size. Three rooms hold something, so 3 is "
+            "the floor, and the lock is what holds a bigger team to it. It does "
+            "not make robots faster; it stops them buying the same information "
+            "twice.",
         ],
     },
     {
