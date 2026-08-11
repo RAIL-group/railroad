@@ -17,14 +17,19 @@ somewhere to go back to.
 from __future__ import annotations
 
 import difflib
+import io
 import json
+import os
+import shlex
 import shutil
 import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Callable, List, Optional
 
+from rich.console import Console
+from rich.table import Table
 from rich.text import Text
 
 from ._playground import Playground
@@ -149,6 +154,133 @@ def colorize(diff_text: str) -> Text:
             style = "dim"
         out.append(line + "\n", style=style)
     return out
+
+
+MIN_SIDE_BY_SIDE_WIDTH = 120
+"""Below this each column is under ~52 characters, which is narrower than the
+code it has to hold. A unified diff is the better answer down there."""
+
+
+def _aligned_rows(
+    from_lines: List[str], to_lines: List[str]
+) -> List[tuple[str, Optional[int], Optional[int]]]:
+    """Pair the two files line for line as ``(tag, left_index, right_index)``.
+
+    Unchanged lines pair up one to one. Inside a changed run the two sides are
+    zipped as far as they go and the shorter one is padded with ``None``, which
+    is what keeps the rest of the file level across the divider.
+    """
+    matcher = difflib.SequenceMatcher(None, from_lines, to_lines, autojunk=False)
+    rows: List[tuple[str, Optional[int], Optional[int]]] = []
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        left = list(range(i1, i2))
+        right = list(range(j1, j2))
+        for offset in range(max(len(left), len(right))):
+            rows.append((
+                tag,
+                left[offset] if offset < len(left) else None,
+                right[offset] if offset < len(right) else None,
+            ))
+    return rows
+
+
+def side_by_side(
+    from_text: str,
+    to_text: str,
+    from_label: str,
+    to_label: str,
+    *,
+    width: int,
+) -> Table | Text:
+    """Both versions of the whole file, aligned, changes coloured.
+
+    A unified diff answers "what changed"; this answers "what changed, and
+    where does it sit in the file" -- which is the question an audience
+    watching one file evolve is actually asking. The whole file is shown, not
+    just hunks with context, so the shape of the step stays visible.
+
+    Falls back to the unified diff on a terminal too narrow to hold two columns
+    of code, because half-width Python is worse than a normal diff.
+    """
+    if width < MIN_SIDE_BY_SIDE_WIDTH:
+        return colorize(unified(from_text, to_text, from_label, to_label))
+
+    from_lines = from_text.splitlines()
+    to_lines = to_text.splitlines()
+    number_width = max(len(str(len(from_lines))), len(str(len(to_lines))), 2)
+    # Two line-number columns, the divider, and the two spaces rich puts in
+    # each of the four gaps between the five columns.
+    column_width = max((width - 2 * number_width - 1 - 8) // 2, 20)
+
+    table = Table(box=None, pad_edge=False, header_style="bold")
+    table.add_column("", justify="right", style="dim", width=number_width)
+    table.add_column(Text(from_label), width=column_width, overflow="fold")
+    table.add_column("", width=1, style="dim")
+    table.add_column("", justify="right", style="dim", width=number_width)
+    table.add_column(Text(to_label), width=column_width, overflow="fold")
+
+    for tag, left, right in _aligned_rows(from_lines, to_lines):
+        unchanged = tag == "equal"
+        table.add_row(
+            "" if left is None else str(left + 1),
+            Text(from_lines[left], style="dim" if unchanged else "red")
+            if left is not None else Text(""),
+            "│",
+            "" if right is None else str(right + 1),
+            Text(to_lines[right], style="dim" if unchanged else "green")
+            if right is not None else Text(""),
+        )
+    return table
+
+
+# -- the pager ---------------------------------------------------------------
+
+LESS_FLAGS = ["-R", "-S", "-F", "-X"]
+"""-R keeps the colour; -S chops rather than folding, so a line that does not
+fit cannot push the two columns out of step; -F -X together decline to take
+over the screen for something that already fits on it."""
+
+
+def pager_command() -> Optional[List[str]]:
+    """``$PAGER``, or ``less`` set up for this, or ``None`` if there is none."""
+    configured = os.environ.get("PAGER", "").strip()
+    if configured:
+        argv = shlex.split(configured)
+        # A bare `less` would print the escape codes rather than the colours.
+        if len(argv) == 1 and Path(argv[0]).name == "less":
+            argv += LESS_FLAGS
+        return argv
+    less = shutil.which("less")
+    return [less, *LESS_FLAGS] if less else None
+
+
+def show_paged(console: Console, renderable: Any) -> bool:
+    """Show *renderable* in a pager. Returns whether it paged.
+
+    Laid out for the terminal as it actually is. Rendering wider and letting
+    ``less -S`` scroll sideways sounds appealing -- zoom out, see more -- but
+    it opens with the right-hand column off the screen, which is the one thing
+    a before/after view must never do.
+
+    Without a pager, or with nobody at a terminal (a pipe, a recording console
+    under test), it prints inline instead.
+    """
+    command = pager_command() if console.is_terminal else None
+    if command is None:
+        console.print(renderable)
+        return False
+
+    # Capture rather than re-render: same console, so the same width and the
+    # same colours the terminal would have received.
+    with console.capture() as captured:
+        console.print(renderable)
+    try:
+        subprocess.run(command, input=captured.get(), text=True, check=False)
+    except (OSError, subprocess.SubprocessError):
+        # A missing or unrunnable pager should cost you the paging, not the diff.
+        console.print(renderable)
+        return False
+    return True
 
 
 def first_changed_line(from_text: str, to_text: str) -> int:

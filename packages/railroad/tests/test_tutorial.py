@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 from rich.console import Console
+from rich.text import Text
 
 from railroad.tutorial import (
     STEPS,
@@ -182,6 +183,80 @@ def test_diff_stat_counts_both_directions():
     assert adv.diff_stat("a\nb\n", "a\nc\nd\n") == (2, 1)
 
 
+def test_side_by_side_pairs_the_files_line_for_line():
+    """Unchanged lines stay level; a changed run pads the shorter side."""
+    rows = adv._aligned_rows(["a", "b", "c"], ["a", "B", "B2", "c"])
+    assert rows == [
+        ("equal", 0, 0),
+        ("replace", 1, 1),
+        ("replace", None, 2),
+        ("equal", 2, 3),
+    ]
+
+
+def test_side_by_side_falls_back_on_a_narrow_terminal():
+    """Half-width Python is worse to read than an ordinary unified diff."""
+    from rich.table import Table
+
+    wide = adv.side_by_side("a\n", "b\n", "before", "after", width=160)
+    assert isinstance(wide, Table)
+    narrow = adv.side_by_side("a\n", "b\n", "before", "after", width=60)
+    assert not isinstance(narrow, Table)
+
+
+# -- the pager ---------------------------------------------------------------
+
+
+def test_pager_command_honours_the_environment(monkeypatch):
+    monkeypatch.setenv("PAGER", "bat --plain")
+    assert adv.pager_command() == ["bat", "--plain"]
+
+
+def test_a_bare_less_still_gets_the_flags_it_needs(monkeypatch):
+    """Without -R it prints escape codes; without -S it folds the columns."""
+    monkeypatch.setenv("PAGER", "less")
+    command = adv.pager_command()
+    assert command is not None
+    assert command[0] == "less" and "-R" in command and "-S" in command
+
+
+def test_show_paged_prints_inline_when_nobody_is_watching(console):
+    """A recording console under test, or a pipe, must not launch a pager."""
+    assert not adv.show_paged(console, Text("printed inline"))
+    assert "printed inline" in console.export_text()
+
+
+def test_show_paged_hands_over_what_the_terminal_would_have_shown(monkeypatch):
+    """Laid out for the real width: a wider layout opens off the right edge."""
+    monkeypatch.setenv("PAGER", "cat")
+    seen = {}
+
+    def fake_run(command, **kwargs):
+        seen["command"] = command
+        seen["input"] = kwargs.get("input", "")
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    console = Console(force_terminal=True, width=70)
+    assert adv.show_paged(console, Text("hello from the pager"))
+    assert seen["command"] == ["cat"]
+    assert "hello from the pager" in seen["input"]
+    widest = max(len(line) for line in seen["input"].splitlines())
+    assert widest <= console.width, "the pager was handed lines wider than the screen"
+
+
+def test_a_broken_pager_costs_the_paging_not_the_diff(monkeypatch):
+    monkeypatch.setenv("PAGER", "definitely-not-a-pager")
+
+    def fake_run(command, **kwargs):
+        raise OSError("no such pager")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    printing = Console(record=True, force_terminal=True, width=120)
+    assert not adv.show_paged(printing, Text("the diff itself"))
+    assert "the diff itself" in printing.export_text()
+
+
 # -- advancing ---------------------------------------------------------------
 
 
@@ -237,7 +312,7 @@ def test_advance_preserves_a_live_edit(playground, console):
     assert "PICK_TIME = 7.0" in result, "the live edit was lost"
     assert playground.current_step_id == second
     # The step's own change landed alongside it.
-    only_in_second = "NUM_ROBOTS = 2"
+    only_in_second = '~F("just-picked ?r ?obj")'
     assert only_in_second not in playground.pristine_text(first)
     assert only_in_second in playground.pristine_text(second)
     assert only_in_second in result
@@ -295,6 +370,101 @@ def test_undo_restores_the_file_and_the_step(playground, console):
 def test_undo_with_no_history_says_so(playground, console):
     commands.cmd_undo(console, playground)
     assert "nothing to undo" in console.export_text()
+
+
+def test_clean_restores_this_step_without_moving_off_it(playground, console):
+    """The way back from a live edit that went somewhere you did not mean."""
+    first = STEPS[0]["id"]
+    pristine = playground.demo.read_text()
+    playground.demo.write_text(pristine.replace("MAX_STEPS = 40", "MAX_STEPS = 4"))
+
+    assert commands.cmd_clean(console, playground, editor_sync=False)
+    assert playground.demo.read_text() == pristine
+    assert playground.current_step_id == first, "clean is not a step change"
+
+
+def test_clean_lands_on_the_step_you_are_on_not_the_first_one(playground, console):
+    second = STEPS[1]["id"]
+    commands.cmd_goto(Console(quiet=True), second, playground=playground,
+                      force=True, editor_sync=False)
+    playground.demo.write_text(playground.demo.read_text() + "\n# tuned live\n")
+
+    commands.cmd_clean(console, playground, editor_sync=False)
+    assert playground.demo.read_text() == playground.pristine_text(second)
+    assert playground.current_step_id == second
+
+
+def test_clean_is_recoverable_with_undo(playground, console):
+    """Throwing away an edit must itself be undoable, or nobody will type it."""
+    edited = playground.demo.read_text() + "\n# tuned live\n"
+    playground.demo.write_text(edited)
+
+    commands.cmd_clean(console, playground, editor_sync=False)
+    assert playground.demo.read_text() != edited
+
+    commands.cmd_undo(console, playground)
+    assert playground.demo.read_text() == edited
+
+
+def _accumulate_results(playground, *, runs=2, media=1):
+    """Whatever a sweep and a couple of live runs would have left behind."""
+    playground.mlflow_db.write_text("not really sqlite")
+    for index in range(runs):
+        (playground.mlruns_dir / "1" / f"run{index}" / "artifacts").mkdir(parents=True)
+    (playground.cache_dir / "railroad-tutorial").mkdir(parents=True)
+    playground.media_dir.mkdir(exist_ok=True)
+    for index in range(media):
+        (playground.media_dir / f"plot{index}.png").write_text("png")
+    playground.append_run({"step": "01", "cost": 38.0, "goal_reached": True})
+
+
+def test_reset_clears_the_results_and_leaves_the_tutorial_alone(playground, console):
+    _accumulate_results(playground)
+    demo = playground.demo.read_text()
+
+    assert commands.cmd_reset(console, playground, force=True)
+    assert not playground.mlflow_db.exists()
+    assert not playground.mlruns_dir.exists()
+    assert not playground.cache_dir.exists()
+    assert list(playground.media_dir.glob("*")) == []
+    assert playground.read_runs() == []
+    # The tutorial itself is not results, and is none of reset's business.
+    assert playground.demo.read_text() == demo
+    assert playground.current_step_id == STEPS[0]["id"]
+    for step in STEPS:
+        assert (playground.steps_dir / step["filename"]).is_file()
+
+
+def test_reset_says_what_it_is_about_to_throw_away(playground, console):
+    _accumulate_results(playground, runs=3, media=2)
+    commands.cmd_reset(console, playground, force=True)
+    text = console.export_text()
+    assert "3 sweep runs" in text
+    assert "1 recorded costs" in text
+    assert "2 files in media/" in text
+
+
+def test_reset_declined_changes_nothing(playground, console):
+    _accumulate_results(playground)
+    assert not commands.cmd_reset(
+        console, playground, ask=lambda _prompt: "no"
+    )
+    assert playground.mlflow_db.exists()
+    assert playground.read_runs()
+    assert "nothing cleared" in console.export_text()
+
+
+def test_reset_with_nothing_to_clear_says_so(playground, console):
+    assert not commands.cmd_reset(console, playground, force=True)
+    assert "no results to clear" in console.export_text()
+
+
+def test_clean_on_an_untouched_file_is_a_message_not_a_write(playground, console):
+    assert not commands.cmd_clean(console, playground, editor_sync=False)
+    assert "already" in console.export_text()
+    # Nothing was snapshotted, so 'undo' has nothing to walk back to.
+    commands.cmd_undo(Console(quiet=True), playground)
+    assert playground.demo.read_text() == playground.pristine_text(STEPS[0]["id"])
 
 
 def test_stepping_past_the_end_is_a_message_not_a_crash(playground, console):
@@ -411,6 +581,32 @@ def test_every_printed_command_runs_through_uv():
             assert row.command.startswith(f"{RUNNER} "), row.command
 
 
+@pytest.mark.parametrize("step", step_params())
+def test_every_case_the_card_prints_actually_exists(step, monkeypatch):
+    """A card that prints '--case 4' for a step with four cases is lying.
+
+    demo.py exits with 'must be between 0 and N-1', mid-talk, on a command the
+    tutorial itself told you to type.
+    """
+    import re
+
+    from railroad.bench import registry
+    from railroad.bench.discovery import load_benchmark_files
+    from railroad.tutorial import command_lines
+
+    monkeypatch.setattr(registry, "_BENCHMARKS", [])
+    load_benchmark_files([str(SHIPPED_STEPS / step["filename"])])
+    count = len(registry._BENCHMARKS[0].cases)
+
+    for row in command_lines(step):
+        found = re.search(r"--case (\d+)", row.command)
+        if found:
+            index = int(found.group(1))
+            assert index < count, (
+                f"step {step['id']} prints '{row.command}' but has {count} case(s)"
+            )
+
+
 def test_bench_fills_in_the_include_tag_and_experiment(playground):
     from railroad.tutorial import EXPERIMENT
     from railroad.tutorial import _launch as launch
@@ -451,9 +647,25 @@ def test_only_the_first_step_points_back_at_the_notebook(playground):
         assert not any("notebook" in command for command in commands_here), step["id"]
 
 
+def test_list_names_every_step_and_marks_the_one_you_are_on(playground, console):
+    """The glance-at-it command: the whole arc, and where you are in it."""
+    commands.cmd_goto(Console(quiet=True), "03", playground=playground,
+                      force=True, editor_sync=False)
+    commands.cmd_list(console, playground)
+    text = console.export_text()
+
+    for step in STEPS:
+        assert step["title"] in text, step["id"]
+    marked = [line for line in text.splitlines() if line.strip().startswith(">")]
+    assert len(marked) == 1, "exactly one step is the current one"
+    assert "clear the table" in marked[0]
+    # Shorter than 'steps' on purpose: no costs, no deltas, no sweep axes.
+    assert all(step["sweep"] not in text for step in STEPS)
+
+
 def test_notes_are_separate_from_the_card(playground, console):
     """Diataxis, in one assertion: how-to and explanation are different pages."""
-    commands.cmd_notes(console, "04", playground)
+    commands.cmd_notes(console, "05", playground)
     text = console.export_text()
     assert "lock-search" in text
     assert "tutorial run" not in text
@@ -639,7 +851,7 @@ def _fake_benchmark(cases, seen):
         return {"success": True, "plan_cost": 12.5, "wall_time": 0.25,
                 "actions_count": 7}
 
-    bench = Benchmark(fn=fn, name="demo::s02_two_robots")
+    bench = Benchmark(fn=fn, name="demo::s04_two_robots")
     bench.add_cases(cases)
     return bench
 
@@ -695,7 +907,7 @@ def test_main_files_a_record_under_the_step_the_benchmark_names(playground, monk
     monkeypatch.chdir(playground.root)
     tutorial.main(_fake_benchmark([{"num_robots": 2}], []), [])
     records = playground.read_runs()
-    assert records[-1]["step"] == "02", "the step id comes from the benchmark name"
+    assert records[-1]["step"] == "04", "the step id comes from the benchmark name"
     assert records[-1]["cost"] == 12.5
     assert records[-1]["goal_reached"] is True
 

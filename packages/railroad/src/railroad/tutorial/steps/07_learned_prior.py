@@ -39,7 +39,7 @@ PICK_TIME = 10.0
 PLACE_TIME = 10.0
 NO_OP_TIME = 5.0
 # Generous: a run that stops here has genuinely wandered, rather than been cut
-# off mid-search. The learned prior in step 07 needs the room.
+# off mid-search. The learned prior below needs the room.
 MAX_STEPS = 100
 # 8 containers and 13 locations ground out to ~440 actions with two robots, so
 # this runs in well under a minute. Bigger seeds (8616, 8617) are prettier and
@@ -85,7 +85,7 @@ class HouseSearch(ProcTHOREnvironment):
         return 1.0 - self.find_prob(robot, location, obj)
 
     def define_operators(self):
-        # Same shapes as steps 01 and 04. The `just-moved` pair keeps a robot
+        # Same shapes as steps 03 and 05. The `just-moved` pair keeps a robot
         # from chaining moves without ever doing anything at the far end.
         move = Operator(
             name="move",
@@ -100,7 +100,7 @@ class HouseSearch(ProcTHOREnvironment):
                        resulting_fluents={~F("just-moved ?r")}),
             ],
         )
-        # Step 04's search, with the constant probability replaced by a pair of
+        # Step 05's search, with the constant probability replaced by a pair of
         # callables of (robot, location, object). Nothing else knows or cares
         # where those numbers come from.
         search = Operator(
@@ -264,7 +264,7 @@ def show_beliefs(env) -> None:
 # So the model holds its own where the objects are where you would guess, and
 # what it costs elsewhere is in the tail rather than the mean. That is the shape
 # of a learned belief: not uniformly worse, occasionally wrong and expensive
-# when it is. Same argument for violins over means as step 05.
+# when it is. Which is the argument for violins over means: an average hides a tail.
 
 @benchmark(
     name="s07_learned_prior",
@@ -284,10 +284,9 @@ def run(case: BenchmarkCase) -> dict:
     with tutorial.dashboard(case, goal, env, fluent_filter=relevant) as view:
         solve(env, goal, view, iterations=case.mcts.iterations, c=case.mcts.c)
     # Measure first, draw second: rendering an MP4 of a 30-action run takes
-    # minutes, and it is not part of what the run cost.
-    outcome = tutorial.result(view)
-    tutorial.show_plots(view, case)
-    return outcome
+    # minutes, and it is not part of what the run cost. The still of the
+    # finished run is cheap, though, and every sweep run keeps one.
+    return tutorial.finish(view, case)
 
 
 run.add_cases([

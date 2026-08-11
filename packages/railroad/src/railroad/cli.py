@@ -398,6 +398,26 @@ def tutorial_diff(steps: tuple[str, str] | None) -> None:
     _tutorial_guard(commands.cmd_diff)(_tutorial_console(), steps or None)
 
 
+@tutorial.command("clean")
+@click.option("--no-editor-sync", is_flag=True, default=False,
+              help="Do not nudge emacs to reload demo.py")
+def tutorial_clean(no_editor_sync: bool) -> None:
+    """Discard local edits: restore demo.py to this step as shipped."""
+    from railroad.tutorial import commands
+    _tutorial_guard(commands.cmd_clean)(
+        _tutorial_console(), editor_sync=not no_editor_sync
+    )
+
+
+@tutorial.command("reset")
+@click.option("--force", is_flag=True, default=False,
+              help="Do not ask first")
+def tutorial_reset(force: bool) -> None:
+    """Clear this playground's sweeps, recorded costs and saved plots."""
+    from railroad.tutorial import commands
+    _tutorial_guard(commands.cmd_reset)(_tutorial_console(), force=force)
+
+
 @tutorial.command("undo")
 def tutorial_undo() -> None:
     """Restore demo.py from before the last advance."""
@@ -411,6 +431,13 @@ def tutorial_notes(step: str | None) -> None:
     """Why this step exists: the talking points behind it."""
     from railroad.tutorial import commands
     _tutorial_guard(commands.cmd_notes)(_tutorial_console(), step)
+
+
+@tutorial.command("list")
+def tutorial_list() -> None:
+    """The arc in one glance: every step, and which one you are on."""
+    from railroad.tutorial import commands
+    _tutorial_guard(commands.cmd_list)(_tutorial_console())
 
 
 @tutorial.command("steps")

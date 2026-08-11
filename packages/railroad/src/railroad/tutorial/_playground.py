@@ -94,6 +94,25 @@ class Playground:
         """The ProcTHOR scenes -- a symlink, so nothing is copied."""
         return self.root / "resources"
 
+    # Everything a sweep leaves behind. All three are resolved by their writers
+    # relative to the working directory, which is why working from in here is
+    # the whole of the isolation, and why `reset` can simply delete them.
+
+    @property
+    def mlflow_db(self) -> Path:
+        """The tracking database: ``sqlite:///mlflow.db``, from in here."""
+        return self.root / "mlflow.db"
+
+    @property
+    def mlruns_dir(self) -> Path:
+        """Artifacts -- the per-run log and plot the dashboard shows."""
+        return self.root / "mlruns"
+
+    @property
+    def cache_dir(self) -> Path:
+        """The dashboard's compacted projection of the above."""
+        return self.root / ".benchmark_cache"
+
     # -- state ---------------------------------------------------------------
 
     def read_state(self) -> Dict[str, Any]:
@@ -248,7 +267,25 @@ Moving through the tutorial is the part a script does for you:
     uv run railroad tutorial next    show that patch, then merge it in
     uv run railroad tutorial notes   the talking points for this step
     uv run railroad tutorial diff    what you changed since the snapshot
+    uv run railroad tutorial clean   drop those edits; this step as shipped
     uv run railroad tutorial undo    put demo.py back the way it was
+    uv run railroad tutorial reset   throw away every result, keep the file
+
+`clean` is the one for a demo that has gone sideways: it restores the current
+step's snapshot without moving you off the step, and snapshots what it replaced
+first, so `undo` still brings your edits back if you wanted them after all.
+
+`reset` is the other half, and the two are deliberately separate: it clears the
+sweeps, the costs in the step list and anything in `media/`, but never touches
+`demo.py`. Nothing here is recoverable, so it asks first, which is why a
+morning of rehearsed sweeps cannot go up in smoke by reflex.
+
+`peek`, `next` and `diff` show both versions of the whole file side by side and
+open it in `$PAGER` (`less -R -S -F -X` by default), so you can scroll, search
+and change the terminal's font size without the layout reflowing under you. The
+diff is laid out for a wide screen whatever size the terminal happens to be, and
+`less -S` scrolls sideways rather than folding lines -- so zooming out reveals
+more of the file rather than rearranging it. `PAGER=cat` turns paging off.
 
 Advancing three-way merges the step's patch into the file as it actually
 stands, so a constant you tuned mid-sentence survives the move. On a genuine

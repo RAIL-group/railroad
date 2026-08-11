@@ -6,7 +6,7 @@ straight lines, and the locations are the containers of a ProcTHOR-generated
 home rather than four names in a dict.
 
 Two things worth saying out loud. The search operator below is the one from
-step 04, lock and all -- and it is also, line for line, what
+step 05, lock and all -- and it is also, line for line, what
 `railroad.operators.construct_search_operator` builds, so everything we wrote
 by hand is what the library was doing anyway. And the find probability is now a
 *callable* rather than the flat 0.5, which is the seam step 07 pulls on.
@@ -69,7 +69,7 @@ class HouseSearch(ProcTHOREnvironment):
         return 1.0 - self.find_prob(robot, location, obj)
 
     def define_operators(self):
-        # Same shapes as steps 01 and 04. The `just-moved` pair keeps a robot
+        # Same shapes as steps 03 and 05. The `just-moved` pair keeps a robot
         # from chaining moves without ever doing anything at the far end.
         move = Operator(
             name="move",
@@ -84,7 +84,7 @@ class HouseSearch(ProcTHOREnvironment):
                        resulting_fluents={~F("just-moved ?r")}),
             ],
         )
-        # Step 04's search, with the constant probability replaced by a pair of
+        # Step 05's search, with the constant probability replaced by a pair of
         # callables of (robot, location, object). Nothing else knows or cares
         # where those numbers come from.
         search = Operator(
@@ -239,10 +239,9 @@ def run(case: BenchmarkCase) -> dict:
     with tutorial.dashboard(case, goal, env, fluent_filter=relevant) as view:
         solve(env, goal, view, iterations=case.mcts.iterations, c=case.mcts.c)
     # Measure first, draw second: rendering an MP4 of a 30-action run takes
-    # minutes, and it is not part of what the run cost.
-    outcome = tutorial.result(view)
-    tutorial.show_plots(view, case)
-    return outcome
+    # minutes, and it is not part of what the run cost. The still of the
+    # finished run is cheap, though, and every sweep run keeps one.
+    return tutorial.finish(view, case)
 
 
 run.add_cases([

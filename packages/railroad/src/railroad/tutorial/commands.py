@@ -19,9 +19,11 @@ from importlib.util import find_spec
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence
 
-from rich.console import Console
+from rich.console import Console, Group
 from rich.markup import escape
+from rich.rule import Rule
 from rich.table import Table
+from rich.text import Text
 
 from . import _advance as adv
 from . import _launch as launch
@@ -100,7 +102,8 @@ def cmd_card(console: Console, playground: Optional[Playground] = None) -> None:
     if edits:
         console.print(f"  [yellow]demo.py has local edits "
                       f"(+{edits[0]} -{edits[1]})[/yellow]  "
-                      f"[dim]they survive 'next'; 'diff' shows them[/dim]")
+                      f"[dim]they survive 'next'; 'diff' shows them, "
+                      f"'clean' drops them[/dim]")
     stale = _stale_snapshots(playground)
     if stale:
         console.print(
@@ -337,6 +340,24 @@ def cmd_steps(console: Console, playground: Optional[Playground] = None) -> None
     console.print(table)
 
 
+def cmd_list(console: Console, playground: Optional[Playground] = None) -> None:
+    """The whole arc in one glance: every step, and which one you are on.
+
+    Deliberately shorter than ``steps``, which also carries the last recorded
+    cost, the delta against the step before, and the sweep axes. This is the
+    one you run mid-sentence to remember what is coming next.
+    """
+    playground = playground or find_playground()
+    current = playground.current_step_id
+    for step in STEPS:
+        here = step["id"] == current
+        marker = "[bold green]>[/bold green]" if here else " "
+        style = "bold" if here else "dim"
+        needs = f"  [dim]{escape('[procthor]')}[/dim]" if step["requires"] else ""
+        console.print(f" {marker} [{style}]{step['id']}  "
+                      f"{escape(step['title'])}[/{style}]{needs}")
+
+
 def cmd_notes(
     console: Console,
     step_id: Optional[str] = None,
@@ -367,20 +388,26 @@ def cmd_notes(
 def render_patch(
     console: Console, playground: Playground, from_id: str, to_id: str
 ) -> None:
-    """Show the canonical diff between two steps -- the unit of the talk."""
+    """Show the canonical diff between two steps -- the unit of the talk.
+
+    Header, both files and the point of the step go into the pager together,
+    so what you scroll through is the whole thing rather than a table whose
+    caption has already scrolled off.
+    """
     from_step, to_step = get_step(from_id), get_step(to_id)
-    diff = adv.unified(
-        playground.pristine_text(from_id),
-        playground.pristine_text(to_id),
-        f"step {from_id} ({from_step['title']})",
-        f"step {to_id} ({to_step['title']})",
-    )
-    added, removed = adv.diff_stat(
-        playground.pristine_text(from_id), playground.pristine_text(to_id)
-    )
-    console.rule(f"step {to_id} · {escape(to_step['title'])}  (+{added} −{removed})")
-    console.print(adv.colorize(diff))
-    console.print(f"[dim]{escape(to_step['point'])}[/dim]")
+    before, after = playground.pristine_text(from_id), playground.pristine_text(to_id)
+    added, removed = adv.diff_stat(before, after)
+    adv.show_paged(console, Group(
+        Rule(f"step {to_id} · {escape(to_step['title'])}  (+{added} −{removed})"),
+        adv.side_by_side(
+            before, after,
+            f"step {from_id} ({from_step['title']})",
+            f"step {to_id} ({to_step['title']})",
+            width=console.width,
+        ),
+        Text(""),
+        Text(to_step["point"], style="dim"),
+    ))
 
 
 def _warn_about_extras(console: Console, step_id: str) -> None:
@@ -511,14 +538,149 @@ def cmd_diff(
         render_patch(console, playground, get_step(first)["id"], get_step(second)["id"])
         return
     current = playground.current_step_id
+    # Unified rather than side-by-side here: a step patch is the lesson and
+    # wants the whole file around it, but "what did I just type" is usually one
+    # line, and 200 lines of context to show it is a worse answer.
     diff = adv.unified(
         playground.pristine_text(current),
         playground.demo.read_text(),
         f"step {current}",
         "your demo.py",
     )
-    console.rule(f"your edits on top of step {current}")
-    console.print(adv.colorize(diff))
+    adv.show_paged(console, Group(
+        Rule(f"your edits on top of step {current}"),
+        adv.colorize(diff),
+    ))
+
+
+def cmd_clean(
+    console: Console,
+    playground: Optional[Playground] = None,
+    *,
+    editor_sync: bool = True,
+) -> bool:
+    """Put ``demo.py`` back to this step's snapshot. Returns whether it moved.
+
+    The counterpart to ``diff``: when a live edit has gone somewhere you did
+    not mean it to, this is the way back that does not involve remembering
+    what you typed. It does not move between steps -- you land on the step you
+    were already on, as it shipped.
+
+    The file is snapshotted into ``.history/`` first, so ``undo`` recovers the
+    edits when it turns out throwing them away was the mistake.
+    """
+    playground = playground or find_playground()
+    step = get_step(playground.current_step_id)
+    edits = _local_edits(playground)
+    if edits is None:
+        console.print(f"[dim]demo.py is already step {step['id']} as shipped[/dim]")
+        return False
+
+    current = playground.demo.read_text(encoding="utf-8")
+    pristine = playground.pristine_text(step["id"])
+    adv.snapshot_demo(playground, reason=f"clean {step['id']}")
+    playground.demo.write_text(pristine, encoding="utf-8")
+    if editor_sync:
+        adv.sync_editor(playground.demo, adv.first_changed_line(current, pristine))
+
+    console.print(f"[green]restored[/green] demo.py to step {step['id']} · "
+                  f"{escape(step['title'])}")
+    console.print(f"  [dim]discarded +{edits[0]} −{edits[1]}; "
+                  f"'uv run railroad tutorial undo' brings them back[/dim]")
+    return True
+
+
+def _result_paths(playground: Playground) -> List[Path]:
+    """Everything a reset would delete, filtered to what is actually there."""
+    paths = [playground.mlflow_db, playground.mlruns_dir, playground.cache_dir]
+    if playground.media_dir.is_dir():
+        paths += sorted(playground.media_dir.iterdir())
+    return [path for path in paths if path.exists()]
+
+
+def _count_sweep_runs(playground: Playground) -> int:
+    """Runs under ``mlruns/``, which is laid out experiment/run/artifacts.
+
+    Counted off the directory tree rather than by asking MLflow: opening the
+    tracking database to say how much is about to be deleted would be a slow
+    answer to a question nobody asked precisely.
+    """
+    if not playground.mlruns_dir.is_dir():
+        return 0
+    total = 0
+    for experiment in playground.mlruns_dir.iterdir():
+        if not experiment.is_dir() or experiment.name.startswith("."):
+            continue
+        total += sum(1 for run in experiment.iterdir()
+                     if run.is_dir() and run.name != "models")
+    return total
+
+
+def _describe_results(playground: Playground) -> str:
+    """``"128 sweep runs, 9 recorded costs, 3 files in media/"``, or ``""``."""
+    media = list(playground.media_dir.glob("*")) if playground.media_dir.is_dir() else []
+    counted = [
+        (_count_sweep_runs(playground), "sweep runs"),
+        (len(playground.read_runs()), "recorded costs"),
+        (len(media), "files in media/"),
+    ]
+    return ", ".join(f"{count} {label}" for count, label in counted if count)
+
+
+def _remove(path: Path) -> None:
+    """Delete a file or a directory, and do not make a fuss about either."""
+    try:
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+    except OSError:
+        pass
+
+
+def cmd_reset(
+    console: Console,
+    playground: Optional[Playground] = None,
+    *,
+    ask: Optional[Ask] = None,
+    force: bool = False,
+) -> bool:
+    """Throw away every result this playground has accumulated.
+
+    The sweeps themselves (``mlflow.db`` and ``mlruns/``), the compacted cache
+    the dashboard reads from them, the step list's recorded costs, and whatever
+    was saved into ``media/``. What it does not touch is the tutorial: not
+    ``demo.py``, not the step snapshots, not ``.history``.
+
+    Unlike :func:`cmd_clean` there is no snapshot to come back from, so it asks.
+    """
+    playground = playground or find_playground()
+    paths = _result_paths(playground)
+    recorded = playground.read_runs()
+    if not paths and not recorded:
+        console.print("[dim]no results to clear[/dim]")
+        return False
+
+    summary = _describe_results(playground)
+    console.print(f"[yellow]about to clear[/yellow] {summary or 'this run history'}")
+    console.print("  [dim]demo.py, the step snapshots and .history are left "
+                  "alone; this is results only[/dim]")
+    if not force and (ask or _plain_ask)("clear them?") == "no":
+        console.print("[dim]nothing cleared[/dim]")
+        return False
+
+    for path in paths:
+        _remove(path)
+    playground.runs_path.write_text("")
+
+    console.print(f"[green]cleared[/green] {summary or 'this run history'}")
+    console.print("  [dim]demo.py left alone; 'clean' resets that[/dim]")
+    running = launch.recorded(playground)
+    if running is not None:
+        console.print(f"  [yellow]the dashboard is still up (pid {running.pid})"
+                      f"[/yellow] [dim]it reads the database this just deleted; "
+                      f"restart it with 'dashboard --stop' then 'dashboard'[/dim]")
+    return True
 
 
 def cmd_undo(console: Console, playground: Optional[Playground] = None) -> None:

@@ -1,21 +1,27 @@
-"""Step 05 -- the value function.
+"""Step 05 -- hide the objects.
 
-Same problem, now with the heuristic exposed. MCTS scores a state with
+The objects are no longer in the initial state; the robots have to look. That
+buys one new operator, and with it a probabilistic effect and a prior over where
+things are -- flat here, because we genuinely have no idea. (Step 07 replaces it
+with a learned one.)
 
-    lambda_add * h_add + lambda_max * h_max + lambda_ff * h_ff
+Two conventions of ObjectSearchEnvironment are doing work now. Search outcomes
+resolve against ground truth rather than sampling, so a bad prior costs time but
+never invents a discovery. And searching a location *reveals* it: everything
+actually there becomes known, and the location can never be searched again.
 
-plus a probabilistic-retry delta, and `heuristic_multiplier` sets how loudly all
-of that speaks relative to accumulated cost in the reward.
+Which is exactly what the lock is for. `searched ?loc ?obj` only lands when the
+search *completes*, so nothing stops two robots holding a search of the same
+room at once -- and the planner has every reason to do it, because it reads the
+two probabilistic branches as independent draws. Double-searching looks like two
+tickets on one lottery rather than one ticket twice. Here it is worse than that:
+one search reveals the whole room, so the second robot was never going to learn
+anything.
 
-The retry delta is the part that matters here. h_add and h_ff both come from a
-relaxation that assumes an action does what it says; under a 0.5 find
-probability that is optimistic by a factor of two, and the delta is what pays
-for the searches you expect to have to repeat. Turn the mix towards h_add
-(lambda_add=1, lambda_ff=0) and you get the cheapest-achiever estimate; towards
-h_ff and you get a relaxed-plan cost that counts shared work once.
-
-Search budget is pinned low on purpose: at 4000 iterations MCTS papers over a
-mediocre value function, and the differences vanish.
+Three lines fix it -- a `lock-search ?loc` precondition, the lock taken when the
+search starts and released when it finishes -- and the flag is here so the sweep
+can run it both ways. With one robot expect nothing to change: a robot cannot
+contend with itself.
 """
 
 from functools import reduce
@@ -27,19 +33,14 @@ from railroad import tutorial
 from railroad.bench import BenchmarkCase, benchmark
 from railroad.core import Effect, Fluent as F, Operator, State, get_action_by_name
 from railroad.environment import ObjectSearchEnvironment
+from railroad.operators import numeric
 from railroad.planner import MCTSPlanner
 
-# A bigger house, because the four-room version is too easy to tell value
-# functions apart on: at any budget worth using, every mix finds the same plan.
 LOCATIONS = {
     "living_room": (0.0, 0.0),
     "kitchen": (5.0, 0.0),
     "table": (2.0, 3.0),
     "shelf": (8.0, 3.0),
-    "bedroom": (12.0, 0.0),
-    "office": (12.0, 6.0),
-    "garage": (0.0, 9.0),
-    "attic": (7.0, 11.0),
 }
 OBJECTS = ["Book", "Mug", "Vase"]
 NUM_ROBOTS = 2
@@ -47,20 +48,26 @@ USE_SEARCH_LOCK = True
 
 # Ground truth, known to the environment and not to the planner.
 TRUE_LOCATIONS = {
-    "attic": {"Book"},
+    "table": {"Book"},
     "kitchen": {"Mug"},
-    "office": {"Vase"},
+    "shelf": {"Vase"},
 }
 
 ROBOT_VELOCITY = 1.0
 SEARCH_TIME = 5.0
 FIND_PROB = 0.5
+NO_OP_TIME = 5.0
 MAX_STEPS = 40
-SEARCH_BUDGET = 400  # small enough that the heuristic still decides things
 
 
+@numeric
 def move_time(robot: str, loc_from: str, loc_to: str) -> float:
-    """Straight-line travel time. Any callable of the parameters will do."""
+    """Straight-line travel time.
+
+    `@numeric` lets it compose like a number, so the `just-moved` expiry below
+    is `move_time + 0.1` rather than a second function that only adds to this
+    one.
+    """
     a, b = np.array(LOCATIONS[loc_from]), np.array(LOCATIONS[loc_to])
     return float(np.linalg.norm(a - b)) / ROBOT_VELOCITY
 
@@ -78,13 +85,16 @@ class HouseSearch(ObjectSearchEnvironment):
         move = Operator(
             name="move",
             parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
-            preconditions=[F("at ?r ?from"), F("free ?r")],
+            preconditions=[F("at ?r ?from"), F("free ?r"), ~F("just-moved ?r")],
             effects=[
                 Effect(time=0, resulting_fluents={~F("free ?r"), ~F("at ?r ?from")}),
                 Effect(
                     time=(move_time, ["?r", "?from", "?to"]),
-                    resulting_fluents={F("free ?r"), F("at ?r ?to")},
+                    resulting_fluents={F("free ?r"), F("at ?r ?to"),
+                                       F("just-moved ?r")},
                 ),
+                Effect(time=(move_time + 0.1, ["?r", "?from", "?to"]),
+                       resulting_fluents={~F("just-moved ?r")}),
             ],
         )
         # The lock makes searching a room exclusive for as long as it takes.
@@ -125,7 +135,21 @@ class HouseSearch(ObjectSearchEnvironment):
                 ),
             ],
         )
-        return [move, search]
+        # Step 02's escape hatch, and `just-moved` is why it has to be here: a
+        # robot that arrives somewhere with nothing to do there would otherwise
+        # have no legal action at all. extra_cost is charged in the objective on
+        # top of elapsed time, so waiting stays a last resort.
+        no_op = Operator(
+            name="no_op",
+            parameters=[("?r", "robot")],
+            preconditions=[F("free ?r")],
+            effects=[
+                Effect(time=0, resulting_fluents={~F("free ?r")}),
+                Effect(time=NO_OP_TIME, resulting_fluents={F("free ?r")}),
+            ],
+            extra_cost=100.0,
+        )
+        return [move, search, no_op]
 
 
 def build(num_robots: int = NUM_ROBOTS,
@@ -153,24 +177,14 @@ def build(num_robots: int = NUM_ROBOTS,
     return env, goal
 
 
-def solve(
-    env, goal, view, *,
-    iterations: int,
-    c: float,
-    h_mult: float = 1.0,
-    lambda_add: float = 0.5,
-    lambda_ff: float = 0.5,
-) -> bool:
+def solve(env, goal, view, *, iterations: int, c: float) -> bool:
     """Replan every time a robot frees up; return whether the goal was met."""
     for _ in range(MAX_STEPS):
         if goal.evaluate(env.state.fluents):
             return True
         actions = env.get_actions()
-        # lambda_max is the third component (h_max) and defaults to 0; the
-        # probabilistic-retry delta rides on top of whatever mix you pick.
-        planner = MCTSPlanner(actions, lambda_add=lambda_add, lambda_ff=lambda_ff)
-        name = planner(env.state, goal, max_iterations=iterations, c=c, max_depth=20,
-                       heuristic_multiplier=h_mult)
+        planner = MCTSPlanner(actions)
+        name = planner(env.state, goal, max_iterations=iterations, c=c, max_depth=20)
         if name == "NONE":
             view.console.print("[yellow]Planner returned NONE.[/yellow]")
             return False
@@ -188,41 +202,42 @@ def relevant(fluent) -> bool:
 # `uv run railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
 # times over, in parallel. Same code either way.
 #
-# Three mixes of the relaxation against three multipliers, at a budget small
-# enough that the value function still decides things. Two things to look at:
-# h_mult=1 wins for every mix here (40.1 / 40.9 / 41.8, against 2-8s more at
-# h_mult=5), so the multiplier matters more than the mix; and the violins are
-# not the same width -- pure h_add has a standard deviation of 12-15 against 2.6
-# for the balanced mix, so its mean flatters it.
+# The A/B, measured over 8 repeats. One robot cannot contend with itself and the
+# numbers say so: 28.3 seconds either way. Two robots 19.2 with the lock against
+# 22-23 without; three robots 19.2 -> 13.5.
+#
+# Read the spread as well as the mean. With the lock the cost is the same every
+# time (sd 0.0 at two and three robots); without it the same configuration
+# scatters over about five seconds, because which room gets double-searched is
+# up to the sampling. And 'searches' is the cleanest measure of all, since three
+# rooms hold something and so 3 is the floor: a flat 3.0 with the lock at any
+# team size, against 3.0, 3.8, 5.8 without. The lock does not make robots
+# faster. It stops them buying the same information twice.
 
 @benchmark(
-    name="s05_heuristic",
-    description="Sweep the h_add/h_ff mix and the heuristic multiplier at a small "
-                "search budget.",
+    name="s05_hidden_objects",
+    description="Find three hidden objects, with and without the per-room search lock.",
     tags=["tutorial"],
     repeat=8,
     timeout=60.0,
 )
 def run(case: BenchmarkCase) -> dict:
-    env, goal = build()
+    env, goal = build(case.num_robots, use_search_lock=case.use_search_lock)
     with tutorial.dashboard(case, goal, env, fluent_filter=relevant) as view:
-        solve(env, goal, view,
-              iterations=case.mcts.iterations, c=case.mcts.c,
-              h_mult=case.mcts.h_mult,
-              lambda_add=case.lambda_add, lambda_ff=case.lambda_ff)
-    # --save-plot and --save-video draw the trajectories and the action
-    # list; the sweep skips them. LOCATIONS puts the rooms where we said.
-    outcome = tutorial.result(view)
-    tutorial.show_plots(view, case, location_coords=LOCATIONS)
-    return outcome
+        solve(env, goal, view, iterations=case.mcts.iterations, c=case.mcts.c)
+    # The metrics, plus this run's trajectory as a plot.jpg artifact so the
+    # results dashboard shows a picture of every run in the sweep, not just a
+    # row of numbers. --save-plot and --save-video are the live equivalents.
+    # LOCATIONS puts the rooms where we said.
+    return tutorial.finish(view, case, location_coords=LOCATIONS)
 
 
 run.add_cases([
-    # Case 0 is what `uv run python demo.py` runs: the balanced mix at h_mult=1.
-    {"lambda_add": lambda_add, "lambda_ff": lambda_ff,
-     "mcts.h_mult": h_mult, "mcts.iterations": SEARCH_BUDGET, "mcts.c": 300}
-    for lambda_add, lambda_ff in ((0.5, 0.5), (1.0, 0.0), (0.0, 1.0))
-    for h_mult in (1.0, 2.0, 5.0)
+    # Case 0 is what `uv run python demo.py` runs: two robots, lock on.
+    {"num_robots": num_robots, "use_search_lock": use_search_lock,
+     "mcts.iterations": 4000, "mcts.c": 300}
+    for num_robots in (2, 1, 3)
+    for use_search_lock in (True, False)
 ])
 
 

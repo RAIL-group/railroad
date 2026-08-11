@@ -79,6 +79,43 @@ def show_plots(view: Any, case: Any, **kwargs: Any) -> None:
     view.show_plots(**{**getattr(case, "media", {}), **kwargs})
 
 
+ARTIFACT_DPI = 110
+"""Resolution for the per-run figure.
+
+A card in the results dashboard rather than a poster. A sweep is dozens of
+these and every one is kept under ``mlruns/`` for good, so the default 150
+buys detail nobody reads at a price paid on every run of every step.
+"""
+
+
+def finish(
+    view: Any,
+    case: Any,
+    *,
+    location_coords: Optional[Dict[str, Any]] = None,
+    **extra: Any,
+) -> Dict[str, Any]:
+    """Everything a step does once the run is over, in one call.
+
+    The metrics, this run's trajectory figure, and whatever ``--save-plot`` or
+    ``--save-video`` asked for. The figure goes back as ``log_plot``, which
+    the runner stores as the run's ``plot.jpg`` artifact and the results
+    dashboard shows beside its log -- so a sweep leaves behind a picture of
+    every run in it, not just a row of numbers.
+
+    Rendered for sweep runs only: live, the same figure is either already on
+    your screen or was not asked for, and a talk should not pay for it.
+    """
+    outcome = result(view, **extra)
+    if not getattr(case, "live", False):
+        image = view.get_plot_image(location_coords=location_coords,
+                                    dpi=ARTIFACT_DPI)
+        if image is not None:
+            outcome["log_plot"] = image
+    show_plots(view, case, location_coords=location_coords)
+    return outcome
+
+
 def result(view: Any, **extra: Any) -> Dict[str, Any]:
     """The metrics both callers want, from the dashboard's own record.
 
@@ -115,7 +152,7 @@ def _describe(params: Dict[str, Any]) -> str:
 
 
 def _step_id(bench: Any) -> str:
-    """``demo::s03_hidden_objects`` -> ``03``, falling back to the playground."""
+    """``demo::s05_hidden_objects`` -> ``05``, falling back to the playground."""
     match = _STEP_IN_NAME.search(getattr(bench, "name", "") or "")
     if match:
         return match.group(1)

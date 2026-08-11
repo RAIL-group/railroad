@@ -1,15 +1,11 @@
-"""Step 01 -- clear the table.
+"""Step 04 -- add a second robot.
 
-A whole problem: a typed object universe, three operators, a goal made of
-negated literals, and the plan-act loop that drives it.
+No operator changes at all. A robot is an object of type `robot` plus two
+initial fluents, and concurrency falls out of the state semantics: time only
+advances when nobody is free, so a second robot simply fills the gap.
 
-The operators are written out rather than taken from `railroad.operators`,
-because they are the point. Each one is a list of effects at times: what stops
-being true when the action starts, and what becomes true when it lands.
-
-The loop is the other thing to look at. There is no plan to execute -- `solve`
-asks for one action, hands it to the environment, and asks again once a robot
-is free. Replanning is not error recovery here, it is the control structure.
+Watch the Braille timeline in the summary -- the two rows overlap -- and the
+total cost against step 03.
 """
 
 from functools import reduce
@@ -21,6 +17,7 @@ from railroad import tutorial
 from railroad.bench import BenchmarkCase, benchmark
 from railroad.core import Effect, Fluent as F, Operator, State, get_action_by_name
 from railroad.environment import SymbolicEnvironment
+from railroad.operators import numeric
 from railroad.planner import MCTSPlanner
 
 LOCATIONS = {
@@ -30,16 +27,23 @@ LOCATIONS = {
     "shelf": (8.0, 3.0),
 }
 OBJECTS = ["Book", "Mug", "Vase"]
-NUM_ROBOTS = 1
+NUM_ROBOTS = 2
 
 ROBOT_VELOCITY = 1.0
 PICK_TIME = 5.0
 PLACE_TIME = 5.0
+NO_OP_TIME = 5.0
 MAX_STEPS = 40
 
 
+@numeric
 def move_time(robot: str, loc_from: str, loc_to: str) -> float:
-    """Straight-line travel time. Any callable of the parameters will do."""
+    """Straight-line travel time.
+
+    `@numeric` lets it compose like a number, so the `just-moved` expiry below
+    is `move_time + 0.1` rather than a second function that only adds to this
+    one.
+    """
     a, b = np.array(LOCATIONS[loc_from]), np.array(LOCATIONS[loc_to])
     return float(np.linalg.norm(a - b)) / ROBOT_VELOCITY
 
@@ -55,13 +59,16 @@ class ClearTable(SymbolicEnvironment):
         move = Operator(
             name="move",
             parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
-            preconditions=[F("at ?r ?from"), F("free ?r")],
+            preconditions=[F("at ?r ?from"), F("free ?r"), ~F("just-moved ?r")],
             effects=[
                 Effect(time=0, resulting_fluents={~F("free ?r"), ~F("at ?r ?from")}),
                 Effect(
                     time=(move_time, ["?r", "?from", "?to"]),
-                    resulting_fluents={F("free ?r"), F("at ?r ?to")},
+                    resulting_fluents={F("free ?r"), F("at ?r ?to"),
+                                       F("just-moved ?r")},
                 ),
+                Effect(time=(move_time + 0.1, ["?r", "?from", "?to"]),
+                       resulting_fluents={~F("just-moved ?r")}),
             ],
         )
         # `just-picked` is set when the pick lands and expires a tenth of a
@@ -102,7 +109,21 @@ class ClearTable(SymbolicEnvironment):
                        resulting_fluents={~F("just-placed ?r ?obj")}),
             ],
         )
-        return [move, pick, place]
+        # Step 02's escape hatch, and `just-moved` is why it has to be here: a
+        # robot that arrives somewhere with nothing to do there would otherwise
+        # have no legal action at all. extra_cost is charged in the objective on
+        # top of elapsed time, so waiting stays a last resort.
+        no_op = Operator(
+            name="no_op",
+            parameters=[("?r", "robot")],
+            preconditions=[F("free ?r")],
+            effects=[
+                Effect(time=0, resulting_fluents={~F("free ?r")}),
+                Effect(time=NO_OP_TIME, resulting_fluents={F("free ?r")}),
+            ],
+            extra_cost=100.0,
+        )
+        return [move, pick, place, no_op]
 
 
 def build(num_robots: int = NUM_ROBOTS):
@@ -150,38 +171,38 @@ def relevant(fluent) -> bool:
 # ---- one function, two ways to run it ---------------------------------------
 # `uv run python demo.py` runs case 0 of the sweep below, live, with the dashboard.
 # `uv run railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
-# times over, in parallel. Same code either way, so a value you tune here is
-# the value the sweep measures.
+# times over, in parallel. Same code either way.
 #
-# How much search does this problem actually need? There is a floor: below a few
-# tens of iterations the run fails outright, and where that floor sits depends on
-# the exploration constant -- a larger c spends more of a small budget looking
-# around. Above ~100 iterations the extra search buys nothing here.
+# Does the second robot pay for itself, and does a third? Measured over 8
+# repeats: 44.3 -> 22.1 -> 8.6 seconds, so the second halves it and the third
+# more than halves it again. With three objects and three robots the answer
+# collapses: they all drive to the table and each picks one, in 6 actions. The
+# goal only asks that nothing *remain* on the table, so the run ends at the last
+# pick -- one trip plus one pick, and nothing is ever put away.
 
 @benchmark(
-    name="s01_clear_table",
-    description="Clear a table with one robot; sweep MCTS iterations and c.",
+    name="s04_two_robots",
+    description="Clear a table with 1-3 robots; sweep team size and search budget.",
     tags=["tutorial"],
     repeat=4,
     timeout=60.0,
 )
 def run(case: BenchmarkCase) -> dict:
-    env, goal = build()
+    env, goal = build(case.num_robots)
     with tutorial.dashboard(case, goal, env, fluent_filter=relevant) as view:
         solve(env, goal, view, iterations=case.mcts.iterations, c=case.mcts.c)
-    # --save-plot and --save-video draw the trajectories and the action
-    # list; the sweep skips them. LOCATIONS puts the rooms where we said.
-    outcome = tutorial.result(view)
-    tutorial.show_plots(view, case, location_coords=LOCATIONS)
-    return outcome
+    # The metrics, plus this run's trajectory as a plot.jpg artifact so the
+    # results dashboard shows a picture of every run in the sweep, not just a
+    # row of numbers. --save-plot and --save-video are the live equivalents.
+    # LOCATIONS puts the rooms where we said.
+    return tutorial.finish(view, case, location_coords=LOCATIONS)
 
 
 run.add_cases([
-    # Case 0 is what `uv run python demo.py` runs, so the grid starts at the
-    # configuration you would actually use and works down from there.
-    {"mcts.iterations": iterations, "mcts.c": c}
-    for c in (300, 100)
-    for iterations in (4000, 1000, 400, 100, 50, 25, 10)
+    # Case 0 is what `uv run python demo.py` runs, so the two-robot team comes first.
+    {"num_robots": num_robots, "mcts.iterations": iterations, "mcts.c": 300}
+    for num_robots in (2, 1, 3)
+    for iterations in (4000, 1000, 400)
 ])
 
 

@@ -23,7 +23,7 @@ knows whether anyone is watching, and a ``main`` that runs one case of the
 step's own benchmark sweep by hand.
 """
 
-from ._harness import dashboard, main, result, show_plots
+from ._harness import dashboard, finish, main, result, show_plots
 from ._playground import (
     ENV_DIR,
     DEFAULT_DIRNAME,
@@ -63,6 +63,7 @@ __all__ = [
     "command_lines",
     "dashboard",
     "find_playground",
+    "finish",
     "get_step",
     "init_playground",
     "is_playground",

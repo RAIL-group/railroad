@@ -81,31 +81,107 @@ class StepInfo(TypedDict):
 STEPS: List[StepInfo] = [
     {
         "id": "01",
-        "title": "clear the table",
-        "filename": "01_clear_table.py",
-        "problem": "clear-table",
+        "title": "one robot, two rooms",
+        "filename": "01_two_rooms.py",
+        "problem": "two-rooms",
         "requires": "",
-        "point": "A whole problem: operators, a negated goal, and the plan-act loop.",
-        "sweep": "mcts.iterations x c",
-        "media": "clear-table",
+        "point": "A whole problem in one file -- and what it does with the value function off.",
+        "sweep": "mcts.h_mult x mcts.iterations",
+        "media": "two-rooms",
         "notes": [
+            "Two rooms, two objects, one robot. Everything after this step is "
+            "these same three operators with more of something.",
             "move is written out by hand so both halves of a durative action "
-            "are visible: lose free/at at t=0, regain them at t=d.",
-            "pick and place are written out too -- same shape, plus the "
-            "just-picked / just-placed pair that stops a robot undoing itself.",
-            "The goal is a conjunction of *negated* literals: nothing on the table.",
-            "The loop replans every time a robot frees up. That is the whole "
+            "are visible: lose free/at at t=0, regain them at t=d. pick and "
+            "place are the same shape.",
+            "The loop replans every time the robot frees up. That is the whole "
             "control structure; there is no plan to execute, only a next action.",
-            "In the sweep: there is a search floor. Around 10-25 iterations the run "
-            "fails outright, and where that floor sits depends on c -- a larger "
-            "exploration constant wastes more of a small budget. Past ~100 "
-            "iterations, more search buys nothing on a problem this small.",
+            "Then the experiment. MCTS scores a leaf by elapsed time plus "
+            "h_mult times an estimate of the work remaining; h_mult=0 leaves "
+            "only the clock. Run it: 'tutorial run --case 3'.",
+            "Measured, 8 repeats: at h_mult=5, every budget in the grid finds "
+            "the same 7-action, 38-second plan. At h_mult=0, 0 of 8 at every "
+            "one of them -- 4000 iterations buys exactly what 400 does.",
+            "Watch what it does rather than the number. It picks the mug up, "
+            "puts it straight back down, and repeats that until the step limit: "
+            "40 actions, every one of them a pick or a place, and it never "
+            "leaves the table.",
+            "That is not a search that needs a bigger budget. Scored by elapsed "
+            "time alone, picking is the cheapest legal action and walking to "
+            "the shelf is the most expensive, so there is nothing pointing at "
+            "the goal to climb.",
         ],
     },
     {
         "id": "02",
+        "title": "stop the robot undoing itself",
+        "filename": "02_action_blocking.py",
+        "problem": "two-rooms",
+        "requires": "",
+        "point": "A guard per action, and the same search at h_mult=0 starts working.",
+        "sweep": "mcts.h_mult x mcts.iterations",
+        "media": "action-blocking",
+        "notes": [
+            "One guard per action, each the same three lines: a precondition, a "
+            "flag set when the action lands, an expiry a tenth of a second "
+            "later. 'just-picked' is a fluent with a lifetime -- no timer, no "
+            "special case, just an ordinary effect at an ordinary time.",
+            "just-moved earns its place separately. Guard pick and place alone "
+            "and the churn stops, but the robot only starts pacing between the "
+            "two rooms instead -- equally cheap, equally pointless. All three, "
+            "and every legal action left is one that makes progress.",
+            "no_op is not decoration. A guard can leave a robot with nothing "
+            "legal to do -- walk to the shelf empty-handed, and there is nothing "
+            "to pick and no second move allowed -- and a search with no value "
+            "function does not stumble into that state, it aims for it: a dead "
+            "end is where the clock stops. Without no_op this step fails after "
+            "a single move. extra_cost keeps waiting a last resort.",
+            "The sweep is the same grid as step 01, which is the point: run the "
+            "case that just failed, 'tutorial run --case 3', and compare the "
+            "two sweeps side by side in the dashboard.",
+            "Measured, 8 repeats: h_mult=0 goes from 0 of 8 at every budget to "
+            "8 of 8 at every budget -- and on the *optimal* plan, the same 7 "
+            "actions and 38 seconds the value function finds.",
+            "There is no floor left to find: it sits below any budget worth "
+            "running. The guards did not help the planner look harder; they "
+            "removed everywhere wrong to look.",
+            "The h_mult=5 half of the grid is the control, and it is identical "
+            "to step 01 -- 38 seconds throughout. A decent estimate of "
+            "work-remaining already knows that undoing yourself is not "
+            "progress, so the guards buy it nothing.",
+            "This is where the h_mult experiment ends. From step 03 the value "
+            "function is back on and the guards stay, because that is the "
+            "combination you would actually ship -- but it is worth knowing how "
+            "far the guards alone get you: measured, the four-room house of step "
+            "03 also solves 8 of 8 at h_mult=0, on the same 44.3-second plan.",
+        ],
+    },
+    {
+        "id": "03",
+        "title": "clear the table",
+        "filename": "03_clear_table.py",
+        "problem": "clear-table",
+        "requires": "",
+        "point": "The same operators in a bigger world, and a goal made of negations.",
+        "sweep": "mcts.iterations x c",
+        "media": "clear-table",
+        "notes": [
+            "Four rooms and three objects now, and the same guards step 02 "
+            "arrived at, carried forward unchanged for the rest of the arc.",
+            "The goal is a conjunction of *negated* literals -- nothing on the "
+            "table -- which names no destination at all. Anywhere else will do, "
+            "and the planner picks.",
+            "In the sweep: no floor. Measured, 8 repeats -- every budget in the "
+            "grid, at either exploration constant, lands the same ~44 second "
+            "plan in 10 actions. That is step 02's lesson at a bigger size: the "
+            "guards removed everywhere wrong to look, so there is nothing left "
+            "for a larger budget to buy.",
+        ],
+    },
+    {
+        "id": "04",
         "title": "add a second robot",
-        "filename": "02_two_robots.py",
+        "filename": "04_two_robots.py",
         "problem": "clear-table",
         "requires": "",
         "point": "Concurrency for free: one more object of type robot, and time drops.",
@@ -117,20 +193,21 @@ STEPS: List[StepInfo] = [
             "semantics, not of the actions. The rest of the diff is prose and "
             "the sweep's new axis.",
             "Watch the Braille timeline: the two rows overlap.",
-            "In the sweep: 1 -> 2 -> 3 robots roughly halves and halves again. With "
-            "three robots and three objects each takes one, and because the goal "
-            "only asks that nothing *remain* on the table, the run ends at the "
-            "last pick -- one trip plus one pick, nothing ever put away.",
+            "In the sweep, 8 repeats: 44.3 -> 22.1 -> 8.6 seconds. The second "
+            "robot halves it, the third more than halves it again. With three "
+            "robots and three objects each takes one, and because the goal only "
+            "asks that nothing *remain* on the table, the run ends at the last "
+            "pick -- 6 actions, one trip plus one pick, nothing ever put away.",
         ],
     },
     {
-        "id": "03",
+        "id": "05",
         "title": "hide the objects",
-        "filename": "03_hidden_objects.py",
+        "filename": "05_hidden_objects.py",
         "problem": "house-search",
         "requires": "",
-        "point": "Probabilistic search, a flat prior, and a failure mode to find.",
-        "sweep": "num_robots x mcts.iterations",
+        "point": "Probabilistic search, a flat prior, and the lock that stops it being wasted.",
+        "sweep": "use_search_lock x num_robots",
         "media": "hidden-objects",
         "notes": [
             "The objects leave the initial state; the robots have to look. That "
@@ -139,56 +216,25 @@ STEPS: List[StepInfo] = [
             "rather than sampling: a wrong prior costs time, it never invents a "
             "discovery. And searching *reveals* a room -- everything there "
             "becomes known and the room closes for good.",
-            "Read the action list, not the number. Two robots search the same "
-            "room at the same time: 'searched' only lands when a search "
-            "finishes, so nothing rules it out, and a flat prior makes two draws "
-            "at 0.5 look better than one.",
-        ],
-    },
-    {
-        "id": "04",
-        "title": "one searcher per room",
-        "filename": "04_search_lock.py",
-        "problem": "house-search",
-        "requires": "",
-        "point": "A lock predicate, and the A/B that shows why it is not optional.",
-        "sweep": "use_search_lock x num_robots",
-        "media": "search-lock",
-        "notes": [
-            "Three lines: a lock-search precondition, the lock taken at t=0, "
-            "released when the search completes.",
-            "Measured, 8 repeats: 1 robot 29.2 either way -- a robot cannot "
-            "contend with itself. 2 robots 18.9 without vs 19.1 with, a wash. "
-            "3 robots 18.7 -> 13.5.",
-            "Cost hides it at two robots because the wasted search overlaps a "
-            "useful one. Watch 'searches' instead: 3 / 4 / 5.6 without the lock "
-            "as the team grows, and a flat 3 with it -- three rooms hold "
-            "something, so 3 is the floor.",
-        ],
-    },
-    {
-        "id": "05",
-        "title": "the value function",
-        "filename": "05_heuristic.py",
-        "problem": "big-house-search",
-        "requires": "",
-        "point": "h_add/h_ff mixing, the multiplier, and the probabilistic retry delta.",
-        "sweep": "(lambda_add, lambda_ff) x mcts.h_mult",
-        "media": "value-function",
-        "notes": [
-            "MCTS scores a state with lambda_add*h_add + lambda_max*h_max + "
-            "lambda_ff*h_ff, plus a retry delta. Both relaxations assume an "
-            "action does what it says; at a 0.5 find probability that is "
-            "optimistic by a factor of two, and the delta is what pays for the "
-            "searches you expect to repeat.",
-            "The house is bigger here on purpose. In the four-room version every "
-            "mix finds the same plan at any budget worth using.",
-            "Measured, 8 repeats at 400 iterations: h_mult=1 wins for all three "
-            "mixes (40.1 / 40.9 / 41.8); h_mult=5 costs 2-8s more. The "
-            "multiplier matters more than the mix.",
-            "Look at the violins, not the means: pure h_add has a standard "
-            "deviation of 12-15 against 2.6 for the balanced mix. Cheap and "
-            "noisy versus steady. This is what the distribution plots are for.",
+            "Which is what the lock is for. 'searched' only lands when a search "
+            "finishes, so nothing stops two robots searching one room at once, "
+            "and a flat prior makes two draws at 0.5 look better than one. It is "
+            "not: one search reveals the room, so the second robot was never "
+            "going to learn anything. Three lines fix it -- a lock-search "
+            "precondition, the lock taken at t=0, released when the search "
+            "completes.",
+            "Measured, 8 repeats: 1 robot 28.3 either way -- a robot cannot "
+            "contend with itself. 2 robots 19.2 with the lock against 22-23 "
+            "without. 3 robots 19.2 -> 13.5.",
+            "The spread moves too, and it is the more honest half: with the lock "
+            "the cost repeats exactly (sd 0.0 at two and three robots), without "
+            "it the same configuration scatters over about five seconds, because "
+            "which room gets double-searched is up to the sampling.",
+            "'searches' is the cleaner measure, and the one to put on the slide: "
+            "a flat 3.0 with the lock at any team size, against 3.0 / 3.8 / ~5.8 "
+            "without it. Three rooms hold something, so 3 is the floor. The lock "
+            "does not make robots faster; it stops them buying the same "
+            "information twice.",
         ],
     },
     {
@@ -204,7 +250,7 @@ STEPS: List[StepInfo] = [
             "The operators barely change. Their *numbers* do: move times are "
             "Theta* paths over the scene's occupancy grid, and the locations are "
             "the containers of a generated home.",
-            "This search operator is the one from step 04, lock and all -- and "
+            "This search operator is the one from step 05, lock and all -- and "
             "it is also, line for line, operators.construct_search_operator.",
             "'tutorial run --save-video house.mp4' renders the run over the scene's "
             "top-down view, into media/, which the dashboard serves. About 15 "
@@ -241,7 +287,7 @@ STEPS: List[StepInfo] = [
             "340 against 450-475, standard deviation 24 against 256, and it "
             "drops a run in eight or ten. A learned belief is not uniformly "
             "worse; it is occasionally wrong and expensive when it is -- the "
-            "same reason step 05 wanted violins rather than means.",
+            "which is the argument for violins rather than means.",
             "Worth admitting out loud: at three repeats this first looked like a "
             "flat 35% penalty on both scenes. It is not. That is the sweep "
             "earning its keep on the last slide of its own tutorial.",
@@ -282,7 +328,10 @@ def command_lines(step: StepInfo) -> List[Command]:
     rows += [
         Command("run it", f"{me} run", f"the same as: {RUNNER} python {DEMO_FILE}"),
         Command("", f"{me} run --list", "the parameter cases this step sweeps"),
-        Command("", f"{me} run --case 4", "run one of them, live"),
+        # Case 1 rather than a more interesting index: the card cannot see how
+        # many cases a step has, and every step has at least two. Which case is
+        # worth watching is a per-step question, so it lives in the notes.
+        Command("", f"{me} run --case 1", "run one of them, live"),
         Command("", f"{me} run --save-plot {stem}.png",
                 "trajectories and the action list, into media/"),
         Command("", f"{me} run --save-video {stem}.mp4",
