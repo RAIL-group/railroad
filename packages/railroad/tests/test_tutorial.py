@@ -675,6 +675,60 @@ def test_stepping_past_the_end_is_a_message_not_a_crash(playground, console):
     assert "last step" in console.export_text()
 
 
+def test_next_with_an_id_jumps_there(playground, console):
+    """'next 05' from step 01: the arc is not walked, and the file is step 05."""
+    assert playground.current_step_id == STEPS[0]["id"]
+
+    assert commands.cmd_step(console, +1, "05", playground=playground,
+                             force=True, editor_sync=False)
+
+    assert playground.current_step_id == "05"
+    assert playground.demo.read_text() == playground.pristine_text("05")
+
+
+def test_next_takes_an_unpadded_id(playground, console):
+    """'next 5' is what gets typed; '05' is what the card shows."""
+    assert commands.cmd_step(console, +1, "5", playground=playground,
+                             force=True, editor_sync=False)
+    assert playground.current_step_id == "05"
+
+
+def test_next_with_an_id_still_merges_local_edits(playground, console):
+    """A jump is the same patch-and-merge as a single step, not a lesser move."""
+    playground.demo.write_text(playground.demo.read_text() + "\nMINE = 1\n")
+
+    assert commands.cmd_step(console, +1, "03", playground=playground,
+                             editor_sync=False, ask=lambda _prompt: "yes")
+
+    assert playground.current_step_id == "03"
+    assert "MINE = 1" in playground.demo.read_text()
+
+
+def test_next_backwards_is_allowed(playground, console):
+    """An id behind you reads oddly as 'next' and is still what you asked for."""
+    commands.cmd_goto(console, "05", playground=playground, force=True,
+                      editor_sync=False)
+
+    assert commands.cmd_step(console, +1, "03", playground=playground,
+                             force=True, editor_sync=False)
+    assert playground.current_step_id == "03"
+
+
+def test_next_to_where_you_already_are_says_so(playground, console):
+    assert not commands.cmd_step(console, +1, STEPS[0]["id"],
+                                 playground=playground, force=True)
+    assert "already on step" in console.export_text()
+
+
+def test_an_unknown_step_id_reads_as_a_sentence(playground, console):
+    """It is still a KeyError, but one that does not arrive wearing repr quotes."""
+    with pytest.raises(KeyError) as caught:
+        commands.cmd_step(console, +1, "99", playground=playground, force=True)
+
+    assert str(caught.value).startswith("no tutorial step '99'")
+    assert ", ".join(step_ids()) in str(caught.value)
+
+
 # -- running the demos -------------------------------------------------------
 
 

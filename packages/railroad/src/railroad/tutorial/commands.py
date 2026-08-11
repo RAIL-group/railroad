@@ -512,14 +512,29 @@ def cmd_goto(
 def cmd_step(
     console: Console,
     offset: int,
+    step: Optional[str] = None,
     *,
     playground: Optional[Playground] = None,
     ask: Optional[Ask] = None,
     force: bool = False,
     editor_sync: bool = True,
 ) -> bool:
-    """``next`` / ``prev``."""
+    """``next`` / ``prev``, or ``next 05`` -- an id instead of a direction.
+
+    Naming a step is ``goto`` under the word already in muscle memory. It is
+    the same show-the-patch-and-merge path, because the patch between any two
+    snapshots is built the same way, so the jump is not a lesser move: local
+    edits still merge, ``undo`` still works, and skipped steps cost nothing.
+
+    An id behind you is a jump backwards, which reads oddly as *next* and is
+    still what someone who typed it wants -- the direction is in the patch
+    header either way.
+    """
     playground = playground or find_playground()
+    if step is not None:
+        return cmd_goto(console, step, playground=playground, ask=ask,
+                        force=force, editor_sync=editor_sync)
+
     target = neighbour(playground.current_step_id, offset)
     if target is None:
         edge = "last" if offset > 0 else "first"

@@ -340,7 +340,7 @@ def command_lines(step: StepInfo) -> List[Command]:
         Command("see it", f"{me} dashboard",
                 "start it; --status and --stop from here too"),
         Command("move on", f"{me} next",
-                "shows the patch, then merges your edits"),
+                "shows the patch, then merges your edits -- 'next 05' jumps"),
     ]
     return rows
 
@@ -350,13 +350,25 @@ def step_ids() -> List[str]:
     return [step["id"] for step in STEPS]
 
 
+class UnknownStep(KeyError):
+    """No step by that id. A ``KeyError`` still, since it always was one.
+
+    ``KeyError`` renders its argument with ``repr``, which puts a mistyped id
+    inside two sets of quotes on the way to the terminal. There are seven steps
+    and two commands that take an id, so this gets typed wrong live.
+    """
+
+    def __str__(self) -> str:
+        return str(self.args[0]) if self.args else ""
+
+
 def get_step(step_id: str) -> StepInfo:
     """Look up a step by id, accepting ``"2"`` for ``"02"``."""
     normalized = step_id.zfill(2)
     for step in STEPS:
         if step["id"] == normalized:
             return step
-    raise KeyError(
+    raise UnknownStep(
         f"no tutorial step {step_id!r}; available: {', '.join(step_ids())}"
     )
 

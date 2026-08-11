@@ -264,9 +264,10 @@ def _tutorial_guard(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         from railroad.tutorial import PlaygroundError
+        from railroad.tutorial._steps import UnknownStep
         try:
             return fn(*args, **kwargs)
-        except PlaygroundError as exc:
+        except (PlaygroundError, UnknownStep) as exc:
             raise click.ClickException(str(exc)) from exc
 
     return wrapper
@@ -352,12 +353,17 @@ def _advance_options(fn):
 
 
 @tutorial.command("next")
+@click.argument("step", required=False)
 @_advance_options
-def tutorial_next(force: bool, no_editor_sync: bool) -> None:
-    """Show the next step's patch, then merge it into demo.py."""
+def tutorial_next(step: str | None, force: bool, no_editor_sync: bool) -> None:
+    """Show the next step's patch, then merge it into demo.py.
+
+    With STEP, jump straight to it instead: 'next 5' or 'next 05'.
+    """
     from railroad.tutorial import commands
     _tutorial_guard(commands.cmd_step)(
-        _tutorial_console(), 1, force=force, editor_sync=not no_editor_sync
+        _tutorial_console(), 1, step, force=force,
+        editor_sync=not no_editor_sync
     )
 
 
