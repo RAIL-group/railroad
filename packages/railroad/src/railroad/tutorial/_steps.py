@@ -225,10 +225,11 @@ STEPS: List[StepInfo] = [
             "search completes -- and they are not optional. A search you can "
             "run unlocked is a search that can be bought twice, so the operator "
             "carries the lock the way it carries 'at ?r ?loc'.",
-            "Measured, 8 repeats: 28.0 -> 19.2 -> 13.5 seconds at one, two and "
-            "three robots, 8 of 8 every time. Two and three robots repeat "
-            "exactly (sd 0.0); the one-robot number scatters by under a second, "
-            "which is the search order changing, not the plan.",
+            "Measured, 8 repeats: about 28 -> 19.2 -> 13.5 seconds at one, two "
+            "and three robots, 8 of 8 every time. Two and three robots repeat "
+            "exactly, to the decimal, sweep after sweep; the one-robot number "
+            "is the only one that moves, by under a second, which is the search "
+            "order changing rather than the plan.",
             "'searches' is the cleaner measure, and the one to put on the slide: "
             "a flat 3.0 at every team size. Three rooms hold something, so 3 is "
             "the floor, and the lock is what holds a bigger team to it. It does "

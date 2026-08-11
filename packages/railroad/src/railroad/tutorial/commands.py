@@ -597,7 +597,11 @@ def cmd_clean(
 
 def _result_paths(playground: Playground) -> List[Path]:
     """Everything a reset would delete, filtered to what is actually there."""
-    paths = [playground.mlflow_db, playground.mlruns_dir, playground.cache_dir]
+    # Local, so that the tutorial CLI does not import MLflow to print a card.
+    from railroad.bench.store import lock_path
+
+    paths = [playground.mlflow_db, lock_path(playground.mlflow_db),
+             playground.mlruns_dir, playground.cache_dir]
     if playground.media_dir.is_dir():
         paths += sorted(playground.media_dir.iterdir())
     return [path for path in paths if path.exists()]
@@ -674,17 +678,22 @@ def cmd_reset(
         console.print("[dim]nothing cleared[/dim]")
         return False
 
+    # Before the delete, not after: a dashboard left running against a
+    # database that has gone rebuilds it on the next page load, and a sweep
+    # started around the same moment is then a second process migrating the
+    # same fresh file. That race can wedge the database (railroad.bench.store).
+    stopped = launch.stop(playground)
+
     for path in paths:
         _remove(path)
     playground.runs_path.write_text("")
 
     console.print(f"[green]cleared[/green] {summary or 'this run history'}")
     console.print("  [dim]demo.py left alone; 'clean' resets that[/dim]")
-    running = launch.recorded(playground)
-    if running is not None:
-        console.print(f"  [yellow]the dashboard is still up (pid {running.pid})"
-                      f"[/yellow] [dim]it reads the database this just deleted; "
-                      f"restart it with 'dashboard --stop' then 'dashboard'[/dim]")
+    if stopped is not None:
+        console.print(f"  [dim]stopped the dashboard (pid {stopped}); it read the "
+                      f"database this just deleted -- "
+                      f"'uv run railroad tutorial dashboard' brings it back[/dim]")
     return True
 
 
@@ -826,6 +835,22 @@ def cmd_doctor(console: Console) -> bool:
                "its own mlflow.db, mlruns/ and media/ live here")
     else:
         record(False, "no playground", "run 'uv run railroad tutorial init'")
+
+    # Only when there is one: building a tracking database is not a checker's
+    # job. Opening it is, because a sweep that cannot is a dead demo -- and an
+    # open repairs a database left half-migrated (railroad.bench.store).
+    if playground is not None and playground.mlflow_db.exists():
+        try:
+            from railroad.bench.store import use_tracking_uri
+            use_tracking_uri(f"sqlite:///{playground.mlflow_db}")
+        except Exception as exc:  # pragma: no cover - defensive
+            record(False, "sweep database will not open",
+                   f"{exc}; 'tutorial reset' clears it and the next sweep "
+                   "builds a fresh one")
+        else:
+            record(True, "sweep database opens",
+                   "its schema is at head, so a sweep and the dashboard can "
+                   "both read it")
 
     all_ok = True
     for ok, label, detail in checks:

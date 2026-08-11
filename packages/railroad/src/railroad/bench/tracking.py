@@ -19,6 +19,7 @@ import mlflow  # noqa: E402
 sys.stderr = _stderr
 
 from .plan import Task, TaskStatus  # noqa: E402
+from .store import use_tracking_uri  # noqa: E402
 
 
 class MLflowTracker:
@@ -44,11 +45,11 @@ class MLflowTracker:
         sys.stderr = StringIO()
 
         try:
-            if tracking_uri:
-                mlflow.set_tracking_uri(tracking_uri)
-            else:
-                # Default: SQLite database (avoids filesystem deprecation warning)
-                mlflow.set_tracking_uri("sqlite:///mlflow.db")
+            # SQLite in the working directory by default, which also avoids the
+            # filesystem-store deprecation warning. Building the schema here,
+            # under a lock, keeps a sweep and a dashboard from migrating the
+            # same fresh database at once -- see railroad.bench.store.
+            use_tracking_uri(tracking_uri)
         finally:
             sys.stderr = _stderr
 

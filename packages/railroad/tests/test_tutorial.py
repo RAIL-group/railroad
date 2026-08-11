@@ -610,6 +610,42 @@ def test_reset_says_what_it_is_about_to_throw_away(playground, console):
     assert "2 files in media/" in text
 
 
+def test_reset_stops_the_dashboard_before_it_deletes(playground, console, monkeypatch):
+    """Left running, it rebuilds the database it reads on the next page load.
+
+    That fresh file is then migrated by two processes at once as soon as a
+    sweep starts, which is what wedges it (railroad.bench.store). The order
+    matters: stop first, delete second, or the window is still open.
+    """
+    _accumulate_results(playground)
+    seen = []
+    monkeypatch.setattr(
+        commands.launch, "stop",
+        lambda _pg, **_kw: seen.append(playground.mlflow_db.exists()) or 4242,
+    )
+
+    assert commands.cmd_reset(console, playground, force=True)
+
+    assert seen == [True], "stopped while the database it reads was still there"
+    assert not playground.mlflow_db.exists()
+    assert "4242" in console.export_text()
+
+
+def test_reset_declined_leaves_the_dashboard_up(playground, console, monkeypatch):
+    """Nothing is deleted, so there is nothing to stop the dashboard for."""
+    _accumulate_results(playground)
+    monkeypatch.setattr(commands.launch, "stop",
+                        lambda _pg, **_kw: pytest.fail("stopped on a declined reset"))
+
+    assert not commands.cmd_reset(console, playground, ask=lambda _prompt: "no")
+
+
+def test_reset_with_no_dashboard_says_nothing_about_one(playground, console):
+    _accumulate_results(playground)
+    assert commands.cmd_reset(console, playground, force=True)
+    assert "dashboard" not in console.export_text()
+
+
 def test_reset_declined_changes_nothing(playground, console):
     _accumulate_results(playground)
     assert not commands.cmd_reset(
@@ -687,6 +723,19 @@ def test_doctor_does_not_let_rich_eat_the_extra_names(console, monkeypatch, tmp_
     text = console.export_text()
     assert "railroad[bench]" in text
     assert "railroad[procthor]" in text
+
+
+def test_doctor_checks_the_sweep_database_when_there_is_one(playground, console,
+                                                            monkeypatch):
+    """A database that will not open is a dead demo, so say so before the talk."""
+    monkeypatch.chdir(playground.root)
+    commands.cmd_doctor(console)
+    assert "sweep database" not in console.export_text(), "none to check yet"
+
+    playground.mlflow_db.write_bytes(b"")  # an empty file is an empty database
+    fresh = Console(record=True, width=100, force_terminal=False)
+    commands.cmd_doctor(fresh)
+    assert "sweep database opens" in fresh.export_text()
 
 
 def test_step_list_reports_the_change_between_steps(playground, console):

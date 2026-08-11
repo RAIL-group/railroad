@@ -9,6 +9,8 @@ import pandas as pd
 from typing import Optional
 from datetime import datetime
 
+from .store import use_tracking_uri
+
 
 class BenchmarkAnalyzer:
     """
@@ -24,10 +26,9 @@ class BenchmarkAnalyzer:
         Args:
             tracking_uri: MLflow tracking URI (default: sqlite:///mlflow.db)
         """
-        if tracking_uri:
-            mlflow.set_tracking_uri(tracking_uri)
-        else:
-            mlflow.set_tracking_uri("sqlite:///mlflow.db")
+        # Under a lock, so that a dashboard opening a fresh database does not
+        # race the sweep that is filling it -- see railroad.bench.store.
+        use_tracking_uri(tracking_uri)
 
     def list_experiments(self) -> pd.DataFrame:
         """
