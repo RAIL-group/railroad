@@ -18,13 +18,16 @@ from __future__ import annotations
 
 import difflib
 import json
+import os
 import shutil
 import subprocess
 import time
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
+from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
@@ -156,6 +159,67 @@ MIN_SIDE_BY_SIDE_WIDTH = 120
 """Below this each column is under ~52 characters, which is narrower than the
 code it has to hold. A unified diff is the better answer down there."""
 
+SYNTAX_ENV = "RAILROAD_TUTORIAL_SYNTAX"
+"""Set to ``off`` for plain text, if a terminal makes a mess of the colours."""
+
+SYNTAX_THEME = "ansi_dark"
+"""Named ANSI colours only, so the diff comes out in the terminal's own palette
+rather than a theme's idea of it. A hardcoded #rrggbb scheme looks right on the
+laptop it was chosen on and wrong over ssh."""
+
+REMOVED, ADDED = "on #3a1114", "on #0d2a12"
+"""Backgrounds for the changed lines. Marking the change with a *background*
+is the whole trick: colouring the text red and green would mean throwing the
+syntax colouring away exactly where the eye is being sent."""
+
+
+@lru_cache(maxsize=8)
+def _highlight(text: str) -> Tuple[Text, ...]:
+    """Lex *text* once. Cached because the result does not depend on width.
+
+    The viewer re-renders on every resize, and re-lexing two files each time
+    is most of what that costs. Callers copy before styling, so handing the
+    same objects back repeatedly is safe.
+    """
+    lines = text.splitlines()
+    try:
+        syntax = Syntax(text, "python", theme=SYNTAX_THEME,
+                        background_color="default")
+        highlighted = list(syntax.highlight(text).split("\n"))
+    except Exception:  # pragma: no cover - a lexer that will not
+        return tuple(Text(line) for line in lines)
+    # Never let the highlighter disagree with the diff about how many lines
+    # there are: the alignment is computed from the plain text.
+    highlighted = highlighted[:len(lines)]
+    highlighted += [Text("") for _ in range(len(lines) - len(highlighted))]
+    return tuple(highlighted)
+
+
+def _highlighted(text: str) -> List[Text]:
+    """The file, syntax-coloured, one :class:`Text` per line.
+
+    Pygments comes with rich, so this costs no dependency. Highlighting the
+    file whole rather than line by line is what lets the lexer see a docstring
+    or a bracket that spans lines.
+    """
+    if os.environ.get(SYNTAX_ENV, "").strip().lower() in {"off", "0", "none"}:
+        return [Text(line) for line in text.splitlines()]
+    return list(_highlight(text))
+
+
+def _cell(lines: List[Text], index: Optional[int], changed: bool,
+          background: str, width: int) -> Text:
+    """One side of one row: the highlighted line, marked for its role."""
+    if index is None:
+        # No counterpart on this side. Fill the cell so the gap reads as a
+        # block rather than as whitespace that might just be a short line.
+        return Text(" " * width, style=background) if changed else Text("")
+    line = lines[index].copy()
+    # Both of these stack on top of the token colours rather than replacing
+    # them: `dim` sets no colour, and a background sets no foreground.
+    line.stylize(background if changed else "dim")
+    return line
+
 
 def _aligned_rows(
     from_lines: List[str], to_lines: List[str]
@@ -203,6 +267,7 @@ def side_by_side(
 
     from_lines = from_text.splitlines()
     to_lines = to_text.splitlines()
+    from_rich, to_rich = _highlighted(from_text), _highlighted(to_text)
     number_width = max(len(str(len(from_lines))), len(str(len(to_lines))), 2)
     # Two line-number columns, the divider, and the two spaces rich puts in
     # each of the four gaps between the five columns.
@@ -216,17 +281,22 @@ def side_by_side(
     table.add_column(Text(to_label), width=column_width, overflow="fold")
 
     for tag, left, right in _aligned_rows(from_lines, to_lines):
-        unchanged = tag == "equal"
+        changed = tag != "equal"
         table.add_row(
-            "" if left is None else str(left + 1),
-            Text(from_lines[left], style="dim" if unchanged else "red")
-            if left is not None else Text(""),
+            _number(left, changed, "red"),
+            _cell(from_rich, left, changed, REMOVED, column_width),
             "│",
-            "" if right is None else str(right + 1),
-            Text(to_lines[right], style="dim" if unchanged else "green")
-            if right is not None else Text(""),
+            _number(right, changed, "green"),
+            _cell(to_rich, right, changed, ADDED, column_width),
         )
     return table
+
+
+def _number(index: Optional[int], changed: bool, style: str) -> Text:
+    """The gutter. Carries the red/green the lines themselves gave up."""
+    if index is None:
+        return Text("")
+    return Text(str(index + 1), style=style if changed else "dim")
 
 
 def first_changed_line(from_text: str, to_text: str) -> int:

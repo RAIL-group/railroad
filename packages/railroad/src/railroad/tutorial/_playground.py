@@ -288,6 +288,12 @@ columns, where two columns of Python stop being readable. Short diffs are
 printed inline rather than taking over the screen, and
 `RAILROAD_TUTORIAL_VIEWER=off` does that for all of them.
 
+The code is syntax highlighted (pygments, which comes with rich -- there is
+nothing extra to install). Changed lines are marked with a *background* rather
+than by turning the text red and green, so the highlighting survives exactly
+where you are looking; unchanged lines are dimmed. `RAILROAD_TUTORIAL_SYNTAX=off`
+falls back to plain text.
+
 Advancing three-way merges the step's patch into the file as it actually
 stands, so a constant you tuned mid-sentence survives the move. On a genuine
 conflict it refuses rather than writing markers into a file you are about to

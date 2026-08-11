@@ -212,6 +212,53 @@ def test_side_by_side_falls_back_on_a_narrow_terminal():
     assert not isinstance(narrow, Table)
 
 
+def test_highlighting_keeps_one_line_per_line():
+    """Alignment is computed from the plain text; the colours must agree."""
+    source = '"""A docstring\nspanning lines."""\nx = 1\n\ndef f():\n    pass\n'
+    assert len(adv._highlighted(source)) == len(source.splitlines())
+    # A file the lexer cannot make sense of must not lose or gain lines either.
+    broken = "def (((\nnot python at all\n"
+    assert len(adv._highlighted(broken)) == len(broken.splitlines())
+
+
+def test_highlighting_can_be_switched_off(monkeypatch):
+    source = "def f():\n    return 1\n"
+    coloured = adv._highlighted(source)
+    assert any(line.spans for line in coloured), "expected pygments to colour this"
+
+    monkeypatch.setenv(adv.SYNTAX_ENV, "off")
+    plain = adv._highlighted(source)
+    assert [line.plain for line in plain] == source.splitlines()
+    assert not any(line.spans for line in plain)
+
+
+def test_a_changed_line_keeps_its_syntax_colour():
+    """The change is marked with a background, so the tokens survive it.
+
+    Colouring the whole line red or green would throw the highlighting away
+    exactly where the eye is being sent.
+    """
+    import io
+    import re
+
+    before = "x = 1\n"
+    after = "def frobnicate():\n    return 1\n"
+    buffer = io.StringIO()
+    Console(file=buffer, width=160, force_terminal=True,
+            color_system="truecolor").print(
+        adv.side_by_side(before, after, "a", "b", width=160))
+    rendered = buffer.getvalue()
+
+    added = [line for line in rendered.splitlines() if "frobnicate" in line]
+    assert added, "the added line should be on screen"
+    codes = re.findall(r"\x1b\[([0-9;]*)m", added[0])
+    background = adv.ADDED.removeprefix("on ").lstrip("#")
+    tint = ";".join(str(int(background[i:i + 2], 16)) for i in (0, 2, 4))
+    assert any(f"48;2;{tint}" in code for code in codes), "no added-line tint"
+    assert any(re.match(r"^(3[0-7]|9[0-7])(;|$)", code) for code in codes), \
+        "the line lost its syntax colour"
+
+
 # -- the viewer -------------------------------------------------------------
 
 
