@@ -167,10 +167,35 @@ SYNTAX_THEME = "ansi_dark"
 rather than a theme's idea of it. A hardcoded #rrggbb scheme looks right on the
 laptop it was chosen on and wrong over ssh."""
 
-REMOVED, ADDED = "on #3a1114", "on #0d2a12"
-"""Backgrounds for the changed lines. Marking the change with a *background*
-is the whole trick: colouring the text red and green would mean throwing the
-syntax colouring away exactly where the eye is being sent."""
+REMOVED, ADDED = "on #5c151d", "on #14431f"
+"""Backgrounds for the changed lines: a dark red and a dark green, tuned to sit
+under syntax-coloured text without competing with it."""
+
+REMOVED_BASIC, ADDED_BASIC = "on red", "on green"
+"""The same idea in the eight ANSI colours. Louder than anyone would choose,
+but the terminal's own red and green, so they land wherever the palette puts
+them -- and, crucially, they are still *backgrounds*."""
+
+DEEP_COLOUR = {"truecolor", "256"}
+"""Colour systems that can render a dark tint as a dark tint. Below these, rich
+rounds the tints above to the nearest of eight, which is black."""
+
+
+def marking(color_system: Optional[str]) -> Tuple[str, str, str]:
+    """``(removed, added, context)`` styles for the colour depth we have.
+
+    Always a background, at every depth. The alternative -- colouring changed
+    lines red and green -- throws the syntax highlighting away at exactly the
+    point the eye is being sent, which is the one place it was worth having.
+    Only the shade changes with the depth available.
+
+    Context is never dimmed. Dimming it makes the common case of the screen
+    (most lines are unchanged) read as fog, and the background already does
+    all the work of saying which lines are the interesting ones.
+    """
+    if color_system in DEEP_COLOUR:
+        return REMOVED, ADDED, ""
+    return REMOVED_BASIC, ADDED_BASIC, ""
 
 
 @lru_cache(maxsize=8)
@@ -208,16 +233,22 @@ def _highlighted(text: str) -> List[Text]:
 
 
 def _cell(lines: List[Text], index: Optional[int], changed: bool,
-          background: str, width: int) -> Text:
+          changed_style: str, context_style: str, width: int) -> Text:
     """One side of one row: the highlighted line, marked for its role."""
     if index is None:
         # No counterpart on this side. Fill the cell so the gap reads as a
-        # block rather than as whitespace that might just be a short line.
-        return Text(" " * width, style=background) if changed else Text("")
+        # block rather than as whitespace that might just be a short line --
+        # but only when the marking is a background, or there is nothing there
+        # for a foreground colour to colour.
+        return (Text(" " * width, style=changed_style)
+                if changed and changed_style.startswith("on ") else Text(""))
     line = lines[index].copy()
-    # Both of these stack on top of the token colours rather than replacing
-    # them: `dim` sets no colour, and a background sets no foreground.
-    line.stylize(background if changed else "dim")
+    style = changed_style if changed else context_style
+    if style:
+        # Stacks on top of the token colours rather than replacing them: `dim`
+        # sets no colour, and a background sets no foreground. A bare "red"
+        # does replace the foreground, which is the point of it.
+        line.stylize(style)
     return line
 
 
@@ -251,6 +282,7 @@ def side_by_side(
     to_label: str,
     *,
     width: int,
+    color_system: Optional[str] = "truecolor",
 ) -> Table | Text:
     """Both versions of the whole file, aligned, changes coloured.
 
@@ -274,20 +306,24 @@ def side_by_side(
     column_width = max((width - 2 * number_width - 1 - 8) // 2, 20)
 
     table = Table(box=None, pad_edge=False, header_style="bold")
-    table.add_column("", justify="right", style="dim", width=number_width)
+    # The line-number columns carry no blanket style: _number sets dim for
+    # context and red/green for a change, and a column style would stack on
+    # top and dim the marking back down again.
+    table.add_column("", justify="right", width=number_width)
     table.add_column(Text(from_label), width=column_width, overflow="fold")
     table.add_column("", width=1, style="dim")
-    table.add_column("", justify="right", style="dim", width=number_width)
+    table.add_column("", justify="right", width=number_width)
     table.add_column(Text(to_label), width=column_width, overflow="fold")
 
+    removed, added, context = marking(color_system)
     for tag, left, right in _aligned_rows(from_lines, to_lines):
         changed = tag != "equal"
         table.add_row(
             _number(left, changed, "red"),
-            _cell(from_rich, left, changed, REMOVED, column_width),
+            _cell(from_rich, left, changed, removed, context, column_width),
             "│",
             _number(right, changed, "green"),
-            _cell(to_rich, right, changed, ADDED, column_width),
+            _cell(to_rich, right, changed, added, context, column_width),
         )
     return table
 

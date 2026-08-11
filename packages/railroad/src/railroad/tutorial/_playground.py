@@ -289,10 +289,14 @@ printed inline rather than taking over the screen, and
 `RAILROAD_TUTORIAL_VIEWER=off` does that for all of them.
 
 The code is syntax highlighted (pygments, which comes with rich -- there is
-nothing extra to install). Changed lines are marked with a *background* rather
-than by turning the text red and green, so the highlighting survives exactly
-where you are looking; unchanged lines are dimmed. `RAILROAD_TUTORIAL_SYNTAX=off`
-falls back to plain text.
+nothing extra to install). Changed lines are marked with a *background*, red or
+green, rather than by recolouring the text: that way the highlighting survives
+exactly where you are looking. `RAILROAD_TUTORIAL_SYNTAX=off` falls back to
+plain text.
+
+If the diff looks washed out, `uv run railroad tutorial colours` prints what
+colour depth this terminal reported and shows the two markers side by side. The
+usual culprit is tmux, which does not forward `COLORTERM`.
 
 Advancing three-way merges the step's patch into the file as it actually
 stands, so a constant you tuned mid-sentence survives the move. On a genuine

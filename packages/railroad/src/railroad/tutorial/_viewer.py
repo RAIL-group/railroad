@@ -26,7 +26,7 @@ import re
 import select
 import shutil
 import sys
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Literal, Optional
 
 from rich.console import Console
 
@@ -88,14 +88,35 @@ def scroll_to(top: int, action: str, total: int, page: int) -> int:
     return max(0, min(top + delta.get(action, 0), limit))
 
 
+ColorSystem = Literal["standard", "256", "truecolor", "windows"]
+
+
+def color_system(console: Console) -> ColorSystem:
+    """What *console* detected, narrowed to what :class:`Console` accepts back.
+
+    ``Console.color_system`` reports a plain string and the constructor wants
+    one of a fixed set, so the round trip needs saying out loud. Anything
+    unrecognised, including no colour at all, is treated as eight colours.
+    """
+    detected = console.color_system
+    if detected in ("standard", "256", "truecolor", "windows"):
+        return detected
+    return "standard"
+
+
 def render_lines(console: Console, build: Callable[[int], Any], width: int) -> List[str]:
-    """Lay ``build(width)`` out at *width* and return it as styled lines."""
+    """Lay ``build(width)`` out at *width* and return it as styled lines.
+
+    Rendered at the same colour depth as *console*, which is the whole of the
+    diff's legibility: pinning this to "standard" rounds every colour to the
+    nearest of eight, and the dark backgrounds that mark a changed line round
+    to black -- leaving a diff with no marking on it at all.
+    """
     buffer = io.StringIO()
     # A second console because the real one is fixed to the terminal's size and
-    # we may be rendering for a size it has not caught up with yet. Colours here
-    # are red/green/dim, all of which "standard" carries.
+    # we may be rendering for a size it has not caught up with yet.
     Console(file=buffer, width=width, force_terminal=True,
-            color_system="standard").print(build(width))
+            color_system=color_system(console)).print(build(width))
     return buffer.getvalue().splitlines()
 
 
@@ -213,5 +234,5 @@ def show(console: Console, build: Callable[[int], Any]) -> bool:
     return True
 
 
-__all__ = ["VIEWER_ENV", "parse_key", "render_lines", "scroll_to", "show",
-           "terminal_size"]
+__all__ = ["VIEWER_ENV", "color_system", "parse_key", "render_lines",
+           "scroll_to", "show", "terminal_size"]

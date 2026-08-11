@@ -13,6 +13,7 @@ between steps without losing what you typed.
 
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 from importlib.util import find_spec
@@ -407,6 +408,7 @@ def render_patch(
             f"step {from_id} ({from_step['title']})",
             f"step {to_id} ({to_step['title']})",
             width=width,
+            color_system=console.color_system,
         ),
         Text(""),
         Text(to_step["point"], style="dim"),
@@ -701,6 +703,52 @@ def cmd_undo(console: Console, playground: Optional[Playground] = None) -> None:
 # -- pre-flight --------------------------------------------------------------
 
 
+def cmd_colours(console: Console) -> str:
+    """What colour depth this terminal has, and what the diff will look like.
+
+    A washed-out diff is nearly always the terminal reporting fewer colours
+    than it has: rich reads ``$COLORTERM`` and ``$TERM``, and over ssh or in a
+    multiplexer those routinely arrive smaller than the terminal really is.
+    The swatch is the part worth trusting -- if the two blocks below look the
+    same as each other, the marking is not going to work no matter what the
+    variables claim.
+    """
+    detected = viewer.color_system(console)
+    console.print(f"[bold]colour system[/bold]  {detected}"
+                  f"   [dim](rich detected this)[/dim]")
+    for name in ("COLORTERM", "TERM", "TERM_PROGRAM", "NO_COLOR"):
+        value = os.environ.get(name)
+        console.print(f"  [dim]${name:<13}{value if value else '(unset)'}[/dim]")
+
+    deep = detected in adv.DEEP_COLOUR
+    removed, added, _ = adv.marking(detected)
+    console.print()
+    console.print("  changed lines are marked with a background, "
+                  + ("a tuned dark tint:" if deep
+                     else "here the terminal's own red and green:"))
+    console.print(f"    [{removed}]  removed line[/]")
+    console.print(f"    [{added}]  added line[/]")
+    console.print("    [dim]if those two look the same as each other, rich has "
+                  "been told more than the terminal can do[/dim]")
+
+    if not deep and (os.environ.get("TMUX")
+                     or os.environ.get("TERM_PROGRAM") == "tmux"):
+        # By far the most common cause: tmux does not pass COLORTERM through,
+        # so a truecolor terminal arrives inside it looking like an old one.
+        console.print()
+        console.print("  [yellow]this is inside tmux[/yellow], which does not "
+                      "forward COLORTERM by default. In ~/.tmux.conf:")
+        console.print('    [dim]set -g default-terminal "tmux-256color"[/dim]')
+        console.print('    [dim]set -as terminal-features ",*:RGB"[/dim]')
+        console.print("  [dim]then kill the server (tmux kill-server) for it "
+                      "to take effect[/dim]")
+    elif not deep:
+        console.print()
+        console.print("  [dim]if the terminal does support more, exporting "
+                      "COLORTERM=truecolor is usually all it needs[/dim]")
+    return detected
+
+
 def cmd_doctor(console: Console) -> bool:
     """Check the things that ruin a live demo. Returns whether all passed."""
     checks: List[tuple[bool, str, str]] = []
@@ -757,6 +805,10 @@ def cmd_doctor(console: Console) -> bool:
            "optional; buffers still refresh via global-auto-revert-mode")
     record(sys.stdin.isatty() and sys.stdout.isatty(), "attached to a terminal",
            "the live planner dashboard needs one")
+    detected = viewer.color_system(console)
+    record(detected in adv.DEEP_COLOUR, f"colour depth: {detected}",
+           "the step diffs mark changed lines with a background, which needs "
+           "more than eight colours; 'tutorial colours' shows a swatch")
 
     if playground is not None:
         record(True, f"playground: {playground.root}",

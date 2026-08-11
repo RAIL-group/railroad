@@ -447,6 +447,20 @@ def tutorial_steps() -> None:
     _tutorial_guard(commands.cmd_steps)(_tutorial_console())
 
 
+@tutorial.command("colours")
+def tutorial_colours() -> None:
+    """Show this terminal's colour depth, and what the diff will look like."""
+    from railroad.tutorial import commands
+    commands.cmd_colours(_tutorial_console())
+
+
+@tutorial.command("colors", hidden=True)
+def tutorial_colors() -> None:
+    """Alias for 'colours'. Hidden so the help lists one spelling, not two."""
+    from railroad.tutorial import commands
+    commands.cmd_colours(_tutorial_console())
+
+
 @tutorial.command("doctor")
 def tutorial_doctor() -> None:
     """Check the things that ruin a live demo."""

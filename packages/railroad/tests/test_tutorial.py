@@ -232,11 +232,22 @@ def test_highlighting_can_be_switched_off(monkeypatch):
     assert not any(line.spans for line in plain)
 
 
-def test_a_changed_line_keeps_its_syntax_colour():
-    """The change is marked with a background, so the tokens survive it.
+def test_every_colour_depth_marks_changes_with_a_background():
+    """Never by recolouring the text: that is where the syntax colours live."""
+    for depth in ("standard", "256", "truecolor"):
+        removed, added, context = adv.marking(depth)
+        assert removed.startswith("on "), depth
+        assert added.startswith("on "), depth
+        assert context == "", "context is left alone at every depth"
 
-    Colouring the whole line red or green would throw the highlighting away
-    exactly where the eye is being sent.
+
+@pytest.mark.parametrize("depth", ["standard", "256", "truecolor"])
+def test_a_changed_line_keeps_its_syntax_colour(depth):
+    """The change is a background, so the tokens survive it.
+
+    Asserted by shape rather than by exact escape code: rich caches a Style's
+    codes on first render, so a process that has already rendered at another
+    depth would hand back that one's.
     """
     import io
     import re
@@ -245,18 +256,17 @@ def test_a_changed_line_keeps_its_syntax_colour():
     after = "def frobnicate():\n    return 1\n"
     buffer = io.StringIO()
     Console(file=buffer, width=160, force_terminal=True,
-            color_system="truecolor").print(
-        adv.side_by_side(before, after, "a", "b", width=160))
-    rendered = buffer.getvalue()
+            color_system=depth).print(
+        adv.side_by_side(before, after, "a", "b", width=160, color_system=depth))
 
-    added = [line for line in rendered.splitlines() if "frobnicate" in line]
+    added = [line for line in buffer.getvalue().splitlines()
+             if "frobnicate" in line]
     assert added, "the added line should be on screen"
     codes = re.findall(r"\x1b\[([0-9;]*)m", added[0])
-    background = adv.ADDED.removeprefix("on ").lstrip("#")
-    tint = ";".join(str(int(background[i:i + 2], 16)) for i in (0, 2, 4))
-    assert any(f"48;2;{tint}" in code for code in codes), "no added-line tint"
+    assert any(re.match(r"^(4[0-7]|10[0-7]|48;)", code) for code in codes), \
+        f"no background marking the change at {depth}"
     assert any(re.match(r"^(3[0-7]|9[0-7])(;|$)", code) for code in codes), \
-        "the line lost its syntax colour"
+        f"the line lost its syntax colour at {depth}"
 
 
 # -- the viewer -------------------------------------------------------------
