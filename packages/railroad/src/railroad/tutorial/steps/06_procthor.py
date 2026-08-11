@@ -1,19 +1,7 @@
 """Step 06 -- a real house.
 
-The operators barely change. What changes is where their numbers come from:
-move times are now Theta* paths over the scene's occupancy grid rather than
-straight lines, and the locations are the containers of a ProcTHOR-generated
-home rather than four names in a dict.
-
-Two things worth saying out loud. The search operator below is the one from
-step 05, lock and all -- and it is also, line for line, what
-`railroad.operators.construct_search_operator` builds, so everything we wrote
-by hand is what the library was doing anyway. And the find probability is now a
-*callable* rather than the flat 0.5, which is the seam step 07 pulls on.
-
-    uv run railroad tutorial run --save-video house.mp4
-
-renders the run over the scene's top-down view, into media/.
+The same operators over a generated ProcTHOR home: move times become Theta*
+paths across its occupancy grid, and the locations become its containers.
 """
 
 import random
@@ -26,7 +14,7 @@ from railroad.core import Effect, Fluent as F, Operator, State, get_action_by_na
 from railroad.environment.procthor import ProcTHOREnvironment
 from railroad.planner import MCTSPlanner
 
-SCENE_SEED = 8613  # cached in this checkout, so no Unity and no network
+SCENE_SEED = 8613
 NUM_ROBOTS = 2
 NUM_OBJECTS = 2
 
@@ -34,12 +22,7 @@ SEARCH_TIME = 10.0
 PICK_TIME = 10.0
 PLACE_TIME = 10.0
 NO_OP_TIME = 5.0
-# Generous: a run that stops here has genuinely wandered, rather than been cut
-# off mid-search. The learned prior in step 07 needs the room.
 MAX_STEPS = 100
-# 8 containers and 13 locations ground out to ~440 actions with two robots, so
-# this runs in well under a minute. Bigger seeds (8616, 8617) are prettier and
-# several times slower; 8616 does not finish at all inside MAX_STEPS here.
 SEARCH_BUDGET = 1000
 
 
@@ -69,8 +52,6 @@ class HouseSearch(ProcTHOREnvironment):
         return 1.0 - self.find_prob(robot, location, obj)
 
     def define_operators(self):
-        # Same shapes as steps 03 and 05. The `just-moved` pair keeps a robot
-        # from chaining moves without ever doing anything at the far end.
         move = Operator(
             name="move",
             parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
@@ -84,9 +65,6 @@ class HouseSearch(ProcTHOREnvironment):
                        resulting_fluents={~F("just-moved ?r")}),
             ],
         )
-        # Step 05's search, with the constant probability replaced by a pair of
-        # callables of (robot, location, object). Nothing else knows or cares
-        # where those numbers come from.
         search = Operator(
             name="search",
             parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
@@ -146,8 +124,6 @@ class HouseSearch(ProcTHOREnvironment):
                        resulting_fluents={~F("just-placed ?r ?obj")}),
             ],
         )
-        # Waiting has to be an option, and has to be unattractive: extra_cost is
-        # charged in the objective on top of elapsed time.
         no_op = Operator(
             name="no_op",
             parameters=[("?r", "robot")],
@@ -169,9 +145,6 @@ def build(seed: int = SCENE_SEED, num_robots: int = NUM_ROBOTS,
     for robot in robots:
         fluents |= {F(f"free {robot}"), F(f"at {robot} start_loc")}
 
-    # The scene lives inside the environment, so the object universe has to be
-    # filled in afterwards -- and the grounding cache invalidated by hand,
-    # because it cannot see that the operators now close over new targets.
     env = HouseSearch(
         seed=seed,
         state=State(0.0, fluents, []),
@@ -187,22 +160,19 @@ def build(seed: int = SCENE_SEED, num_robots: int = NUM_ROBOTS,
     env.objects_by_type["object"] = set(targets)
     env.invalidate_grounding()
 
-    # 'found' is left implicit: the heuristic's at-implies-found augmentation
-    # knows an object's location can only be established by finding it.
     goal = reduce(and_, [F(f"at {obj} {destination}") for obj in targets])
     return env, goal
 
 
-def solve(env, goal, view, *, iterations: int, c: float,
-          h_mult: float = 2.0) -> bool:
+def solve(env, goal, view, *, iterations: int, c: float, h_mult: float) -> bool:
     """Replan every time a robot frees up; return whether the goal was met."""
     for _ in range(MAX_STEPS):
         if goal.evaluate(env.state.fluents):
             return True
         actions = env.get_actions()
         planner = MCTSPlanner(actions)
-        name = planner(env.state, goal, max_iterations=iterations, c=c,
-                       max_depth=20, heuristic_multiplier=h_mult)
+        name = planner(env.state, goal, max_iterations=iterations, c=c, max_depth=20,
+                       heuristic_multiplier=h_mult)
         if name == "NONE":
             view.console.print("[yellow]Planner returned NONE.[/yellow]")
             return False
@@ -214,16 +184,6 @@ def solve(env, goal, view, *, iterations: int, c: float,
 def relevant(fluent) -> bool:
     return any(word in fluent.name for word in ("at", "holding", "found", "searched"))
 
-
-# ---- one function, two ways to run it ---------------------------------------
-# `uv run python demo.py` runs case 0 of the sweep below, live, with the dashboard.
-# `uv run railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
-# times over, in parallel. Same code either way.
-#
-# Two houses, one and two robots. Scenes differ enough in size and layout that
-# the absolute costs are not comparable across seeds -- the question is whether
-# the second robot still pays once travel is real geometry rather than a
-# straight line.
 
 @benchmark(
     name="s06_procthor",
@@ -237,17 +197,14 @@ def run(case: BenchmarkCase) -> dict:
     print(f"scene {case.scene_seed}: {len(env.scene.object_locations)} containers, "
           f"{len(env.scene.objects)} objects")
     with tutorial.dashboard(case, goal, env, fluent_filter=relevant) as view:
-        solve(env, goal, view, iterations=case.mcts.iterations, c=case.mcts.c)
-    # Measure first, draw second: rendering an MP4 of a 30-action run takes
-    # minutes, and it is not part of what the run cost. The still of the
-    # finished run is cheap, though, and every sweep run keeps one.
+        solve(env, goal, view, iterations=case.mcts.iterations, c=case.mcts.c,
+              h_mult=case.mcts.h_mult)
     return tutorial.finish(view, case)
 
 
 run.add_cases([
-    # Case 0 is what `uv run python demo.py` runs: seed 8613 with two robots.
     {"scene_seed": scene_seed, "num_robots": num_robots,
-     "mcts.iterations": SEARCH_BUDGET, "mcts.c": 300}
+     "mcts.iterations": SEARCH_BUDGET, "mcts.h_mult": 2.0, "mcts.c": 300}
     for scene_seed in (8613, 8612)
     for num_robots in (2, 1)
 ])

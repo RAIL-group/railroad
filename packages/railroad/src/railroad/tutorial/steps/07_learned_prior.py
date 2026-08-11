@@ -1,19 +1,7 @@
 """Step 07 -- stop cheating.
 
-The prior in step 06 read `scene.object_locations` -- it was an oracle wearing
-a probability's clothes. This one has never seen the answer. It is a small
-network over SBERT embeddings of the *names* (room, container, object), shipped
-with the package at ~30MB, and it answers "would you expect a pillow on a bed?"
-
-The demo prints the ranked containers before it plans anything. That table is
-the step; the plan afterwards is the consequence. (It also warms the estimator's
-per-object cache, so the first search does not pay for it mid-run.)
-
-Nothing else changes -- not one line of the operators. The find probability is
-a callable of (robot, location, object) either way, which is the whole point:
-swapping a hand-written estimate for a learned one is a change to one function.
-
-    uv run railroad tutorial run --save-video learned.mp4
+The prior stops reading ground truth and becomes a small network over the
+names of things. One function changes.
 """
 
 import random
@@ -26,9 +14,6 @@ from railroad.core import Effect, Fluent as F, Operator, State, get_action_by_na
 from railroad.environment.procthor import ProcTHOREnvironment
 from railroad.planner import MCTSPlanner
 
-# A smaller house than step 06: this step is about the table, and 8612 both
-# prints a cleaner one and finishes in a quarter of the time. The sweep below
-# covers 8613 too, where the model has a harder time.
 SCENE_SEED = 8612
 NUM_ROBOTS = 2
 NUM_OBJECTS = 2
@@ -38,12 +23,7 @@ SEARCH_TIME = 10.0
 PICK_TIME = 10.0
 PLACE_TIME = 10.0
 NO_OP_TIME = 5.0
-# Generous: a run that stops here has genuinely wandered, rather than been cut
-# off mid-search. The learned prior below needs the room.
 MAX_STEPS = 100
-# 8 containers and 13 locations ground out to ~440 actions with two robots, so
-# this runs in well under a minute. Bigger seeds (8616, 8617) are prettier and
-# several times slower; 8616 does not finish at all inside MAX_STEPS here.
 SEARCH_BUDGET = 1000
 
 
@@ -63,7 +43,6 @@ class HouseSearch(ProcTHOREnvironment):
         """Either estimate, behind one signature the operator cannot tell apart."""
         if self.use_learned_prior:
             return self.learned(robot, location, obj)
-        # The step 06 prior: generous, and cheating -- it reads ground truth.
         for loc, objects in self.scene.object_locations.items():
             if obj in objects:
                 return 0.8 if loc == location else 0.1
@@ -85,8 +64,6 @@ class HouseSearch(ProcTHOREnvironment):
         return 1.0 - self.find_prob(robot, location, obj)
 
     def define_operators(self):
-        # Same shapes as steps 03 and 05. The `just-moved` pair keeps a robot
-        # from chaining moves without ever doing anything at the far end.
         move = Operator(
             name="move",
             parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
@@ -100,9 +77,6 @@ class HouseSearch(ProcTHOREnvironment):
                        resulting_fluents={~F("just-moved ?r")}),
             ],
         )
-        # Step 05's search, with the constant probability replaced by a pair of
-        # callables of (robot, location, object). Nothing else knows or cares
-        # where those numbers come from.
         search = Operator(
             name="search",
             parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
@@ -162,8 +136,6 @@ class HouseSearch(ProcTHOREnvironment):
                        resulting_fluents={~F("just-placed ?r ?obj")}),
             ],
         )
-        # Waiting has to be an option, and has to be unattractive: extra_cost is
-        # charged in the objective on top of elapsed time.
         no_op = Operator(
             name="no_op",
             parameters=[("?r", "robot")],
@@ -186,9 +158,6 @@ def build(seed: int = SCENE_SEED, num_robots: int = NUM_ROBOTS,
     for robot in robots:
         fluents |= {F(f"free {robot}"), F(f"at {robot} start_loc")}
 
-    # The scene lives inside the environment, so the object universe has to be
-    # filled in afterwards -- and the grounding cache invalidated by hand,
-    # because it cannot see that the operators now close over new targets.
     env = HouseSearch(
         seed=seed,
         state=State(0.0, fluents, []),
@@ -205,22 +174,19 @@ def build(seed: int = SCENE_SEED, num_robots: int = NUM_ROBOTS,
     env.objects_by_type["object"] = set(targets)
     env.invalidate_grounding()
 
-    # 'found' is left implicit: the heuristic's at-implies-found augmentation
-    # knows an object's location can only be established by finding it.
     goal = reduce(and_, [F(f"at {obj} {destination}") for obj in targets])
     return env, goal
 
 
-def solve(env, goal, view, *, iterations: int, c: float,
-          h_mult: float = 2.0) -> bool:
+def solve(env, goal, view, *, iterations: int, c: float, h_mult: float) -> bool:
     """Replan every time a robot frees up; return whether the goal was met."""
     for _ in range(MAX_STEPS):
         if goal.evaluate(env.state.fluents):
             return True
         actions = env.get_actions()
         planner = MCTSPlanner(actions)
-        name = planner(env.state, goal, max_iterations=iterations, c=c,
-                       max_depth=20, heuristic_multiplier=h_mult)
+        name = planner(env.state, goal, max_iterations=iterations, c=c, max_depth=20,
+                       heuristic_multiplier=h_mult)
         if name == "NONE":
             view.console.print("[yellow]Planner returned NONE.[/yellow]")
             return False
@@ -245,26 +211,9 @@ def show_beliefs(env) -> None:
         )
         print(f"\n  {obj}")
         for prob, loc in scored:
-            # The marker is ground truth, shown for us and not for the planner.
             here = "  <- actually here" if truth.get(obj) == loc else ""
             print(f"    {prob:.3f}  {loc}{here}")
 
-
-# ---- one function, two ways to run it ---------------------------------------
-# `uv run python demo.py` runs case 0 of the sweep below, live, with the dashboard.
-# `uv run railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
-# times over, in parallel. Same code either way.
-#
-# The oracle against the model, on two houses -- and a lesson about sample size.
-# At three repeats this looked like a flat 35% penalty on both scenes. It is not:
-#
-#   8612  336.8 vs 339.4 at n=10, but 341.8 vs 402.6 at n=8 -- inside the noise
-#   8613  ~340 vs 450-475, sd 24 vs 256, and the model drops a run in 8-10
-#
-# So the model holds its own where the objects are where you would guess, and
-# what it costs elsewhere is in the tail rather than the mean. That is the shape
-# of a learned belief: not uniformly worse, occasionally wrong and expensive
-# when it is. Which is the argument for violins over means: an average hides a tail.
 
 @benchmark(
     name="s07_learned_prior",
@@ -282,17 +231,14 @@ def run(case: BenchmarkCase) -> dict:
           f"{'learned' if env.use_learned_prior else 'hand-tuned'} prior")
     show_beliefs(env)
     with tutorial.dashboard(case, goal, env, fluent_filter=relevant) as view:
-        solve(env, goal, view, iterations=case.mcts.iterations, c=case.mcts.c)
-    # Measure first, draw second: rendering an MP4 of a 30-action run takes
-    # minutes, and it is not part of what the run cost. The still of the
-    # finished run is cheap, though, and every sweep run keeps one.
+        solve(env, goal, view, iterations=case.mcts.iterations, c=case.mcts.c,
+              h_mult=case.mcts.h_mult)
     return tutorial.finish(view, case)
 
 
 run.add_cases([
-    # Case 0 is what `uv run python demo.py` runs: seed 8612 with the learned prior.
     {"scene_seed": scene_seed, "use_learned_prior": use_learned_prior,
-     "mcts.iterations": SEARCH_BUDGET, "mcts.c": 300}
+     "mcts.iterations": SEARCH_BUDGET, "mcts.h_mult": 2.0, "mcts.c": 300}
     for scene_seed in (8612, 8613)
     for use_learned_prior in (True, False)
 ])

@@ -1,11 +1,7 @@
 """Step 04 -- add a second robot.
 
-No operator changes at all. A robot is an object of type `robot` plus two
-initial fluents, and concurrency falls out of the state semantics: time only
-advances when nobody is free, so a second robot simply fills the gap.
-
-Watch the Braille timeline in the summary -- the two rows overlap -- and the
-total cost against step 03.
+One more object of type robot. Not one operator changes -- concurrency is a
+property of the state semantics, not of the actions.
 """
 
 from functools import reduce
@@ -38,12 +34,7 @@ MAX_STEPS = 40
 
 @numeric
 def move_time(robot: str, loc_from: str, loc_to: str) -> float:
-    """Straight-line travel time.
-
-    `@numeric` lets it compose like a number, so the `just-moved` expiry below
-    is `move_time + 0.1` rather than a second function that only adds to this
-    one.
-    """
+    """Straight-line travel time. `@numeric` lets `move_time + 0.1` compose."""
     a, b = np.array(LOCATIONS[loc_from]), np.array(LOCATIONS[loc_to])
     return float(np.linalg.norm(a - b)) / ROBOT_VELOCITY
 
@@ -52,10 +43,6 @@ class ClearTable(SymbolicEnvironment):
     """Move, pick, place. Nothing is hidden and nothing is uncertain yet."""
 
     def define_operators(self):
-        # Both halves of a durative action are visible here: the robot stops
-        # being free and stops being anywhere at t=0, and both facts are
-        # restored at the destination when the move lands. Nothing else in the
-        # system needs to know that a move "takes time".
         move = Operator(
             name="move",
             parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
@@ -71,9 +58,6 @@ class ClearTable(SymbolicEnvironment):
                        resulting_fluents={~F("just-moved ?r")}),
             ],
         )
-        # `just-picked` is set when the pick lands and expires a tenth of a
-        # second later -- a fluent with a lifetime, which is all it takes to
-        # stop a robot putting down what it has only just picked up.
         pick = Operator(
             name="pick",
             parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
@@ -109,10 +93,6 @@ class ClearTable(SymbolicEnvironment):
                        resulting_fluents={~F("just-placed ?r ?obj")}),
             ],
         )
-        # Step 02's escape hatch, and `just-moved` is why it has to be here: a
-        # robot that arrives somewhere with nothing to do there would otherwise
-        # have no legal action at all. extra_cost is charged in the objective on
-        # top of elapsed time, so waiting stays a last resort.
         no_op = Operator(
             name="no_op",
             parameters=[("?r", "robot")],
@@ -133,7 +113,6 @@ def build(num_robots: int = NUM_ROBOTS):
     for robot in robots:
         fluents |= {F(f"free {robot}"), F(f"at {robot} living_room")}
 
-    # "None of these objects is on the table" -- a conjunction of negations.
     goal = reduce(and_, [~F(f"at {obj} table") for obj in OBJECTS])
 
     env = ClearTable(
@@ -148,14 +127,15 @@ def build(num_robots: int = NUM_ROBOTS):
     return env, goal
 
 
-def solve(env, goal, view, *, iterations: int, c: float) -> bool:
+def solve(env, goal, view, *, iterations: int, c: float, h_mult: float) -> bool:
     """Replan every time a robot frees up; return whether the goal was met."""
     for _ in range(MAX_STEPS):
         if goal.evaluate(env.state.fluents):
             return True
         actions = env.get_actions()
         planner = MCTSPlanner(actions)
-        name = planner(env.state, goal, max_iterations=iterations, c=c, max_depth=20)
+        name = planner(env.state, goal, max_iterations=iterations, c=c, max_depth=20,
+                       heuristic_multiplier=h_mult)
         if name == "NONE":
             view.console.print("[yellow]Planner returned NONE.[/yellow]")
             return False
@@ -168,18 +148,6 @@ def relevant(fluent) -> bool:
     return any(word in fluent.name for word in ("at", "holding"))
 
 
-# ---- one function, two ways to run it ---------------------------------------
-# `uv run python demo.py` runs case 0 of the sweep below, live, with the dashboard.
-# `uv run railroad benchmarks run -i demo.py --tags tutorial` runs all of them, many
-# times over, in parallel. Same code either way.
-#
-# Does the second robot pay for itself, and does a third? Measured over 8
-# repeats: 44.3 -> 22.1 -> 8.6 seconds, so the second halves it and the third
-# more than halves it again. With three objects and three robots the answer
-# collapses: they all drive to the table and each picks one, in 6 actions. The
-# goal only asks that nothing *remain* on the table, so the run ends at the last
-# pick -- one trip plus one pick, and nothing is ever put away.
-
 @benchmark(
     name="s04_two_robots",
     description="Clear a table with 1-3 robots; sweep team size and search budget.",
@@ -190,17 +158,14 @@ def relevant(fluent) -> bool:
 def run(case: BenchmarkCase) -> dict:
     env, goal = build(case.num_robots)
     with tutorial.dashboard(case, goal, env, fluent_filter=relevant) as view:
-        solve(env, goal, view, iterations=case.mcts.iterations, c=case.mcts.c)
-    # The metrics, plus this run's trajectory as a plot.jpg artifact so the
-    # results dashboard shows a picture of every run in the sweep, not just a
-    # row of numbers. --save-plot and --save-video are the live equivalents.
-    # LOCATIONS puts the rooms where we said.
+        solve(env, goal, view, iterations=case.mcts.iterations, c=case.mcts.c,
+              h_mult=case.mcts.h_mult)
     return tutorial.finish(view, case, location_coords=LOCATIONS)
 
 
 run.add_cases([
-    # Case 0 is what `uv run python demo.py` runs, so the two-robot team comes first.
-    {"num_robots": num_robots, "mcts.iterations": iterations, "mcts.c": 300}
+    {"num_robots": num_robots, "mcts.iterations": iterations,
+     "mcts.h_mult": 5.0, "mcts.c": 300}
     for num_robots in (2, 1, 3)
     for iterations in (4000, 1000, 400)
 ])

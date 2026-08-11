@@ -188,10 +188,10 @@ STEPS: List[StepInfo] = [
         "sweep": "num_robots x mcts.iterations",
         "media": "two-robots",
         "notes": [
-            "Only one line of the problem changes: NUM_ROBOTS. Not one "
+            "The whole diff is the problem growing a robot: a count, a loop "
+            "building their fluents, and the sweep's new axis. Not one "
             "operator is touched -- concurrency is a property of the state "
-            "semantics, not of the actions. The rest of the diff is prose and "
-            "the sweep's new axis.",
+            "semantics, not of the actions.",
             "Watch the Braille timeline: the two rows overlap.",
             "In the sweep, 8 repeats: 44.3 -> 22.1 -> 8.6 seconds. The second "
             "robot halves it, the third more than halves it again. With three "
