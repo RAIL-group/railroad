@@ -90,15 +90,37 @@ def scroll_to(top: int, action: str, total: int, page: int) -> int:
 
 ColorSystem = Literal["standard", "256", "truecolor", "windows"]
 
+COLOR_ENV = "RAILROAD_TUTORIAL_COLOR"
+"""Force a depth: ``truecolor``, ``256`` or ``standard``. Last word on it."""
+
+TRUECOLOR_TERMS = ("ghostty", "kitty", "wezterm", "alacritty", "foot",
+                   "contour", "rio", "vte")
+"""TERM names of 24-bit terminals that rich reads as eight-colour ones.
+
+Rich decides from the suffix of ``$TERM`` and knows only ``256color``,
+``16color`` and ``kitty``, so ``xterm-ghostty`` -- a terminal that has done
+24-bit colour since the day it shipped -- comes out as eight colours, and the
+diff's markers turn into full-strength ANSI red and green. Matching on the name
+is what every other tool ends up doing.
+"""
+
 
 def color_system(console: Console) -> ColorSystem:
-    """What *console* detected, narrowed to what :class:`Console` accepts back.
+    """The depth to render at: forced, detected, or inferred from ``$TERM``.
 
     ``Console.color_system`` reports a plain string and the constructor wants
     one of a fixed set, so the round trip needs saying out loud. Anything
     unrecognised, including no colour at all, is treated as eight colours.
     """
+    forced = os.environ.get(COLOR_ENV, "").strip().lower()
+    if forced in ("standard", "256", "truecolor", "windows"):
+        return forced
+
     detected = console.color_system
+    if console.is_terminal and detected != "truecolor":
+        term = os.environ.get("TERM", "").lower()
+        if any(name in term for name in TRUECOLOR_TERMS):
+            return "truecolor"
     if detected in ("standard", "256", "truecolor", "windows"):
         return detected
     return "standard"

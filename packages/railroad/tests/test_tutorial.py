@@ -269,6 +269,75 @@ def test_a_changed_line_keeps_its_syntax_colour(depth):
         f"the line lost its syntax colour at {depth}"
 
 
+def test_a_changed_line_is_tinted_to_the_edge_of_its_column():
+    """A background that stops at the last character reads as a smear.
+
+    Rich colours a cell's padding from the column's style rather than the
+    cell's, so the line has to be padded out before it is styled.
+    """
+    import io
+    import re
+
+    width = 140
+    buffer = io.StringIO()
+    Console(file=buffer, width=width, force_terminal=True,
+            color_system="truecolor").print(
+        adv.side_by_side("x = 1\n", "x = 1\nz = 3\n", "a", "b",
+                         width=width, color_system="truecolor"))
+
+    def covered(line: str) -> int:
+        """Printable characters with a background active."""
+        total, background = 0, False
+        for part in re.split(r"(\x1b\[[0-9;]*m)", line):
+            if part.startswith("\x1b["):
+                codes = part[2:-1]
+                if re.search(r"(^|;)(4[0-7]|10[0-7])(;|$)", codes) or "48;" in codes:
+                    background = True
+                if codes in ("", "0") or re.search(r"(^|;)49(;|$)", codes):
+                    background = False
+            elif background:
+                total += len(part)
+        return total
+
+    column = (width - 2 * 2 - 1 - 8) // 2
+    rows = {strip_ansi(line): line for line in buffer.getvalue().splitlines()}
+    changed = next(line for plain, line in rows.items() if "z = 3" in plain)
+    unchanged = next(line for plain, line in rows.items() if "x = 1" in plain)
+    # Both cells: the added line, and the filled block where it has no
+    # counterpart on the left.
+    assert covered(changed) == 2 * column
+    assert covered(unchanged) == 0
+
+
+def test_known_truecolor_terminals_are_not_taken_at_richs_word(monkeypatch):
+    """xterm-ghostty is 24-bit; rich reads the suffix and says eight colours."""
+    monkeypatch.delenv(viewer.COLOR_ENV, raising=False)
+    monkeypatch.delenv("COLORTERM", raising=False)
+
+    def depth(term: str) -> str:
+        # A fresh console each time: rich decides its colour system in
+        # __init__, so one built before the patch keeps the old answer.
+        monkeypatch.setenv("TERM", term)
+        return viewer.color_system(Console(force_terminal=True))
+
+    assert depth("xterm-ghostty") == "truecolor"
+    assert depth("alacritty") == "truecolor"
+    assert depth("xterm-wezterm") == "truecolor"
+    # Things rich already gets right, and things that really are old, are left
+    # exactly as they are.
+    assert depth("xterm-256color") == "256"
+    assert depth("xterm") == "standard"
+    assert depth("screen") == "standard"
+
+
+def test_the_colour_depth_can_be_forced(monkeypatch):
+    monkeypatch.setenv("TERM", "xterm-ghostty")
+    monkeypatch.setenv(viewer.COLOR_ENV, "standard")
+    assert viewer.color_system(Console(force_terminal=True)) == "standard"
+    monkeypatch.setenv(viewer.COLOR_ENV, "nonsense")
+    assert viewer.color_system(Console(force_terminal=True)) == "truecolor"
+
+
 # -- the viewer -------------------------------------------------------------
 
 

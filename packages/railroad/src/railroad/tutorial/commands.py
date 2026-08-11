@@ -408,7 +408,7 @@ def render_patch(
             f"step {from_id} ({from_step['title']})",
             f"step {to_id} ({to_step['title']})",
             width=width,
-            color_system=console.color_system,
+            color_system=viewer.color_system(console),
         ),
         Text(""),
         Text(to_step["point"], style="dim"),
@@ -714,11 +714,21 @@ def cmd_colours(console: Console) -> str:
     variables claim.
     """
     detected = viewer.color_system(console)
-    console.print(f"[bold]colour system[/bold]  {detected}"
-                  f"   [dim](rich detected this)[/dim]")
-    for name in ("COLORTERM", "TERM", "TERM_PROGRAM", "NO_COLOR"):
+    reported = console.color_system or "none"
+    if detected != reported:
+        why = ("forced by $" + viewer.COLOR_ENV
+               if os.environ.get(viewer.COLOR_ENV) else
+               "rich read $TERM as " + reported + ", but that terminal does "
+               "24-bit colour")
+        console.print(f"[bold]colour system[/bold]  {detected}   [dim]({why})[/dim]")
+    else:
+        console.print(f"[bold]colour system[/bold]  {detected}"
+                      f"   [dim](rich detected this)[/dim]")
+    names = ("COLORTERM", "TERM", "TERM_PROGRAM", "NO_COLOR", viewer.COLOR_ENV)
+    column = max(len(name) for name in names) + 2
+    for name in names:
         value = os.environ.get(name)
-        console.print(f"  [dim]${name:<13}{value if value else '(unset)'}[/dim]")
+        console.print(f"  [dim]${name:<{column}}{value if value else '(unset)'}[/dim]")
 
     deep = detected in adv.DEEP_COLOUR
     removed, added, _ = adv.marking(detected)
@@ -745,7 +755,8 @@ def cmd_colours(console: Console) -> str:
     elif not deep:
         console.print()
         console.print("  [dim]if the terminal does support more, exporting "
-                      "COLORTERM=truecolor is usually all it needs[/dim]")
+                      "COLORTERM=truecolor is usually all it needs, or "
+                      f"{viewer.COLOR_ENV}=truecolor to settle it here[/dim]")
     return detected
 
 

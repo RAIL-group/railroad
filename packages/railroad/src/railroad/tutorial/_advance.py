@@ -245,9 +245,17 @@ def _cell(lines: List[Text], index: Optional[int], changed: bool,
     line = lines[index].copy()
     style = changed_style if changed else context_style
     if style:
-        # Stacks on top of the token colours rather than replacing them: `dim`
-        # sets no colour, and a background sets no foreground. A bare "red"
-        # does replace the foreground, which is the point of it.
+        if style.startswith("on "):
+            # Pad out to the end of the cell before styling. Rich colours a
+            # cell's padding from the *column's* style, not the cell's, so a
+            # background otherwise stops dead at the last character and the
+            # changed line reads as a ragged smear rather than a band. Padding
+            # to a whole number of rows covers folded lines too.
+            length = len(line.plain)
+            rows = max(1, -(-length // width))  # ceil, without importing math
+            line.pad_right(rows * width - length)
+        # Stacks on top of the token colours rather than replacing them: a
+        # background sets no foreground, so the syntax survives underneath.
         line.stylize(style)
     return line
 
