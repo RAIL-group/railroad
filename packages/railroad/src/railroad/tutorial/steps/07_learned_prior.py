@@ -62,9 +62,11 @@ class HouseSearch(ProcTHOREnvironment):
             preconditions=[F("at ?r ?from"), F("free ?r"), ~F("just-moved ?r")],
             effects=[
                 Effect(time=0, resulting_fluents={~F("free ?r"), ~F("at ?r ?from")}),
-                Effect(time=(self.move_time, ["?r", "?from", "?to"]),
-                       resulting_fluents={F("free ?r"), F("at ?r ?to"),
-                                          F("just-moved ?r")}),
+                Effect(
+                    time=(self.move_time, ["?r", "?from", "?to"]),
+                    resulting_fluents={F("free ?r"), F("at ?r ?to"),
+                                       F("just-moved ?r")},
+                ),
                 Effect(time=(self.move_expiry, ["?r", "?from", "?to"]),
                        resulting_fluents={~F("just-moved ?r")}),
             ],
@@ -73,8 +75,11 @@ class HouseSearch(ProcTHOREnvironment):
             name="search",
             parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
             preconditions=[
-                F("at ?r ?loc"), F("free ?r"),
-                ~F("revealed ?loc"), ~F("searched ?loc ?obj"), ~F("found ?obj"),
+                F("at ?r ?loc"),
+                F("free ?r"),
+                ~F("revealed ?loc"),
+                ~F("searched ?loc ?obj"),
+                ~F("found ?obj"),
                 ~F("lock-search ?loc"),
             ],
             effects=[

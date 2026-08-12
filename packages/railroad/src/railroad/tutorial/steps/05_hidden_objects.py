@@ -34,7 +34,6 @@ TRUE_LOCATIONS = {
 
 ROBOT_VELOCITY = 1.0
 SEARCH_TIME = 5.0
-FIND_PROB = 0.5
 NO_OP_TIME = 5.0
 MAX_STEPS = 40
 
@@ -48,6 +47,21 @@ def move_time(robot: str, loc_from: str, loc_to: str) -> float:
 
 class HouseSearch(ObjectSearchEnvironment):
     """Move and search. Where things are is now the whole problem."""
+
+    def find_prob(self, robot: str, location: str, obj: str) -> float:
+        """A hand-tuned prior, and a generous one: it reads ground truth.
+
+        0.8 where the object actually is, 0.1 everywhere else. Step 07 replaces
+        it with a model that has never seen the answer.
+        """
+        del robot
+        for loc, objects in TRUE_LOCATIONS.items():
+            if obj in objects:
+                return 0.8 if loc == location else 0.1
+        return 0.1
+
+    def miss_prob(self, robot: str, location: str, obj: str) -> float:
+        return 1.0 - self.find_prob(robot, location, obj)
 
     def define_operators(self):
         move = Operator(
@@ -84,11 +98,10 @@ class HouseSearch(ObjectSearchEnvironment):
                     resulting_fluents={F("free ?r"), F("searched ?loc ?obj"),
                                        ~F("lock-search ?loc")},
                     prob_effects=[
-                        (FIND_PROB, [Effect(
-                            time=0,
-                            resulting_fluents={F("found ?obj"), F("at ?obj ?loc")},
-                        )]),
-                        (1 - FIND_PROB, []),
+                        ((self.find_prob, ["?r", "?loc", "?obj"]),
+                         [Effect(time=0, resulting_fluents={F("found ?obj"),
+                                                            F("at ?obj ?loc")})]),
+                        ((self.miss_prob, ["?r", "?loc", "?obj"]), []),
                     ],
                 ),
             ],

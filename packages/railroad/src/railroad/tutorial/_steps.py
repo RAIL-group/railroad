@@ -206,35 +206,49 @@ STEPS: List[StepInfo] = [
         "filename": "05_hidden_objects.py",
         "problem": "house-search",
         "requires": "",
-        "point": "Probabilistic search, a flat prior, and the lock that stops it being wasted.",
+        "point": "Probabilistic search, a prior worth having, and the lock that stops it being wasted.",
         "sweep": "num_robots",
         "media": "hidden-objects",
         "notes": [
             "The objects leave the initial state; the robots have to look. That "
-            "buys a probabilistic effect and a prior over where things are.",
+            "buys a probabilistic effect and a prior over where things are: "
+            "find_prob, 0.8 where the object actually is and 0.1 everywhere "
+            "else. It is an oracle wearing a probability's clothes, and it is "
+            "the same function step 06 carries into a real house -- which is "
+            "what makes step 07, where it stops reading the answer, a swap of "
+            "one function rather than a rewrite.",
             "ObjectSearchEnvironment resolves the branch against ground truth "
             "rather than sampling: a wrong prior costs time, it never invents a "
             "discovery. And searching *reveals* a room -- everything there "
             "becomes known and the room closes for good.",
             "Which is what the lock is for. 'searched' only lands when a search "
             "finishes, so nothing would stop two robots searching one room at "
-            "once, and a flat prior makes two draws at 0.5 look better than one. "
-            "It is not: one search reveals the room, so the second robot was "
+            "once, and two independent draws at 0.8 look better than one. They "
+            "are not: one search reveals the room, so the second robot was "
             "never going to learn anything. Three lines settle it -- a "
             "lock-search precondition, the lock taken at t=0, released when the "
             "search completes -- and they are not optional. A search you can "
             "run unlocked is a search that can be bought twice, so the operator "
             "carries the lock the way it carries 'at ?r ?loc'.",
-            "Measured, 8 repeats: about 28 -> 19.2 -> 13.5 seconds at one, two "
-            "and three robots, 8 of 8 every time. Two and three robots repeat "
-            "exactly, to the decimal, sweep after sweep; the one-robot number "
-            "is the only one that moves, by under a second, which is the search "
-            "order changing rather than the plan.",
+            "Measured, 8 repeats: about 28 -> 19.1 -> 13.5 seconds at one, two "
+            "and three robots, 8 of 8 every time. Three robots repeat exactly, "
+            "to the decimal; the smaller teams move by around a second, which is "
+            "the search order changing rather than the plan.",
             "'searches' is the cleaner measure, and the one to put on the slide: "
-            "a flat 3.0 at every team size. Three rooms hold something, so 3 is "
-            "the floor, and the lock is what holds a bigger team to it. It does "
-            "not make robots faster; it stops them buying the same information "
+            "3.0 at every team size. Three rooms hold something, so 3 is the "
+            "floor, and the lock is what holds a bigger team to it. It does not "
+            "make robots faster; it stops them buying the same information "
             "twice.",
+            "What the prior does *not* buy here is worth saying, because it is "
+            "the setup for step 06. Three objects in three rooms, and a goal "
+            "that wants all three: every room gets searched whatever the belief "
+            "says, so a better prior changes the order and barely moves the "
+            "clock. Measured against the flat 0.5 this step used to carry, every "
+            "team size lands inside the other's spread -- what tightens is the "
+            "plan, two robots taking 7 actions every single time instead of 7 "
+            "to 9. A prior earns "
+            "its keep when there are more places than targets, which is the "
+            "next step's house.",
         ],
     },
     {
@@ -255,6 +269,9 @@ STEPS: List[StepInfo] = [
             "'tutorial run --save-video house.mp4' renders the run over the scene's "
             "top-down view, into media/, which the dashboard serves. About 15 "
             "seconds on top of the run, so it is something you can do live.",
+            "Its two-robot cases are also the oracle half of step 07's "
+            "comparison -- same houses, same team, same budget -- so run this "
+            "sweep before that one if the last slide is the point.",
             "Seed 8613 is chosen for pace: 8 containers ground out to ~440 "
             "actions with two robots, about 25 seconds. 8616 is prettier and "
             "does not finish inside MAX_STEPS at this budget.",
@@ -285,19 +302,22 @@ STEPS: List[StepInfo] = [
             "the dashboard rather than a flag inside this one -- and there is no "
             "way to run this step with the cheating prior, which is the point of "
             "the step.",
-            "Measured here, 8 repeats at two robots: 318.4 seconds on 8612 (sd "
-            "83) and 421.8 on 8613 (sd 44), 8 of 8 both. Step 06's oracle on the "
-            "same houses: 312.9 and 344.2. On 8612 the two are inside the noise "
-            "of each other -- do not claim a winner there. On 8613 the model is "
-            "clearly worse, and worse in the *tail*: the spread nearly triples. "
-            "A learned belief is not uniformly worse; it is occasionally wrong "
-            "and expensive when it is, which is the argument for violins rather "
-            "than means.",
-            "Step 06 samples three times to this step's eight, so it is the "
-            "thinner half of that comparison -- worth saying out loud, because "
-            "at three repeats the penalty here first looked like a flat 35% on "
-            "both scenes. It is not. That is the sweep earning its keep on the "
-            "last slide of its own tutorial.",
+            "Measured at two robots, 32 repeats of each: on 8612 the oracle "
+            "averages 333 seconds against this step's 385, and both finish every "
+            "run. On 8613 the means are 336 against 510 -- but the *medians* are "
+            "333 against 367, and that gap between the two summaries is the "
+            "slide. The model's typical run is barely worse; its bad run is 891 "
+            "seconds, and 9 runs in 32 never finish inside MAX_STEPS at all. A "
+            "learned belief is not uniformly worse. It is occasionally wrong and "
+            "expensive when it is, and a mean is exactly the statistic that "
+            "hides that. Violins, not means.",
+            "The sweep ships at 8 repeats and 8 cannot pin these down, which is "
+            "its own lesson and this is the step to say it on. Two 8-repeat "
+            "sweeps of 8612, same configuration, same afternoon, came back 318 "
+            "and 480; the 32-repeat answer is 385. Read the shape of the violin, "
+            "not the number under it, and treat any one sweep's mean as a "
+            "sample. That is the sweep earning its keep on the last slide of its "
+            "own tutorial.",
             "Nothing else changes: the find probability is a callable of "
             "(robot, location, object) either way.",
         ],
