@@ -127,6 +127,8 @@ _BENCH_NUM_TRIALS = 100
 _BENCH_BASE_SEED = 43
 _BENCH_RUNS_PER_TOPOLOGY = 10   # runs per graph; number of graphs = trials / this, so 100/10 = 10
 _BENCH_PLANNER_KEYS = ALL_PLANNERS
+# Both failure models, because which baseline wins depends on it rather than on the planners.
+_BENCH_BLOCKING = [True, False]
 
 
 @benchmark(
@@ -148,6 +150,7 @@ def bench_risk_scale_sweep(case: BenchmarkCase) -> dict:
         graph_type=case.params["graph_type"],
         graph_size=case.params["graph_size"],
         risk_scale=case.params["risk_scale"],
+        blocks_on_failure=case.params["blocks_on_failure"],
         seed=topo_seed,
     ))
 
@@ -182,18 +185,21 @@ def bench_risk_scale_sweep(case: BenchmarkCase) -> dict:
         "c_fail": inst.c_fail,
         "trial_cost": outcome.trial_cost,
         "topo_seed": topo_seed,   # which graph this trial ran on, so cost can be read per graph
+        "blocks_on_failure": inst.spec.blocks_on_failure,  # logged: it reorders the planners
         "wall_time": wall_time,
         "log_html": console.export_html(inline_styles=True),
     }
 
 
-# One case per (graph size, risk scale, planner). Generated graphs only for now.
+# One case per (graph size, risk scale, failure model, planner). Generated graphs only for now.
 def _bench_cases() -> list:
     # the hand-built 7-node graph is off; generated graphs only
     #small = [{"graph_type": "small_scale", "graph_size": 7, "risk_scale": s, "planner": p}
     #         for s, p in product(RISK_MULTIPLIER, _BENCH_PLANNER_KEYS)]
-    sctp = [{"graph_type": BENCH_SPEC.graph_type, "graph_size": gs, "risk_scale": s, "planner": p}
-            for gs, s, p in product(_BENCH_GRAPH_SIZES, RISK_MULTIPLIER, _BENCH_PLANNER_KEYS)]
+    sctp = [{"graph_type": BENCH_SPEC.graph_type, "graph_size": gs, "risk_scale": s,
+             "blocks_on_failure": b, "planner": p}
+            for gs, s, b, p in product(_BENCH_GRAPH_SIZES, RISK_MULTIPLIER,
+                                       _BENCH_BLOCKING, _BENCH_PLANNER_KEYS)]
     return sctp
 
 bench_risk_scale_sweep.add_cases(_bench_cases())

@@ -420,6 +420,21 @@ def test_blocks_on_failure_controls_what_the_wreck_retracts(corridor, blocks):
     assert ("path_available" in retracted) is blocks
 
 
+# The knob has to survive the trip from Spec through build_operators, since that is the only path
+# the benchmark takes. Without this, sweeping the failure model would silently sweep nothing.
+@pytest.mark.parametrize("blocks", [True, False])
+def test_spec_carries_the_failure_model_to_the_operator(blocks):
+    from resilient_mrp.experiments import Spec, build_instance
+    inst = build_instance(Spec(graph_type="small_scale", num_robots=2,
+                               blocks_on_failure=blocks))
+    move = inst.operators[0]
+    retracted = {f.name
+                 for effect in move.effects
+                 for _probability, branch in getattr(effect, "prob_effects", ()) or ()
+                 for sub in branch for f in sub.resulting_fluents if f.negated}
+    assert ("path_available" in retracted) is blocks
+
+
 # With the edge left open, no failure can ever change the set of available paths. This is the
 # premise the leaf estimate is already built on: it fixes its route tables at construction with
 # open_edges=None and never re-reads them, which is exactly right here and wrong when edges close.

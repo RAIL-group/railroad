@@ -33,6 +33,12 @@ class Spec:
     num_goals: int = 2
     risk_scale: float = 1.0
     c_fail: float = 500.0   # what failing the mission costs, same number for the whole experiment
+    # Whether a wreck shuts the edge it happened on. Not a detail: it decides which baseline wins.
+    # On a graph with a risky shortcut beside a safe detour, blocking deletes the shortcut after the
+    # first robot dies on it, which rescues the optimistic policy from repeating its own choice --
+    # optimistic 33.4 against cautious 39.1 with blocking, 127.1 against 31.4 without. So the
+    # benchmark sweeps it rather than picking one.
+    blocks_on_failure: bool = True
     mcts_iterations: int = 10000
     max_depth: int = 40
     max_steps: int = 100
@@ -102,8 +108,8 @@ def _scenario(name: str):
 
 # the true-model operators, shared by execution and search; failure carries no cost in the model,
 # C_fail is applied once at mission failure in the metric and the split value function
-def build_operators(graph, profiles) -> list:
-    move_op    = create_risk_move_operator(graph, profiles)
+def build_operators(graph, profiles, blocks_on_failure: bool = True) -> list:
+    move_op    = create_risk_move_operator(graph, profiles, blocks_on_failure=blocks_on_failure)
     visited_op = create_safely_visited_operator()
     no_op      = rr_operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
     return [move_op, visited_op, no_op]
@@ -150,7 +156,7 @@ def build_instance(spec: Spec) -> Instance:
         goal_sites=goal_sites,
         profiles=profiles,
         robots=robots,
-        operators=build_operators(graph, profiles),
+        operators=build_operators(graph, profiles, spec.blocks_on_failure),
         c_fail=spec.c_fail,
         goal_fluent=make_goal(goal_sites),
     )
