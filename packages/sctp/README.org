@@ -1,0 +1,7 @@
+#SCTP
+
+Run Experiments
+- make build && make sctp_eval_random_graph
+
+Run one experiment 
+- make build && make test XPASSTHROUGH=true PYTEST_FILTER=test_baseline_plan_exec_rg

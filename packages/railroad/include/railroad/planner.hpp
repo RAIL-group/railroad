@@ -255,7 +255,9 @@ inline std::string mcts(const State &root_state,
                         double lambda_add = 0.5,
                         double lambda_max = 0.0,
                         double lambda_ff  = 0.5,
-                        std::optional<double> dead_end_penalty = std::nullopt) {
+                        std::optional<double> dead_end_penalty = std::nullopt,
+                        HeuristicFn external_heuristic = nullptr,
+                        double unreachable_penalty = HEURISTIC_CANNOT_FIND_GOAL_PENALTY) {
   // RNG
   std::mt19937 &rng = mcts_rng();
 
@@ -265,11 +267,15 @@ inline std::string mcts(const State &root_state,
   auto root = std::make_unique<MCTSDecisionNode>(root_state.copy_and_zero_out_time());
   root->untried_actions = get_next_actions(root_state, all_actions);
 
-  HeuristicFn heuristic_fn = [goal, all_actions, ff_memory,
-                              lambda_add, lambda_max, lambda_ff](const State& s) -> double {
-    return ff_heuristic(s, goal, all_actions, ff_memory,
-                        lambda_add, lambda_max, lambda_ff);
-  };
+  // A caller-supplied leaf value (e.g. a risk-aware value function) replaces FF entirely; the
+  // lambda_* weights then have nothing to mix, since they only ever fed ff_heuristic.
+  HeuristicFn heuristic_fn = external_heuristic
+      ? external_heuristic
+      : HeuristicFn([goal, all_actions, ff_memory,
+                     lambda_add, lambda_max, lambda_ff](const State& s) -> double {
+          return ff_heuristic(s, goal, all_actions, ff_memory,
+                              lambda_add, lambda_max, lambda_ff);
+        });
 
   for (int it = 0; it < max_iterations; ++it) {
     bool is_node_goal = false;
@@ -371,7 +377,10 @@ inline std::string mcts(const State &root_state,
         reward = -*dead_end_penalty;
       } else {
         if (h > 1e10) {
-          h = HEURISTIC_CANNOT_FIND_GOAL_PENALTY;
+          // The heuristic says the goal is out of reach and no flat dead-end cost was set, so
+          // the caller decides what that is worth. Defaults to HEURISTIC_CANNOT_FIND_GOAL_PENALTY,
+          // which is the behaviour every existing caller already gets.
+          h = unreachable_penalty;
         }
         if (did_need_relaxed_transition)
           h += 100;
@@ -438,11 +447,14 @@ public:
                          int max_iterations = 1000,
                          int max_depth = 20,
                          double c = std::sqrt(2.0),
-                         double heuristic_multiplier = HEURISTIC_MULTIPLIER) {
+                         double heuristic_multiplier = HEURISTIC_MULTIPLIER,
+                         HeuristicFn heuristic_fn = nullptr,
+                         double unreachable_penalty = HEURISTIC_CANNOT_FIND_GOAL_PENALTY) {
     return mcts(root_state, all_actions_, goal.get(), &ff_memory_,
                 max_iterations, max_depth, c, heuristic_multiplier,
                 &last_mcts_tree_trace_,
-                lambda_add_, lambda_max_, lambda_ff_, dead_end_penalty_);
+                lambda_add_, lambda_max_, lambda_ff_, dead_end_penalty_,
+                heuristic_fn, unreachable_penalty);
   }
 
   void clear_cache() { ff_memory_.clear(); }

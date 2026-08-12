@@ -1,5 +1,5 @@
 from typing import List, Dict, Union, SupportsFloat, SupportsInt
-from collections.abc import Set
+from collections.abc import Callable, Set
 from railroad._bindings import get_usable_actions, seed_planner_rng
 from railroad._action_pruning import prune_probabilistic_achievers
 
@@ -283,6 +283,8 @@ class MCTSPlanner:
         max_depth: SupportsInt = 100,
         c: SupportsFloat = 1.414,
         heuristic_multiplier: SupportsFloat = 5.0,
+        heuristic_fn: Callable[[State], float] | None = None,
+        unreachable_penalty: SupportsFloat = 0.0,
     ) -> str:
         """Run MCTS planning to find the next action.
 
@@ -295,6 +297,17 @@ class MCTSPlanner:
             max_depth: Maximum depth for rollouts
             c: Exploration constant for UCB1
             heuristic_multiplier: Multiplier for heuristic in reward calculation
+            heuristic_fn: optional ``callable(State) -> float`` used as the leaf
+                value in place of the built-in FF mix. When given, the
+                ``lambda_*`` weights are unused, since they only ever mixed the
+                components of ``ff_heuristic``. Note that a Python callable is
+                invoked once per searched leaf, so it wants to be cheap or
+                memoised.
+            unreachable_penalty: leaf value substituted when the heuristic
+                reports the goal unreachable (h = inf) and no
+                ``dead_end_penalty`` was set on the planner. Defaults to 0.0,
+                which scores such a state as the best possible leaf -- see
+                ``dead_end_penalty`` for why that default is a trap.
 
         Returns:
             Name of the selected action as a string
@@ -351,7 +364,7 @@ class MCTSPlanner:
 
         return self._cpp_planner(
             converted_state, converted_goal, max_iterations, max_depth, c,
-            heuristic_multiplier
+            heuristic_multiplier, heuristic_fn, unreachable_penalty
         )
 
     def get_trace_from_last_mcts_tree(self):

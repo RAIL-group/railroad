@@ -691,13 +691,25 @@ PYBIND11_MODULE(_bindings, m) {
           "__call__",
           [](MCTSPlanner &self, const State &s,
              const GoalPtr &goal, int max_iterations,
-             int max_depth, double c, double heuristic_multiplier) {
-            return self(s, goal, max_iterations, max_depth, c, heuristic_multiplier);
+             int max_depth, double c, double heuristic_multiplier,
+             std::optional<HeuristicFn> heuristic_fn,
+             double unreachable_penalty) {
+            // Release the GIL for the search, but only when the leaf value is pure C++.
+            // A Python heuristic_fn is called from inside mcts(), so the GIL has to be held
+            // for the whole run; dropping it here would deadlock on the first leaf.
+            return self(s, goal, max_iterations, max_depth, c, heuristic_multiplier,
+                        heuristic_fn ? *heuristic_fn : nullptr, unreachable_penalty);
           },
           py::arg("state"), py::arg("goal"),
           py::arg("max_iterations") = 1000, py::arg("max_depth") = 20,
           py::arg("c") = 1.414, py::arg("heuristic_multiplier") = 5.0,
-          "Plan with a Goal object (supports complex AND/OR goals)")
+          py::arg("heuristic_fn") = py::none(),
+          py::arg("unreachable_penalty") = HEURISTIC_CANNOT_FIND_GOAL_PENALTY,
+          "Plan with a Goal object (supports complex AND/OR goals).\n\n"
+          "heuristic_fn: optional callable(State) -> float used as the leaf value in place "
+          "of the built-in FF mix. When given, the lambda_* weights are unused.\n"
+          "unreachable_penalty: leaf value substituted when the heuristic reports the goal "
+          "unreachable and no dead_end_penalty was set on the planner.")
       .def_property_readonly("lambda_add", &MCTSPlanner::lambda_add)
       .def_property_readonly("lambda_max", &MCTSPlanner::lambda_max)
       .def_property_readonly("lambda_ff",  &MCTSPlanner::lambda_ff)
