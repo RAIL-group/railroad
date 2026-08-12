@@ -11,7 +11,7 @@ from railroad.dashboard import PlannerDashboard
 from rich.console import Console
 
 from resilient_mrp.experiments import (
-    ALL_PLANNERS, Spec, build_instance, run_trial, start_trial,
+    ALL_PLANNERS, Spec, build_instance, planner_setup, run_trial, start_trial,
 )
 from resilient_mrp.experiments.mission import print_mission_summary
 from resilient_mrp.analysis.graph_viz import GraphVisualizer
@@ -114,11 +114,11 @@ def run_demo(spec: Spec,
 
 # All planners see the same graph (size, scale, trial) for a fair comparison.
 BENCH_SPEC = Spec(
-    graph_type="sctp_random",   # "sctp_random" or "sctp_island" or "small_scale"
+    graph_type="sctp_island",   # "sctp_random" or "sctp_island" or "small_scale"
     graph_size=10,
     num_robots=2,
     num_goals=2,
-    mcts_iterations=100000,
+    mcts_iterations=100_000,
     max_depth=40,
     max_steps=50,
 )
@@ -129,6 +129,18 @@ _BENCH_RUNS_PER_TOPOLOGY = 10   # runs per graph; number of graphs = trials / th
 _BENCH_PLANNER_KEYS = ALL_PLANNERS
 # Both failure models, because which baseline wins depends on it rather than on the planners.
 _BENCH_BLOCKING = [True, False]
+
+# How hard the leaf estimate pulls against the clock in the MCTS reward, which is
+# -(state.time + h * h_mult + extra_cost). At 1.0 the leaf is in the same units as the clock,
+# which is what it is built to be; above that the search trusts the estimate more than the time
+# already spent. Swept because "already in cost units" is an argument, not a measurement.
+_BENCH_H_MULT: list[float] = [1.0, 1.2, 2.0]
+
+# The baselines are route policies: they follow a precomputed route and never enter MCTS, so the
+# multiplier is never read on their path. Sweeping it over them would triple their runs and give
+# three identical copies of each, so they get one case with the axis left off (h_mult=None, which
+# the dashboards omit from the label rather than showing a value that did nothing).
+_BENCH_ROUTE_POLICIES = ("optimistic", "cautious")
 
 
 @benchmark(
@@ -160,9 +172,12 @@ def bench_risk_scale_sweep(case: BenchmarkCase) -> dict:
     # every planner on this trial hits the same failures, and each trial differs, so the two
     # baselines are not just repeating one run over and over
     env = start_trial(inst, _BENCH_BASE_SEED + trial)
+    # None leaves planner_setup to pick its own 1.0, which is what the route-policy cases want:
+    # they never reach the search, so there is nothing for a multiplier to scale.
+    h_mult = case.params.get("h_mult")
     with PlannerDashboard(inst.goal_fluent, env, fluent_filter=_fluent_filter, print_on_exit=False,
                           force_interactive=False, console=console) as dashboard:
-        outcome = run_trial(inst, planner, env, dashboard=dashboard)
+        outcome = run_trial(inst, planner, env, dashboard=dashboard, heuristic_mult=h_mult)
         dashboard.print_history()
 
     wall_time = time.perf_counter() - t0
@@ -196,6 +211,10 @@ def bench_risk_scale_sweep(case: BenchmarkCase) -> dict:
         "failure_time": (outcome.makespan if not outcome.success else None),
         "c_fail": inst.c_fail,
         "trial_cost": outcome.trial_cost,
+        # as swept (None on the route-policy cases, which do not search); the value the search
+        # actually used is logged beside it so the two cannot be confused when reading results
+        "h_mult": h_mult,
+        "h_mult_used": planner_setup(inst, planner, heuristic_mult=h_mult)[2],
         "topo_seed": topo_seed,   # which graph this trial ran on, so cost can be read per graph
         "blocks_on_failure": inst.spec.blocks_on_failure,  # logged: it reorders the planners
         "wall_time": wall_time,
@@ -203,15 +222,23 @@ def bench_risk_scale_sweep(case: BenchmarkCase) -> dict:
     }
 
 
-# One case per (graph size, risk scale, failure model, planner). Generated graphs only for now.
+# One case per (graph size, risk scale, failure model, planner), and per heuristic multiplier for
+# the planners that actually search. Generated graphs only for now.
 def _bench_cases() -> list:
     # the hand-built 7-node graph is off; generated graphs only
     #small = [{"graph_type": "small_scale", "graph_size": 7, "risk_scale": s, "planner": p}
     #         for s, p in product(RISK_MULTIPLIER, _BENCH_PLANNER_KEYS)]
-    sctp = [{"graph_type": BENCH_SPEC.graph_type, "graph_size": gs, "risk_scale": s,
-             "blocks_on_failure": b, "planner": p}
-            for gs, s, b, p in product(_BENCH_GRAPH_SIZES, RISK_MULTIPLIER,
-                                       _BENCH_BLOCKING, _BENCH_PLANNER_KEYS)]
+    def case(gs, s, b, p, h):
+        return {"graph_type": BENCH_SPEC.graph_type, "graph_size": gs, "risk_scale": s,
+                "blocks_on_failure": b, "planner": p, "h_mult": h}
+
+    grid = list(product(_BENCH_GRAPH_SIZES, RISK_MULTIPLIER, _BENCH_BLOCKING))
+    searchers = [p for p in _BENCH_PLANNER_KEYS if p not in _BENCH_ROUTE_POLICIES]
+    baselines = [p for p in _BENCH_PLANNER_KEYS if p in _BENCH_ROUTE_POLICIES]
+
+    sctp = [case(gs, s, b, p, None) for (gs, s, b), p in product(grid, baselines)]
+    sctp += [case(gs, s, b, p, h)
+             for (gs, s, b), p, h in product(grid, searchers, _BENCH_H_MULT)]
     return sctp
 
 bench_risk_scale_sweep.add_cases(_bench_cases())
