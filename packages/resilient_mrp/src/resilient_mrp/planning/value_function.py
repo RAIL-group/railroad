@@ -179,12 +179,35 @@ class RiskAwareCostToGo:
             alive[robot] *= safe[(robot, goal)].get(where[robot], NO_ROUTE).survival
             where[robot] = goal
 
-        # load is the optimistic travel; the odds are the cautious side, and they combine into one
-        # cost. The mission is not lost when a robot is: it is lost when the robots still standing
-        # cannot between them reach everything left, which is what _mission_survival works out.
-        return max(load.values()) + (1.0 - self._mission_survival(alive, positions,
-                                                                  outstanding, safe)) \
-            * self.failure_cost
+        # load is the optimistic travel; the odds are the cautious side. They combine into the
+        # expected total the metric would charge, written as a cost-to-go so that `time + h` is
+        # that total:
+        #
+        #     p*(time + travel) + (1-p)*C_fail  ==  time + [ p*travel + (1-p)*(C_fail - time) ]
+        #
+        # Both halves of that matter, and this used to get both wrong by returning
+        # `travel + (1-p)*C_fail`:
+        #
+        #   - travel is weighted by p because a branch that never finishes never pays it.
+        #   - C_fail is offset by the clock because it is a *total*. TrialOutcome charges exactly
+        #     C_fail for a failed run however long it ran, so time already spent counts toward it
+        #     rather than adding to it. Adding it on top overcharged a doomed-but-alive branch by
+        #     time + travel -- at 100 units elapsed it read 310 against a true 200, while a branch
+        #     that had already died reported infinity and was charged a flat 200 by
+        #     dead_end_penalty. Nearly dying therefore scored worse than dying, and the search was
+        #     drawn toward the failure it should have been avoiding.
+        #
+        # The offset is deliberately not clamped at zero. Past C_fail units the term goes negative,
+        # which is what keeps `time + h` equal to C_fail rather than climbing above it; a clamp
+        # would reintroduce the same inversion for long runs. Nothing here reaches that in
+        # practice -- successful makespans run to about 103 against a C_fail of 200 -- but the
+        # arithmetic should not depend on that staying true.
+        #
+        # The mission is not lost when a robot is: it is lost when the robots still standing cannot
+        # between them reach everything left, which is what _mission_survival works out.
+        p_success = self._mission_survival(alive, positions, outstanding, safe)
+        return (p_success * max(load.values())
+                + (1.0 - p_success) * (self.failure_cost - state.time))
 
     # The chance the mission finishes, over every way the team could come apart.
     #

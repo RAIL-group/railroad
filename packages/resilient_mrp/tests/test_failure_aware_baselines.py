@@ -397,8 +397,43 @@ def test_leaf_reports_a_lone_robots_odds_as_the_missions(both_can_cover):
     profiles = {"r1": {"t": 0.0}}
     leaf = RiskAwareCostToGo(both_can_cover, ["gA"], profiles, C_FAIL)
     state = State(0.0, _fluents(both_can_cover, profiles, ["gA"]), [])
-    # one leg at survival 0.5, so half the failure cost plus the 10 units of travel
-    assert leaf(state) == pytest.approx(10.0 + 0.5 * C_FAIL)
+    # One leg at survival 0.5. The estimate is the expected total the metric would charge:
+    # p*travel + (1-p)*(C_FAIL - clock), which at clock 0 is half the travel and half the failure
+    # cost. Travel is weighted by p because the half of the time it dies it never walks the leg.
+    assert leaf(state) == pytest.approx(0.5 * 10.0 + 0.5 * C_FAIL)
+
+
+# A doomed branch must cost the same as a dead one, or the search prefers dying to nearly dying.
+#
+# The metric charges a flat C_FAIL for a failed run however long it ran, and a branch with no
+# robots left reports infinity, which the planner charges as a flat C_FAIL via dead_end_penalty. A
+# branch that is certain to fail but still has a robot standing has to price out the same way, and
+# it did not: it used to report travel + C_FAIL on top of the clock, so at 100 units elapsed it
+# scored 310 against the 200 a dead branch scored. MCTS ranks by -(time + h), so dying beat nearly
+# dying and the search was pulled toward the failures it was supposed to avoid.
+def test_a_doomed_branch_costs_the_same_as_a_dead_one_at_every_clock():
+    graph = ResilientGraph()
+    graph.add_edge("start", "g", cost=10.0, terrain_type="t", hazard_severity=1.0)
+    profiles = {"r1": {"t": 0.0}}          # no compatibility on certain-death terrain: p_success 0
+    leaf = RiskAwareCostToGo(graph, ["g"], profiles, C_FAIL)
+    fluents = _fluents(graph, profiles, ["g"])
+
+    for clock in (0.0, 40.0, 100.0, 150.0):
+        total = clock + leaf(State(clock, fluents, []))
+        assert total == pytest.approx(C_FAIL), (
+            f"doomed at clock {clock} priced at {total:.1f}, but losing costs a flat {C_FAIL}")
+
+
+# The healthy case is the other half: with nothing to fear the estimate is just the makespan.
+def test_a_safe_branch_is_priced_at_its_makespan():
+    graph = ResilientGraph()
+    graph.add_edge("start", "g", cost=10.0, terrain_type="t", hazard_severity=0.0)
+    profiles = {"r1": {"t": 1.0}}
+    leaf = RiskAwareCostToGo(graph, ["g"], profiles, C_FAIL)
+    fluents = _fluents(graph, profiles, ["g"])
+
+    for clock in (0.0, 40.0):
+        assert clock + leaf(State(clock, fluents, [])) == pytest.approx(clock + 10.0)
 
 
 # A robot that cannot reach a goal cannot cover it, however healthy it is. Here r2 sits behind a
@@ -415,7 +450,7 @@ def test_leaf_does_not_count_cover_a_robot_cannot_reach(both_can_cover):
                ) | {F("at r2 gB")}
 
     stranded = leaf(State(0.0, fluents, []))
-    assert stranded == pytest.approx(10.0 + 0.5 * C_FAIL), (
+    assert stranded == pytest.approx(0.5 * 10.0 + 0.5 * C_FAIL), (
         f"r2 is walled off and cannot cover gA, so the estimate should be r1's alone: {stranded:.1f}")
 
 

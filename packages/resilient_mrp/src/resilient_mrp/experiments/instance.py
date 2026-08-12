@@ -40,7 +40,7 @@ class Spec:
     num_robots: int = 2
     num_goals: int = 2
     risk_scale: float = 1.0
-    c_fail: float = 500.0   # what failing the mission costs, same number for the whole experiment
+    c_fail: float = 200.0   # what failing the mission costs, same number for the whole experiment
     # Whether a wreck shuts the edge it happened on. Not a detail: it decides which baseline wins.
     # On a graph with a risky shortcut beside a safe detour, blocking deletes the shortcut after the
     # first robot dies on it, which rescues the optimistic policy from repeating its own choice --
@@ -198,15 +198,29 @@ def planner_setup(inst: Instance, planner: str, *, heuristic_mult: float | None 
 
     mult = 1.0 if heuristic_mult is None else heuristic_mult
     penalty = inst.c_fail if unreachable_penalty is None else unreachable_penalty
+
+    # The flat dead-end cost rides the multiplier, because what it is compared against does. The
+    # reward is -(time + h*mult + extra), so a leaf worth c_fail is charged c_fail*mult while an
+    # unscaled flat penalty would be worth relatively less every time mult rose -- dying would look
+    # cheaper the harder the search was told to trust its own estimate.
+    #
+    # Exact only at mult=1.0. The clock sits outside the multiplier, so nothing makes a scaled
+    # heuristic agree with an unscaled elapsed time: at mult=2 a doomed branch reads 400-t against
+    # a flat 400, matching at t=0 and drifting after. So mult distorts this planner's objective
+    # rather than calibrating it -- its leaf is already in the metric's units, and 1.0 is the value
+    # that means what it says. For failure_aware_ff it is genuine calibration: the FF relaxation
+    # sums a relaxed plan, which is total work rather than makespan, and needs scaling to be
+    # comparable with a clock at all.
+    dead_end = inst.c_fail * mult
     if planner == "failure_aware_ff":
-        return inst.operators, None, mult, penalty, inst.c_fail, None
+        return inst.operators, None, mult, penalty, dead_end, None
     if planner == "failure_aware_split":
         # The leaf is told whether edges can close rather than inferring it from the state: when
         # they cannot, `path_available` never changes, and the planner projects unchanging fluents
         # out of the states it searches -- including the ones it hands the leaf.
         leaf = RiskAwareCostToGo(graph, goals, profiles, inst.c_fail,
                                  edges_can_close=inst.spec.blocks_on_failure)
-        return inst.operators, leaf, mult, penalty, inst.c_fail, None
+        return inst.operators, leaf, mult, penalty, dead_end, None
     raise ValueError(f"unknown planner: {planner}")
 
 
@@ -237,7 +251,7 @@ def run_trial(inst: Instance, planner: str, env: SymbolicEnvironment, *,
         inst, planner, heuristic_mult=heuristic_mult, unreachable_penalty=unreachable_penalty)
     visited, travel = run_episode(
         env, inst.goal_fluent, spec.mcts_iterations, spec.max_depth, inst.goal_sites,
-        planning_operators=plan_ops, c=500, max_steps=spec.max_steps,
+        planning_operators=plan_ops, c=100, max_steps=spec.max_steps,
         heuristic_fn=heuristic_fn, heuristic_multiplier=mult,
         unreachable_penalty=penalty, dead_end_penalty=dead_end,
         route_policy=policy, dashboard=dashboard, graph=inst.graph,
