@@ -6,7 +6,7 @@ import math
 from collections import OrderedDict
 
 from .core import ResilientGraph, RobotProfile, parse_state_and_paths
-from .baselines import (NO_ROUTE, UNREACHABLE, build_route_table,
+from .baselines import (NO_ROUTE, UNREACHABLE, best_assignment, build_route_table,
                         cautious_weight, optimistic_weight)
 
 # How many distinct edge sets to keep route tables for. The leaf runs at every node of the search
@@ -18,6 +18,32 @@ _MAX_CACHED_MAPS = 32
 # Above this team size the exact 2^robots enumeration of who survives stops being free. Nothing in
 # these experiments comes close; the fallback exists so a larger team degrades rather than hangs.
 _MAX_EXACT_TEAM = 12
+
+# Same idea for the assignment. Searching the orderings is exact but exponential in outstanding
+# goals, and this runs once per search node. Measured per leaf call on a 10-node instance with two
+# robots: 472us at 2 goals, 536us at 3, 854us at 4, 2173us at 5. The experiments run 2 or 3, so the
+# exact search is what they get; past this the one-pass hand-out takes over, which is worse but
+# bounded. Raise it if the instances grow and the leaf is not the bottleneck.
+_MAX_EXACT_GOALS = 4
+
+
+# The bounded fallback: hand each goal to whoever would finish it soonest counting what they
+# already carry, and never reconsider. Cheap and order-dependent -- which is exactly why it is not
+# the default. Returns legs in the same shape best_assignment does.
+def _greedy_assignment(outstanding, positions: dict, load: dict, route_to) -> list | None:
+    where, carried = dict(positions), dict(load)
+    legs = []
+    for goal in outstanding:
+        taker, finish_at = None, UNREACHABLE
+        for robot, node in where.items():
+            finish = carried[robot] + route_to(robot, node, goal).travel_cost
+            if finish < finish_at:
+                taker, finish_at = robot, finish
+        if taker is None:
+            return None
+        legs.append((taker, where[taker], goal))
+        carried[taker], where[taker] = finish_at, goal
+    return legs
 
 
 class RiskAwareCostToGo:
@@ -66,27 +92,33 @@ class RiskAwareCostToGo:
 
         fast, safe = self._tables_for(frozenset(open_edges))
 
-        # One assignment, then both numbers come off it. A goal goes to whoever would finish it
-        # soonest counting what they already carry, so two free robots split rather than stack up.
-        # A robot still crossing an edge starts owing the rest of that crossing, and its own odds
-        # already carry the chance it does not survive it.
+        # One assignment, then both numbers come off it. A robot still crossing an edge starts
+        # owing the rest of that crossing, and its own odds already carry the chance it does not
+        # survive it, so the assignment is seeded with both.
         where, load = dict(positions), {r: 0.0 for r in positions}
         alive = {r: 1.0 for r in positions}
         for robot, leg in pending.items():
             load[robot] = leg.remaining_time
             alive[robot] *= leg.survival
 
-        for goal in outstanding:
-            taker, finish_at = None, UNREACHABLE
-            for robot, node in where.items():
-                finish = load[robot] + fast[(robot, goal)].get(node, NO_ROUTE).travel_cost
-                if finish < finish_at:
-                    taker, finish_at = robot, finish
-            if taker is None:
-                return self.failure_cost   # this goal is out of everyone's reach now
-            # the robot that took it, priced on its safest route rather than its fastest one
-            alive[taker] *= safe[(taker, goal)].get(where[taker], NO_ROUTE).survival
-            load[taker], where[taker] = finish_at, goal
+        # The exact search over orderings rather than one greedy pass. A pass that hands each goal
+        # to whoever would finish it soonest cannot revisit that choice, so its answer depends on
+        # the order it walked the goals -- 31 against an optimum of 12 on two robots at separate
+        # depots, and overshooting is the wrong direction for a term meant to be optimistic.
+        route_to = lambda robot, node, goal: fast[(robot, goal)].get(node, NO_ROUTE)  # noqa: E731
+        if len(outstanding) <= _MAX_EXACT_GOALS:
+            assignment = best_assignment(self.goal_sites, positions, visited, route_to,
+                                         optimistic_weight, initial_loads=load)
+        else:
+            assignment = _greedy_assignment(outstanding, positions, load, route_to)
+        if assignment is None:
+            return self.failure_cost   # something outstanding is out of everyone's reach now
+
+        for robot, _from_node, goal in assignment:
+            # time off the fastest route, odds off the safest one
+            load[robot] += fast[(robot, goal)].get(where[robot], NO_ROUTE).travel_cost
+            alive[robot] *= safe[(robot, goal)].get(where[robot], NO_ROUTE).survival
+            where[robot] = goal
 
         # load is the optimistic travel; the odds are the cautious side, and they combine into one
         # cost. The mission is not lost when a robot is: it is lost when the robots still standing

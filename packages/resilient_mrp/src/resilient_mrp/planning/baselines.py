@@ -82,9 +82,19 @@ def build_route_table(graph: ResilientGraph, profiles: dict[str, RobotProfile], 
 
 # Uniform-cost search over (where each robot stands, which goals are done), priced by the same weight
 # that routed its legs. Piling every goal on one robot loses by itself: that robot's legs stack up.
+#
+# It searches the orderings rather than handing goals out in one pass, which is the whole point: a
+# single pass down a fixed order commits to its first choice and cannot take it back, and which
+# order that is then decides the answer. On two robots at separate depots that is 31 against an
+# optimum of 12.
+#
+# initial_loads seeds a robot with time it already owes -- the rest of a crossing it is partway
+# through -- so the makespan being minimised counts from now rather than pretending every robot is
+# standing still and free.
 def best_assignment(goal_sites, robot_positions: dict, visited_goals,
                     route_to: Callable[[str, str, str], RouteToGoal],
-                    weigh: Callable[[float, float], float]) -> list | None:
+                    weigh: Callable[[float, float], float],
+                    initial_loads: dict | None = None) -> list | None:
     outstanding = frozenset(g for g in goal_sites if g not in visited_goals)
     if not outstanding:
         return []
@@ -92,11 +102,12 @@ def best_assignment(goal_sites, robot_positions: dict, visited_goals,
         return None
 
     robots = list(robot_positions)
+    owed = initial_loads or {}
     tiebreak = count()  # keeps heap entries orderable when two assignments weigh the same
     # loads is each robot's own running travel, so a second goal costs it both legs
     start = (tuple(sorted(robot_positions.items())), frozenset(),
-             tuple((r, 0.0) for r in sorted(robots)), 1.0)
-    nothing_yet = weigh(0.0, 1.0)
+             tuple((r, float(owed.get(r, 0.0))) for r in sorted(robots)), 1.0)
+    nothing_yet = weigh(max([0.0, *owed.values()]), 1.0)
     frontier = [(nothing_yet, 0.0, next(tiebreak), start, [])]
     cheapest = {start: nothing_yet}
 

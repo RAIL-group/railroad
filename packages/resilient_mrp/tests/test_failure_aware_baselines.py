@@ -19,8 +19,8 @@ from railroad.environment import SymbolicEnvironment
 
 from resilient_mrp.experiments.mission import run_episode
 from resilient_mrp.planning.baselines import (CautiousPolicy, OptimisticPolicy,
-                                              build_route_table, cautious_weight,
-                                              optimistic_weight)
+                                              best_assignment, build_route_table,
+                                              cautious_weight, optimistic_weight)
 from resilient_mrp.planning.core import (ResilientGraph, create_risk_move_operator,
                                          create_safely_visited_operator,
                                          parse_available_paths)
@@ -311,24 +311,34 @@ def _two_depot_estimate(two_depots, order):
     return leaf(State(0.0, fluents, []))
 
 
-# The leaf hands the outstanding goals out one at a time and never revisits a choice, so the order
-# it walks them in used to leak into the answer: 31 one way round, 12 the other. It sorts goal_sites
-# now, which makes the estimate a function of the state rather than of how the caller built the list.
-def test_leaf_is_independent_of_goal_site_order(two_depots):
-    forward = _two_depot_estimate(two_depots, ["gA", "gB"])
-    reversed_ = _two_depot_estimate(two_depots, ["gB", "gA"])
-    assert forward == pytest.approx(reversed_), (
-        f"reordering goal_sites moved the estimate from {forward:.1f} to {reversed_:.1f}")
+# The leaf used to hand the outstanding goals out in one pass and never revisit a choice, which
+# made the answer depend on the order it walked them: 31 one way round, 12 the other, where 12 is
+# the optimum. It searches the orderings now, so the estimate is a function of the state rather
+# than of how the caller happened to build the goal list -- and it is the right number, which
+# matters because the makespan term is supposed to be the optimistic side of the estimate and 31
+# overshoots rather than under-shoots.
+@pytest.mark.parametrize("order", [["gA", "gB"], ["gB", "gA"]])
+def test_leaf_finds_the_optimal_makespan_whatever_the_goal_order(two_depots, order):
+    assert _two_depot_estimate(two_depots, order) == pytest.approx(12.0)
 
 
-# Deterministic is not the same as right. A greedy hand-out that never reconsiders still misses the
-# split here: r1->gB at 11 with r2->gA at 12 finishes at 12, which best_assignment finds and the
-# greedy does not. Left standing until the leaf is rebuilt on the reduced determinized problem,
-# which plans rather than hands out. It also means the makespan term is not an optimistic bound --
-# 31 overshoots the true optimum -- so the "optimistic relaxation" framing does not hold yet.
-@pytest.mark.xfail(strict=True, reason="greedy hand-out is deterministic but still not optimal")
-def test_leaf_matches_the_optimal_makespan(two_depots):
-    assert _two_depot_estimate(two_depots, ["gA", "gB"]) == pytest.approx(12.0)
+# Time a robot already owes has to reach the assignment, not just the makespan added at the end.
+# r1 is nearer gA (10 against 12), so with everyone standing still it takes it. Give r1 a 30-unit
+# crossing still to finish and that stops being true: r2 should be sent instead. An assignment that
+# starts every robot at zero cannot see the difference.
+def test_assignment_accounts_for_time_a_robot_already_owes(two_depots):
+    profiles = {"r1": {"t": 1.0}, "r2": {"t": 1.0}}
+    policy = OptimisticPolicy(two_depots, ["gA"], profiles)
+    positions = {"r1": "p1", "r2": "p2"}
+
+    def taker(initial_loads):
+        legs = best_assignment(["gA"], positions, set(), policy.route_to,
+                               optimistic_weight, initial_loads=initial_loads)
+        assert legs, "gA is reachable from both depots"
+        return legs[0][0]
+
+    assert taker(None) == "r1", "standing still, the nearer robot goes"
+    assert taker({"r1": 30.0}) == "r2", "r1 owes 30 before it can start, so r2 is sooner"
 
 
 # A pair of goals both robots can reach from where they stand, on ground that kills half the
