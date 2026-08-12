@@ -17,7 +17,6 @@ from railroad.planner import MCTSPlanner
 SCENE_SEED = 8612
 NUM_ROBOTS = 2
 NUM_OBJECTS = 2
-USE_LEARNED_PRIOR = True
 
 SEARCH_TIME = 10.0
 PICK_TIME = 10.0
@@ -37,16 +36,9 @@ class HouseSearch(ProcTHOREnvironment):
     def move_expiry(self, robot: str, loc_from: str, loc_to: str) -> float:
         return self.move_time(robot, loc_from, loc_to) + 0.1
 
-    use_learned_prior: bool = USE_LEARNED_PRIOR
-
     def find_prob(self, robot: str, location: str, obj: str) -> float:
-        """Either estimate, behind one signature the operator cannot tell apart."""
-        if self.use_learned_prior:
-            return self.learned(robot, location, obj)
-        for loc, objects in self.scene.object_locations.items():
-            if obj in objects:
-                return 0.8 if loc == location else 0.1
-        return 0.1
+        """The one function that changes: same signature, no ground truth."""
+        return self.learned(robot, location, obj)
 
     @property
     def learned(self):
@@ -150,8 +142,7 @@ class HouseSearch(ProcTHOREnvironment):
 
 
 def build(seed: int = SCENE_SEED, num_robots: int = NUM_ROBOTS,
-          num_objects: int = NUM_OBJECTS,
-          use_learned_prior: bool = USE_LEARNED_PRIOR):
+          num_objects: int = NUM_OBJECTS):
     """Load the scene, pick targets, and say where they have to end up."""
     robots = [f"robot{i + 1}" for i in range(num_robots)]
     fluents = {F("revealed start_loc")}
@@ -163,7 +154,6 @@ def build(seed: int = SCENE_SEED, num_robots: int = NUM_ROBOTS,
         state=State(0.0, fluents, []),
         objects_by_type={"robot": set(robots), "location": {"start_loc"}},
     )
-    env.use_learned_prior = use_learned_prior
     rng = random.Random(seed)
     everything = sorted({o for objs in env.scene.object_locations.values()
                          for o in objs})
@@ -217,18 +207,16 @@ def show_beliefs(env) -> None:
 
 @benchmark(
     name="s07_learned_prior",
-    description="Search-and-deliver in ProcTHOR homes, ground-truth prior vs the "
-                "packaged learned model.",
+    description="Search-and-deliver in ProcTHOR homes, with the packaged learned "
+                "prior.",
     tags=["tutorial"],
     repeat=8,
     timeout=300.0,
 )
 def run(case: BenchmarkCase) -> dict:
-    env, goal = build(seed=case.scene_seed, num_robots=NUM_ROBOTS,
-                      use_learned_prior=case.use_learned_prior)
+    env, goal = build(seed=case.scene_seed, num_robots=case.num_robots)
     print(f"scene {case.scene_seed}: {len(env.scene.object_locations)} containers, "
-          f"{len(env.scene.objects)} objects, "
-          f"{'learned' if env.use_learned_prior else 'hand-tuned'} prior")
+          f"{len(env.scene.objects)} objects")
     show_beliefs(env)
     with tutorial.dashboard(case, goal, env, fluent_filter=relevant) as view:
         solve(env, goal, view, iterations=case.mcts.iterations, c=case.mcts.c,
@@ -237,10 +225,9 @@ def run(case: BenchmarkCase) -> dict:
 
 
 run.add_cases([
-    {"scene_seed": scene_seed, "use_learned_prior": use_learned_prior,
+    {"scene_seed": scene_seed, "num_robots": NUM_ROBOTS,
      "mcts.iterations": SEARCH_BUDGET, "mcts.h_mult": 2.0, "mcts.c": 300}
     for scene_seed in (8612, 8613)
-    for use_learned_prior in (True, False)
 ])
 
 

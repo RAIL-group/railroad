@@ -267,7 +267,7 @@ STEPS: List[StepInfo] = [
         "problem": "procthor-8612",
         "requires": "procthor",
         "point": "Swap the oracle prior for the packaged network. One function changes.",
-        "sweep": "use_learned_prior x scene_seed",
+        "sweep": "scene_seed",
         "media": "learned",
         "notes": [
             "Step 06's prior read scene.object_locations -- an oracle wearing a "
@@ -280,17 +280,24 @@ STEPS: List[StepInfo] = [
             "out the toilet. On 8613 a fork gets 0.825 on the countertop, while a "
             "pen spreads 0.41/0.37/0.36 over three flat surfaces -- which is the "
             "right answer for a pen.",
-            "On 8612 the two are inside the noise of each other, and which one "
-            "looks better depends on the sample: 336.8 vs 339.4 at ten repeats, "
-            "341.8 vs 402.6 at eight. Do not claim a winner there.",
-            "On 8613 the model is clearly worse, and worse in the *tail*: about "
-            "340 against 450-475, standard deviation 24 against 256, and it "
-            "drops a run in eight or ten. A learned belief is not uniformly "
-            "worse; it is occasionally wrong and expensive when it is -- the "
-            "which is the argument for violins rather than means.",
-            "Worth admitting out loud: at three repeats this first looked like a "
-            "flat 35% penalty on both scenes. It is not. That is the sweep "
-            "earning its keep on the last slide of its own tutorial.",
+            "The oracle half of the comparison is step 06: the same problem, the "
+            "same two houses, the same team. So it is two sweeps side by side in "
+            "the dashboard rather than a flag inside this one -- and there is no "
+            "way to run this step with the cheating prior, which is the point of "
+            "the step.",
+            "Measured here, 8 repeats at two robots: 318.4 seconds on 8612 (sd "
+            "83) and 421.8 on 8613 (sd 44), 8 of 8 both. Step 06's oracle on the "
+            "same houses: 312.9 and 344.2. On 8612 the two are inside the noise "
+            "of each other -- do not claim a winner there. On 8613 the model is "
+            "clearly worse, and worse in the *tail*: the spread nearly triples. "
+            "A learned belief is not uniformly worse; it is occasionally wrong "
+            "and expensive when it is, which is the argument for violins rather "
+            "than means.",
+            "Step 06 samples three times to this step's eight, so it is the "
+            "thinner half of that comparison -- worth saying out loud, because "
+            "at three repeats the penalty here first looked like a flat 35% on "
+            "both scenes. It is not. That is the sweep earning its keep on the "
+            "last slide of its own tutorial.",
             "Nothing else changes: the find probability is a callable of "
             "(robot, location, object) either way.",
         ],
