@@ -177,8 +177,12 @@ def planner_setup(inst: Instance, planner: str, *, heuristic_mult: float | None 
     if planner == "failure_aware_ff":
         return inst.operators, None, mult, penalty, None
     if planner == "failure_aware_split":
-        # its leaf already returns c_fail when nothing is reachable, so this never fires
-        leaf = RiskAwareCostToGo(graph, goals, profiles, inst.c_fail)
+        # its leaf already returns c_fail when nothing is reachable, so this never fires.
+        # The leaf is told whether edges can close rather than inferring it from the state: when
+        # they cannot, `path_available` never changes, and the planner projects unchanging fluents
+        # out of the states it searches -- including the ones it hands the leaf.
+        leaf = RiskAwareCostToGo(graph, goals, profiles, inst.c_fail,
+                                 edges_can_close=inst.spec.blocks_on_failure)
         return inst.operators, leaf, mult, penalty, None
     raise ValueError(f"unknown planner: {planner}")
 

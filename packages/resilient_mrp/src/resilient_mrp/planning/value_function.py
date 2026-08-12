@@ -5,7 +5,7 @@
 import math
 from collections import OrderedDict
 
-from .core import ResilientGraph, RobotProfile, parse_state_and_paths
+from .core import ResilientGraph, RobotProfile, parse_state, parse_state_and_paths
 from .baselines import (NO_ROUTE, UNREACHABLE, best_assignment, build_route_table,
                         cautious_weight, optimistic_weight)
 
@@ -54,15 +54,37 @@ def _greedy_assignment(outstanding, positions: dict, load: dict, route_to) -> li
 
 
 class RiskAwareCostToGo:
+    # edges_can_close says whether a failure shuts the edge it happened on. It is the difference
+    # between the map being state and the map being structure, and the leaf should not have to
+    # rediscover which it is by reading fluents.
+    #
+    # When nothing ever closes an edge the open set is the whole graph in every state the search
+    # can reach, so it is known here and never read again. That is not only cheaper -- it is what
+    # makes the leaf correct under relevance projection. The planner drops fluents no effect ever
+    # changes from the states it searches, which is exactly what `path_available` is when nothing
+    # retracts it, and the leaf is handed those projected states. Reading the open edges out of
+    # one gave the empty set, so every goal looked unreachable and the leaf returned a flat
+    # failure_cost on all 26909 calls of a trial -- a constant leaf, so a search with no signal.
+    # It did not crash; it just always failed.
+    #
+    # When edges do close, `path_available` is retracted by the failure branch, which makes it
+    # dynamic, which is precisely why projection keeps it -- so reading it from the state is safe
+    # in the one case where reading it is necessary.
     def __init__(self, graph: ResilientGraph, goal_sites, profiles: dict[str, RobotProfile],
-                 failure_cost: float):
+                 failure_cost: float, edges_can_close: bool = True):
         self.graph = graph
         self.profiles = profiles
         # sorted so the hand-out below cannot depend on the order the caller happened to list them
         self.goal_sites = sorted(goal_sites)
         self.failure_cost = failure_cost
+        self._edges_can_close = edges_can_close
         self._tables: OrderedDict = OrderedDict()
         self._estimates: OrderedDict = OrderedDict()
+
+        # Warm start. One frozenset, built once: reused as the cache key it also stops every call
+        # allocating a fresh set of edges and rehashing it, since a frozenset caches its own hash.
+        self._all_edges = frozenset(graph.edges.keys())
+        self._tables_for(self._all_edges)
 
     # The fastest route to each goal, and separately the one most likely to survive, for one set of
     # open edges. A failure shuts the edge it happened on, so a table built from the whole graph
@@ -103,8 +125,14 @@ class RiskAwareCostToGo:
         return value
 
     def _evaluate(self, state) -> float:
-        # one pass for all of it: at this call rate the fluent scan dominates everything else
-        positions, visited, pending, open_edges = parse_state_and_paths(state)
+        # one pass for all of it: at this call rate the fluent scan dominates everything else.
+        # The map is only worth reading when it can change; otherwise it is the one from __init__.
+        if self._edges_can_close:
+            positions, visited, pending, open_edges = parse_state_and_paths(state)
+            open_edges = frozenset(open_edges)
+        else:
+            positions, visited, pending = parse_state(state)
+            open_edges = self._all_edges
         outstanding = [g for g in self.goal_sites if g not in visited]
         if not outstanding:
             return 0.0
@@ -112,7 +140,7 @@ class RiskAwareCostToGo:
         if not positions:
             return self.failure_cost
 
-        fast, safe = self._tables_for(frozenset(open_edges))
+        fast, safe = self._tables_for(open_edges)
 
         # One assignment, then both numbers come off it. A robot still crossing an edge starts
         # owing the rest of that crossing, and its own odds already carry the chance it does not
