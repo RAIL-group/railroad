@@ -60,7 +60,12 @@ class Instance:
     goal_fluent: F = field(repr=False)
 
     # Fresh environment per trial; every planner has to start from the same state.
-    def new_env(self) -> SymbolicEnvironment:
+    #
+    # The seed is threaded explicitly because SymbolicEnvironment samples its probabilistic
+    # branches from its own random.Random(seed), not from the global module. Left None it seeds
+    # from OS entropy, and then which robots die is unreproducible and differs between planners on
+    # the same trial -- which would silently undo the paired comparison the benchmark is built on.
+    def new_env(self, seed: int | None = None) -> SymbolicEnvironment:
         initial_fluents: set = set()
         for robot in self.robots:
             initial_fluents.add(F(f"at {robot} start"))
@@ -74,6 +79,7 @@ class Instance:
             state=State(0.0, initial_fluents, []),
             objects_by_type={"robot": set(self.robots), "location": set(self.graph.nodes)},
             operators=self.operators,
+            seed=seed,
         )
 
 
@@ -162,28 +168,37 @@ def build_instance(spec: Spec) -> Instance:
     )
 
 
-# Returns (plan_ops, heuristic_fn, heuristic_mult, unreachable_penalty, route_policy). Both leaves
-# are already in cost units, so their weight is 1.0 and the multiplier is applied to the search heuristic only.
+# Returns (plan_ops, heuristic_fn, heuristic_mult, unreachable_penalty, dead_end_penalty,
+# route_policy). Both leaves are already in cost units, so their weight is 1.0 and the multiplier is
+# applied to the search heuristic only.
+#
+# dead_end_penalty is what makes losing cost the same in the search as it does in the score. A
+# branch the relaxation proves cannot reach the goal is charged a flat c_fail: not c_fail plus the
+# clock, not c_fail plus the extra cost already spent. That matters because TrialOutcome.trial_cost
+# charges exactly c_fail for a failed run however long it took, so without the flat treatment the
+# search would be minimising a different objective than the one being reported -- it would prefer
+# to lose quickly, a preference the metric does not express. Left None (the C++ default) a dead end
+# scores 0, which is *better* than any reachable state and actively draws the search into it.
 def planner_setup(inst: Instance, planner: str, *, heuristic_mult: float | None = None,
-                  unreachable_penalty: float | None = None) -> tuple[Any, Any, float, float, Any]:
+                  unreachable_penalty: float | None = None
+                  ) -> tuple[Any, Any, float, float, float | None, Any]:
     graph, goals, profiles = inst.graph, inst.goal_sites, inst.profiles
     if planner == "optimistic":
-        return None, None, 1.0, 0.0, OptimisticPolicy(graph, goals, profiles)
+        return None, None, 1.0, 0.0, None, OptimisticPolicy(graph, goals, profiles)
     if planner == "cautious":
-        return None, None, 1.0, 0.0, CautiousPolicy(graph, goals, profiles)
+        return None, None, 1.0, 0.0, None, CautiousPolicy(graph, goals, profiles)
 
     mult = 1.0 if heuristic_mult is None else heuristic_mult
     penalty = inst.c_fail if unreachable_penalty is None else unreachable_penalty
     if planner == "failure_aware_ff":
-        return inst.operators, None, mult, penalty, None
+        return inst.operators, None, mult, penalty, inst.c_fail, None
     if planner == "failure_aware_split":
-        # its leaf already returns c_fail when nothing is reachable, so this never fires.
         # The leaf is told whether edges can close rather than inferring it from the state: when
         # they cannot, `path_available` never changes, and the planner projects unchanging fluents
         # out of the states it searches -- including the ones it hands the leaf.
         leaf = RiskAwareCostToGo(graph, goals, profiles, inst.c_fail,
                                  edges_can_close=inst.spec.blocks_on_failure)
-        return inst.operators, leaf, mult, penalty, None
+        return inst.operators, leaf, mult, penalty, inst.c_fail, None
     raise ValueError(f"unknown planner: {planner}")
 
 
@@ -192,7 +207,9 @@ def planner_setup(inst: Instance, planner: str, *, heuristic_mult: float | None 
 def start_trial(inst: Instance, exec_seed: int | None = None) -> SymbolicEnvironment:
     if exec_seed is not None:
         random.seed(exec_seed)
-    return inst.new_env()
+    # exec_seed also goes to the environment itself: seeding the global module does not reach
+    # SymbolicEnvironment's own RNG, which is what decides who survives.
+    return inst.new_env(seed=exec_seed)
 
 
 # One trial. The single place run_episode is called, so the demos and the benchmark cannot drift
@@ -201,13 +218,13 @@ def run_trial(inst: Instance, planner: str, env: SymbolicEnvironment, *,
               dashboard: Any = None, heuristic_mult: float | None = None,
               unreachable_penalty: float | None = None) -> TrialOutcome:
     spec = inst.spec
-    plan_ops, heuristic_fn, mult, penalty, policy = planner_setup(
+    plan_ops, heuristic_fn, mult, penalty, dead_end, policy = planner_setup(
         inst, planner, heuristic_mult=heuristic_mult, unreachable_penalty=unreachable_penalty)
     visited, travel = run_episode(
         env, inst.goal_fluent, spec.mcts_iterations, spec.max_depth, inst.goal_sites,
         planning_operators=plan_ops, c=100, max_steps=spec.max_steps,
         heuristic_fn=heuristic_fn, heuristic_multiplier=mult,
-        unreachable_penalty=penalty,
+        unreachable_penalty=penalty, dead_end_penalty=dead_end,
         route_policy=policy, dashboard=dashboard, graph=inst.graph,
     )
     return TrialOutcome(visited=visited, travel=travel, env=env,

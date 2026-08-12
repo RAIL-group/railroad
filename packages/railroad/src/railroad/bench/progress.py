@@ -203,9 +203,12 @@ class BenchmarkStatsColumn(ProgressColumn):
             if stats["wall_time_count"] > 0:
                 avg_wall_time = stats["wall_time_sum"] / stats["wall_time_count"]
                 metrics.append(f"[dim]t={avg_wall_time:.1f}s[/dim]")
+            if stats["success_cost_count"] > 0:
+                avg_success_cost = stats["success_cost_sum"] / stats["success_cost_count"]
+                metrics.append(f"[dim]cost|ok={avg_success_cost:.1f}[/dim]")
             if stats["plan_cost_count"] > 0:
                 avg_plan_cost = stats["plan_cost_sum"] / stats["plan_cost_count"]
-                metrics.append(f"[dim]cost={avg_plan_cost:.1f}[/dim]")
+                metrics.append(f"[dim]net={avg_plan_cost:.1f}[/dim]")
 
             if metrics:
                 result += " " + " ".join(metrics)
@@ -292,6 +295,10 @@ class ProgressDisplay:
             "wall_time_count": 0,
             "plan_cost_sum": 0.0,
             "plan_cost_count": 0,
+            # success-only cost, tracked separately so the line can show both what succeeding
+            # costs and what the policy costs once failed runs are priced in
+            "success_cost_sum": 0.0,
+            "success_cost_count": 0,
         })
 
         # Track tasks with hard errors for stderr printing
@@ -658,9 +665,12 @@ class ProgressDisplay:
         if case_stats["wall_time_count"] > 0:
             avg_wall_time = case_stats["wall_time_sum"] / case_stats["wall_time_count"]
             metrics.append(f"[dim]t={avg_wall_time:.1f}s[/dim]")
+        if case_stats["success_cost_count"] > 0:
+            avg_success_cost = case_stats["success_cost_sum"] / case_stats["success_cost_count"]
+            metrics.append(f"[dim]cost|ok={avg_success_cost:.1f}[/dim]")
         if case_stats["plan_cost_count"] > 0:
             avg_plan_cost = case_stats["plan_cost_sum"] / case_stats["plan_cost_count"]
-            metrics.append(f"[dim]cost={avg_plan_cost:.1f}[/dim]")
+            metrics.append(f"[dim]net={avg_plan_cost:.1f}[/dim]")
 
         metrics_str = " " + " ".join(metrics) if metrics else ""
 
@@ -910,8 +920,12 @@ class ProgressDisplay:
             self.case_stats[case_key]["wall_time_count"] += 1
 
         if task.result and isinstance(task.result, dict) and "plan_cost" in task.result:
-            self.case_stats[case_key]["plan_cost_sum"] += float(task.result["plan_cost"])
+            cost = float(task.result["plan_cost"])
+            self.case_stats[case_key]["plan_cost_sum"] += cost
             self.case_stats[case_key]["plan_cost_count"] += 1
+            if task.result.get("success"):
+                self.case_stats[case_key]["success_cost_sum"] += cost
+                self.case_stats[case_key]["success_cost_count"] += 1
 
         # Update pending tasks count
         self.benchmark_pending_tasks[benchmark_name] -= 1

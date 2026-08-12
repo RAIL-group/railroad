@@ -219,8 +219,11 @@ def create_case_annotation(
 
     # Build hover text with summary statistics
     hover_parts = ["<b>Summary Statistics</b>"]
+    # Both costs: what succeeding costs, and what the policy costs once failures are priced in.
+    if summary_stats.get("avg_success_cost") is not None:
+        hover_parts.append(f"Avg Cost (success only): {summary_stats['avg_success_cost']:.2f}")
     if summary_stats["avg_plan_cost"] is not None:
-        hover_parts.append(f"Avg Plan Cost: {summary_stats['avg_plan_cost']:.2f}")
+        hover_parts.append(f"Avg Net Cost (incl. failures): {summary_stats['avg_plan_cost']:.2f}")
     if summary_stats["success_rate"] is not None:
         hover_parts.append(f"Success Rate: {summary_stats['success_rate']:.1%}")
     if summary_stats["avg_wall_time"] is not None:

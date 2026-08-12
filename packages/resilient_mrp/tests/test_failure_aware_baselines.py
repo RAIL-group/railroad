@@ -62,11 +62,16 @@ def _fluents(graph, profiles, goal_sites, start="start"):
     return fl
 
 
-def _env(graph, profiles, goal_sites, start="start", blocks=True):
+# seed goes to the environment, not just to the global module: SymbolicEnvironment samples its
+# probabilistic branches from its own random.Random(seed), and left None that comes from OS
+# entropy. Without this the sweeps below are not reproducible -- two runs of the same file
+# disagreed on which of them passed.
+def _env(graph, profiles, goal_sites, start="start", blocks=True, seed=None):
     return SymbolicEnvironment(
         state=State(0.0, _fluents(graph, profiles, goal_sites, start), []),
         objects_by_type={"robot": set(profiles), "location": set(graph.nodes)},
-        operators=_operators(graph, profiles, blocks))
+        operators=_operators(graph, profiles, blocks),
+        seed=seed)
 
 
 def _goal(goal_sites):
@@ -80,7 +85,7 @@ def _goal(goal_sites):
 def _episode(graph, profiles, goal_sites, policy_cls, seed, max_steps=60, start="start",
              blocks=True):
     random.seed(seed)
-    env = _env(graph, profiles, goal_sites, start, blocks)
+    env = _env(graph, profiles, goal_sites, start, blocks, seed=seed)
     policy = policy_cls(graph, list(goal_sites), profiles)
     visited, _ = run_episode(env, _goal(goal_sites), 0, 0, list(goal_sites),
                              max_steps=max_steps, route_policy=policy, graph=graph)
@@ -298,8 +303,24 @@ def test_leaf_returns_failure_cost_when_the_goal_is_cut_off():
 
     fluents = _fluents(g, profiles, ["g"])
     shut = fluents - {F("path_available mid g"), F("path_available g mid")}
-    assert leaf(State(0.0, shut, [])) == pytest.approx(C_FAIL), (
+    # Infinity, not C_FAIL: a lost branch is reported as a dead end so the search charges it a
+    # *flat* cost through dead_end_penalty=c_fail, rather than c_fail plus whatever the clock and
+    # the extra cost had already reached. The trial metric charges exactly c_fail for a failed run
+    # however long it took, so anything that varied with time would have the search minimising a
+    # different objective than the one being reported.
+    assert leaf(State(0.0, shut, [])) == math.inf, (
         "the only corridor to g is closed, so the mission is already lost")
+
+
+# The clock must not leak into what losing costs: the metric charges one price for a failed run.
+def test_leaf_prices_a_lost_mission_the_same_however_late_it_is_lost():
+    g = ResilientGraph()
+    g.add_edge("start", "g", cost=10.0, terrain_type="t", hazard_severity=0.5)
+    profiles = {"r1": {"t": 0.0}}
+    leaf = RiskAwareCostToGo(g, ["g"], profiles, C_FAIL)
+    # no `at` fluent for any robot: dispatch retracts it and a failure never restores it
+    stranded = {f for f in _fluents(g, profiles, ["g"]) if f.name != "at"}
+    assert {leaf(State(t, stranded, [])) for t in (0.0, 40.0, 400.0)} == {math.inf}
 
 
 def _two_depot_estimate(two_depots, order):

@@ -128,6 +128,7 @@ def _make_env(
     goal_sites: list[str],
     failed_robots: set[str] | None = None,
     blocked_paths: set[tuple[str, str]] | None = None,
+    env_seed: int = 1337,
 ) -> tuple[SymbolicEnvironment, list]:
 
     failed_robots = failed_robots or set()
@@ -161,10 +162,14 @@ def _make_env(
     for g in goal_sites:
         fluents.add(F(f"is_goal {g}"))
 
+    # Every scenario below calls random.seed(1337), but that only seeds the global module --
+    # SymbolicEnvironment samples its probabilistic branches from its own random.Random(seed),
+    # which defaults to OS entropy. Without matching it here the scenarios are not reproducible.
     env = SymbolicEnvironment(
         state=State(0.0, fluents, []),
         objects_by_type=objects_by_type,
         operators=operators,
+        seed=env_seed,
     )
     return env, operators
 

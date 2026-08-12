@@ -114,11 +114,11 @@ def run_demo(spec: Spec,
 
 # All planners see the same graph (size, scale, trial) for a fair comparison.
 BENCH_SPEC = Spec(
-    graph_type="sctp_island",   # "sctp_random" or "sctp_island" or "small_scale"
+    graph_type="sctp_random",   # "sctp_random" or "sctp_island" or "small_scale"
     graph_size=10,
     num_robots=2,
     num_goals=2,
-    mcts_iterations=10000,
+    mcts_iterations=100000,
     max_depth=40,
     max_steps=50,
 )
@@ -170,7 +170,17 @@ def bench_risk_scale_sweep(case: BenchmarkCase) -> dict:
     # makespan:   the clock at the end when the last robot stops
     # travel:     every edge any robot travels, added up. it is larger than makespan when they overlap.
     # trial_cost: this run's score. Averaging it over a case's runs gives the expected cost.
-    plan_cost = outcome.makespan  # primary cost is makespan
+    #
+    # plan_cost is the metric the framework aggregates -- the live progress line and the dashboard
+    # both read it -- so it has to be the score, not the makespan. It used to be the raw makespan,
+    # which is only the cost when the run succeeded: a failed run reported whatever the clock
+    # happened to read when it died (18.9 to 49.6 across one sample) instead of the flat c_fail the
+    # score charges. Every failure is one price, so plan_cost is trial_cost.
+    #
+    # success_cost is the same number restricted to runs that finished, and is None otherwise, so
+    # averaging it gives the cost of succeeding without failures dragging it to c_fail. Reporting
+    # both is the point: one says how expensive success is, the other how expensive the policy is.
+    plan_cost = outcome.trial_cost
     return {
         "success": outcome.success,
         "failed": not outcome.success,
@@ -178,7 +188,9 @@ def bench_risk_scale_sweep(case: BenchmarkCase) -> dict:
         "num_goals": outcome.num_goals,
         "num_robots": len(inst.robots),   # logged, not assumed, so a team sweep groups correctly
         "exec_seed": _BENCH_BASE_SEED + trial,
-        "plan_cost": plan_cost,
+        "plan_cost": plan_cost,                 # net cost: makespan when it worked, c_fail when it did not
+        "success_cost": (outcome.makespan if outcome.success else None),
+        "makespan": outcome.makespan,           # the raw clock, kept so failures stay inspectable
         "travel": outcome.travel,  # secondary: total edge cost walked
         "cost_at_failure": (outcome.travel if not outcome.success else None),
         "failure_time": (outcome.makespan if not outcome.success else None),

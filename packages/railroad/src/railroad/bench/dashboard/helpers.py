@@ -71,21 +71,36 @@ def format_status_count(n_success: int, n_total: int, n_error: int = 0, n_timeou
 def compute_case_summary_stats(case_data: pd.DataFrame) -> dict:
     """
     Compute summary statistics for a case.
-    Returns dict with avg_plan_cost, success_rate, avg_wall_time.
+
+    Returns dict with avg_plan_cost, avg_success_cost, success_rate, avg_wall_time.
+
+    ``avg_plan_cost`` averages every run, successes and failures alike, so for a benchmark
+    that scores a failed run at a fixed penalty it is the net expected cost of the policy.
+    ``avg_success_cost`` averages only the runs that succeeded, which is what a run costs
+    when it works. They answer different questions and a policy can win on one and lose on
+    the other -- a cautious policy that never fails has the higher success cost and the
+    lower net cost -- so both are reported rather than one standing in for the other.
     """
     stats = {
         "avg_plan_cost": None,
+        "avg_success_cost": None,
         "success_rate": None,
         "avg_wall_time": None,
     }
+
+    has_success = "metrics.success" in case_data.columns
+    success_mask = _success_mask(case_data["metrics.success"]) if has_success else None
 
     if "metrics.plan_cost" in case_data.columns:
         plan_costs = case_data["metrics.plan_cost"].dropna()
         if len(plan_costs) > 0:
             stats["avg_plan_cost"] = float(plan_costs.mean())
+        if success_mask is not None:
+            won = case_data["metrics.plan_cost"][success_mask].dropna()
+            if len(won) > 0:
+                stats["avg_success_cost"] = float(won.mean())
 
-    if "metrics.success" in case_data.columns:
-        success_mask = _success_mask(case_data["metrics.success"])
+    if success_mask is not None:
         stats["success_rate"] = float(success_mask.mean())
 
     if "metrics.wall_time" in case_data.columns:

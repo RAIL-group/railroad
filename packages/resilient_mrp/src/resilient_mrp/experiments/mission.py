@@ -112,16 +112,18 @@ def _route_policy_action(env: SymbolicEnvironment, real_actions: list, goal_site
 def _mcts_action(env: SymbolicEnvironment, real_actions: list, goal: F, planning_operators: list | None,
                  max_iterations: int, max_depth: int, c: float,
                  heuristic_fn: Callable | None, heuristic_multiplier: float,
-                 unreachable_penalty: float):
+                 unreachable_penalty: float, dead_end_penalty: float | None = None):
+    # dead_end_penalty is a constructor argument, not a call argument: it is a property of how this
+    # planner scores a lost branch, and it has to be the same c_fail the trial metric charges.
     if planning_operators is not None:
         planning_env = SymbolicEnvironment(
             state=env.state,
             objects_by_type=env.objects_by_type,
             operators=planning_operators,
         )
-        mcts = MCTSPlanner(planning_env.get_actions())
+        mcts = MCTSPlanner(planning_env.get_actions(), dead_end_penalty=dead_end_penalty)
     else:
-        mcts = MCTSPlanner(real_actions)
+        mcts = MCTSPlanner(real_actions, dead_end_penalty=dead_end_penalty)
 
     action_name = mcts(env.state, goal, max_iterations=max_iterations,
                        c=c, max_depth=max_depth,
@@ -147,6 +149,7 @@ def run_episode(
     heuristic_fn: Callable | None = None,
     heuristic_multiplier: float = 5.0,
     unreachable_penalty: float = 0.0,
+    dead_end_penalty: float | None = None,
     route_policy: Any = None,
     dashboard: Any = None,
     graph: ResilientGraph | None = None,
@@ -177,7 +180,7 @@ def run_episode(
             planner, action = _mcts_action(env, real_actions, goal, planning_operators,
                                            max_iterations, max_depth, c,
                                            heuristic_fn, heuristic_multiplier,
-                                           unreachable_penalty)
+                                           unreachable_penalty, dead_end_penalty)
         if action is None:
             break
 

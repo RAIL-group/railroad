@@ -136,9 +136,16 @@ class RiskAwareCostToGo:
         outstanding = [g for g in self.goal_sites if g not in visited]
         if not outstanding:
             return 0.0
-        # return the failure cost if there are no robots left to do the work
+        # No robots left to do the work: the mission is over, not merely expensive.
+        #
+        # This reports infinity rather than failure_cost so the search charges it as a dead end --
+        # a flat cost, with the clock and the extra cost this branch already spent left out. Those
+        # belong to a branch that can still finish; here nothing can, and folding them in would
+        # rank a slow loss below a fast one and pull the search toward dying quickly. The planner
+        # turns this back into exactly failure_cost via dead_end_penalty, which is the same number
+        # the trial metric charges, so the search and the score agree on what losing costs.
         if not positions:
-            return self.failure_cost
+            return math.inf
 
         fast, safe = self._tables_for(open_edges)
 
@@ -162,7 +169,9 @@ class RiskAwareCostToGo:
         else:
             assignment = _greedy_assignment(outstanding, positions, load, route_to)
         if assignment is None:
-            return self.failure_cost   # something outstanding is out of everyone's reach now
+            # something outstanding is out of everyone's reach now, so this is lost too --
+            # flat, for the same reason as the no-robots case above
+            return math.inf
 
         for robot, _from_node, goal in assignment:
             # time off the fastest route, odds off the safest one
