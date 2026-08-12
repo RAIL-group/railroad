@@ -147,7 +147,7 @@ def run_episode(
     c: float = 100,
     max_steps: int = 50,
     heuristic_fn: Callable | None = None,
-    heuristic_multiplier: float = 5.0,
+    heuristic_multiplier: float = 1.0,
     unreachable_penalty: float = 0.0,
     dead_end_penalty: float | None = None,
     route_policy: Any = None,

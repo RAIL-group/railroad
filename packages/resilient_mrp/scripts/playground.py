@@ -118,7 +118,7 @@ BENCH_SPEC = Spec(
     graph_size=10,
     num_robots=2,
     num_goals=2,
-    mcts_iterations=100_000,
+    mcts_iterations=100000,
     max_depth=40,
     max_steps=50,
 )
@@ -134,7 +134,7 @@ _BENCH_BLOCKING = [True, False]
 # -(state.time + h * h_mult + extra_cost). At 1.0 the leaf is in the same units as the clock,
 # which is what it is built to be; above that the search trusts the estimate more than the time
 # already spent. Swept because "already in cost units" is an argument, not a measurement.
-_BENCH_H_MULT: list[float] = [1.0, 1.2, 2.0]
+_BENCH_H_MULT: list[float] = [1.0]
 
 # The baselines are route policies: they follow a precomputed route and never enter MCTS, so the
 # multiplier is never read on their path. Sweeping it over them would triple their runs and give

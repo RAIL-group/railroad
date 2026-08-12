@@ -30,6 +30,8 @@ uv.lock
 
 # Logging
 mlruns
-mlflow.db
+# the -journal/-wal companions too: sqlite writes them beside the db during a benchmark run, and
+# one got committed because it was not covered here
+mlflow.db*
 .worktrees/
 .benchmark_cache/
