@@ -2,16 +2,17 @@
 A graph convolution neural network model
 to estimate the expected cost of a state.
 """
-
+from pathlib import Path
 import torch
-import torch.nn as nn
+from torch import nn
 import torch.nn.functional as F
-from torch_geometric.data import Data
-from torch_geometric.nn import (global_add_pool,
-                                global_mean_pool, GATv2Conv, TransformerConv)
-# import learning
-# from antplan.utilities.utils import preprocess_gcn_data
-import numpy as np
+from torch_geometric.nn import (
+    global_add_pool,
+    global_mean_pool,
+    TransformerConv
+)
+from interruption.learning.utils import prepare_gcn_input, convert_batch_format
+from railroad.environment.procthor.scenegraph import SceneGraph
 
 
 class AnticipateGCN(nn.Module):
@@ -92,25 +93,27 @@ class AnticipateGCN(nn.Module):
     #     axs.imshow(image)
     #     axs.set_title(f"true cost: {true_cost} | predicted cost: {pred_cost}")
 
-    # @classmethod
-    # def get_net_eval_fn(cls, network_file, device):
-    #     model = AnticipateGCN()
-    #     model.load_state_dict(torch.load(network_file))
-    #     model.eval()
-    #     model.to(device)
+    @classmethod
+    def get_net_eval_fn(cls, network_file: Path | str, device: torch.device):
+        """
+        Returns a learned function that maps a SceneGraph representation of 
+        the environment state to the expected value over the task distribution.
+        """
+        # load trained gcn
+        model = AnticipateGCN()
+        model.load_state_dict(torch.load(network_file))
+        model.to(device)
+        model.eval()
 
-    #     def prepare_net(datum):
-    #         gcn_data = preprocess_gcn_data(datum)
-    #         batch_index = torch.zeros(gcn_data['latent_features'].size(0),
-    #                                   dtype=torch.long)
-    #         with torch.no_grad():
-    #             out = model.forward({
-    #                 'batch_index': batch_index,
-    #                 'edge_data': gcn_data['edge_data'],
-    #                 'edge_features': gcn_data['edge_features'],
-    #                 'latent_features':  gcn_data['latent_features']
-    #             }, device)
-    #             out = out[:, 0].detach().cpu().numpy()
-    #             return out[0]
+        def prepare_net(datum: SceneGraph):
+            gcn_data = prepare_gcn_input((datum, -1))
+            if gcn_data.x is not None:
+                gcn_data.batch = torch.zeros(gcn_data.x.size(0), dtype=torch.long)
 
-    #     return prepare_net
+                with torch.no_grad():
+                    out = model.forward(convert_batch_format(gcn_data), device)
+                    out = out[:, 0].detach().cpu().numpy()
+                    return out[0]
+            # if an invalid graph nodes features vector was passed in
+            return -1
+        return prepare_net

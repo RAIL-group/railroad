@@ -10,12 +10,16 @@ import itertools
 from typing import Any
 
 from railroad.bench import BenchmarkCase, benchmark
+from railroad.core import ff_heuristic
+from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 
 from ..environments import (
+    construct_procthor_kitchen_environment,
+    get_alfred_task_distribution,
     get_example_procthor_goal,
-    get_example_procthor_task_distribution,
+    # get_example_procthor_task_distribution,
 )
-from ..experiments import ExperimentConfig, ExperimentSeeds, run_experiment
+from ..experiments import ExperimentConfig, ExperimentSeeds, run_experiment, ExperimentMode
 from ..utilities import DistributionType, RandomVariableType, TaskArrivalProb
 
 
@@ -34,35 +38,49 @@ def _get_cases() -> list[dict[str, Any]]:
         }
         for (interruption_prob, seed), num_task_sequence in itertools.product(
             zip(
-                [0.0, 0.1, 0.2],
-                [140, 42, 240]
+                [0.0, 0.05, 0.1, 0.15, 0.2, 0.3],
+                [140, 42, 240, 57, 630, 175]
             ),
             [2]
         )
     ]
 
 
-def _setup_experiment_config(case: BenchmarkCase, baseline_flag: bool) -> ExperimentConfig:
+def _setup_experiment_config(
+        case: BenchmarkCase,
+        experiment_mode: ExperimentMode
+    ) -> ExperimentConfig:
     """
     Helper function for setting up the experimental config for both the 
     baseline and interruption-based planner benchmark experiments.
     """
     seeds = ExperimentSeeds(
         case.params["procthor_seed"],
-        case.params["interruption_seed"] + case.repeat_idx
+        case.params["interruption_seed"] + case.repeat_idx,
+        object_placement_seed=None
     )
     task_arrival_model = TaskArrivalProb(
         case.params["interruption_prob"], RandomVariableType.CONTINUOUS,
         DistributionType.EXPONENTIAL
     )
+    # get task distribution from alfred dataset used during training
+    env = construct_procthor_kitchen_environment(seeds.procthor_seed)
+    task_distribution = get_alfred_task_distribution(env.scene.objects, set(env.scene.locations))
+
+    model_path = (
+        DEFAULT_RESOURCES_BASE / "models/best_model_experiment5.pt"
+        if experiment_mode == ExperimentMode.INTERRUPTION
+        else ""
+    )
+
     config = ExperimentConfig(
-        get_example_procthor_goal(),
-        get_example_procthor_task_distribution(case.params["task_dist_idx"]),
-        baseline_flag,
-        task_arrival_model,
         seeds,
-        case.params["num_task_sequence"],
-        True
+        get_example_procthor_goal(),
+        task_distribution,
+        task_arrival_model,
+        ff_heuristic,
+        model_path,
+        case.params["num_task_sequence"]
     )
     return config
 
@@ -82,8 +100,8 @@ def bench_interruption_kitchen(case: BenchmarkCase):
     Wrapper function to evaluate the interruption-based planner on procthor kitchen
     environments. 
     """
-    config = _setup_experiment_config(case, False)
-    return run_experiment(config)
+    config = _setup_experiment_config(case, ExperimentMode.INTERRUPTION)
+    return run_experiment(config, ExperimentMode.INTERRUPTION, True)
 
 bench_interruption_kitchen.add_cases(_get_cases())
 
@@ -96,14 +114,14 @@ bench_interruption_kitchen.add_cases(_get_cases())
     ),
     tags=["interruption", "procthor", "myopic"],
     timeout=600.0,
-    repeat=32,
+    repeat=100,
 )
 def bench_myopic_interruption_kitchen(case: BenchmarkCase):
     """
     Wrapper function to evaluate the interruption-based planner on procthor kitchen
     environments. 
     """
-    config = _setup_experiment_config(case, True)
-    return run_experiment(config)
+    config = _setup_experiment_config(case, ExperimentMode.MYOPIC)
+    return run_experiment(config, ExperimentMode.MYOPIC, True)
 
 bench_myopic_interruption_kitchen.add_cases(_get_cases())

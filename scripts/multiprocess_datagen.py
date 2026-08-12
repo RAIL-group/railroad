@@ -7,7 +7,7 @@ import multiprocessing
 import random
 import time
 from concurrent.futures import ProcessPoolExecutor
-from functools import partial
+# from functools import partial
 from pathlib import Path
 
 from interruption.environments import (
@@ -19,6 +19,7 @@ from interruption.environments import (
 from interruption.experiments import (
     ExperimentConfig,
     ExperimentData,
+    ExperimentMode,
     ExperimentSeeds,
     initialize_experiment_data,
 )
@@ -83,7 +84,7 @@ def main():
             )
             for worker_id, target in enumerate(targets)
         ]
-        total_written = sum(future.result() for future in futures)
+        total_written = sum(future.result() for future in futures if future.result() != -1)
 
     _merge_csv_shards(PROCTHOR_SEED, num_workers)
 
@@ -117,23 +118,31 @@ def _generate_worker_share(
             num_locations
         )
 
+        # this check isn't really needed since get_randomized_procthor_data requires
+        # a valid task_distribution to be passed in, but it removes type checking errors
+        if data.search_problem.interrupting_task_dist is None:
+            return -1
+
         random.seed(DATA_GENERATION_SEED + worker_id * SEED_STRIDE + count)
         while True:
             sampled_task_idx = random.randint(0, len(task_distribution[0]))
-            task = (
-                data.converted_goal if sampled_task_idx == 0
-                else data.converted_interrupting_task_dist[0][sampled_task_idx-1]
+            # sample with replacement
+            # TODO - verify this works how I think it does
+            if sampled_task_idx > 0:
+                temp = data.search_problem.interrupting_task_dist[0][sampled_task_idx-1]
+                data.search_problem.interrupting_task_dist[0][sampled_task_idx-1] = (
+                    data.search_problem.goal
+                )
+                data.search_problem.goal = temp
+
+            initial_state = convert_state_to_positive_preconditions(
+                data.env.state, data.neg_to_pos_mapping
             )
+
             plan, _, success = astar_search(
-                convert_state_to_positive_preconditions(data.env.state, data.neg_to_pos_mapping),
-                task,
-                data.converted_actions,
-                None,
-                ff_heuristic,
-                0,
-                None,
-                0,
-                print_trace=False
+                (initial_state, None),
+                data.search_problem,
+                data.planner_parameters
             )
             if success:
                 break
@@ -146,12 +155,9 @@ def _generate_worker_share(
             # compute expected value of state over the interrupting task distribution
             expected_value = compute_interruption_value(
                 convert_state_to_positive_preconditions(data.env.state, data.neg_to_pos_mapping),
-                data.converted_actions,
-                data.converted_interrupting_task_dist,
-                partial(
-                    ff_heuristic, lambda_add=0.5, lambda_max=0, lambda_ff=0.5, at_implies_found=True
-                ),
-                0
+                data.search_problem.actions,
+                data.search_problem.interrupting_task_dist,
+                data.planner_parameters.heuristic_fn
             )
 
             if expected_value != -1:
@@ -232,11 +238,11 @@ def initialize_experiment_config(
         DistributionType.EXPONENTIAL
     )
     return ExperimentConfig(
+        ExperimentSeeds(procthor_seed, object_placement_seed=objects_seed),
         goal,
         task_distribution,
-        True,
         task_arrival_model,
-        ExperimentSeeds(procthor_seed, object_placement_seed=objects_seed)
+        ff_heuristic
     )
 
 
@@ -259,7 +265,8 @@ def get_randomized_procthor_data(
                 task_distribution,
                 procthor_seed,
                 start_seed
-            )
+            ),
+            ExperimentMode.MYOPIC
         )
         start_seed+=1
         if (

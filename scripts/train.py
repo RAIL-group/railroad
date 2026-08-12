@@ -4,7 +4,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 from torch_geometric.loader import DataLoader
 from interruption.learning.data import CSVPickleDataset
-from interruption.learning.utils import prepare_gcn_input, split_dataset
+from interruption.learning.utils import prepare_gcn_input, split_dataset, convert_batch_format
 from interruption.learning.models.gcn import AnticipateGCN
 from railroad.environment.procthor.resources import get_procthor_10k_dir, DEFAULT_RESOURCES_BASE
 
@@ -30,7 +30,7 @@ HYPERPARAMETERS = {
 }
 
 # output directories specifications
-EXPERIMENT_NAME = "experiment6"
+EXPERIMENT_NAME = "experiment7"
 LOG_DIRECTORY = DEFAULT_RESOURCES_BASE / f"run_logs/{EXPERIMENT_NAME}"
 OUTPUT_MODEL_DIRECTORY = DEFAULT_RESOURCES_BASE / "models"
 
@@ -161,7 +161,7 @@ def train_epoch(
     # iterate over the training dataset in batches
     for i, batch in enumerate(train_loader):
         batch = batch.to(device)
-        batch_data = _convert_batch_format(batch)
+        batch_data = convert_batch_format(batch)
         optimizer.zero_grad()
         # expected value preds
         out = model.forward(batch_data, device)
@@ -204,7 +204,7 @@ def evaluate(
     total_loss = 0.0
     for i, batch in enumerate(test_loader):
         batch = batch.to(device)
-        batch_data = _convert_batch_format(batch)
+        batch_data = convert_batch_format(batch)
         # compute expected value preds
         out = model.forward(batch_data, device)
         loss = model.loss(out, batch, str(device), None, i)
@@ -219,19 +219,6 @@ def evaluate(
         else 0,
         error_flag
      )
-
-
-def _convert_batch_format(batch) -> dict[str, torch.Tensor]:
-    """
-    Helper function for converting a batch returned by a DataLoader
-    to the data format expected by forward method of AnticipateGCN.
-    """
-    return {
-        "batch_index": batch.batch,
-        "edge_data": batch.edge_index,
-        "edge_features": batch.edge_attr,
-        "latent_features": batch.x
-    }
 
 
 def _get_train_test_dataloaders() -> tuple[DataLoader, DataLoader]:

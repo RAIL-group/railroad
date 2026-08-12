@@ -1,9 +1,8 @@
 import random
 
 import pytest
-from railroad.core import Fluent, LiteralGoal
-
 from interruption.experiments import _get_scene_objects_locations, _map_goal_to_scene
+from railroad.core import Fluent, LiteralGoal
 
 
 def test_map_goal_to_scene_maps_object_and_location():

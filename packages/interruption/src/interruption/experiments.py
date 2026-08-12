@@ -4,7 +4,9 @@ import time
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from functools import partial
+from pathlib import Path
 from rich.console import Console
 
 from railroad.core import (
@@ -12,6 +14,7 @@ from railroad.core import (
     Fluent,
     Goal,
     LiteralGoal,
+    State,
     convert_goal_to_positive_preconditions,
     convert_state_to_positive_preconditions,
     ff_heuristic,
@@ -23,15 +26,27 @@ from railroad.environment import SymbolicEnvironment
 from railroad.environment.procthor.environment import ProcTHOREnvironment
 
 from .dashboard_adapters import AstarDashboardPlanner
-from .environments import construct_procthor_kitchen_environment
-from .planner import astar_search
+from .environments import construct_procthor_kitchen_environment, KitchenProcTHOREnvironment
+from .learning.models.gcn import AnticipateGCN
+from .learning.utils import get_torch_device
+from .planner import astar_search, PlannerConfig, InterruptionSearchProblem
+from .planning_frameworks import get_no_int_prob, get_no_int_discount
 from .utilities import (
     TaskArrivalProb,
     get_action_cost,
     get_task_arrival_prob,
-    handcrafted_interruption_value,
     negative_fluent_preprocessing,
 )
+
+# global constants/enums
+class ExperimentMode(Enum):
+    """
+    Enumeration for interruption-based and baseline planners A*
+    Search settings.
+    """
+    MYOPIC = 1
+    ANTICIPATORY_PLANNING = 2
+    INTERRUPTION = 3
 
 
 @dataclass
@@ -56,13 +71,13 @@ class ExperimentConfig:
     to find matching objects/containers within the scene. These
     names are then used to update the goals.
     """
+    seeds: ExperimentSeeds
     goal: Goal
     interrupting_task_dist: tuple[Sequence[Goal], list[float]]
-    baseline_flag: bool
     task_arrival_model: TaskArrivalProb
-    seeds: ExperimentSeeds
+    heuristic_fn: float | Callable[[State, Goal, list[Action]], float]
+    ev_model_path: Path | str = ""
     num_task_sequence: int = 2
-    benchmark_flag: bool = False
 
 
 @dataclass
@@ -70,12 +85,9 @@ class ExperimentData:
     """
     Data struct for storage of experiment related data.
     """
-    env: ProcTHOREnvironment
-    interruption_prob_fn: float | Callable[[float], float]
-    interruption_value_fn: Callable[[frozenset[Fluent]], float] | None
-    converted_actions: list[Action]
-    converted_goal: Goal
-    converted_interrupting_task_dist: tuple[list[Goal], list[float]]
+    env: KitchenProcTHOREnvironment
+    search_problem: InterruptionSearchProblem
+    planner_parameters: PlannerConfig
     neg_to_pos_mapping: dict[Fluent, Fluent]
 
 
@@ -95,6 +107,8 @@ class DashboardData:
 
 def run_experiment(
     config: ExperimentConfig,
+    experiment_mode: ExperimentMode,
+    benchmark_flag: bool = False,
     show_plot: bool = False,
     save_plot: str | None = None,
     save_video: str | None = None
@@ -104,14 +118,14 @@ def run_experiment(
     Returns the total cost of the execution sequence, the initial plan, and a trace of 
     the execution sequence.
     """
-    experiment_data = initialize_experiment_data(config)
+    experiment_data = initialize_experiment_data(config, experiment_mode)
 
     # set the experiment seed after loading the ProcTHOR scene since it sets the
     # seed to procthor_seed
     random.seed(config.seeds.experiment_seed)
 
     recording_console = (
-        Console(record=True, force_terminal=True, width=120) if config.benchmark_flag else None
+        Console(record=True, force_terminal=True, width=120) if benchmark_flag else None
     )
 
     start_time = time.perf_counter()
@@ -128,7 +142,7 @@ def run_experiment(
     )
     dashboard = _setup_dashboard(
         pos_goal, dash_env, recording_console,
-        partial(AstarDashboardPlanner, heuristic_fn=ff_heuristic), config.benchmark_flag
+        partial(AstarDashboardPlanner, heuristic_fn=ff_heuristic), benchmark_flag
     )
     execute_deterministic_replay(event_trace, dashboard, dash_env)
     dash_data = DashboardData(
@@ -152,41 +166,44 @@ def _get_task_sequence_event_trace(
     task_arrival_sequence = [config.goal]
 
     for i in range(config.num_task_sequence - 1):
-        plan, _, _ = astar_search(
+        # the initial state is a tuple of the actually environment's state and its associated
+        # scene_graph if an interruption_value_fn was specified
+        initial_state = (
             convert_state_to_positive_preconditions(data.env.state, data.neg_to_pos_mapping),
-            data.converted_goal,
-            data.converted_actions,
-            data.converted_interrupting_task_dist if not config.baseline_flag else None,
-            ff_heuristic,
-            data.interruption_prob_fn if not config.baseline_flag else 0,
-            data.interruption_value_fn,
-            0,
-            num_steps=300000,
-            print_trace=False
+            None if data.planner_parameters.interruption_value_fn is None
+            else data.env.scene.scene_graph
+        )
+        plan, _, _ = astar_search(
+            initial_state,
+            data.search_problem,
+            data.planner_parameters
         )
 
         _execution_loop(plan, data, event_trace)
 
         # setup for next task in the sequence
         task_arrival_sequence.append(config.interrupting_task_dist[0][i])
-        data.converted_goal = data.converted_interrupting_task_dist[0][i]
+        if data.search_problem.interrupting_task_dist is not None:
+            data.search_problem.goal = data.search_problem.interrupting_task_dist[0][i]
 
         # check if current task was completed successfully
         if task_arrival_sequence[i].evaluate(data.env.state.fluents):
             event_trace[-1] += " | Goal Complete"
 
     # complete the last task in the sequence under the assumption that no future tasks will come
-    plan, _, _ = astar_search(
+    initial_state = (
         convert_state_to_positive_preconditions(data.env.state, data.neg_to_pos_mapping),
-        data.converted_goal,
-        data.converted_actions,
-        None,
-        ff_heuristic,
-        0,
-        None,
-        0,
-        num_steps=300000,
-        print_trace=False
+        None if data.planner_parameters.interruption_value_fn is None
+        else data.env.scene.scene_graph
+    )
+    plan, _, _ = astar_search(
+        initial_state,
+        data.search_problem,
+        _get_planner_config(
+            config,
+            ExperimentMode.MYOPIC,
+            0
+        )
     )
 
     _execution_loop(plan, data, event_trace, True)
@@ -212,12 +229,14 @@ def _execution_loop(
         action = get_action_by_name(data.env.get_actions(), converted_action.name)
         # perform the action
         data.env.act(action)
+        # update the scene_graph
+        data.env.update_scene_graph(action)
         event_trace.append(converted_action.name)
 
         task_arrival_prob = (
-            data.interruption_prob_fn
-            if isinstance(data.interruption_prob_fn, (float, int))
-            else data.interruption_prob_fn(get_action_cost(action))
+            data.search_problem.interruption_prob_fn
+            if isinstance(data.search_problem.interruption_prob_fn, (float, int))
+            else data.search_problem.interruption_prob_fn(get_action_cost(action))
         )
         # check if interrupting task arrived
         if not last_task_flag and random.random() < task_arrival_prob:
@@ -225,7 +244,10 @@ def _execution_loop(
             break
 
 
-def initialize_experiment_data(config: ExperimentConfig) -> ExperimentData:
+def initialize_experiment_data(
+    config: ExperimentConfig,
+    planner_mode: ExperimentMode
+) -> ExperimentData:
     """
     Helper function for initializing the ExperimentData struct, which entails
     the loading of the environment, setting up the task arrival prob function,
@@ -271,16 +293,43 @@ def initialize_experiment_data(config: ExperimentConfig) -> ExperimentData:
         max(get_action_cost(act) for act in converted_actions)
     )
 
-    # for learned function
-    interruption_value_fn = (
-        partial(handcrafted_interruption_value, config.task_arrival_model.interruption_prob)
-        if not config.baseline_flag
-        else None
+    # setup planner config based on experiment_mode
+    return ExperimentData(
+        env,
+        InterruptionSearchProblem(
+            converted_goal,
+            converted_actions,
+            converted_interrupting_task_dist,
+            interruption_prob_fn
+        ),
+        _get_planner_config(config, planner_mode, interruption_prob_fn),
+        mapping
     )
 
-    return ExperimentData(
-        env, interruption_prob_fn, interruption_value_fn, converted_actions,
-        converted_goal, converted_interrupting_task_dist,mapping
+
+def _get_planner_config(
+    config: ExperimentConfig,
+    planner_mode: ExperimentMode,
+    interruption_prob_fn: float | Callable[[float], float]
+) -> PlannerConfig:
+    if planner_mode in [ExperimentMode.MYOPIC, ExperimentMode.ANTICIPATORY_PLANNING]:
+        discount_fn=get_no_int_discount
+        planner_interruption_prob_fn=None
+        interruption_value_fn=None
+        current_task_reward=0
+    else: # ExperimentMode.INTERRUPTION
+        discount_fn=get_no_int_prob
+        planner_interruption_prob_fn=interruption_prob_fn
+        interruption_value_fn=AnticipateGCN.get_net_eval_fn(
+            config.ev_model_path, get_torch_device()
+        )
+        current_task_reward=0
+    return PlannerConfig(
+        discount_fn,
+        config.heuristic_fn,
+        planner_interruption_prob_fn,
+        interruption_value_fn,
+        current_task_reward
     )
 
 

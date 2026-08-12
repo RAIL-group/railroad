@@ -21,6 +21,7 @@ from railroad.core import (
 )
 from railroad.core import Fluent as F
 from railroad.environment.procthor.resources import get_procthor_10k_dir
+from railroad.environment.procthor.scenegraph import SceneGraph
 from railroad.environment.procthor.utils import get_generic_name
 
 
@@ -58,6 +59,20 @@ def get_action_cost(action: Action) -> float:
     Gets the total cost (reward) of performing an action.
     """
     return action.effects[-1].time + action.extra_cost
+
+
+def get_reward(action: Action, discount_factor: float, additional_reward: float) -> float:
+    """
+    Generic reward function.
+    """
+    return get_discounted_value(get_action_cost(action), discount_factor, additional_reward)
+
+
+def get_discounted_value(value: float, discount_factor: float, additional_value: float) -> float:
+    """
+    Returns the discounted sum of the value and additional_value.
+    """
+    return discount_factor * (value + additional_value)
 
 
 def get_next_state(
@@ -297,3 +312,61 @@ def handcrafted_interruption_value(prob_int: float, state_fluents: frozenset[F])
     #     return -500
     # return 500
     return 0
+
+
+# helper functions for keeping scene graphs up to date with the state of an environment
+def get_updated_scene_graph(
+    scene_graph: SceneGraph,
+    state: State,
+    action: Action
+) -> None:
+    """
+    Helper function for getting an updated scene graph that matches the
+    environment's state after the robot took an action.
+    Notes: this method assumes a single-robot scenario.
+    Also, this function updates the scene_graph in-place (send in a copy
+    if you don't want this behavior).
+    """
+    action_split = action.name.split(" ")
+    action_type = action_split[0]
+    robot_idx = scene_graph.robot_indices[0]
+
+    if action_type in ["pick", "place"]:
+        obj_idx = int(action_split[-1].split("_")[-1])
+        loc_idx = int(action_split[-2].split("_")[-1])
+        if action_type == "pick":
+            scene_graph.delete_edge(loc_idx, obj_idx)
+            scene_graph.add_edge(robot_idx, obj_idx)
+            scene_graph.nodes[obj_idx]["position"] = scene_graph.nodes[robot_idx]["position"]
+        else: # action_type == "place"
+            scene_graph.delete_edge(robot_idx, obj_idx)
+            scene_graph.add_edge(loc_idx, obj_idx)
+            scene_graph.nodes[obj_idx]["position"] = scene_graph.nodes[loc_idx]["position"]
+    else: # action_type == "move"
+        new_loc_idx = int(action_split[-1].split("_")[-1])
+        scene_graph.nodes[robot_idx]["position"] = scene_graph.nodes[new_loc_idx]["position"]
+        # when the robot is holding one or more objects
+        gripper_names = {fluent.args[0] for fluent in state.fluents if fluent.name == "hand-full"}
+        _update_held_objects_position(state, scene_graph, robot_idx, gripper_names)
+
+
+def _update_held_objects_position(
+    state: State, scene_graph: SceneGraph, robot_idx: int, grippers: set[str]
+) -> None:
+    """
+    Helper function for updating the position attribute of object nodes
+    that are currently held by the robot.
+    """
+    for gripper in grippers:
+        # check if gripper is holding an object
+        if F(f"hand-full {gripper}") in state.fluents:
+            obj_idxs = scene_graph.object_indices
+            for idx in obj_idxs:
+                obj = (
+                    scene_graph.get_node_name_by_idx(idx) +
+                    f"_{idx}"
+                )
+                if F(f"holding {gripper} {obj}") in state.fluents:
+                    scene_graph.nodes[idx]["position"] = (
+                        scene_graph.nodes[robot_idx]["position"]
+                    )

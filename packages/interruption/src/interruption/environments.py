@@ -13,6 +13,7 @@ from .operators import (
     construct_gripper_place_operator,
 )
 from .alfred_task_generator import get_task_list
+from .utilities import get_updated_scene_graph
 
 
 class KitchenProcTHOREnvironment(ProcTHOREnvironment):
@@ -34,49 +35,7 @@ class KitchenProcTHOREnvironment(ProcTHOREnvironment):
         state after taking the robot takes an action.
         Note: this method assumes a single-robot scenario.
         """
-        scene_graph = self.scene.scene_graph
-        action_split = action.name.split(" ")
-        action_type = action_split[0]
-        robot_idx = scene_graph.robot_indices[0]
-
-        if action_type in ["pick", "place"]:
-            obj_idx = int(action_split[-1].split("_")[-1])
-            loc_idx = int(action_split[-2].split("_")[-1])
-            if action_type == "pick":
-                scene_graph.delete_edge(loc_idx, obj_idx)
-                scene_graph.add_edge(robot_idx, obj_idx)
-                scene_graph.nodes[obj_idx]["position"] = scene_graph.nodes[robot_idx]["position"]
-            else: # action_type == "place"
-                scene_graph.delete_edge(robot_idx, obj_idx)
-                scene_graph.add_edge(loc_idx, obj_idx)
-                scene_graph.nodes[obj_idx]["position"] = scene_graph.nodes[loc_idx]["position"]
-        else: # action_type == "move"
-            new_loc_idx = int(action_split[-1].split("_")[-1])
-            scene_graph.nodes[robot_idx]["position"] = scene_graph.nodes[new_loc_idx]["position"]
-            # when the robot is holding one or more objects
-            self._update_held_objects_position(robot_idx)
-
-
-    def _update_held_objects_position(self, robot_idx: int) -> None:
-        """
-        Helper function for updating the position attribute of object nodes
-        that are currently held by the robot.
-        """
-        scene_graph = self.scene.scene_graph
-        grippers = self.objects_by_type["gripper"]
-        for gripper in grippers:
-            # check if gripper is holding an object
-            if F(f"hand-full {gripper}") in self.state.fluents:
-                obj_idxs = scene_graph.object_indices
-                for idx in obj_idxs:
-                    obj = (
-                        scene_graph.get_node_name_by_idx(idx) +
-                        f"_{idx}"
-                    )
-                    if F(f"holding {gripper} {obj}") in self.state.fluents:
-                        scene_graph.nodes[idx]["position"] = (
-                            scene_graph.nodes[robot_idx]["position"]
-                        )
+        get_updated_scene_graph(self.scene.scene_graph, self.state, action)
 
 
 # helper functions

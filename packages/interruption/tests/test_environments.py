@@ -1,6 +1,7 @@
 import types
 
 from interruption.environments import KitchenProcTHOREnvironment
+from interruption.utilities import _update_held_objects_position
 from railroad.core import Fluent as F, Action
 from railroad.environment.procthor.scene import ProcTHORScene
 from railroad.environment.procthor.scenegraph import SceneGraph
@@ -279,7 +280,12 @@ def test_update_held_objects_position_updates_held_object():
         grippers={"r1-left"},
     )
 
-    env._update_held_objects_position(idx.robot)
+    _update_held_objects_position(
+        env.state,
+        env.scene._thor.scene_graph,
+        idx.robot,
+        env._objects_by_type["gripper"]
+    )
 
     assert sg.nodes[idx.spoon]["position"] == sg.nodes[idx.robot]["position"]
 
@@ -288,7 +294,12 @@ def test_update_held_objects_position_ignores_gripper_that_is_not_full():
     sg, idx = _build_scene_graph()
     env = _bare_kitchen_env(sg, fluents=set(), grippers={"r1-left"})  # no hand-full fluent
 
-    env._update_held_objects_position(idx.robot)
+    _update_held_objects_position(
+        env.state,
+        env.scene._thor.scene_graph,
+        idx.robot,
+        env._objects_by_type["gripper"]
+    )
 
     assert sg.nodes[idx.spoon]["position"] == (1, 1)  # unchanged, still on countertop
 
@@ -308,7 +319,12 @@ def test_update_held_objects_position_only_updates_the_held_object():
         grippers={"r1-left"},
     )
 
-    env._update_held_objects_position(idx.robot)
+    _update_held_objects_position(
+        env.state,
+        env.scene._thor.scene_graph,
+        idx.robot,
+        env._objects_by_type["gripper"]
+    )
 
     assert sg.nodes[idx.spoon]["position"] == sg.nodes[idx.robot]["position"]
     assert sg.nodes[cup_idx]["position"] == (5, 5)
@@ -330,7 +346,12 @@ def test_update_held_objects_position_handles_multiple_grippers():
         grippers={"r1-left", "r1-right"},
     )
 
-    env._update_held_objects_position(idx.robot)
+    _update_held_objects_position(
+        env.state,
+        env.scene._thor.scene_graph,
+        idx.robot,
+        env._objects_by_type["gripper"]
+    )
 
     assert sg.nodes[idx.spoon]["position"] == sg.nodes[idx.robot]["position"]
     assert sg.nodes[cup_idx]["position"] == sg.nodes[idx.robot]["position"]

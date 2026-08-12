@@ -4,19 +4,21 @@ import numpy as np
 import pytest
 from interruption.operators import construct_assemble_operator
 from interruption.planner import (
-    Trajectory,
+    InterruptionTrajectory,
+    InterruptionSearchProblem,
+    PlannerConfig,
     astar_search,
     check_value_cache,
     compute_interruption_value,
-    discounted_accumulated_cost,
-    get_no_int_prob,
-    h,
 )
+from interruption.planning_frameworks import get_no_int_prob
 from interruption.utilities import (
     RandomVariableType,
     get_next_state,
     get_task_arrival_prob,
     negative_fluent_preprocessing,
+    get_discounted_value,
+    get_reward
 )
 from railroad.core import Fluent as F, LiteralGoal
 from railroad.core import Operator, State, ff_heuristic, get_next_actions
@@ -45,12 +47,17 @@ def test_check_value_cache():
 
 
 def test_get_no_int_prob():
-    traj = Trajectory(state_history=[], plan=[], interruption_probs=[])
-    assert get_no_int_prob(traj) == 1
+    traj = InterruptionTrajectory(
+        state_history=[],
+        plan=[],
+        interruption_probs=[],
+        scene_graph=None
+    )
+    assert get_no_int_prob(traj.interruption_probs) == 1
     traj.interruption_probs.append(0.1)
-    assert get_no_int_prob(traj) == 0.9
+    assert get_no_int_prob(traj.interruption_probs) == 0.9
     traj.interruption_probs.append(0.1)
-    assert get_no_int_prob(traj) == 0.81
+    assert get_no_int_prob(traj.interruption_probs) == 0.81
 
 
 @pytest.mark.parametrize(
@@ -74,20 +81,26 @@ def test_discounted_accumulated_cost(interruption_value, solution):
         fluents={F("at robot1 kitchen"), F("free robot1")}
     )
 
-    traj = Trajectory(state_history=[initial_state], plan=[], interruption_probs=[])
-    # value_cache = {}
+    traj = InterruptionTrajectory(
+        state_history=[initial_state],
+        plan=[],
+        interruption_probs=[],
+        scene_graph=None
+    )
 
     # solution stores the discounted accumulated cost after taking an action
     # from the current state of the trajectory
     for discounted_acc_cost in solution:
-        applicable_actions = get_next_actions(traj.state_history[-1], move_actions)
+        applicable_actions = get_next_actions(
+            traj.state_history[-1], move_actions
+        )
         assert len(applicable_actions) == 1
-        assert discounted_accumulated_cost(
-            traj,
+        reward = get_reward(
             applicable_actions[0],
-            interruption_value,
-            interruption_prob=0.1
-        ) == pytest.approx(discounted_acc_cost)
+            get_no_int_prob(traj.interruption_probs),
+            interruption_value * 0.1
+        )
+        assert reward + traj.cost == pytest.approx(discounted_acc_cost)
 
         # update the trajectory
         next_state, _ = get_next_state(traj.state_history[-1], applicable_actions[0])
@@ -95,8 +108,8 @@ def test_discounted_accumulated_cost(interruption_value, solution):
         traj.state_history.append(next_state)
         traj.plan.append(applicable_actions[0])
         traj.interruption_probs.append(0.1)
-        traj.value = discounted_acc_cost
-        traj.cost = discounted_acc_cost
+        traj.value += reward
+        traj.cost += reward
 
 
 def test_h():
@@ -116,22 +129,25 @@ def test_h():
         fluents={F("at robot1 kitchen"), F("free robot1")}
     )
 
-    goal = F("at robot1 living_room") & F("free robot1")
-
-    traj = Trajectory(state_history=[initial_state], plan=[], interruption_probs=[])
-    applicable_actions = get_next_actions(initial_state, move_actions)
-    assert len(applicable_actions) == 1
-    action = applicable_actions[0]
-    next_state, interruption_prob = get_next_state(initial_state, action, 0.1)
+    traj = InterruptionTrajectory(
+        state_history=[initial_state],
+        plan=[],
+        interruption_probs=[],
+        scene_graph=None
+    )
 
     # tests for when passed in hueristic_fn is an int
-    assert h(traj, next_state, goal, move_actions, 5, interruption_prob, 0)[0] == 0.9 * 5
+    assert get_discounted_value(
+        5, get_no_int_prob(traj.interruption_probs) * (1 - 0.1), 0
+    ) == pytest.approx(0.9 * 5)
     traj.interruption_probs.append(0.1)
-    assert h(traj, next_state, goal, move_actions, 5, interruption_prob, 0)[0] == \
-        pytest.approx(0.81 * 5)
+    assert get_discounted_value(
+        5, get_no_int_prob(traj.interruption_probs) * (1 - 0.1), 0
+    ) == pytest.approx(0.81 * 5)
     traj.interruption_probs.append(0.1)
-    assert h(traj, next_state, goal, move_actions, 5, interruption_prob, 0)[0] == \
-        pytest.approx(0.729 * 5)
+    assert get_discounted_value(
+        5, get_no_int_prob(traj.interruption_probs) * (1 - 0.1), 0
+    ) == pytest.approx(0.729 * 5)
 
 
 def test_h_user_reward():
@@ -152,22 +168,25 @@ def test_h_user_reward():
         fluents={F("at robot1 kitchen"), F("free robot1")}
     )
 
-    goal = F("at robot1 living_room") & F("free robot1")
-
-    traj = Trajectory(state_history=[initial_state], plan=[], interruption_probs=[])
-    applicable_actions = get_next_actions(initial_state, move_actions)
-    assert len(applicable_actions) == 1
-    action = applicable_actions[0]
-    next_state, interruption_prob = get_next_state(initial_state, action, 0.1)
+    traj = InterruptionTrajectory(
+        state_history=[initial_state],
+        plan=[],
+        interruption_probs=[],
+        scene_graph=None
+    )
 
     # tests for when passed in hueristic_fn is an int
-    assert h(traj, next_state, goal, move_actions, 5, interruption_prob, reward)[0] == 0.9 * 6
+    assert get_discounted_value(
+        5, get_no_int_prob(traj.interruption_probs) * (1 - 0.1), reward
+    ) == pytest.approx(0.9 * 6)
     traj.interruption_probs.append(0.1)
-    assert h(traj, next_state, goal, move_actions, 5, interruption_prob, reward)[0] == \
-        pytest.approx(0.81 * 6)
+    assert get_discounted_value(
+        5, get_no_int_prob(traj.interruption_probs) * (1 - 0.1), reward
+    ) == pytest.approx(0.81 * 6)
     traj.interruption_probs.append(0.1)
-    assert h(traj, next_state, goal, move_actions, 5, interruption_prob, reward)[0] == \
-        pytest.approx(0.729 * 6)
+    assert get_discounted_value(
+        5, get_no_int_prob(traj.interruption_probs) * (1 - 0.1), reward
+    ) == pytest.approx(0.729 * 6)
 
 
 @pytest.mark.parametrize("heuristic_fn", [0, 5])
@@ -195,14 +214,19 @@ def test_construct_trajectory(heuristic_fn):
     action = applicable_actions[0]
     new_state, next_interruption_prob = get_next_state(initial_state, action, 0.1)
 
-    traj = Trajectory(state_history=[initial_state], plan=[], interruption_probs=[])
+    traj = InterruptionTrajectory(
+        state_history=[initial_state],
+        plan=[],
+        interruption_probs=[],
+        scene_graph=None
+    )
+    search_problem = InterruptionSearchProblem(goal, applicable_actions)
+    planner_params = PlannerConfig(get_no_int_prob, heuristic_fn)
     new_traj = traj.create_child(
-        goal,
-        move_actions,
+        search_problem,
+        planner_params,
         action,
-        0,
-        next_interruption_prob,
-        heuristic_fn
+        next_interruption_prob
     )
 
     assert new_traj.level == 1
@@ -217,7 +241,7 @@ def test_construct_trajectory(heuristic_fn):
 
 
 @pytest.mark.parametrize("heuristic_fn", [0, 5, ff_heuristic])
-def test_astart_search_noint(heuristic_fn):
+def test_astart_search_nointdist(heuristic_fn):
     # setup
     move_op = construct_move_operator(4)
 
@@ -237,7 +261,15 @@ def test_astart_search_noint(heuristic_fn):
     goal = F("at robot1 living_room") & F("free robot1")
 
     # testing with no interrupting tasks
-    plan, plan_cost, success = astar_search(initial_state, goal, move_actions, None, heuristic_fn)
+    search_problem = InterruptionSearchProblem(goal, move_actions)
+    planner_params = PlannerConfig(get_no_int_prob, heuristic_fn, 0.1)
+
+    plan, plan_cost, success = astar_search(
+        (initial_state, None),
+        search_problem,
+        planner_params
+    )
+
     assert success is True
     assert len(plan) == 1
     assert plan[0].name == "move robot1 kitchen living_room"
@@ -272,7 +304,14 @@ def test_astart_search_noint(heuristic_fn):
         F("at water_bottle living_room")
     )
 
-    plan, plan_cost, success = astar_search(initial_state, goal, all_actions, None, heuristic_fn)
+    search_problem = InterruptionSearchProblem(goal, all_actions)
+    planner_params = PlannerConfig(get_no_int_prob, heuristic_fn, 0.1)
+
+    plan, plan_cost, success = astar_search(
+        (initial_state, None),
+        search_problem,
+        planner_params
+    )
     assert success is True
     assert len(plan) == 3
     plan_with_names = [action.name for action in plan]
@@ -389,15 +428,15 @@ def test_optimal_make_sandwhich_noint(heuristic_fn, interruption_prob_fn):
 
     goal = converted_goals[0]
 
+    search_problem = InterruptionSearchProblem(goal, actions)
+    planner_params = PlannerConfig(get_no_int_prob, heuristic_fn, interruption_prob_fn)
+
     plan, cost, success = astar_search(
-        initial_state,
-        goal,
-        actions,
-        None,
-        heuristic_fn,
-        interruption_prob_fn,
-        num_steps=1000000
+        (initial_state, None),
+        search_problem,
+        planner_params
     )
+
     assert success is True
     assert cost == pytest.approx(12.414213562373096)
     solution = [

@@ -95,3 +95,29 @@ def split_dataset(
     test_length = total_length - train_length
 
     return random_split(dataset, [train_length, test_length], g)
+
+
+def convert_batch_format(batch) -> dict[str, torch.Tensor]:
+    """
+    Helper function for converting a batch returned by a DataLoader
+    to the data format expected by forward method of AnticipateGCN.
+    """
+    return {
+        "batch_index": batch.batch,
+        "edge_data": batch.edge_index,
+        "edge_features": batch.edge_attr,
+        "latent_features": batch.x
+    }
+
+
+def get_torch_device() -> torch.device:
+    """
+    Helper function for getting the device a torch model should run on.
+    """
+    # load model
+    device_str = "cpu"
+    if torch.cuda.is_available():
+        device_str = "cuda"
+    elif torch.backends.mps.is_available():
+        device_str = "mps"
+    return torch.device(device_str)
