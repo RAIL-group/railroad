@@ -73,6 +73,7 @@ def test_astar_plan_reaches_the_goal(problem):
 def test_astar_finds_the_makespan_optimal_plan(problem):
     start, actions, goal = problem
     plan = astar(start, actions, goal)
+    assert plan is not None, "the goals are reachable, so there is a plan"
     assert _replay(start, plan).time == pytest.approx(10.0), (
         f"expected the split, got {[a.name for a in plan]}")
     assert {a.name.split()[1] for a in plan} == {"r1", "r2"}, "both robots should move"

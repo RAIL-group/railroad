@@ -66,8 +66,7 @@ def _env(graph, profiles, goal_sites, start="start", blocks=True):
     return SymbolicEnvironment(
         state=State(0.0, _fluents(graph, profiles, goal_sites, start), []),
         objects_by_type={"robot": set(profiles), "location": set(graph.nodes)},
-        operators=_operators(graph, profiles, blocks),
-        true_object_locations={})
+        operators=_operators(graph, profiles, blocks))
 
 
 def _goal(goal_sites):

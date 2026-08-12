@@ -88,8 +88,7 @@ class ReducedProblem:
         env = SymbolicEnvironment(
             state=State(0.0, fluents, []),
             objects_by_type={"robot": set(positions), "site": set(key_nodes)},
-            operators=[self._visit_operator()],
-            true_object_locations={})
+            operators=[self._visit_operator()])
         return env.state, env.get_actions()
 
     # Every goal actually visited, so the clock at the goal is the last arrival and astar is
