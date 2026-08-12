@@ -12,6 +12,13 @@ from .core import (ResilientGraph, RobotProfile, compute_p_success,
 _EPS = 1e-6
 UNREACHABLE = 1e12
 
+# How much a unit of travel is worth to the cautious weight. Not a tuning knob: it exists only to
+# keep the weight strictly positive, so it has to be small enough that it can never outvote a real
+# difference in survival. The smallest survival gap worth respecting is about -log(0.99) = 1e-2, and
+# route costs run to ~1e3, so 1e-9 leaves four orders of magnitude of headroom. Without it a
+# risk-free edge weighs exactly 0.0, the route table goes flat, and greedy descent stalls.
+_EPS_TIME = 1e-9
+
 
 # One robot's trip to one goal. so we never mix a cost from one route with a risk from another.
 class RouteToGoal(NamedTuple):
@@ -31,9 +38,12 @@ def optimistic_weight(travel_cost: float, survival: float) -> float:
     return travel_cost
 
 
-# cautious: -log of the chance of getting through, so the safest option wins and time never enters
+# cautious: -log of the chance of getting through, so the safest option wins. Time enters only
+# lexicographically, to separate options the survival term calls equal: between two routes that are
+# both certain, the shorter one is strictly better, and a hop back the way we came must never tie
+# with a hop toward the goal.
 def cautious_weight(travel_cost: float, survival: float) -> float:
-    return -math.log(max(survival, _EPS))
+    return -math.log(max(survival, _EPS)) + _EPS_TIME * travel_cost
 
 
 # use Djikstra to precomputes the cheapest route from a goal under weigh, with the 

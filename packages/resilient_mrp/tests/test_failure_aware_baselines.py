@@ -193,11 +193,11 @@ def test_optimistic_assignment_minimises_makespan(two_depots):
 # ------------------------------------------------------------------ routing: open defects
 
 
-# cautious_weight is -log(survival), which is exactly 0.0 on any edge a robot is certain to cross.
-# A risk-free region is therefore a plateau in the route table, and step_toward descends it with a
-# strict <, so a hop back the way it came ties with the hop toward the goal and wins on whichever
-# was declared first. The robot walks start->slow->start->slow until max_steps runs out.
-@pytest.mark.xfail(strict=True, reason="cautious livelocks on zero-weight (risk-free) edges")
+# cautious_weight used to be -log(survival) alone, which is exactly 0.0 on any edge a robot is
+# certain to cross. A risk-free region was then a plateau in the route table, and step_toward
+# descends it with a strict <, so a hop back the way it came tied with the hop toward the goal and
+# won on whichever was declared first: start->slow->start->slow until max_steps ran out. The
+# _EPS_TIME term makes every real edge weigh something, which breaks the tie the right way.
 def test_cautious_makes_progress_across_risk_free_ground(diamond):
     policy = CautiousPolicy(diamond, ["g"], PERFECT)
     assert policy.step_toward("slow", "r1", "g") == "risk_move r1 slow g", (
@@ -207,11 +207,10 @@ def test_cautious_makes_progress_across_risk_free_ground(diamond):
     assert reached, "there is a route to g that cannot fail, so cautious must always arrive"
 
 
-# Between two routes that are equally likely to survive, the shorter one is strictly better, but
-# build_route_table breaks the tie on nothing at all: whichever node the heap happens to settle
-# first wins. Here it records the 1000-unit route while step_toward walks the 10-unit one, so the
-# travel_cost that best_assignment prices the leg with describes a path nobody takes.
-@pytest.mark.xfail(strict=True, reason="build_route_table has no travel tie-break")
+# Between two routes that are equally likely to survive, the shorter one is strictly better. The
+# survival terms tie here, so this is entirely decided by _EPS_TIME. Before it, whichever node the
+# heap happened to settle first won: the table recorded the 1000-unit route while step_toward walked
+# the 10-unit one, and best_assignment priced the leg against a path nobody took.
 def test_cautious_prefers_the_shorter_of_two_equally_safe_routes():
     g = ResilientGraph()
     g.add_edge("start", "s", cost=5.0, terrain_type="clear", hazard_severity=0.0)
