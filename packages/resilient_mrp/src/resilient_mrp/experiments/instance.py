@@ -5,7 +5,15 @@ from typing import Any
 from railroad._bindings import State
 from railroad.core import Fluent as F
 from railroad.environment import SymbolicEnvironment
+from railroad.planner import seed_planner_rng
 from railroad import operators as rr_operators
+
+# Offset between the two streams a trial drives, both derived from exec_seed. They are kept apart
+# because Python's `random` and the planner's mt19937 are both Mersenne Twister: handing them the
+# same integer invites the failure draws and the search's own coin flips to move together, which
+# would tie what the world does to what the planner happened to sample. Any fixed offset does; the
+# value is not tuned and nothing should depend on it.
+_PLANNER_SEED_OFFSET = 1_000_003
 
 from resilient_mrp.planning.core import (
     RobotProfile,
@@ -207,6 +215,13 @@ def planner_setup(inst: Instance, planner: str, *, heuristic_mult: float | None 
 def start_trial(inst: Instance, exec_seed: int | None = None) -> SymbolicEnvironment:
     if exec_seed is not None:
         random.seed(exec_seed)
+        # The search samples too, from the planner's own thread-local mt19937, which otherwise
+        # seeds itself from random_device. Left alone, two runs of the same trial searched
+        # differently -- failure_aware_split gave makespans 169.5, 66.2, 161.3 on one graph and one
+        # exec_seed -- so a trial was not reproducible and the planners were not being compared on
+        # equal terms. Seeding it here makes trial t mean the same thing for every configuration.
+        # The benchmark runs trials in separate processes, so a per-trial global seed is safe.
+        seed_planner_rng(exec_seed + _PLANNER_SEED_OFFSET)
     # exec_seed also goes to the environment itself: seeding the global module does not reach
     # SymbolicEnvironment's own RNG, which is what decides who survives.
     return inst.new_env(seed=exec_seed)
@@ -222,7 +237,7 @@ def run_trial(inst: Instance, planner: str, env: SymbolicEnvironment, *,
         inst, planner, heuristic_mult=heuristic_mult, unreachable_penalty=unreachable_penalty)
     visited, travel = run_episode(
         env, inst.goal_fluent, spec.mcts_iterations, spec.max_depth, inst.goal_sites,
-        planning_operators=plan_ops, c=100, max_steps=spec.max_steps,
+        planning_operators=plan_ops, c=500, max_steps=spec.max_steps,
         heuristic_fn=heuristic_fn, heuristic_multiplier=mult,
         unreachable_penalty=penalty, dead_end_penalty=dead_end,
         route_policy=policy, dashboard=dashboard, graph=inst.graph,
