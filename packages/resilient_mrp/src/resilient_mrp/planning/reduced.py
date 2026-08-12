@@ -92,15 +92,13 @@ class ReducedProblem:
             true_object_locations={})
         return env.state, env.get_actions()
 
-    # Every goal claimed, not every goal visited. Nothing in this relaxation can stop a robot that
-    # has set off, so a claim is an arrival that has not happened yet -- and searching for arrivals
-    # would dead-end: once the last robot is dispatched no action is applicable, and raw astar has
-    # no way to let the clock run the way SymbolicEnvironment.act does. Makespan is recovered from
-    # the legs afterwards in cost(), so nothing is lost by stopping at the last dispatch.
+    # Every goal actually visited, so the clock at the goal is the last arrival and astar is
+    # minimising the makespan. `claimed` still guards against two robots setting off for the same
+    # goal, but it no longer has to double as the goal itself.
     def _goal(self, outstanding):
-        goal = F(f"claimed {outstanding[0]}")
+        goal = F(f"safely_visited {outstanding[0]}")
         for site in outstanding[1:]:
-            goal = goal & F(f"claimed {site}")
+            goal = goal & F(f"safely_visited {site}")
         return goal
 
     # The plan, as (robot, from_node, goal) legs in the order A* committed them. None when the
@@ -115,8 +113,9 @@ class ReducedProblem:
         state, actions = self._instance(positions, visited_goals)
         goal = self._goal(outstanding)
 
-        # Uniform cost. See the note at the bottom of this file: the plans are valid but not yet
-        # makespan-optimal, so this is not wired into OptimisticPolicy.
+        # Uniform cost. g is the state clock and the goal is stated on arrival, so this is
+        # makespan-optimal; see the note at the bottom of this file for why no heuristic is used
+        # and why this is still not what OptimisticPolicy runs.
         found = astar(state, actions, goal, lambda _state: 0.0)
         if found is None:
             return None
@@ -135,39 +134,28 @@ class ReducedProblem:
 
 
 # ---------------------------------------------------------------------------------------------
-# Why this is not wired into OptimisticPolicy yet.
+# Why this is still not wired into OptimisticPolicy.
 #
-# The modelling works: the reduced problem grounds, plans, visits every goal exactly once, and on
-# rings of 2 to 4 goals it returns the same makespan best_assignment does. Three things stand
-# between here and replacing best_assignment, and all three are about the objective rather than
-# the model.
+# It is correct now. The plans are makespan-optimal, matching best_assignment -- which is exact for
+# this weight -- on rings of 2 to 10 goals. That took two fixes: astar gained a visited set, and it
+# gained a step that lets the clock run to the next scheduled effect when nothing else applies. The
+# second one is what made the objective right. Before it, a goal stated on arrival was unreachable
+# (once the last robot is dispatched, no action applies and the search dead-ends), so the goal had
+# to be stated on dispatch instead -- and astar minimises the state clock, which then read the last
+# dispatch rather than the last arrival. A 5-goal ring came back at 50.2 against an optimum of 37.4.
 #
-# 1. The goal has to be "every goal claimed" rather than "every goal visited", because astar has no
-#    way to advance the clock. Once the last robot is dispatched no action is applicable, and there
-#    is no equivalent of SymbolicEnvironment.act's wait-for-the-next-event. Searching for arrivals
-#    dead-ends there and astar reports no plan.
+# What is left is cost. Speed was the whole reason to replace best_assignment, and it does not:
 #
-# 2. But astar minimises state.time, and with the goal on the claim that clock reads the last
-#    dispatch, not the last arrival. So what it optimises is when the team finishes handing out
-#    work, which is not the makespan. That is why rings of 5 and 6 goals come back valid but
-#    suboptimal. Fixing this needs either a cost that counts committed-but-unresolved legs, or a
-#    wait action fine-grained enough not to quantise the clock.
+#     goals       reduced      best_assignment
+#         8         2.25s                0.23s
+#         9        18.48s                2.67s
+#        10        49.10s                4.99s
 #
-# 3. Neither heuristic tried is admissible for makespan, so both cost optimality rather than just
-#    speed:
+# The visited set took ten goals from 163s to 49s, so this is much closer than it was, but it is
+# still an order of magnitude the wrong way and both are exponential. Measured as a leaf evaluator
+# at the size the experiments actually run -- 2 goals, 2 robots -- ReducedProblem.cost is 418us a
+# call against best_assignment's 27us, and the leaf is called once per search node.
 #
-#      ff_heuristic / len(robots)   ff sums its relaxed plan, so it measures total work rather than
-#                                   a schedule -- 60 for six legs of ten however many robots walk
-#                                   them -- and dividing by the team size does not turn that into a
-#                                   lower bound on the clock. Wrong from 5 goals up: 40.8, 50.0,
-#                                   46.9, 53.0 against optima of 33.5, 30.0, 36.0, 33.0.
-#
-#      earliest arrival per goal    max over outstanding goals of the soonest any robot could get
-#                                   there. Reads like a lower bound, and was exact to 10 goals, but
-#                                   overestimates at 11: 57.5 against an optimum of 38.2. Bounds on
-#                                   a concurrent model need checking well past the size they were
-#                                   derived at.
-#
-# Speed was the reason for the migration, and uniform cost does not deliver it either: 163s at ten
-# goals against 5.1s for best_assignment. So best_assignment stays the production path until there
-# is an admissible heuristic and a cost that reads arrivals rather than dispatches.
+# So best_assignment stays. This module is the reference implementation of the relaxation stated as
+# a planning problem: correct, checkable against the oracle, and the thing to reach for if the
+# assignment search ever becomes the bottleneck rather than the cheap option.

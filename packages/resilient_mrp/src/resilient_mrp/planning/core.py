@@ -45,23 +45,40 @@ class PendingLeg(NamedTuple):
     survival: float
 
 
-# Where each robot is and which goals are done. A robot part-way across an edge has no location at
-# all, since "at" is dropped on departure, so we use the place it is heading for -- and report what
-# that crossing still costs, in pending, keyed by robot. Callers that only need positions can ignore
-# the third element; the leaf estimate has to charge for it.
-def parse_state(state) -> tuple[dict, set, dict]:
-    pos, visited, pending = {}, set(), {}
+# Everything read off a state, in one pass over the fluents.
+#
+# The pass is worth caring about. A leaf evaluation on a 10-node instance costs about 720us, and
+# 700us of that is walking the ~500 fluents -- reading positions and reading open edges separately
+# means doing it twice. The assignment the leaf actually computes is 22us. So anything called per
+# search node should take all of it from here rather than calling the narrower helpers in turn.
+def parse_state_and_paths(state) -> tuple[dict, set, dict, set]:
+    pos, visited, open_edges = {}, set(), set()
     for f in state.fluents:
-        if f.name == "at" and len(f.args) == 2:
-            pos[f.args[0]] = f.args[1]
-        elif f.name == "safely_visited" and len(f.args) == 1:
-            visited.add(f.args[0])
+        name = f.name
+        args = f.args
+        if name == "at" and len(args) == 2:
+            pos[args[0]] = args[1]
+        elif name == "safely_visited" and len(args) == 1:
+            visited.add(args[0])
+        elif name == "path_available" and len(args) == 2:
+            open_edges.add((args[0], args[1]))
+
+    pending = {}
     for resolves_at, eff in state.upcoming_effects:
         for robot, arrives_at, survival in _arrivals(eff):
             if robot in pos:
                 continue
             pos[robot] = arrives_at
             pending[robot] = PendingLeg(arrives_at, max(0.0, resolves_at - state.time), survival)
+    return pos, visited, pending, open_edges
+
+
+# Where each robot is and which goals are done. A robot part-way across an edge has no location at
+# all, since "at" is dropped on departure, so we use the place it is heading for -- and report what
+# that crossing still costs, in pending, keyed by robot. Callers that only need positions can ignore
+# the third element; the leaf estimate has to charge for it.
+def parse_state(state) -> tuple[dict, set, dict]:
+    pos, visited, pending, _open_edges = parse_state_and_paths(state)
     return pos, visited, pending
 
 

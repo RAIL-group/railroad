@@ -5,8 +5,7 @@
 import math
 from collections import OrderedDict
 
-from .core import (ResilientGraph, RobotProfile, parse_available_paths,
-                   parse_state)
+from .core import ResilientGraph, RobotProfile, parse_state_and_paths
 from .baselines import (NO_ROUTE, UNREACHABLE, build_route_table,
                         cautious_weight, optimistic_weight)
 
@@ -56,7 +55,8 @@ class RiskAwareCostToGo:
 
     # our leaf evaluator here
     def estimate(self, state) -> float:
-        positions, visited, pending = parse_state(state)
+        # one pass for all of it: at this call rate the fluent scan dominates everything else
+        positions, visited, pending, open_edges = parse_state_and_paths(state)
         outstanding = [g for g in self.goal_sites if g not in visited]
         if not outstanding:
             return 0.0
@@ -64,7 +64,7 @@ class RiskAwareCostToGo:
         if not positions:
             return self.failure_cost
 
-        fast, safe = self._tables_for(frozenset(parse_available_paths(state)))
+        fast, safe = self._tables_for(frozenset(open_edges))
 
         # One assignment, then both numbers come off it. A goal goes to whoever would finish it
         # soonest counting what they already carry, so two free robots split rather than stack up.

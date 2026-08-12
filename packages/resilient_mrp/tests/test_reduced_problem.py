@@ -52,32 +52,15 @@ def _plan(graph, goals):
     return legs
 
 
+# Makespan-optimal, not merely valid. That holds because astar can now let the clock run when a
+# robot is still crossing, so the goal is stated on arrival and the state clock at the goal is the
+# makespan. Before that the goal had to be stated on dispatch, and a 5-goal ring came back at 50.2
+# against an optimum of 37.4.
+#
 # Sizes kept small deliberately: uniform-cost search over the reduced problem is slow, and past
 # about eight goals it takes seconds rather than milliseconds.
-@pytest.mark.parametrize("n_goals", [2, 3, 4])
+@pytest.mark.parametrize("n_goals", [2, 3, 4, 5, 6])
 def test_reduced_plan_matches_the_exact_assignment(n_goals):
-    goals = [f"g{i}" for i in range(n_goals)]
-    graph = _ring(n_goals)
-
-    reduced = ReducedProblem(graph, goals, TWO_ROBOTS).cost(AT_START, set())
-    policy = OptimisticPolicy(graph, goals, TWO_ROBOTS)
-    oracle = _oracle_makespan(policy, AT_START, policy.assign(AT_START, set()))
-
-    assert reduced == pytest.approx(oracle), (
-        f"{n_goals} goals: reduced plan finishes at {reduced:.3f}, best_assignment at {oracle:.3f}")
-
-
-# The objective is still wrong past four goals, and the reason is structural rather than a tuning
-# problem. astar minimises the state clock; the goal has to be stated on `claimed` rather than
-# `safely_visited` because nothing can advance the clock once the last robot is dispatched; and the
-# claim clock reads the last dispatch, not the last arrival. So what gets minimised is when the
-# team finishes handing out work. See the note at the bottom of reduced.py.
-#
-# Whether that costs anything depends on the instance -- a 6-goal ring happens to come out optimal
-# anyway -- so this pins the 5-goal ring, where it does not.
-@pytest.mark.xfail(strict=True, reason="astar minimises last dispatch, not last arrival")
-@pytest.mark.parametrize("n_goals", [5])
-def test_reduced_plan_is_makespan_optimal(n_goals):
     goals = [f"g{i}" for i in range(n_goals)]
     graph = _ring(n_goals)
 
