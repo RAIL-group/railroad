@@ -36,8 +36,11 @@ Pipeline:
                execution to plan_and_render.py -- for the actual grasp,
                carry, and place.
 
-Output: molmospace_search_house<idx>_<Object>.mp4 (in the working directory)
-        plus, if --save-plot is given, a PNG of the final frame.
+Output: molmospace_search_house<idx>_<Object>.mp4 (in the working directory),
+        plus a second molmospace_search_house<idx>_<Object>_topdown.mp4 shot
+        from a static, straight-down camera framed to keep the whole house
+        in view for the entire run, and, if --save-plot is given, a PNG of
+        the final frame.
 
 Run with: uv run python scripts/molmospace_search.py --seed 8616
           --save-video ./out.mp4 --save-plot ./out.png
@@ -70,7 +73,40 @@ from bridge import (  # pyrefly: ignore [missing-import]
 )
 
 CAMERA_NAME = "exo_camera_1"  # base-mounted, kept pointed at the task object
+TOP_DOWN_CAMERA_NAME = "top_down_camera"  # static, framed to cover the whole house
 FPS = 15  # matches policy_dt_ms ~66ms per task.step()
+
+# Top-down camera framing. An orthographic camera was tried here (every
+# pixel looking straight down, so no perspective spillage past the house's
+# edges) and was abandoned: this renderer bakes the free camera's default
+# viewing distance -- itself derived from mj_model.stat.extent -- into the
+# orthographic frustum size before our custom pos/forward/up ever get
+# applied, so the right "fov" value to pass depends on that per-house,
+# uncontrollable number rather than on anything we compute. Back to a
+# perspective camera, whose framing is plain trigonometry we control end to
+# end.
+#
+# TOP_DOWN_FOV_DEG is the *vertical* FOV (world y, given forward=-z/up=+y in
+# setup_top_down_camera puts world x along the image's horizontal axis and
+# world y along its vertical one); the horizontal FOV is wider by the image's
+# aspect ratio. The house footprint is measured from real wall positions
+# (see setup_top_down_camera), not mj_model.stat.{center,extent}: MolmoSpaces
+# parks internal bookkeeping geometry (receptacle-staging candidates, grasp
+# calibration markers) tens of meters above/away from the actual house,
+# which blows up that whole-model bounding sphere uselessly.
+#
+# TOP_DOWN_EDGE_PAD_M adds a flat world-space buffer to the wall bounding box
+# before framing, and TOP_DOWN_MARGIN then scales the result a bit more.
+# Both are needed for the same underlying reason: near the edge of a wide-FOV
+# frame, the ray looking at that pixel isn't pointing straight down, so a
+# wall's real (x,y) footprint and where it visually appears in frame (it has
+# height, so an oblique ray hits its top edge, offset outward from its
+# footprint) don't quite line up. A pad in meters compensates for that offset
+# directly; the margin is a smaller multiplicative safety factor on top for
+# whatever the pad doesn't quite catch.
+TOP_DOWN_FOV_DEG = 55.0
+TOP_DOWN_EDGE_PAD_M = 1.0
+TOP_DOWN_MARGIN = 1.02
 
 # A fixed, empirically-verified-good (seed, house, object) triple, used as
 # the default so a run is reproducible and reliably completes end to end
@@ -126,6 +162,82 @@ def build_task_sampler(seed: int):
     task_sampler = config.task_sampler_config.task_sampler_class(config)
     task_sampler.reset()
     return config, task_sampler
+
+
+def _hide_ceilings(env) -> None:
+    """Make ceiling geoms fully transparent so the top-down camera actually
+    sees the rooms rather than their roof. housegen/builder.py names every
+    ceiling patch body with the "ceiling" prefix (name_prefix="ceiling"),
+    consistently across houses -- these sit a few meters above the floor
+    (well below our overhead camera) and, left visible, render as a single
+    opaque textured slab that hides all interior detail (confirmed: without
+    this, the top-down video showed nothing but that slab for the entire
+    run). Not restored afterward -- exo_camera_1 is a low, workspace-facing
+    camera that never frames the ceiling anyway, so there's nothing to
+    restore for.
+    """
+    ceiling_geoms = [
+        i for i in range(env.mj_model.ngeom)
+        if (env.mj_model.body(env.mj_model.geom_bodyid[i]).name or "").startswith("ceiling")
+    ]
+    env.mj_model.geom_rgba[ceiling_geoms, 3] = 0.0
+
+
+def setup_top_down_camera(env) -> None:
+    """Register a static, straight-down camera sized to frame the whole
+    house's footprint (see TOP_DOWN_FOV_DEG's comment for why this -- and
+    not mj_model.stat -- is the bounds source). Idempotent: re-registering
+    under the same name just overwrites the previous entry, which matters
+    because task.reset() re-runs camera setup from the task's own
+    CameraSystemConfig and could otherwise leave this camera stale.
+    """
+    from molmo_spaces.env.camera_manager import Camera
+
+    _hide_ceilings(env)
+
+    # housegen/builder.py names every wall segment body "wall_{room_id}_{n}"
+    # (consistently across houses); their positions bound the real house
+    # footprint. An earlier version of this used env.get_thormap()'s
+    # free-space map instead, but that map is *eroded* inward from walls by
+    # its agent_radius (0.35m, so the robot's own body never clips through
+    # them) and the erosion isn't uniform on every side of a non-rectangular
+    # floor plan -- padding it back by a flat guessed margin either clipped
+    # walls on the more-eroded sides or left excess border on the others.
+    # Real wall positions have neither problem.
+    wall_geoms = [
+        i for i in range(env.mj_model.ngeom)
+        if (env.mj_model.body(env.mj_model.geom_bodyid[i]).name or "").startswith("wall_")
+    ]
+    wall_xy = env.current_data.geom_xpos[wall_geoms, :2]
+    xy_min, xy_max = wall_xy.min(axis=0), wall_xy.max(axis=0)
+    center_xy = (xy_min + xy_max) / 2.0
+    dx, dy = (xy_max - xy_min + 2.0 * TOP_DOWN_EDGE_PAD_M).tolist()
+    floor_z = float(env.current_robot.robot_view.base.pose[2, 3])
+
+    half_vfov_rad = np.radians(TOP_DOWN_FOV_DEG) / 2.0
+    aspect = env._renderer.width / env._renderer.height
+    half_hfov_rad = np.arctan(aspect * np.tan(half_vfov_rad))
+    height_for_dy = (dy / 2.0) / np.tan(half_vfov_rad)
+    height_for_dx = (dx / 2.0) / np.tan(half_hfov_rad)
+    height = max(TOP_DOWN_MARGIN * max(height_for_dy, height_for_dx), 3.0)
+
+    camera = Camera(
+        name=TOP_DOWN_CAMERA_NAME,
+        pos=np.array([center_xy[0], center_xy[1], floor_z + height], dtype=np.float32),
+        forward=np.array([0.0, 0.0, -1.0], dtype=np.float32),
+        up=np.array([0.0, 1.0, 0.0], dtype=np.float32),
+        fov=TOP_DOWN_FOV_DEG,
+    )
+    env.camera_manager.registry.add_camera(camera)
+
+
+def render_top_down_frame(env) -> np.ndarray:
+    """Thin alias for render_rgb_frame(TOP_DOWN_CAMERA_NAME), kept as its own
+    function so call sites don't need to change if top-down rendering ever
+    again needs per-call setup (an orthographic mode was tried and reverted
+    here -- see TOP_DOWN_FOV_DEG's comment).
+    """
+    return env.render_rgb_frame(TOP_DOWN_CAMERA_NAME)
 
 
 def room_of(thormap, xyz: np.ndarray) -> Optional[str]:
@@ -273,6 +385,7 @@ class SearchRenderer:
         self.sim_dt = task_env.mj_model.opt.timestep
         self.render_every = max(1, int(round(1.0 / (FPS * self.sim_dt))))
         self.frames: list[np.ndarray] = []
+        self.top_down_frames: list[np.ndarray] = []
         self._step_count = 0
         pose = robot_view.base.pose
         self.xy = pose[:2, 3].copy()
@@ -314,6 +427,7 @@ class SearchRenderer:
         self._step_count += 1
         if self._step_count % self.render_every == 0:
             self.frames.append(self.env.render_rgb_frame(CAMERA_NAME))
+            self.top_down_frames.append(render_top_down_frame(self.env))
 
     def glide_to(self, target_xy: np.ndarray) -> None:
         start_xy = self.xy.copy()
@@ -369,6 +483,8 @@ def main() -> int:
     parser.add_argument("--num-candidates", type=int, default=DEFAULT_NUM_CANDIDATES,
                          help="Number of receptacles (incl. the real one) offered as search sites.")
     parser.add_argument("--save-video", type=str, default=None, help="Output video path (default: auto-named).")
+    parser.add_argument("--save-topdown-video", type=str, default=None,
+                         help="Top-down (whole-house) output video path (default: <save-video>_topdown.mp4).")
     parser.add_argument("--save-plot", type=str, default=None, help="Optional PNG snapshot of the final frame.")
     args = parser.parse_args()
 
@@ -403,6 +519,8 @@ def main() -> int:
             destination = task.config.task_config.place_receptacle_name
             print(f"  [SAMPLE] object={obj!r}  destination={destination!r}")
 
+            setup_top_down_camera(task.env)
+
             om = task.env.object_managers[task.env.current_batch_index]
             fluents, _unplaced = build_initial_fluents_from_scene(om)
             correct_loc = next(
@@ -424,6 +542,8 @@ def main() -> int:
             print(f"  [SEARCH SITES] {candidate_locations}  (real: {correct_loc!r})")
 
             executed = run_search_planning(om, robot_base_xy, obj, candidate_locations, correct_loc)
+            print(executed)
+            raise NotImplementedError
             print("\n  [SEARCH PLAN] railroad MCTSPlanner executed:")
             for i, action_name in enumerate(executed, 1):
                 print(f"    {i}. {action_name}")
@@ -440,12 +560,18 @@ def main() -> int:
             robot_view.base.pose = original_pose
             task.env.step(n_steps=1)
             renderer.frames.append(task.env.render_rgb_frame(CAMERA_NAME))
+            renderer.top_down_frames.append(render_top_down_frame(task.env))
 
             policy = config.policy_config.policy_factory(config, task)
             task.register_policy(policy)
             observation, _info = task.reset()
+            # task.reset() re-runs the task sampler's own camera setup from
+            # its CameraSystemConfig, which doesn't touch our custom entry --
+            # but re-registering here is cheap and removes any doubt.
+            setup_top_down_camera(task.env)
             assert_pickup_pose_matches_sim(observation[0], task.env, obj)
             renderer.frames.append(observation[0][CAMERA_NAME])
+            renderer.top_down_frames.append(render_top_down_frame(task.env))
 
             break
         except reset_failures as e:
@@ -471,6 +597,7 @@ def main() -> int:
 
             observation, _reward, _terminated, _truncated, _infos = task.step(action_cmd)
             renderer.frames.append(observation[0][CAMERA_NAME])
+            renderer.top_down_frames.append(render_top_down_frame(task.env))
 
             if action_cmd.get("success") is False:
                 failure_reason = f"policy signaled failure during phase {phase!r} (max retries exceeded)"
@@ -490,10 +617,19 @@ def main() -> int:
     obj_category = category_from_object_name(obj)
     suffix = "" if failure_reason is None else "_FAILED"
     output_path = args.save_video or f"molmospace_search_house{house_idx}_{obj_category}{suffix}.mp4"
+    root, ext = os.path.splitext(output_path)
+    top_down_output_path = args.save_topdown_video or f"{root}_topdown{ext}"
 
     print(f"\nRendered {len(renderer.frames)} frames. Writing {output_path}...")
     with imageio.get_writer(output_path, fps=FPS, codec="libx264", quality=7, macro_block_size=1) as writer:
         for frame in renderer.frames:
+            writer.append_data(frame)
+
+    print(f"Writing top-down video ({len(renderer.top_down_frames)} frames) to {top_down_output_path}...")
+    with imageio.get_writer(
+        top_down_output_path, fps=FPS, codec="libx264", quality=7, macro_block_size=1
+    ) as writer:
+        for frame in renderer.top_down_frames:
             writer.append_data(frame)
 
     if args.save_plot:
@@ -508,6 +644,7 @@ def main() -> int:
     print(f"Searches before find: {len(executed) - 1}")
     print(f"Destination:     {destination}")
     print(f"Video:           {output_path}")
+    print(f"Top-down video:  {top_down_output_path}")
     print("=" * 60)
 
     if failure_reason is not None:
