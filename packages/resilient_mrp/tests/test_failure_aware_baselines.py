@@ -270,7 +270,6 @@ def test_cautious_pays_makespan_to_concentrate_risk(side_by_side):
 # arrival branch of the pending effect and reports it already standing on its destination. The leaf
 # then charges it no travel and no risk for the edge it is halfway across. Committing r1 to a
 # 100-unit coin-flip drops the estimate from 350 to 1, which is a reward for taking the gamble.
-@pytest.mark.xfail(strict=True, reason="leaf treats an in-flight robot as safely arrived")
 def test_leaf_charges_for_the_edge_a_robot_is_crossing():
     g = ResilientGraph()
     g.add_edge("start", "gA", cost=100.0, terrain_type="t", hazard_severity=0.5)
@@ -291,7 +290,6 @@ def test_leaf_charges_for_the_edge_a_robot_is_crossing():
 # The failure branch of risk_move retracts path_available both ways, so a failure can cut a goal
 # off entirely. Both baselines re-read the open edges in .observe(); the leaf builds its tables
 # once with open_edges=None and never looks again, so it keeps quoting a route through a shut edge.
-@pytest.mark.xfail(strict=True, reason="leaf never rebuilds its route tables as edges close")
 def test_leaf_returns_failure_cost_when_the_goal_is_cut_off():
     g = ResilientGraph()
     g.add_edge("start", "mid", cost=10.0, terrain_type="t", hazard_severity=0.5)
@@ -305,23 +303,32 @@ def test_leaf_returns_failure_cost_when_the_goal_is_cut_off():
         "the only corridor to g is closed, so the mission is already lost")
 
 
-# The leaf hands the outstanding goals out one at a time in goal_sites order and never revisits a
-# choice, so the answer depends on how the goal list happens to be ordered. On two_depots the
-# optimum is 12, which the baselines' uniform-cost search finds; the greedy gets 12 or 31.
-@pytest.mark.xfail(strict=True, reason="greedy hand-out is order-dependent and not optimal")
-def test_leaf_is_independent_of_goal_site_order(two_depots):
+def _two_depot_estimate(two_depots, order):
     profiles = {"r1": {"t": 1.0}, "r2": {"t": 1.0}}
+    leaf = RiskAwareCostToGo(two_depots, order, profiles, C_FAIL)
+    fluents = _fluents(two_depots, profiles, order, start="p1")
+    fluents = (fluents - {F("at r2 p1")}) | {F("at r2 p2")}
+    return leaf(State(0.0, fluents, []))
 
-    def estimate(order):
-        leaf = RiskAwareCostToGo(two_depots, order, profiles, C_FAIL)
-        fluents = _fluents(two_depots, profiles, order, start="p1")
-        fluents = (fluents - {F("at r2 p1")}) | {F("at r2 p2")}
-        return leaf(State(0.0, fluents, []))
 
-    forward, reversed_ = estimate(["gA", "gB"]), estimate(["gB", "gA"])
+# The leaf hands the outstanding goals out one at a time and never revisits a choice, so the order
+# it walks them in used to leak into the answer: 31 one way round, 12 the other. It sorts goal_sites
+# now, which makes the estimate a function of the state rather than of how the caller built the list.
+def test_leaf_is_independent_of_goal_site_order(two_depots):
+    forward = _two_depot_estimate(two_depots, ["gA", "gB"])
+    reversed_ = _two_depot_estimate(two_depots, ["gB", "gA"])
     assert forward == pytest.approx(reversed_), (
         f"reordering goal_sites moved the estimate from {forward:.1f} to {reversed_:.1f}")
-    assert forward == pytest.approx(12.0), "12 is the optimal makespan here"
+
+
+# Deterministic is not the same as right. A greedy hand-out that never reconsiders still misses the
+# split here: r1->gB at 11 with r2->gA at 12 finishes at 12, which best_assignment finds and the
+# greedy does not. Left standing until the leaf is rebuilt on the reduced determinized problem,
+# which plans rather than hands out. It also means the makespan term is not an optimistic bound --
+# 31 overshoots the true optimum -- so the "optimistic relaxation" framing does not hold yet.
+@pytest.mark.xfail(strict=True, reason="greedy hand-out is deterministic but still not optimal")
+def test_leaf_matches_the_optimal_makespan(two_depots):
+    assert _two_depot_estimate(two_depots, ["gA", "gB"]) == pytest.approx(12.0)
 
 
 # --------------------------------------------------- more goals than robots to carry them

@@ -1,7 +1,7 @@
 # The map and the move for a mixed robot team on risky terrain: some robots handle some ground
 # better than others. The older version, where every robot was the same, is in legacy.py.
 
-from typing import Dict, Set
+from typing import Dict, NamedTuple, Set
 from railroad.core import Fluent, Operator, Effect
 
 F = Fluent
@@ -36,20 +36,45 @@ def parse_available_paths(state) -> set:
             if f.name == "path_available" and len(f.args) == 2}
 
 
+# What a robot part-way across an edge still owes: how long until the crossing resolves, and the
+# chance it resolves in its favour. Reading the destination without these two makes the crossing
+# look free, which rewards whoever committed to the longest, riskiest edge.
+class PendingLeg(NamedTuple):
+    arrives_at: str
+    remaining_time: float
+    survival: float
+
+
 # Where each robot is and which goals are done. A robot part-way across an edge has no location at
-# all, since "at" is dropped on departure, so we use the place it is heading for.
-def parse_state(state) -> tuple[dict, set]:
-    pos, visited = {}, set()
+# all, since "at" is dropped on departure, so we use the place it is heading for -- and report what
+# that crossing still costs, in pending, keyed by robot. Callers that only need positions can ignore
+# the third element; the leaf estimate has to charge for it.
+def parse_state(state) -> tuple[dict, set, dict]:
+    pos, visited, pending = {}, set(), {}
     for f in state.fluents:
         if f.name == "at" and len(f.args) == 2:
             pos[f.args[0]] = f.args[1]
         elif f.name == "safely_visited" and len(f.args) == 1:
             visited.add(f.args[0])
-    for _, eff in state.upcoming_effects:
-        for rf in effect_fluents(eff):
-            if not rf.negated and rf.name == "at" and len(rf.args) == 2 and rf.args[0] not in pos:
-                pos[rf.args[0]] = rf.args[1]
-    return pos, visited
+    for resolves_at, eff in state.upcoming_effects:
+        for robot, arrives_at, survival in _arrivals(eff):
+            if robot in pos:
+                continue
+            pos[robot] = arrives_at
+            pending[robot] = PendingLeg(arrives_at, max(0.0, resolves_at - state.time), survival)
+    return pos, visited, pending
+
+
+# The arrival branches of one queued effect: who lands where, and how likely that branch is. A
+# deterministic effect is the same thing at probability 1.
+def _arrivals(eff):
+    branches = ([(b.prob, b.effects) for b in eff.prob_effects]
+                if eff.is_probabilistic else [(1.0, [eff])])
+    for prob, effects in branches:
+        for sub in effects:
+            for rf in effect_fluents(sub):
+                if not rf.negated and rf.name == "at" and len(rf.args) == 2:
+                    yield rf.args[0], rf.args[1], float(prob)
 
 
 # The map: places, and edges carrying a travel cost, a kind of ground, and how dangerous they are.

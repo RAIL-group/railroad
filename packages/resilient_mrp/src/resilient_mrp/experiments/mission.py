@@ -81,7 +81,7 @@ def _route_policy_action(env: SymbolicEnvironment, real_actions: list, goal_site
     # a failure closes the edge it happened on, so re-read the map before routing anything
     route_policy.observe(env.state)
     # operational robots only, so a failed robot drops out and assign() replans with the survivors
-    pos, _ = parse_state(env.state)
+    pos, _, _ = parse_state(env.state)
     positions = {r: u for r, u in pos.items() if F(f"operational {r}") in fluents}
     queues = route_policy.assign(positions, visited)
 
