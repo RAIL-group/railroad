@@ -2,6 +2,7 @@
 # It hands the outstanding goals out once, then reads that one assignment twice: how fast
 # it goes off the optimistic table, how likely it is to survive off the cautious one.
 
+import math
 from collections import OrderedDict
 
 from .core import (ResilientGraph, RobotProfile, parse_available_paths,
@@ -14,6 +15,10 @@ from .baselines import (NO_ROUTE, UNREACHABLE, build_route_table,
 # thousands of times per call to the planner. A handful of sets covers the branching that one
 # search actually explores; past that the least recently used one goes.
 _MAX_CACHED_MAPS = 32
+
+# Above this team size the exact 2^robots enumeration of who survives stops being free. Nothing in
+# these experiments comes close; the fallback exists so a larger team degrades rather than hangs.
+_MAX_EXACT_TEAM = 12
 
 
 class RiskAwareCostToGo:
@@ -63,13 +68,13 @@ class RiskAwareCostToGo:
 
         # One assignment, then both numbers come off it. A goal goes to whoever would finish it
         # soonest counting what they already carry, so two free robots split rather than stack up.
-        # A robot still crossing an edge starts owing the rest of that crossing, and the mission
-        # already owes the chance it does not survive it.
+        # A robot still crossing an edge starts owing the rest of that crossing, and its own odds
+        # already carry the chance it does not survive it.
         where, load = dict(positions), {r: 0.0 for r in positions}
-        survival = 1.0
+        alive = {r: 1.0 for r in positions}
         for robot, leg in pending.items():
             load[robot] = leg.remaining_time
-            survival *= leg.survival
+            alive[robot] *= leg.survival
 
         for goal in outstanding:
             taker, finish_at = None, UNREACHABLE
@@ -80,12 +85,48 @@ class RiskAwareCostToGo:
             if taker is None:
                 return self.failure_cost   # this goal is out of everyone's reach now
             # the robot that took it, priced on its safest route rather than its fastest one
-            survival *= safe[(taker, goal)].get(where[taker], NO_ROUTE).survival
+            alive[taker] *= safe[(taker, goal)].get(where[taker], NO_ROUTE).survival
             load[taker], where[taker] = finish_at, goal
 
-        # relaxation here
-        # load is the optimistic travel, survival the cautious and they combine into one cost.
-        return max(load.values()) + (1.0 - survival) * self.failure_cost
+        # load is the optimistic travel; the odds are the cautious side, and they combine into one
+        # cost. The mission is not lost when a robot is: it is lost when the robots still standing
+        # cannot between them reach everything left, which is what _mission_survival works out.
+        return max(load.values()) + (1.0 - self._mission_survival(alive, positions,
+                                                                  outstanding, safe)) \
+            * self.failure_cost
+
+    # The chance the mission finishes, over every way the team could come apart.
+    #
+    # Multiplying the robots' odds together would answer a different question -- the chance nobody
+    # is lost -- and that is not what failing means here. Losing one robot only loses the mission if
+    # nothing else can reach what it was carrying, and when it dies the survivors get reassigned.
+    # So: enumerate which robots come through, weight each outcome by its probability, and count the
+    # ones where the survivors can still cover every outstanding goal between them.
+    #
+    # That is 2^robots outcomes, which is nothing for the team sizes here; past _MAX_EXACT_TEAM it
+    # falls back to the product, which understates the odds rather than overstating them.
+    def _mission_survival(self, alive: dict, positions: dict, outstanding, safe) -> float:
+        robots = sorted(alive)
+        if len(robots) > _MAX_EXACT_TEAM:
+            return math.prod(alive.values())
+
+        # who could reach what, from where they stand now -- a robot redirected onto someone else's
+        # goal starts from its own position, not from wherever the assignment left it
+        reaches = {robot: {goal for goal in outstanding
+                           if safe[(robot, goal)].get(positions[robot]) is not None}
+                   for robot in robots}
+
+        survived = 0.0
+        for outcome in range(1 << len(robots)):
+            standing = [r for i, r in enumerate(robots) if outcome >> i & 1]
+            chance = 1.0
+            for i, robot in enumerate(robots):
+                chance *= alive[robot] if outcome >> i & 1 else (1.0 - alive[robot])
+            if chance == 0.0:
+                continue
+            if all(any(goal in reaches[r] for r in standing) for goal in outstanding):
+                survived += chance
+        return survived
 
     def __call__(self, state) -> float:
         return self.estimate(state)

@@ -331,6 +331,64 @@ def test_leaf_matches_the_optimal_makespan(two_depots):
     assert _two_depot_estimate(two_depots, ["gA", "gB"]) == pytest.approx(12.0)
 
 
+# A pair of goals both robots can reach from where they stand, on ground that kills half the
+# robots that cross it. Losing one robot does not lose the mission here: the other can be sent to
+# whatever the first was carrying.
+@pytest.fixture
+def both_can_cover() -> ResilientGraph:
+    g = ResilientGraph()
+    g.add_edge("start", "gA", cost=10.0, terrain_type="t", hazard_severity=0.5)
+    g.add_edge("start", "gB", cost=10.0, terrain_type="t", hazard_severity=0.5)
+    g.add_edge("gA", "gB", cost=10.0, terrain_type="t", hazard_severity=0.5)
+    return g
+
+
+# The mission is lost when the robots still standing cannot cover what is left, not when any one
+# robot is lost. With two robots that can each reach both goals, the only outcome that loses the
+# mission is losing both -- so the estimate must be far below the one-robot case, not equal to it.
+def test_leaf_counts_a_survivor_taking_over(both_can_cover):
+    # profile 0.0 on hazard 0.5 makes survival exactly 0.5 per leg
+    profiles = {"r1": {"t": 0.0}, "r2": {"t": 0.0}}
+    goals = ["gA", "gB"]
+
+    alone = RiskAwareCostToGo(both_can_cover, goals, {"r1": profiles["r1"]}, C_FAIL)
+    lone_state = State(0.0, _fluents(both_can_cover, {"r1": profiles["r1"]}, goals), [])
+
+    pair = RiskAwareCostToGo(both_can_cover, goals, profiles, C_FAIL)
+    pair_state = State(0.0, _fluents(both_can_cover, profiles, goals), [])
+
+    assert pair(pair_state) < alone(lone_state) - 50.0, (
+        f"two robots that can each cover both goals estimated at {pair(pair_state):.1f} against "
+        f"{alone(lone_state):.1f} for one; the second robot's cover is not being counted")
+
+
+# The other half of the same claim: with nobody to take over, one robot's odds are the mission's.
+def test_leaf_reports_a_lone_robots_odds_as_the_missions(both_can_cover):
+    profiles = {"r1": {"t": 0.0}}
+    leaf = RiskAwareCostToGo(both_can_cover, ["gA"], profiles, C_FAIL)
+    state = State(0.0, _fluents(both_can_cover, profiles, ["gA"]), [])
+    # one leg at survival 0.5, so half the failure cost plus the 10 units of travel
+    assert leaf(state) == pytest.approx(10.0 + 0.5 * C_FAIL)
+
+
+# A robot that cannot reach a goal cannot cover it, however healthy it is. Here r2 sits behind a
+# closed edge, so it is no insurance at all and the estimate should match r1 working alone.
+def test_leaf_does_not_count_cover_a_robot_cannot_reach(both_can_cover):
+    profiles = {"r1": {"t": 0.0}, "r2": {"t": 0.0}}
+    leaf = RiskAwareCostToGo(both_can_cover, ["gA"], profiles, C_FAIL)
+
+    fluents = _fluents(both_can_cover, profiles, ["gA"])
+    # strand r2 at gB with the only ways out shut
+    fluents = (fluents - {F("at r2 start"),
+                          F("path_available gB gA"), F("path_available gA gB"),
+                          F("path_available gB start"), F("path_available start gB")}
+               ) | {F("at r2 gB")}
+
+    stranded = leaf(State(0.0, fluents, []))
+    assert stranded == pytest.approx(10.0 + 0.5 * C_FAIL), (
+        f"r2 is walled off and cannot cover gA, so the estimate should be r1's alone: {stranded:.1f}")
+
+
 # --------------------------------------------------- more goals than robots to carry them
 
 
