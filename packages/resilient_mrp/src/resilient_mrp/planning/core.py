@@ -83,10 +83,16 @@ class ResilientGraph:
         return {F(f"path_available {fr} {to}") for (fr, to) in self.edges.keys()}
 
 
-# A robot crosses an edge and either arrives, or fails and shuts that edge behind it.
+# A robot crosses an edge and either arrives, or fails.
+#
+# blocks_on_failure decides what the wreck does to the map. True shuts that edge to everyone,
+# which is what the terrain-hazard reading implies: whatever stopped this robot is still there.
+# False leaves it open, so a failure costs the team the robot and nothing else. The two are
+# genuinely different problems rather than a tuning knob, and the paired experiment runs both.
 def create_risk_move_operator(
     graph_instance: ResilientGraph,
     robot_profiles: Dict[str, RobotProfile],
+    blocks_on_failure: bool = True,
 ) -> Operator:
     graph = graph_instance
     profiles = robot_profiles
@@ -110,6 +116,10 @@ def create_risk_move_operator(
 
     def prob_fail(robot: str, from_: str, to_: str) -> float:
         return 1.0 - prob_reached(robot, from_, to_)
+
+    failure_fluents = {~F("free ?robot"), ~F("operational ?robot")}
+    if blocks_on_failure:
+        failure_fluents |= {~F("path_available ?from ?to"), ~F("path_available ?to ?from")}
 
     return Operator(
         name="risk_move",
@@ -145,14 +155,10 @@ def create_risk_move_operator(
                     (
                         (prob_fail, ["?robot", "?from", "?to"]),
                         [
-                            # The robot fails and the edge shuts both ways, right when the crossing
-                            # ends. No cost here: C_fail is charged once in the score.
-                            Effect(time=0, resulting_fluents={
-                                ~F("free ?robot"),
-                                ~F("operational ?robot"),
-                                ~F("path_available ?from ?to"),
-                                ~F("path_available ?to ?from"),
-                            })
+                            # The robot is lost right when the crossing would have ended, and takes
+                            # the edge with it when blocks_on_failure. No cost here: C_fail is
+                            # charged once in the score.
+                            Effect(time=0, resulting_fluents=failure_fluents)
                         ]
                     ),
                 ]
