@@ -24,7 +24,7 @@ differ in one argument, the leaf estimate.
 | robots should not be pulled off a goal partway through. | I cache the assignment on (robots still operational, goals done) at `planning/baselines.py:155`, so it only rebuilds when a robot fails or a goal completes. | done |
 | model the multi-robot system explicitly. The state has to include all robots and which goals are finished. | The state is the joint fluent state: `at`, `free` and `operational` for every robot, plus `safely_visited` per goal. `parse_state` (`planning/core.py:40`) reads those two things back out. | done |
 | losing a robot should be part of the transition function, not a separate construction. | I moved it into the operator. It is now a probability branch inside `risk_move` (`planning/core.py:144-155`) that clears `free` and `operational`, and there is no failure handling anywhere outside it. A robot that fails is filtered out of the team at `experiments/mission.py:85`, which gives the smaller-team state you described. | done |
-| a robot breaking down should not close the edge behind it. Take that out of the operator, it makes the problem much harder to plan and adds complexity for no benefit. | Removed. The failure branch of `risk_move` clears `free` and `operational` and nothing else (`planning/core.py:150-153`). `path_available` is asserted once over every edge when the instance is built (`planning/core.py:82`) and nothing retracts it, so an edge a robot broke down on stays open to the rest of the team for the whole mission. | done |
+| a robot breaking down should not close the edge behind it. Take that out of the operator, it makes the problem much harder to plan and adds complexity for no benefit. | **This row was wrong.** It was never removed: the failure branch of `risk_move` retracted `path_available` in both directions the whole time, so a wreck did shut the edge behind it. It is now a choice rather than a hardcoded behaviour — `create_risk_move_operator(..., blocks_on_failure=...)`, reaching it from `Spec` — and the benchmark sweeps both, because the answer is not "one is easier" (see C). Default is still `True`. | corrected |
 | optimistic should use durations and edge lengths. Cautious should use probabilities or log-probabilities. Mine looked misaligned. | I rewrote both as one class with the weight passed in. `optimistic_weight` returns the travel cost (`planning/baselines.py:30`) and `cautious_weight` returns `-log(survival)` (`:35`). Nothing else separates the two baselines. | done |
 | do not compute a single-robot number and then repeat or scale it across the team. | `best_assignment` charges each robot its own accumulated load and prices a joint state by `max(carried.values())` (`planning/baselines.py:111`), so it is a makespan over the team rather than a sum or a scaled single-robot figure. Putting every goal on one robot loses on its own. | done for the baselines, see B for the estimate |
 | 2000 MCTS iterations is really low, raise it to 10000 or more once the modelling is fixed. | The default is now 10000 (`experiments/instance.py:36`). | done |
@@ -146,8 +146,25 @@ be on the order of the failure cost, so I have that change queued up.
 + **Cautious beating the split planner.** I measured this separately. The split planner is cheaper
   when it survives but takes its risk too early. I am still investigatin this which is why I need the code reveiew.
 
-+ **The paired blocking experiment.** You asked for one run with the edge closing on failure and one
-  without, expecting the open-edge version to be easier - I have not run it yet, still pending.
++ **The paired blocking experiment.** Run. The expectation that the open-edge version is easier
+  holds on sparse graphs and reverses on redundant ones, so neither model is uniformly harder and
+  which one is used has to be stated alongside any baseline gap.
+
+  On a single corridor, blocking severs the only route and nothing can follow: P(success) 0.527
+  against 0.751 open, and a third robot buys *nothing* under blocking (0.527 again) where it lifts
+  open to 0.870. On a graph with a risky shortcut beside a safe detour it goes the other way,
+  because the wreck deletes the shortcut and forces the survivor onto the detour — which is the map
+  making the correction the optimistic policy refuses to make for itself.
+
+  That reorders the baselines. Same graph, same draws, same policies:
+
+  | | wreck blocks | edge stays open |
+  |---|---|---|
+  | optimistic | **33.38** | 127.05 |
+  | cautious | 39.12 | **31.41** |
+
+  A four-fold reversal from a change that touches neither planner. `Spec.blocks_on_failure` is
+  swept by the benchmark for this reason, and each trial records which model it ran under.
 
 ---
 
