@@ -166,6 +166,32 @@ be on the order of the failure cost, so I have that change queued up.
   A four-fold reversal from a change that touches neither planner. `Spec.blocks_on_failure` is
   swept by the benchmark for this reason, and each trial records which model it ran under.
 
+  It is not confined to graphs built to show it. On the benchmark grid itself — `sctp_island`, 10
+  nodes, 2 robots, 2 goals, 30 trials per cell, mean cost at `C_fail` 500:
+
+  | risk | wreck | optimistic | cautious |
+  |---|---|---|---|
+  | 1.0 | blocks | 157.42 | **71.49** |
+  | 1.0 | open | 157.11 | **99.36** |
+  | 2.0 | blocks | 299.23 | **101.01** |
+  | 2.0 | open | 391.85 | **160.78** |
+  | 3.0 | blocks | 389.94 | **187.55** |
+  | 3.0 | open | 422.69 | **133.83** |
+
+  Cautious wins every cell by two to four times. It spends 54-60 makespan against optimistic's
+  28-37, but at these risk scales `C_fail` dwarfs what it spends avoiding failures. At risk 2.0
+  blocking, 101 against 299 is about four standard errors.
+
+  At risk 2.0 both planners are cheaper when wrecks block; at risk 3.0 it splits, with cautious
+  apparently preferring the map left alone. That last one is about one standard error at 30 trials,
+  so it is a reason to run the full grid rather than a result.
+
+  **`failure_aware_ff` and `failure_aware_split` are not in that table.** At 81s and 115s a trial
+  the full grid is around 34 hours single-threaded, so they need the harness with `--parallel`.
+  That run matters more than the baseline half: the leaf now charges for crossings in progress, so
+  committing to a long risky edge no longer collapses its estimate, and the split planner is the
+  one that changes behaviour as a result.
+
 ---
 
 ## D. Running it
