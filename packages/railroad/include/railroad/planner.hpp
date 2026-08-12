@@ -16,6 +16,7 @@
 #include <iostream>
 #include <iomanip>
 #include <optional>
+#include <queue>
 #include <random>
 #include <set>
 #include <sstream>
@@ -82,6 +83,121 @@ get_next_actions(const State &state, const std::vector<Action> &all_actions) {
   }
   if (!non_wait.empty()) return non_wait;
   return result;
+}
+
+// ############## A* ###############
+
+using QueueEntry = std::tuple<double, State>;
+
+// For backtracking. Keyed on the state hash, holding the parent's hash and the action that got
+// here by value -- get_next_actions hands back pointers into the caller's vector, and those are
+// only good for the length of this search. The action is optional because letting the clock run is
+// also a step between states, and it belongs in the chain without appearing in the plan.
+using CameFromMap =
+    std::unordered_map<std::size_t, std::pair<std::size_t, std::optional<Action>>>;
+
+inline std::vector<Action> reconstruct_path(const CameFromMap &came_from,
+                                            std::size_t current) {
+  std::vector<Action> path;
+  auto it = came_from.find(current);
+  while (it != came_from.end()) {
+    if (it->second.second.has_value())
+      path.push_back(*it->second.second);
+    current = it->second.first;
+    it = came_from.find(current);
+  }
+  std::reverse(path.begin(), path.end());
+  return path;
+}
+
+// A* over the concurrent state model. g is the state's own clock, so what this minimises is the
+// makespan of the plan, and a heuristic handed in here has to be in the same units to keep the
+// result optimal.
+inline std::optional<std::vector<Action>>
+astar(const State &start_state, const std::vector<Action> &all_actions,
+      const GoalPtr &goal,
+      HeuristicFn heuristic_fn = nullptr) {
+  std::priority_queue<QueueEntry, std::vector<QueueEntry>, std::greater<>>
+      open_heap;
+  CameFromMap came_from;
+  // cheapest g seen per state, which is what stops a worse route to somewhere we have already been
+  // from being followed at all.
+  std::unordered_map<std::size_t, double> best_g;
+  // states already expanded. The same state reaches the heap by several routes, and without this
+  // every one of those entries gets expanded again; on the reduced multi-robot problem that is the
+  // difference between a search that closes and one that walks the same ground repeatedly.
+  std::unordered_set<std::size_t> visited;
+
+  FFMemory ff_memory;
+  if (!heuristic_fn) {
+    heuristic_fn = [&goal, &all_actions, &ff_memory](const State &s) -> double {
+      return ff_heuristic(s, goal.get(), all_actions, &ff_memory);
+    };
+  }
+
+  best_g[start_state.hash()] = start_state.time();
+  open_heap.emplace(heuristic_fn(start_state), start_state);
+
+  while (!open_heap.empty()) {
+    QueueEntry top = open_heap.top();
+    State current = std::get<1>(top);
+    open_heap.pop();
+
+    if (goal->evaluate(current.fluents())) {
+      return reconstruct_path(came_from, current.hash());
+    }
+
+    // a stale heap entry for a state we have since reached more cheaply
+    auto seen = best_g.find(current.hash());
+    if (seen != best_g.end() && current.time() > seen->second)
+      continue;
+
+    // expanded already, by this or a cheaper route: do not walk it again
+    if (!visited.insert(current.hash()).second)
+      continue;
+
+    auto push_successor = [&](State successor, const Action *via) {
+      double g = successor.time();
+      auto known = best_g.find(successor.hash());
+      if (known != best_g.end() && g >= known->second)
+        return;
+
+      best_g[successor.hash()] = g;
+      came_from[successor.hash()] = std::make_pair(
+          current.hash(), via ? std::optional<Action>(*via) : std::nullopt);
+
+      open_heap.emplace(g + heuristic_fn(successor), std::move(successor));
+    };
+
+    auto next_actions = get_next_actions(current, all_actions);
+    for (const auto action : next_actions) {
+      for (const auto &[successor, prob] : transition(current, action)) {
+        if (prob == 0.0)
+          continue;
+        push_successor(successor, action);
+      }
+    }
+
+    // Nothing applies but something is still in flight: let the clock run to the next scheduled
+    // effect and resolve it, which is what SymbolicEnvironment::act does between decisions.
+    // Without this a state whose last robot is still crossing has no successor at all, so a goal
+    // that only becomes true on arrival is unreachable and the search reports no plan. Jumping the
+    // clock to the due time first is what gets past advance_to_terminal's rule of handing control
+    // back while anyone is free -- here nobody free has anything to do.
+    if (next_actions.empty() && !current.upcoming_effects().empty()) {
+      State waited = current;
+      double due = waited.upcoming_effects().front().first;
+      if (due > waited.time())
+        waited.set_time(due);
+      for (const auto &[successor, prob] : transition(waited, nullptr)) {
+        if (prob == 0.0)
+          continue;
+        push_successor(successor, nullptr);
+      }
+    }
+  }
+
+  return std::nullopt; // no path found
 }
 
 // ############## MCTS ###############

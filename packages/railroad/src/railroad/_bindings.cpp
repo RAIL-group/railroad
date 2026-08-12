@@ -472,6 +472,13 @@ PYBIND11_MODULE(_bindings, m) {
         "Names of all actions that can contribute to the goal under relaxed "
         "reachability (the backward closure following every achiever).");
 
+  m.def("astar", &astar, py::arg("start_state"), py::arg("all_actions"),
+        py::arg("goal"), py::arg("heuristic_fn") = nullptr,
+        "Run A* search and return the action path. g is the state clock, so "
+        "this minimises makespan; a supplied heuristic must be in the same "
+        "units for the result to stay optimal. Returns None when no plan "
+        "reaches the goal.");
+
   // Complex Goal classes
   py::enum_<GoalType>(m, "GoalType")
       .value("LITERAL", GoalType::LITERAL)
