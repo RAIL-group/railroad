@@ -26,6 +26,13 @@ _MAX_EXACT_TEAM = 12
 # bounded. Raise it if the instances grow and the leaf is not the bottleneck.
 _MAX_EXACT_GOALS = 4
 
+# How many evaluated states to remember. The estimate is a pure function of the state, and the
+# search asks about the same state over and over: on one 10000-iteration trial the leaf was called
+# 141739 times for 7713 distinct states, so ~95% of the work was being redone. State has value
+# equality, so it can key the memo directly rather than by hash. Bounded because a long mission
+# keeps finding new states and nothing else would ever drop the old ones.
+_MAX_CACHED_ESTIMATES = 20000
+
 
 # The bounded fallback: hand each goal to whoever would finish it soonest counting what they
 # already carry, and never reconsider. Cheap and order-dependent -- which is exactly why it is not
@@ -55,6 +62,7 @@ class RiskAwareCostToGo:
         self.goal_sites = sorted(goal_sites)
         self.failure_cost = failure_cost
         self._tables: OrderedDict = OrderedDict()
+        self._estimates: OrderedDict = OrderedDict()
 
     # The fastest route to each goal, and separately the one most likely to survive, for one set of
     # open edges. A failure shuts the edge it happened on, so a table built from the whole graph
@@ -79,8 +87,22 @@ class RiskAwareCostToGo:
             self._tables.popitem(last=False)
         return built
 
-    # our leaf evaluator here
+    # our leaf evaluator here. The answer depends on nothing but the state, and the search revisits
+    # states constantly, so the whole thing is memoised -- including the fluent scan, which is most
+    # of what one evaluation costs.
     def estimate(self, state) -> float:
+        remembered = self._estimates.get(state)
+        if remembered is not None:
+            self._estimates.move_to_end(state)
+            return remembered
+
+        value = self._evaluate(state)
+        self._estimates[state] = value
+        if len(self._estimates) > _MAX_CACHED_ESTIMATES:
+            self._estimates.popitem(last=False)
+        return value
+
+    def _evaluate(self, state) -> float:
         # one pass for all of it: at this call rate the fluent scan dominates everything else
         positions, visited, pending, open_edges = parse_state_and_paths(state)
         outstanding = [g for g in self.goal_sites if g not in visited]
