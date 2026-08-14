@@ -91,9 +91,15 @@ space is around the corner. Offices have no goal path and no breadcrumbs.
 ## Integration with railroad
 
 `RailsimScene` mirrors the `ProcTHORScene` data-provider surface (`.grid`,
-`.locations`, `.object_locations`, `.get_top_down_image()`), so railsim worlds
-plug into the unknown-space exploration stack unchanged. `object_locations`
-is empty: railsim scenes are exploration-only.
+`.locations`, `.object_locations`, `.get_top_down_image()`,
+`.get_top_down_view()`), so railsim worlds plug into the unknown-space
+exploration stack unchanged. `object_locations` is empty: railsim scenes are
+exploration-only.
+
+`get_top_down_view()` returns a `TopDownView` — the same image positioned in
+occupancy-grid cells, which is what lets the dashboard draw it underneath a
+trajectory. Note it transposes: `get_top_down_image()` is indexed `[x, y]` like
+the grid, while the plot draws `grid.T`.
 
 `VisualUnknownSpaceEnvironment` subclasses
 `railroad.experimental.unknown_search.UnknownSpaceEnvironment` and hooks

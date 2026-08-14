@@ -373,8 +373,18 @@ class _PlottingMixin:
         occupancy_grid = getattr(self._env, 'occupancy_grid', None)
         if occupancy_grid is not None:
             from railroad.navigation.plotting import plot_grid_background
-            true_grid = getattr(self._env, 'true_grid', None)
-            plot_grid_background(ax, occupancy_grid, true_grid)
+            # A scene image is positioned in grid cells, so it is only drawn
+            # when the plot is in that frame. It goes underneath, and the grid
+            # over it turns translucent -- an opaque obstacle fill would hide
+            # the very thing being drawn under it.
+            photo = self._render_photo_underlay(ax)
+            # The faint true-grid underlay is a stand-in for ground truth in
+            # unknown-space runs. The scene image *is* ground truth, and shown
+            # at once they muddy each other, so the image wins.
+            true_grid = None if photo is not None else getattr(self._env, 'true_grid', None)
+            plot_grid_background(
+                ax, occupancy_grid, true_grid, translucent=photo is not None,
+            )
             # Predicted frontier probabilities (LSP environments): color
             # each frontier's cells by its prob_feasible.
             overlays = getattr(self._env, 'frontier_probability_overlays', None)
@@ -384,6 +394,8 @@ class _PlottingMixin:
                     make_frontier_overlay_rgba(occupancy_grid.shape, overlays),
                     origin="upper", zorder=1,
                 )
+        else:
+            photo = None
 
         if self._goal_time is not None:
             t_end = self._goal_time
@@ -461,6 +473,14 @@ class _PlottingMixin:
         if occupancy_grid is None:
             ax.autoscale()
             ax.set_aspect("equal", adjustable="datalim")
+        else:
+            # Last, so everything plotted above is inside the frame: pinning
+            # the limits turns autoscale off, and a caller's coordinates need
+            # not all fall within the grid.
+            self._set_grid_limits(
+                ax, occupancy_grid, photo,
+                points=None if trail is None else trail[0],
+            )
 
         ax.set_title(f"Entity Trajectories  (cost = {t_end:.1f})",
                      fontfamily="monospace", fontsize=10)
@@ -513,24 +533,105 @@ class _PlottingMixin:
 
         return result
 
-    def _render_overhead(self: PlannerDashboard, ax: Any) -> bool:
-        """Render ProcTHOR top-down image on the given axes if available.
+    def _render_photo_underlay(self: PlannerDashboard, ax: Any) -> Any | None:
+        """Draw the scene's aligned top-down image as the bottom layer of *ax*.
 
-        Args:
-            ax: Matplotlib axes to draw on.
-
-        Returns:
-            True if an overhead image was rendered, False otherwise.
+        Returns the ``AxesImage``, or ``None`` when the scene cannot place an
+        image on the occupancy grid -- no ProcTHOR/railsim scene, or a ProcTHOR
+        cache predating the recorded camera extent. A scene offering only the
+        older, unpositioned ``get_top_down_image`` deliberately gets nothing:
+        an image that cannot be located can only be drawn misaligned.
         """
         scene = getattr(self._env, "scene", None)
-        get_top_down = getattr(scene, "get_top_down_image", None)
-        if get_top_down is None:
-            return False
-        top_down_image = get_top_down(orthographic=True)
-        ax.imshow(top_down_image)
-        ax.axis("off")
-        ax.set_title("Top-down View", fontsize=8)
-        return True
+        get_view = getattr(scene, "get_top_down_view", None)
+        if get_view is None:
+            return None
+        view = get_view()
+        if view is None:
+            return None
+        # zorder -1 sits below the grid (0) without disturbing the frontier
+        # overlay (1), location markers (4) or the trail (5).
+        return ax.imshow(
+            view.image, origin="upper", extent=view.extent, zorder=-1,
+        )
+
+    @staticmethod
+    def _image_content_extent(artist: Any) -> tuple[float, float, float, float]:
+        """The data-space box of an image's non-background pixels.
+
+        ProcTHOR renders its overhead view through a square orthographic camera
+        onto a white skybox, so a house that is not square arrives padded with
+        blank margin -- often a third of the frame. Framing on the padding
+        shrinks the map for nothing.
+
+        Only the *framing* uses this; the image is still drawn at its true
+        extent, so a misfire here can crop the view slightly but can never
+        misplace anything. Images with no blank border (railsim's, which is one
+        pixel per cell) return their full extent unchanged.
+        """
+        import numpy as np
+
+        left, right, bottom, top = artist.get_extent()
+        data = np.asarray(artist.get_array())
+        if data.ndim != 3 or data.shape[2] < 3:
+            return left, right, bottom, top
+        rgb = data[:, :, :3]
+        white = 250 if np.issubdtype(rgb.dtype, np.integer) else 250 / 255
+        content = np.any(rgb < white, axis=2)
+        rows = np.flatnonzero(np.any(content, axis=1))
+        cols = np.flatnonzero(np.any(content, axis=0))
+        if rows.size == 0 or cols.size == 0:
+            return left, right, bottom, top
+
+        height, width = content.shape
+        # Pixel index -> data coordinate, over the image's own extent. Row 0
+        # sits at `top`, matching the origin="upper" it was drawn with.
+        def _lerp(lo, hi, index, count):
+            return lo + (hi - lo) * (index / count)
+
+        return (
+            _lerp(left, right, cols[0], width),
+            _lerp(left, right, cols[-1] + 1, width),
+            _lerp(top, bottom, rows[-1] + 1, height),
+            _lerp(top, bottom, rows[0], height),
+        )
+
+    def _set_grid_limits(
+        self: PlannerDashboard, ax: Any, occupancy_grid: Any, photo: Any | None,
+        points: Any = None,
+    ) -> None:
+        """Frame the occupancy grid, widened to include an image and *points*.
+
+        Set explicitly rather than left to autoscale: two images whose extents
+        run in opposite directions is exactly where autoscale surprises live,
+        and framing on an image's blank margin wastes most of the panel.
+
+        Widened to the image, because the grid spans only the agent-reachable
+        bbox -- it stops a collision radius short of every wall, and in scenes
+        with a room the agent cannot enter it misses that room entirely.
+
+        Widened to *points* (the plotted trajectory and location markers)
+        because pinning the limits turns autoscale off. Without this, anything
+        a caller plots outside the grid -- location coordinates that do not all
+        fall inside it, say -- would be silently cropped, where before it
+        simply expanded the view.
+        """
+        import numpy as np
+
+        n_x, n_y = occupancy_grid.shape
+        left, right, bottom, top = -0.5, n_x - 0.5, n_y - 0.5, -0.5
+        if photo is not None:
+            p_left, p_right, p_bottom, p_top = self._image_content_extent(photo)
+            left, right = min(left, p_left), max(right, p_right)
+            top, bottom = min(top, p_top), max(bottom, p_bottom)
+        if points is not None:
+            xy = np.asarray(points, dtype=float).reshape(-1, 2)
+            if xy.size:
+                left, right = min(left, xy[:, 0].min()), max(right, xy[:, 0].max())
+                top, bottom = min(top, xy[:, 1].min()), max(bottom, xy[:, 1].max())
+        ax.set_xlim(left, right)
+        ax.set_ylim(bottom, top)  # bottom > top: y increases downward
+        ax.set_aspect("equal", adjustable="box")
 
     def _render_sidebar(
         self: PlannerDashboard,
@@ -695,7 +796,7 @@ class _PlottingMixin:
         location_coords: dict[str, tuple[float, float]] | None = None,
         onboard_robots: list[str] | None = None,
     ) -> tuple[Any, Any, Any, Any, Any, float, dict[str, Any]] | None:
-        """Create a GridSpec figure with main + sidebar + optional overhead axes.
+        """Create a GridSpec figure with main + sidebar axes.
 
         When ``onboard_robots`` is given, a bottom row is added with one axes
         per robot for onboard camera imagery.
@@ -721,57 +822,31 @@ class _PlottingMixin:
         if t_end <= 0.0:
             return None
 
-        has_overhead = getattr(getattr(self._env, "scene", None), "get_top_down_image", None) is not None
         n_onboard = len(onboard_robots) if onboard_robots else 0
 
+        # The scene's top-down image is drawn into the main axes underneath the
+        # trajectory (see _render_photo_underlay), so there is no longer a
+        # separate overhead column. Onboard images go in a bottom row.
         fig = plt.figure(figsize=figsize)
         onboard_spec = None
-        onboard_stacked = False
-        if has_overhead:
-            if n_onboard:
-                # Onboard images stack in the left column, under the
-                # top-down view; main plot and sidebar span both rows.
-                gs = GridSpec(2, 3, width_ratios=[1, 2, 1],
-                             height_ratios=[3, n_onboard], figure=fig,
-                             wspace=0.1, left=0.03, right=0.97, top=0.95, bottom=0.05)
-                overhead_ax = fig.add_subplot(gs[0, 0])
-                main_ax = fig.add_subplot(gs[:, 1])
-                sidebar_ax = fig.add_subplot(gs[:, 2])
-                onboard_spec = gs[1, 0]
-                onboard_stacked = True
-            else:
-                gs = GridSpec(1, 3, width_ratios=[1, 2, 1], figure=fig,
-                             wspace=0.1, left=0.03, right=0.97, top=0.95, bottom=0.05)
-                overhead_ax = fig.add_subplot(gs[0, 0])
-                main_ax = fig.add_subplot(gs[0, 1])
-                sidebar_ax = fig.add_subplot(gs[0, 2])
-            self._render_overhead(overhead_ax)
-        else:
-            # No top-down view: onboard images go in a bottom row instead.
-            n_rows = 2 if n_onboard else 1
-            height_ratios = [3, 1] if n_onboard else None
-            gs = GridSpec(n_rows, 2, width_ratios=[3, 1], height_ratios=height_ratios,
-                         figure=fig,
-                         wspace=0.1, left=0.05, right=0.97, top=0.95, bottom=0.05)
-            main_ax = fig.add_subplot(gs[0, 0])
-            sidebar_ax = fig.add_subplot(gs[0, 1])
-            if n_onboard:
-                onboard_spec = gs[1, :]
+        n_rows = 2 if n_onboard else 1
+        height_ratios = [3, 1] if n_onboard else None
+        gs = GridSpec(n_rows, 2, width_ratios=[3, 1], height_ratios=height_ratios,
+                     figure=fig,
+                     wspace=0.1, left=0.05, right=0.97, top=0.95, bottom=0.05)
+        main_ax = fig.add_subplot(gs[0, 0])
+        sidebar_ax = fig.add_subplot(gs[0, 1])
+        if n_onboard:
+            onboard_spec = gs[1, :]
         sidebar_ax.set_axis_off()
 
         onboard_axes: dict[str, Any] = {}
         if onboard_robots and onboard_spec is not None:
-            if onboard_stacked:
-                onboard_gs = GridSpecFromSubplotSpec(
-                    n_onboard, 1, subplot_spec=onboard_spec, hspace=0.25,
-                )
-            else:
-                onboard_gs = GridSpecFromSubplotSpec(
-                    1, n_onboard, subplot_spec=onboard_spec, wspace=0.05,
-                )
+            onboard_gs = GridSpecFromSubplotSpec(
+                1, n_onboard, subplot_spec=onboard_spec, wspace=0.05,
+            )
             for i, robot in enumerate(onboard_robots):
-                index = (i, 0) if onboard_stacked else (0, i)
-                onboard_ax = fig.add_subplot(onboard_gs[index])
+                onboard_ax = fig.add_subplot(onboard_gs[0, i])
                 onboard_ax.set_axis_off()
                 onboard_axes[robot] = onboard_ax
 
@@ -857,16 +932,46 @@ class _PlottingMixin:
             onboard_frame_idx[robot] = 0
 
         # Animated navigation grid background
-        from railroad.navigation.plotting import make_plotting_grid, make_plotting_grid_rgba, _BACKGROUND_GRAY
+        from railroad.navigation.plotting import (
+            PHOTO_UNDERLAY_ALPHA, _BACKGROUND_GRAY, make_plotting_grid,
+            make_plotting_grid_alpha, make_plotting_grid_rgba,
+        )
 
         nav_grid_artist = None
         nav_grid_frames: list[tuple[float, Any]] = []
         occupancy_grid = getattr(self._env, 'occupancy_grid', None)
         _nav_has_true_underlay = False
+        photo_artist = None
         if occupancy_grid is not None:
-            true_grid = getattr(self._env, "true_grid", None)
+            # A scene image is positioned in grid cells, so it can only be
+            # placed when the plot is in that frame -- without a grid the
+            # trajectory is drawn in whatever space location_coords uses.
+            #
+            # Drawn once beneath the animated grid, and deliberately left out of
+            # the layered/hot artist sets below: the plain canvas.draw() in
+            # _draw_chrome then bakes it into the cached chrome region, so it
+            # costs nothing per frame and returns with every restore_region().
+            photo_artist = self._render_photo_underlay(ax)
+            # As in plot_trajectories: the scene image is ground truth, so the
+            # faint true-grid stand-in steps aside when one is present.
+            true_grid = (
+                None if photo_artist is not None
+                else getattr(self._env, "true_grid", None)
+            )
             has_unknown = bool(np.any(occupancy_grid == -1.0))
             _nav_has_true_underlay = true_grid is not None and has_unknown
+
+            def _with_photo_alpha(rgb: np.ndarray, obs_grid: np.ndarray) -> np.ndarray:
+                """Attach a per-class alpha so the scene image shows through.
+
+                Returned unconditionally as RGBA when an image is present, so
+                the channel count is fixed for the whole video and ``set_data``
+                stays happy.
+                """
+                if photo_artist is None:
+                    return rgb
+                alpha = make_plotting_grid_alpha(obs_grid.T, **PHOTO_UNDERLAY_ALPHA)
+                return np.dstack([rgb, alpha])
 
             if _nav_has_true_underlay:
                 assert true_grid is not None
@@ -878,10 +983,11 @@ class _PlottingMixin:
                 def _composite_frame(obs_grid: np.ndarray) -> np.ndarray:
                     obs_rgba = make_plotting_grid_rgba(obs_grid.T)
                     obs_alpha = obs_rgba[:, :, 3:4]
-                    return underlay * (1 - obs_alpha) + obs_rgba[:, :, :3] * obs_alpha
+                    rgb = underlay * (1 - obs_alpha) + obs_rgba[:, :, :3] * obs_alpha
+                    return _with_photo_alpha(rgb, obs_grid)
             else:
                 def _composite_frame(obs_grid: np.ndarray) -> np.ndarray:
-                    return make_plotting_grid(obs_grid.T)
+                    return _with_photo_alpha(make_plotting_grid(obs_grid.T), obs_grid)
 
             if self._nav_grid_snapshots:
                 nav_grid_frames = [
@@ -909,13 +1015,6 @@ class _PlottingMixin:
                 frontier_overlay_frames[0][1], origin="upper", zorder=1,
             )
 
-        n_frames = int(fps * duration)
-        animation_times = np.linspace(0.0, t_end, n_frames)
-        # Prepend the final time as frame 0 so the video thumbnail/poster
-        # shows the completed plan rather than the empty initial state.
-        frame_times = np.concatenate(([t_end], animation_times))
-        n_frames += 1
-
         # Pre-compute trail arrays (dense scatter data for all robots)
         trail = self._compute_trail_arrays(trajectories, t_end)
         if trail is not None:
@@ -925,6 +1024,21 @@ class _PlottingMixin:
             combined_sizes = np.empty(0)
             combined_colors = np.empty((0, 4))
             combined_times = np.empty(0)
+
+        if occupancy_grid is not None:
+            # Before label_offset below, which reads ax.get_ylim(). The trail is
+            # computed above so the frame can include a path that leaves the
+            # grid: pinning the limits turns autoscale off.
+            self._set_grid_limits(
+                ax, occupancy_grid, photo_artist, points=combined_xy,
+            )
+
+        n_frames = int(fps * duration)
+        animation_times = np.linspace(0.0, t_end, n_frames)
+        # Prepend the final time as frame 0 so the video thumbnail/poster
+        # shows the completed plan rather than the empty initial state.
+        frame_times = np.concatenate(([t_end], animation_times))
+        n_frames += 1
 
         # Derive entity names from trajectories (robots with >= 2 waypoints)
         entity_names = sorted(

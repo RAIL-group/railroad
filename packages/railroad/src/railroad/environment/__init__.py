@@ -23,7 +23,7 @@ Unknown-space frontier search lives in railroad.experimental.unknown_search.
 
 from .environment import ActiveSkill, Environment
 from .skill import InterruptibleNavigationMoveSkill, MotionSkill, NavigationMoveSkill
-from .types import Pose, PoseLike
+from .types import Pose, PoseLike, TopDownView
 from .symbolic import (
     LocationRegistry,
     SymbolicEnvironment,
@@ -44,4 +44,5 @@ __all__ = [
     "PoseLike",
     "SymbolicEnvironment",
     "SymbolicSkill",
+    "TopDownView",
 ]

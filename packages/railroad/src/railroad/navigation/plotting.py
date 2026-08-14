@@ -32,6 +32,48 @@ def make_plotting_grid(grid_map: np.ndarray) -> np.ndarray:
     return grid
 
 
+PHOTO_UNDERLAY_ALPHA = {
+    "free": 0.15, "boundary": 1.0, "obstacle": 0.15, "unknown": 0.95,
+}
+"""Per-class opacity when an aligned scene image is drawn underneath.
+
+Obstacle *outlines* stay opaque so the map still reads as a map, but obstacle
+*interiors* go nearly transparent -- that is where the scene image earns its
+place, and in ProcTHOR every cell that is not an agent-reachable position is
+"occupied", so an opaque interior would blot out the entire house.
+
+Unobserved cells stay nearly opaque. In an exploration run the observed /
+unobserved boundary is the most important thing on the plot, and letting the
+image bleed through the unobserved side blurs exactly that line -- it also
+shows the robot something it has not seen. Free space takes only a light wash,
+enough to lift the floor under a trail without hiding what is on it.
+"""
+
+
+def make_plotting_grid_alpha(
+    grid_map: np.ndarray, *,
+    free: float, boundary: float, obstacle: float, unknown: float,
+) -> np.ndarray:
+    """Per-cell opacity mask matching ``make_plotting_grid``'s classes.
+
+    Classifies exactly as ``make_plotting_grid`` does, so the two cannot drift
+    apart, but splits its single gray fill into *obstacle* interiors and
+    *unknown* (unobserved or outside-the-map) cells -- they render alike, yet
+    want opposite treatment over a scene image. Returns an (H, W) float array
+    for ``imshow(alpha=...)``.
+    """
+    collision = grid_map >= 0.5
+    thinned = erosion(collision, footprint=np.ones((3, 3)))
+    is_boundary = np.logical_xor(collision, thinned)
+    is_free = np.logical_and(grid_map < 0.5, grid_map >= FREE_VAL)
+
+    alpha = np.full(grid_map.shape, unknown, dtype=float)
+    alpha[collision] = obstacle
+    alpha[is_free] = free
+    alpha[is_boundary] = boundary
+    return alpha
+
+
 def make_plotting_grid_rgba(grid_map: np.ndarray) -> np.ndarray:
     """Convert occupancy grid to RGBA plotting grid.
 
@@ -82,7 +124,9 @@ def plot_grid_background(
     ax: Any,
     observed_grid: np.ndarray,
     true_grid: np.ndarray | None = None,
-) -> None:
+    *,
+    translucent: bool = False,
+) -> Any:
     """Render occupancy grid background with optional faded true-grid underlay.
 
     If *true_grid* is provided and *observed_grid* contains unobserved cells,
@@ -92,7 +136,17 @@ def plot_grid_background(
 
     Both paths transpose the grid (``grid.T``) before rendering, matching the
     existing ``plot_grid`` convention.
+
+    Set *translucent* when an aligned scene image sits at a lower zorder, to
+    let it show through per cell class (see ``PHOTO_UNDERLAY_ALPHA``). The
+    default renders fully opaque, exactly as before.
+
+    Returns the ``AxesImage`` that was drawn.
     """
+    alpha = None
+    if translucent:
+        alpha = make_plotting_grid_alpha(observed_grid.T, **PHOTO_UNDERLAY_ALPHA)
+
     has_unknown = bool(np.any(observed_grid == UNOBSERVED_VAL))
     if true_grid is not None and has_unknown:
         # Composite in numpy so the true-grid underlay blends against the
@@ -109,9 +163,10 @@ def plot_grid_background(
         obs_alpha = observed_rgba[:, :, 3:4]
         composite = composite * (1 - obs_alpha) + observed_rgba[:, :, :3] * obs_alpha
 
-        ax.imshow(composite, origin="upper", zorder=0)
-    else:
-        ax.imshow(make_plotting_grid(observed_grid.T), origin="upper", zorder=0)
+        return ax.imshow(composite, origin="upper", zorder=0, alpha=alpha)
+    return ax.imshow(
+        make_plotting_grid(observed_grid.T), origin="upper", zorder=0, alpha=alpha,
+    )
 
 
 def plot_grid(ax: Any, grid: np.ndarray) -> None:

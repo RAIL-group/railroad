@@ -1,9 +1,12 @@
 """ProcTHOR scene data provider."""
 
+from __future__ import annotations
+
 from typing import Callable, Dict, Set, Tuple
 
 import numpy as np
 
+from railroad.environment.types import TopDownView
 from .thor_interface import ThorInterface
 
 
@@ -137,3 +140,7 @@ class ProcTHORScene:
     def get_top_down_image(self, orthographic: bool = True) -> np.ndarray:
         """Get top-down view image of the scene."""
         return self._thor.get_top_down_image(orthographic=orthographic)
+
+    def get_top_down_view(self) -> TopDownView | None:
+        """Top-down image aligned to :attr:`grid`, or ``None`` if unavailable."""
+        return self._thor.get_top_down_view()
