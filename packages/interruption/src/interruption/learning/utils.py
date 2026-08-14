@@ -69,7 +69,7 @@ def compute_edge_features(
         dest_indices.append(dest_idx)
 
     # scale distances
-    # TODO - ask why 600?, is it the max distance across all considered scenes?
+    # 600 because engineering things
     scaled_edge_costs = 1 - np.expand_dims(edge_costs, axis=1) / 600
 
     # graph should be undirected, account for edges in the reversed direction as well

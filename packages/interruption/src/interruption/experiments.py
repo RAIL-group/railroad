@@ -24,13 +24,14 @@ from railroad.dashboard import PlannerDashboard
 from railroad.dashboard._protocols import DashboardPlanner
 from railroad.environment import SymbolicEnvironment
 from railroad.environment.procthor.environment import ProcTHOREnvironment
+from railroad.environment.procthor.scenegraph import SceneGraph
 
 from .dashboard_adapters import AstarDashboardPlanner
 from .environments import construct_procthor_kitchen_environment, KitchenProcTHOREnvironment
 from .learning.models.gcn import AnticipateGCN
 from .learning.utils import get_torch_device
 from .planner import astar_search, PlannerConfig, InterruptionSearchProblem
-from .planning_frameworks import get_no_int_prob, get_no_int_discount
+from .planning_framework import get_no_int_prob, get_no_int_discount, anticipatory_planner
 from .utilities import (
     TaskArrivalProb,
     get_action_cost,
@@ -130,7 +131,7 @@ def run_experiment(
 
     start_time = time.perf_counter()
 
-    event_trace, _ = _get_task_sequence_event_trace(experiment_data, config)
+    event_trace, _ = _get_task_sequence_event_trace(experiment_data, config, experiment_mode)
 
     # setup for deterministic replay for dashboard
     dash_env = construct_procthor_kitchen_environment(
@@ -155,7 +156,8 @@ def run_experiment(
 # helper functions
 def _get_task_sequence_event_trace(
     data: ExperimentData,
-    config: ExperimentConfig
+    config: ExperimentConfig,
+    experiment_mode: ExperimentMode
 ) -> tuple[list[str], list[Goal]]:
     """
     Searchs for a plan and executes the plan in the environment for the specificed n length
@@ -166,18 +168,27 @@ def _get_task_sequence_event_trace(
     task_arrival_sequence = [config.goal]
 
     for i in range(config.num_task_sequence - 1):
-        # the initial state is a tuple of the actually environment's state and its associated
-        # scene_graph if an interruption_value_fn was specified
-        initial_state = (
-            convert_state_to_positive_preconditions(data.env.state, data.neg_to_pos_mapping),
-            None if data.planner_parameters.interruption_value_fn is None
-            else data.env.scene.scene_graph
+        initial_state = convert_state_to_positive_preconditions(
+            data.env.state, data.neg_to_pos_mapping
         )
-        plan, _, _ = astar_search(
-            initial_state,
-            data.search_problem,
-            data.planner_parameters
-        )
+        if experiment_mode == ExperimentMode.ANTICIPATORY_PLANNING:
+            plan, _, _ = anticipatory_planner(
+                (initial_state, data.env.scene.scene_graph),
+                data.search_problem,
+                data.planner_parameters,
+                data.env.scene,
+                data.neg_to_pos_mapping
+            )
+        else:
+            plan, _, _, _ = astar_search(
+                (
+                    initial_state,
+                    None if experiment_mode == ExperimentMode.MYOPIC
+                    else data.env.scene.scene_graph
+                ),
+                data.search_problem,
+                data.planner_parameters
+            )
 
         _execution_loop(plan, data, event_trace)
 
@@ -196,7 +207,7 @@ def _get_task_sequence_event_trace(
         None if data.planner_parameters.interruption_value_fn is None
         else data.env.scene.scene_graph
     )
-    plan, _, _ = astar_search(
+    plan, _, _, _ = astar_search(
         initial_state,
         data.search_problem,
         _get_planner_config(
@@ -315,7 +326,11 @@ def _get_planner_config(
     if planner_mode in [ExperimentMode.MYOPIC, ExperimentMode.ANTICIPATORY_PLANNING]:
         discount_fn=get_no_int_discount
         planner_interruption_prob_fn=None
-        interruption_value_fn=None
+        interruption_value_fn=(
+            None
+            if planner_mode == ExperimentMode.MYOPIC
+            else AnticipateGCN.get_net_eval_fn(config.ev_model_path, get_torch_device())
+        )
         current_task_reward=0
     else: # ExperimentMode.INTERRUPTION
         discount_fn=get_no_int_prob

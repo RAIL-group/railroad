@@ -8,10 +8,6 @@ from interruption.learning.utils import prepare_gcn_input, split_dataset, conver
 from interruption.learning.models.gcn import AnticipateGCN
 from railroad.environment.procthor.resources import get_procthor_10k_dir, DEFAULT_RESOURCES_BASE
 
-# setting of environment variables
-# TODO - is this needed?
-# os.environ["TOKENIZERS_PARALLELISM"] = "true"
-
 # dataset specifications
 TRAIN_DATASET_PATH = get_procthor_10k_dir() / "procthor_data_201.csv"
 TEST_DATASET_PATH = None
@@ -69,9 +65,6 @@ def main() -> None:
         step_size=decay_step_size,
         gamma=HYPERPARAMETERS["lr_decay_factor"]
     )
-
-    # TODO - what is an anomaly when it comes to gradients?
-    # torch.autograd.set_detect_anomaly(False)
 
     training_loop(model, device, optimizer, scheduler, (train_loader, test_loader), writer)
 

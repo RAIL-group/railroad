@@ -11,7 +11,7 @@ from interruption.planner import (
     check_value_cache,
     compute_interruption_value,
 )
-from interruption.planning_frameworks import get_no_int_prob
+from interruption.planning_framework import get_no_int_prob
 from interruption.utilities import (
     RandomVariableType,
     get_next_state,
@@ -264,7 +264,7 @@ def test_astart_search_nointdist(heuristic_fn):
     search_problem = InterruptionSearchProblem(goal, move_actions)
     planner_params = PlannerConfig(get_no_int_prob, heuristic_fn, 0.1)
 
-    plan, plan_cost, success = astar_search(
+    plan, plan_cost, success, _ = astar_search(
         (initial_state, None),
         search_problem,
         planner_params
@@ -307,7 +307,7 @@ def test_astart_search_nointdist(heuristic_fn):
     search_problem = InterruptionSearchProblem(goal, all_actions)
     planner_params = PlannerConfig(get_no_int_prob, heuristic_fn, 0.1)
 
-    plan, plan_cost, success = astar_search(
+    plan, plan_cost, success, _ = astar_search(
         (initial_state, None),
         search_problem,
         planner_params
@@ -431,7 +431,7 @@ def test_optimal_make_sandwhich_noint(heuristic_fn, interruption_prob_fn):
     search_problem = InterruptionSearchProblem(goal, actions)
     planner_params = PlannerConfig(get_no_int_prob, heuristic_fn, interruption_prob_fn)
 
-    plan, cost, success = astar_search(
+    plan, cost, success, _ = astar_search(
         (initial_state, None),
         search_problem,
         planner_params

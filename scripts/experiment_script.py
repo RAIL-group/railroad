@@ -40,7 +40,7 @@ def main():
         num_task_sequence=2
     )
 
-    run_experiment(config, ExperimentMode.INTERRUPTION, show_plot=True)
+    run_experiment(config, ExperimentMode.ANTICIPATORY_PLANNING, show_plot=True)
 
 if __name__ == "__main__":
     main()

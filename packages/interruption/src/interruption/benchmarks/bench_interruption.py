@@ -125,3 +125,6 @@ def bench_myopic_interruption_kitchen(case: BenchmarkCase):
     return run_experiment(config, ExperimentMode.MYOPIC, True)
 
 bench_myopic_interruption_kitchen.add_cases(_get_cases())
+
+
+# TODO - add bench mark for anticipatory planner

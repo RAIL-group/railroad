@@ -73,9 +73,11 @@ class InterruptionTrajectory:
         # compute accumulated cost (g(traj))
         interrupting_task_ev = 0
         scene_graph = None
-        if planner_params.interruption_value_fn is not None and self.scene_graph is not None:
+        if self.scene_graph is not None:
             scene_graph = self.scene_graph.copy()
             get_updated_scene_graph(scene_graph, next_state, action)
+        if planner_params.interruption_value_fn is not None:
+            assert scene_graph is not None
             interrupting_task_ev = planner_params.interruption_value_fn(scene_graph)
 
         accumulated_cost = self.cost + get_reward(
@@ -156,7 +158,7 @@ def astar_search(
     search_params: PlannerConfig,
     num_steps: int = 20000,
     print_trace: bool = False
-) -> tuple[list[Action], float, bool]:
+) -> tuple[list[Action], float, bool, SceneGraph | None]:
     """
     Astar algorithm implementation.
     """
@@ -197,7 +199,7 @@ def astar_search(
 
             # check for goal condition being met
             if interruption_problem.goal.evaluate(curr_state.fluents):
-                return expand.plan, expand.cost, True
+                return expand.plan, expand.cost, True, expand.scene_graph
 
             # check if we've already expanded this state
             if curr_state.fluents in expanded:
@@ -236,7 +238,7 @@ def astar_search(
 
     # goal not reached, get best trajectory found
     best_found, _, _ = heapq.heappop(frontier)
-    return best_found.plan, best_found.cost, False
+    return best_found.plan, best_found.cost, False, best_found.scene_graph
 
 
 def compute_interruption_value(
@@ -264,7 +266,7 @@ def compute_interruption_value(
             task,
             actions
         )
-        plan, cost, success = astar_search(
+        plan, cost, success, _ = astar_search(
             (state, None),
             search_problem,
             search_params

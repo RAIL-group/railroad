@@ -139,7 +139,7 @@ def _generate_worker_share(
                 data.env.state, data.neg_to_pos_mapping
             )
 
-            plan, _, success = astar_search(
+            plan, _, success, _ = astar_search(
                 (initial_state, None),
                 data.search_problem,
                 data.planner_parameters
