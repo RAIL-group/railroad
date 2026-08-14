@@ -50,17 +50,18 @@ Provides abstractions for planning execution:
   - `protocols.py`: `MotionSkill` protocol, `SupportsMovePathEnvironment` contract
   - `navigation.py`: `NavigationMoveSkill` (path-following with occupancy-grid pathing), `InterruptibleNavigationMoveSkill` (interruptible variant)
 
-- **`types.py`**: Shared types (`Pose`, `PoseLike` protocol)
+- **`types.py`**: Shared types (`Pose`, `PoseLike` protocol, `TopDownView`)
 
 - **`procthor/`**: ProcTHOR simulator interface (optional dependency)
   - `ThorInterface`: Main underlying interface to AI2-THOR/ProcTHOR scenes
   - `ProcTHORScene`: User-facing data provider for ProcTHOR, wrapping ThorInterface
   - `ProcTHOREnvironment`: Subclass of `ObjectSearchEnvironment` + `OccupancyGridPathingMixin`; subclasses must override `define_operators()`
   - `SceneGraph`: Scene graph representation
+  - Overhead view: `get_top_down_view()` returns the orthographic image *plus* its footprint in grid cells, so the dashboard can draw trajectories on top of it. `top_down_footprint()` chooses that footprint from the room floor polygons in the scene JSON (squared up, plus `TOP_DOWN_MARGIN_M`) and the camera is *told* to frame exactly it — deliberately not AI2-THOR's map-view framing, which uses `sceneBounds` (the union of every enabled renderer, including geometry invisible from above) and is inconsistent across ProcTHOR-10k (allenai/ai2thor#1181). Because it is recomputable, the cached `image_ortho_extent_m` is checked against it on load: a missing or disagreeing extent returns `None` and warns once rather than misplacing pixels — delete `resources/procthor-10k/cache` to regenerate (needs a display)
 
 - **`railsim/`**: OpenGL visual simulator with procedural maze/office worlds (optional dependency, `railroad[railsim]`)
   - `Simulator`: Renders perspective and panoramic RGB/depth images at any meter-space pose (moderngl)
-  - `RailsimScene`: Data provider mirroring `ProcTHORScene` (`.grid`, `.locations`, `.object_locations`); `RailsimScene.maze(seed=...)` / `.office(seed=...)` constructors; navigation `grid` is the raw occupancy grid inflated by `inflation_radius_m` while rendering uses raw geometry
+  - `RailsimScene`: Data provider mirroring `ProcTHORScene` (`.grid`, `.locations`, `.object_locations`, `.get_top_down_view()`); `RailsimScene.maze(seed=...)` / `.office(seed=...)` constructors; navigation `grid` is the raw occupancy grid inflated by `inflation_radius_m` while rendering uses raw geometry
   - `VisualUnknownSpaceEnvironment`: `UnknownSpaceEnvironment` subclass that renders a panorama at every laser sensor step into `pano_records` (list of `PanoRecord`)
   - Coordinates: railroad environments work in grid cells; railsim renders in meters (`meters = cells * map_data.resolution`)
   - Example: `uv run railroad example visual-frontier-search --env maze|office`; rendering requires a working GL context (`RAILSIM_GL_BACKEND` to pin one)

@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Dict, Set, Tuple
 
 import numpy as np
 
-from railroad.environment.types import PoseLike
+from railroad.environment.types import PoseLike, TopDownView
 from railroad.navigation.pathing import inflate_grid
 
 from .environments import (
@@ -223,6 +223,19 @@ class RailsimScene:
             table_color = np.array(palette.get("table", (0.36, 0.21, 0.06)))
             image[occupied & (semantic == clutter_label)] = table_color
         return (image * 255).astype(np.uint8)
+
+    def get_top_down_view(self) -> TopDownView:
+        """Semantic top-down map, positioned on the occupancy grid."""
+        # get_top_down_image is indexed [x, y] like the grid itself, but the
+        # trajectory plot draws grid.T -- row = y, col = x. Transposing only
+        # here leaves get_top_down_image's own shape contract untouched.
+        image = np.transpose(self.get_top_down_image(), (1, 0, 2))
+        n_y, n_x = image.shape[:2]
+        # The image is exactly one pixel per cell, so these are the same
+        # bounds imshow would infer for the grid itself.
+        return TopDownView(
+            image=image, min_x=-0.5, max_x=n_x - 0.5, min_y=-0.5, max_y=n_y - 0.5,
+        )
 
     def release(self) -> None:
         """Release the simulator's GPU resources (safe if never created)."""

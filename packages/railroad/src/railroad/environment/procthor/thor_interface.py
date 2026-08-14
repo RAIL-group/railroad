@@ -4,12 +4,14 @@ import copy
 import json
 import pickle
 import random
+import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 from shapely import geometry
 
+from railroad.environment.types import TopDownView
 from railroad.navigation import pathing
 from .scenegraph import SceneGraph
 from . import utils
@@ -21,6 +23,44 @@ IGNORE_CONTAINERS = [
     'showerhead', 'television', 'vacuumcleaner', 'photo', 'plunger',
     'box'
 ]
+
+SCENE_CACHE_VERSION = 2
+"""Version 2 adds ``image_ortho_extent_m``.
+
+The extent is recomputable from the scene JSON via
+:meth:`ThorInterface.top_down_footprint`, but it is stored anyway, because its
+*presence* is what distinguishes an image rendered with that footprint from a
+version 1 image framed on AI2-THOR's ``sceneBounds``. Recomputing a footprint
+and applying it to a version 1 image would misalign it silently.
+
+Bumping this does *not* invalidate older caches: a scene missing the extent
+degrades to no overhead image rather than relaunching Unity for every scene
+already on disk.
+"""
+
+_MAP_VIEW_ROTATION = {"x": 90.0, "y": 0.0, "z": 0.0}
+"""Straight down, with camera-right along world +x and camera-up along +z."""
+
+TOP_DOWN_MARGIN_M = 0.5
+"""Slack around the room polygons, for wall thickness and exterior trim."""
+
+_EXTENT_WARNED: set = set()
+"""Seeds already warned about, so a per-frame render path stays quiet.
+
+Deliberately not left to ``warnings``' own deduplication, which keys on
+(message, category, module, lineno) and is reset to "always" inside
+``pytest.warns``.
+"""
+
+
+def _is_axis_aligned_top_down(rotation: Any) -> bool:
+    """Whether *rotation* already points straight down with no yaw."""
+    if not isinstance(rotation, dict):
+        return False
+    return all(
+        abs(float(rotation.get(axis, 0.0)) - expected) < 1e-6
+        for axis, expected in _MAP_VIEW_ROTATION.items()
+    )
 
 
 class ThorInterface:
@@ -121,10 +161,19 @@ class ThorInterface:
 
     def _save_and_get_cache(self, path: Optional[str] = None) -> Dict:
         """Cache expensive computations."""
+        image_ortho, extent_m = self._render_top_down_from_controller(orthographic=True)
+        image_persp, _ = self._render_top_down_from_controller(orthographic=False)
         cache = {
+            'cache_version': SCENE_CACHE_VERSION,
             'reachable_positions': self._get_reachable_positions_from_controller(),
-            'image_ortho': self._get_top_down_image_from_controller(orthographic=True),
-            'image_persp': self._get_top_down_image_from_controller(orthographic=False)
+            'image_ortho': image_ortho,
+            'image_persp': image_persp,
+            # Meters, not cells: the filename encodes no resolution, but
+            # `resolution` is a constructor argument, so cells would silently
+            # corrupt any run that does not use the default. Plain floats, not
+            # a dataclass -- pickling one pins its module path, and renaming it
+            # later would turn every cache into an AttributeError on load.
+            'image_ortho_extent_m': extent_m,
         }
         save_dir = Path(path) if path is not None else self._cache_dir()
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -157,10 +206,30 @@ class ThorInterface:
         """Set grid coordinate offset."""
         self.grid_offset = np.array([min_x, min_y])
 
+    def scale_to_grid_continuous(
+        self, point: Union[Tuple[float, float], Sequence[float]]
+    ) -> Tuple[float, float]:
+        """World (x, z) meters -> fractional grid cells.
+
+        Integers land on cell centers, which is exactly where matplotlib
+        places them. Callers positioning an image need the unrounded value:
+        rounding an outer edge to a cell center shifts it by up to half a cell.
+        """
+        x = (point[0] - self.grid_offset[0]) / self.grid_resolution
+        y = (point[1] - self.grid_offset[1]) / self.grid_resolution
+        return x, y
+
     def scale_to_grid(self, point: Union[Tuple[float, float], Sequence[float]]) -> Tuple[int, int]:
         """Convert world coordinates to grid coordinates."""
-        x = round((point[0] - self.grid_offset[0]) / self.grid_resolution)
-        y = round((point[1] - self.grid_offset[1]) / self.grid_resolution)
+        x, y = self.scale_to_grid_continuous(point)
+        return round(x), round(y)
+
+    def grid_to_world(
+        self, cell: Union[Tuple[float, float], Sequence[float]]
+    ) -> Tuple[float, float]:
+        """Inverse of :meth:`scale_to_grid`: world (x, z) at a cell's center."""
+        x = float(cell[0]) * self.grid_resolution + float(self.grid_offset[0])
+        y = float(cell[1]) * self.grid_resolution + float(self.grid_offset[1])
         return x, y
 
     def _get_robot_pose(self) -> Tuple[int, int]:
@@ -314,8 +383,48 @@ class ThorInterface:
 
         return known_cost
 
-    def _get_top_down_image_from_controller(self, orthographic: bool = True) -> np.ndarray:
-        """Get top-down image from controller."""
+    def top_down_footprint(self) -> Tuple[float, float, float, float]:
+        """World footprint the top-down camera frames, ``(min_x, max_x, min_z, max_z)``.
+
+        Chosen here rather than taken from AI2-THOR's map-view camera, so that
+        it is known exactly and offline. THOR frames on ``sceneBounds``, the
+        union of every enabled renderer's bounds -- which sweeps in geometry
+        that is not visible from above (ceilings, roof overhang) by a
+        scene-dependent amount, and is inconsistent enough across ProcTHOR-10k
+        that deriving world coordinates from it is an open upstream bug
+        (allenai/ai2thor#1181). Nothing downstream could then say where a pixel
+        sits without re-reading numbers only a live Unity has.
+
+        The room floor polygons are exact, in the scene JSON, and the walls sit
+        on their boundary -- so the house footprint plus a small margin frames
+        the whole scene, including rooms the agent cannot enter.
+
+        Square, because a third-party camera inherits the main camera's
+        resolution and ``orthographicSize`` is a half-height: a non-square
+        request could not be honoured.
+        """
+        corners = [
+            (vertex["x"], vertex["z"])
+            for room in self.rooms
+            for vertex in room["floorPolygon"]
+        ]
+        xs = [corner[0] for corner in corners]
+        zs = [corner[1] for corner in corners]
+        center_x = 0.5 * (min(xs) + max(xs))
+        center_z = 0.5 * (min(zs) + max(zs))
+        half = 0.5 * max(max(xs) - min(xs), max(zs) - min(zs)) + TOP_DOWN_MARGIN_M
+        return (center_x - half, center_x + half, center_z - half, center_z + half)
+
+    def _render_top_down_from_controller(
+        self, orthographic: bool = True
+    ) -> Tuple[np.ndarray, Optional[Tuple[float, float, float, float]]]:
+        """Render a top-down frame, plus its world footprint in meters.
+
+        The second element is ``(min_x, max_x, min_z, max_z)`` for the
+        orthographic camera and ``None`` for the perspective one -- a
+        projective view has no rectangular footprint, so there is nothing
+        honest to return.
+        """
         assert self.controller is not None
         event = self.controller.step(action="GetMapViewCameraProperties", raise_for_failure=True)
         pose = copy.deepcopy(event.metadata["actionReturn"])
@@ -323,12 +432,39 @@ class ThorInterface:
         bounds = event.metadata["sceneBounds"]["size"]
         max_bound = max(bounds["x"], bounds["z"])
 
+        # Pin the camera straight down. A non-zero yaw would rotate the world
+        # footprint out of axis-alignment, which no rectangular imshow extent
+        # can express -- the overlay would be silently skewed rather than
+        # obviously broken. Warn rather than swallow it if THOR ever disagrees.
+        returned_rotation = pose.get("rotation")
+        pose["rotation"] = dict(_MAP_VIEW_ROTATION)
+        if orthographic and not _is_axis_aligned_top_down(returned_rotation):
+            warnings.warn(
+                f"AI2-THOR's map-view camera for scene {self.seed} returned "
+                f"rotation {returned_rotation}; overriding with "
+                f"{_MAP_VIEW_ROTATION} so the render stays axis-aligned.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+
         pose["fieldOfView"] = 50
+        # Height only, so it never affects an orthographic footprint -- this is
+        # the one place sceneBounds stays useful, lifting the camera clear of
+        # whatever the scene contains.
         pose["position"]["y"] += 1.1 * max_bound
         pose["orthographic"] = orthographic
         pose["farClippingPlane"] = 50
+
+        extent_m = None
         if orthographic:
-            pose["orthographicSize"] = 0.5 * max_bound
+            extent_m = self.top_down_footprint()
+            min_x, max_x, min_z, max_z = extent_m
+            pose["position"]["x"] = 0.5 * (min_x + max_x)
+            pose["position"]["z"] = 0.5 * (min_z + max_z)
+            # Unity's orthographicSize is the camera's HALF-height in world
+            # units. The footprint is square and the frame is square, so this
+            # is also its half-width.
+            pose["orthographicSize"] = 0.5 * (max_z - min_z)
         else:
             del pose["orthographicSize"]
 
@@ -338,15 +474,99 @@ class ThorInterface:
             skyboxColor="white",
             raise_for_failure=True,
         )
-        image = event.third_party_camera_frames[-1]
-        return image[::-1, ...]
+        image = event.third_party_camera_frames[-1][::-1, ...]
+
+        if extent_m is not None:
+            # The footprint above assumes a square frame. Guard it rather than
+            # trust it: a non-square controller resolution would stretch the
+            # horizontal axis and silently skew every overlay.
+            height_px, width_px = image.shape[:2]
+            if height_px != width_px:
+                raise RuntimeError(
+                    f"top-down render is {width_px}x{height_px}; the orthographic "
+                    "footprint is only square when the frame is. Set the "
+                    "controller to a square resolution, or widen the footprint "
+                    "by the aspect ratio here."
+                )
+        return image, extent_m
 
     def get_top_down_image(self, orthographic: bool = True) -> np.ndarray:
         """Get top-down image (from cache or controller)."""
         if self.cached_data is not None:
             key = 'image_ortho' if orthographic else 'image_persp'
             return self.cached_data[key]
-        return self._get_top_down_image_from_controller(orthographic)
+        return self._render_top_down_from_controller(orthographic)[0]
+
+    def get_top_down_view(self) -> Optional[TopDownView]:
+        """The orthographic top-down image, placed on the occupancy grid.
+
+        Returns ``None`` -- after warning once for this scene -- when the
+        cached scene predates the recorded camera extent. An unpositioned
+        image can only be drawn misaligned, which is worse than no image.
+        """
+        if self.cached_data is not None:
+            image = self.cached_data.get('image_ortho')
+            extent_m = self.cached_data.get('image_ortho_extent_m')
+            if image is None or extent_m is None:
+                self._warn_missing_extent()
+                return None
+            # The footprint is recomputable, so a cache that disagrees with it
+            # was rendered against different framing -- a changed
+            # TOP_DOWN_MARGIN_M, say. Its pixels sit somewhere else than we
+            # would now say, so treat it as stale rather than misplace it.
+            expected = self.top_down_footprint()
+            if not np.allclose(extent_m, expected, atol=1e-6):
+                self._warn_stale_extent(extent_m, expected)
+                return None
+        else:
+            image, extent_m = self._render_top_down_from_controller(orthographic=True)
+            if extent_m is None:
+                return None
+        return self._view_from_extent(image, extent_m)
+
+    def _view_from_extent(
+        self, image: np.ndarray, extent_m: Tuple[float, float, float, float],
+    ) -> TopDownView:
+        """Place an image given its world footprint, in meters.
+
+        The bounds are the image's outer *edges*, and
+        ``scale_to_grid_continuous`` maps meters to cell coordinates where
+        integers are cell centers -- which is where matplotlib draws them. So
+        no half-cell correction belongs here: rounding to a cell index, as
+        ``scale_to_grid`` does, would put an outer edge on a center instead.
+        """
+        min_x, min_y = self.scale_to_grid_continuous((extent_m[0], extent_m[2]))
+        max_x, max_y = self.scale_to_grid_continuous((extent_m[1], extent_m[3]))
+        return TopDownView(
+            image=image, min_x=min_x, max_x=max_x, min_y=min_y, max_y=max_y,
+        )
+
+    def _warn_missing_extent(self) -> None:
+        """Warn once per scene that the cached image cannot be positioned."""
+        self._warn_unusable_cache(
+            "was cached before the top-down camera extent was recorded"
+        )
+
+    def _warn_stale_extent(self, cached: Any, expected: Any) -> None:
+        """Warn once per scene that the cached image was framed differently."""
+        self._warn_unusable_cache(
+            f"was rendered with the footprint {tuple(round(v, 3) for v in cached)}, "
+            f"but this build frames it at {tuple(round(v, 3) for v in expected)}"
+        )
+
+    def _warn_unusable_cache(self, reason: str) -> None:
+        """Warn once per scene, whatever made the cached image unplaceable."""
+        if self.seed in _EXTENT_WARNED:
+            return
+        _EXTENT_WARNED.add(self.seed)
+        warnings.warn(
+            f"ProcTHOR scene {self.seed} {reason}, so its overhead image cannot "
+            f"be aligned with the occupancy grid and will be omitted. Delete "
+            f"{self._cache_dir()} to regenerate it (this relaunches Unity for "
+            f"the scenes you use).",
+            RuntimeWarning,
+            stacklevel=4,
+        )
 
     def get_target_objs_info(self, num_objects: int = 1) -> Dict | List[Dict]:
         """Get info about target objects for search tasks."""
