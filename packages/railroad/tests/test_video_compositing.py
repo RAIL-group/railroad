@@ -238,12 +238,11 @@ class TestSaveVideoEndToEnd:
 class TestSceneImageSurvivesCompositing:
     """The overhead image is static chrome, not a per-frame artist.
 
-    ``save_video`` caches a "chrome" raster and replays only the moving
-    artists over it. The scene image is deliberately left out of the layered
-    artist sets so the plain ``canvas.draw()`` in ``_draw_chrome`` bakes it
-    into that cache -- it then costs nothing per frame. If it were wired in as
-    an animated artist instead, it would drop out of the restored region and
-    the frames would go white behind the map.
+    ``save_video`` caches a "chrome" raster and replays only moving artists
+    over it. The image is deliberately left out of the layered artist sets so
+    the plain ``canvas.draw()`` bakes it into that cache. Wire it in as an
+    animated artist instead and it drops out of the restored region, leaving
+    the frames white behind the map.
     """
 
     PHOTO_COLOR = (200, 40, 160)
@@ -257,24 +256,21 @@ class TestSceneImageSurvivesCompositing:
         from railroad.environment import ObjectSearchEnvironment
         from railroad.environment.types import TopDownView
 
-        grid = np.zeros((20, 20))
         image = np.zeros((32, 32, 3), dtype=np.uint8)
         image[:, :] = self.PHOTO_COLOR
 
         class Scene:
             def get_top_down_view(self):
                 # Overhangs the grid on every side, as ProcTHOR's does.
-                return TopDownView(
-                    image=image, min_x=-20.0, max_x=39.0, min_y=-20.0, max_y=39.0,
-                )
+                return TopDownView(image=image, min_x=-20.0, max_x=39.0,
+                                   min_y=-20.0, max_y=39.0)
 
-        move_op = operators.construct_move_operator_blocking(lambda r, a, b: 10.0)
         env = ObjectSearchEnvironment(
             state=State(0.0, {F("at r1 A"), F("free r1")}, []),
             objects_by_type={"robot": {"r1"}, "location": {"A", "B"}},
-            operators=[move_op],
+            operators=[operators.construct_move_operator_blocking(lambda r, a, b: 10.0)],
         )
-        env.occupancy_grid = grid  # ty: ignore[unresolved-attribute]
+        env.occupancy_grid = np.zeros((20, 20))  # ty: ignore[unresolved-attribute]
         env.scene = Scene()  # ty: ignore[unresolved-attribute]
 
         db = PlannerDashboard(
@@ -291,14 +287,13 @@ class TestSceneImageSurvivesCompositing:
     ):
         import subprocess
 
+        import matplotlib.image as mpimg
+
         out = tmp_path / "trajectory.mp4"
         dashboard.save_video(
-            str(out),
-            location_coords={"A": (2.0, 2.0), "B": (17.0, 17.0)},
+            str(out), location_coords={"A": (2.0, 2.0), "B": (17.0, 17.0)},
             fps=5, duration=1.0, figsize=(8.0, 6.0), dpi=100,
         )
-        assert out.is_file()
-
         frames_dir = tmp_path / "frames"
         frames_dir.mkdir()
         subprocess.run(
@@ -309,16 +304,13 @@ class TestSceneImageSurvivesCompositing:
         frames = sorted(frames_dir.glob("frame_*.png"))
         assert len(frames) >= 3
 
-        import matplotlib.image as mpimg
-
         def photo_pixels(path):
             # The image overhangs the grid, so its colour is the only thing
             # that can be in the corner of the axes.
             rgb = (mpimg.imread(str(path))[:, :, :3] * 255).astype(int)
-            target = np.array(self.PHOTO_COLOR)
-            return (np.abs(rgb - target).sum(axis=2) < 60).sum()
+            return (np.abs(rgb - np.array(self.PHOTO_COLOR)).sum(axis=2) < 60).sum()
 
-        counts = [photo_pixels(path) for path in (frames[1], frames[-1])]
+        counts = [photo_pixels(p) for p in (frames[1], frames[-1])]
         assert counts[0] > 500, "scene image missing from the composited frames"
         # Static chrome: the same pixels every frame, modulo h264 noise.
         assert abs(counts[0] - counts[1]) < 0.05 * counts[0]

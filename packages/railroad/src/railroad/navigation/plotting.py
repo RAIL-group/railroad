@@ -32,24 +32,16 @@ def make_plotting_grid(grid_map: np.ndarray) -> np.ndarray:
     return grid
 
 
-PHOTO_UNDERLAY_ALPHA = {
-    "free": 0.0, "boundary": 0.0, "obstacle": 0.0, "unknown": 0.0,
-}
-"""Per-class grid opacity when an aligned scene image is drawn underneath.
+PHOTO_UNDERLAY_ALPHA = 0.0
+"""Grid opacity when an aligned scene image is drawn underneath.
 
-All zero: the grid says nothing the image does not say better, and filling
+Invisible: the grid says nothing the image does not say better, and filling
 whole regions hides the map it is drawn on. What an image genuinely cannot
 show -- which parts the robot has actually looked at -- is drawn as an outline
 instead, by ``make_known_boundary_rgba``.
 
-The grid is still drawn rather than skipped, which keeps the layering, the
-alpha plumbing and the per-class classification exercised instead of rotting
--- raising any of these brings the grid straight back. The classes stay
-separate because they want different treatment if that happens: obstacle
-*outlines* can be opaque, since they are what makes a plot read as a map, but
-obstacle *interiors* must stay faint, because in ProcTHOR every cell that is
-not an agent-reachable position is "occupied" and an opaque interior blots out
-the entire house.
+Still drawn rather than skipped, so the layering and the alpha plumbing stay
+exercised instead of rotting; raising this brings the grid straight back.
 """
 
 KNOWN_WALL_COLOR = (0.0, 0.0, 0.0)
@@ -76,24 +68,18 @@ def make_known_boundary_rgba(
 ) -> np.ndarray:
     """Outline of the region the robot has observed, as an RGBA overlay.
 
-    Drawn instead of shading the unobserved region, which buries the map under
-    a wash. The outline says the same thing -- here is how far the robot has
-    seen -- while leaving everything inside it legible.
-
-    The outline is split by *why* it ends. Black where an observed obstacle
-    stops it, so the robot knows what is there; grey where observed free space
-    runs into the unknown, which is a frontier and could still be explored.
+    Drawn instead of shading the unobserved region, which buries the map the
+    image is there to show. Split by *why* the outline ends: an observed
+    obstacle, or a frontier that could still be explored.
 
     Frontier cells use the same rule as
-    ``railroad.experimental.unknown_search.extract_frontiers``: an observed
-    free cell 8-adjacent to an unknown one. Repeated here rather than imported,
-    because plotting sits below the exploration package, and applied to the
-    grid rather than to the environment's live frontier list so that an
-    animated grid outlines the frame being drawn rather than the final state.
+    ``railroad.experimental.unknown_search.extract_frontiers`` -- an observed
+    free cell 8-adjacent to an unknown one -- repeated rather than imported,
+    since plotting sits below that package. Taken from the grid, not the
+    environment's live frontiers, so an animated grid outlines the frame being
+    drawn rather than the final state.
 
-    Returns ``(n_y, n_x, 4)``, transposed to match ``make_plotting_grid(grid.T)``
-    so grid cell (i, j) lands at pixel [j, i]. Everything off the outline is
-    fully transparent.
+    Returns ``(n_y, n_x, 4)``, transposed to match ``make_plotting_grid(grid.T)``.
     """
     from skimage.morphology import dilation
 
@@ -119,30 +105,6 @@ def make_known_boundary_rgba(
     rgba[is_frontier, :3] = frontier_color
     rgba[is_wall | is_frontier, 3] = alpha
     return np.transpose(rgba, (1, 0, 2))
-
-
-def make_plotting_grid_alpha(
-    grid_map: np.ndarray, *,
-    free: float, boundary: float, obstacle: float, unknown: float,
-) -> np.ndarray:
-    """Per-cell opacity mask matching ``make_plotting_grid``'s classes.
-
-    Classifies exactly as ``make_plotting_grid`` does, so the two cannot drift
-    apart, but splits its single gray fill into *obstacle* interiors and
-    *unknown* (unobserved or outside-the-map) cells -- they render alike, yet
-    want opposite treatment over a scene image. Returns an (H, W) float array
-    for ``imshow(alpha=...)``.
-    """
-    collision = grid_map >= 0.5
-    thinned = erosion(collision, footprint=np.ones((3, 3)))
-    is_boundary = np.logical_xor(collision, thinned)
-    is_free = np.logical_and(grid_map < 0.5, grid_map >= FREE_VAL)
-
-    alpha = np.full(grid_map.shape, unknown, dtype=float)
-    alpha[collision] = obstacle
-    alpha[is_free] = free
-    alpha[is_boundary] = boundary
-    return alpha
 
 
 def make_plotting_grid_rgba(grid_map: np.ndarray) -> np.ndarray:
@@ -215,9 +177,7 @@ def plot_grid_background(
 
     Returns the ``AxesImage`` that was drawn.
     """
-    alpha = None
-    if translucent:
-        alpha = make_plotting_grid_alpha(observed_grid.T, **PHOTO_UNDERLAY_ALPHA)
+    alpha = PHOTO_UNDERLAY_ALPHA if translucent else None
 
     has_unknown = bool(np.any(observed_grid == UNOBSERVED_VAL))
     if true_grid is not None and has_unknown:

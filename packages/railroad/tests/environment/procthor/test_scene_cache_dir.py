@@ -90,19 +90,8 @@ class TestTheCacheSurvivesAnInterruptedWrite:
                 thor._write_cache_atomically(self._cache("replacement"), target)
 
         assert thor._load_cache(str(tmp_path)) == self._cache("original")
-
-    def test_an_interrupted_write_leaves_no_debris(self, tmp_path):
-        thor = _interface(5)
-
-        def explode(obj, file):
-            raise KeyboardInterrupt
-
-        with pytest.MonkeyPatch.context() as patch:
-            patch.setattr(pickle, "dump", explode)
-            with pytest.raises(KeyboardInterrupt):
-                thor._write_cache_atomically(self._cache("x"), tmp_path / "scene_5.pkl")
-
-        assert list(tmp_path.iterdir()) == []
+        # And no half-written temporary file left lying beside it.
+        assert [p.name for p in tmp_path.iterdir()] == ["scene_5.pkl"]
 
     def test_an_unreadable_cache_reads_as_a_miss_rather_than_raising(self, tmp_path):
         """Recovers files written before the atomic swap existed."""
