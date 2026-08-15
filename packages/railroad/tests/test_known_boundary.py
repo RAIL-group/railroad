@@ -12,7 +12,9 @@ from railroad.navigation.constants import UNOBSERVED_VAL
 from railroad.navigation.plotting import (
     FRONTIER_COLOR,
     KNOWN_WALL_COLOR,
+    UNTRAVERSABLE_SHADE,
     make_known_boundary_rgba,
+    make_untraversable_shade_rgba,
 )
 
 
@@ -114,3 +116,15 @@ def test_the_outline_matches_the_planner_s_own_frontier_rule():
         from_planner[frontier.cells[0], frontier.cells[1]] = True
 
     np.testing.assert_array_equal(painted_as_frontier, from_planner)
+
+
+def test_only_what_cannot_be_stood_on_is_shaded():
+    """An image shows the room, not the map; furniture reads as floor from
+    above unless the space the robot can move through is picked out."""
+    grid = _room()
+    grid[3:8, 3:8] = 0.0
+
+    shade = np.transpose(make_untraversable_shade_rgba(grid), (1, 0, 2))[:, :, 3]
+    free = grid == 0.0
+    np.testing.assert_allclose(shade[free], 0.0)
+    np.testing.assert_allclose(shade[~free], UNTRAVERSABLE_SHADE)

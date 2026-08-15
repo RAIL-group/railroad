@@ -412,9 +412,17 @@ class _PlottingMixin:
                 ax, occupancy_grid, true_grid, translucent=photo is not None,
             )
             if photo is not None:
+                from railroad.navigation.plotting import (
+                    make_known_boundary_rgba, make_untraversable_shade_rgba,
+                )
+                # An image shows the room, not the map: darken what the robot
+                # cannot stand on so the space it can move through reads.
+                ax.imshow(
+                    make_untraversable_shade_rgba(occupancy_grid),
+                    origin="upper", zorder=0.25,
+                )
                 # The image renders ground truth everywhere, including where
                 # the robot has not looked, so outline how far it has seen.
-                from railroad.navigation.plotting import make_known_boundary_rgba
                 ax.imshow(
                     make_known_boundary_rgba(occupancy_grid),
                     origin="upper", zorder=0.5,
@@ -970,6 +978,7 @@ class _PlottingMixin:
         from railroad.navigation.plotting import (
             PHOTO_UNDERLAY_ALPHA, _BACKGROUND_GRAY, make_known_boundary_rgba,
             make_plotting_grid, make_plotting_grid_rgba,
+            make_untraversable_shade_rgba,
         )
 
         nav_grid_artist = None
@@ -1030,16 +1039,18 @@ class _PlottingMixin:
         # frame rather than the final state.
         known_boundary_artist = None
         known_boundary_frames: list[tuple[float, Any]] = []
+        shade_artist = None
+        shade_frames: list[tuple[float, Any]] = []
         if occupancy_grid is not None and photo_artist is not None:
-            if self._nav_grid_snapshots:
-                known_boundary_frames = [
-                    (t, make_known_boundary_rgba(g))
-                    for t, g in self._nav_grid_snapshots
-                ]
-                first = known_boundary_frames[0][1]
-            else:
-                first = make_known_boundary_rgba(occupancy_grid)
-            known_boundary_artist = ax.imshow(first, origin="upper", zorder=0.5)
+            for make, zorder in ((make_untraversable_shade_rgba, 0.25),
+                                 (make_known_boundary_rgba, 0.5)):
+                frames = [(t, make(g)) for t, g in self._nav_grid_snapshots]
+                first = frames[0][1] if frames else make(occupancy_grid)
+                artist = ax.imshow(first, origin="upper", zorder=zorder)
+                if zorder == 0.25:
+                    shade_artist, shade_frames = artist, frames
+                else:
+                    known_boundary_artist, known_boundary_frames = artist, frames
 
         # Animated frontier-probability overlay (LSP environments)
         frontier_overlay_artist = None
@@ -1225,10 +1236,12 @@ class _PlottingMixin:
                 if nav_idx != shown_idx["nav"]:
                     nav_grid_artist.set_data(nav_grid_frames[nav_idx][1])
                     shown_idx["nav"] = nav_idx
-                # Same snapshots, so the same index keeps the outline in step.
-                if (known_boundary_artist is not None and known_boundary_frames
-                        and nav_idx != shown_idx["boundary"]):
-                    known_boundary_artist.set_data(known_boundary_frames[nav_idx][1])
+                # Same snapshots, so the same index keeps these in step.
+                if nav_idx != shown_idx["boundary"]:
+                    for artist, frames in ((known_boundary_artist, known_boundary_frames),
+                                           (shade_artist, shade_frames)):
+                        if artist is not None and frames:
+                            artist.set_data(frames[nav_idx][1])
                     shown_idx["boundary"] = nav_idx
             # Frontier-probability overlay
             overlay_idx = -1
@@ -1301,7 +1314,7 @@ class _PlottingMixin:
         hot_artists.sort(key=lambda a: a.get_zorder())
 
         stack_artists: list[Any] = [
-            a for a in (nav_grid_artist, known_boundary_artist,
+            a for a in (nav_grid_artist, shade_artist, known_boundary_artist,
                         frontier_overlay_artist) if a is not None
         ]
         if stack_artists:
