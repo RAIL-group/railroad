@@ -56,6 +56,39 @@ class _PlottingMixin:
     _TRAIL_SIZE_START = 25.0
     _TRAIL_SIZE_END = 2.0
 
+    _TRAIL_OUTLINE_WIDTH_PT = 1.4
+    """Half-width of the white halo behind a trail, in points.
+
+    Wide enough to separate a trail from a busy scene image underneath,
+    narrow enough not to swallow the thin tail of the trail.
+    """
+
+    _TRAIL_REPAINT_OVERLAP = 64
+    """Trail points repainted behind each newly drawn batch, in the video.
+
+    Frames are composited incrementally: each one paints the newly revealed
+    points onto the previous frame's raster. The halo is wider than the trail,
+    so a batch's halo spills backwards over colours already on that raster.
+    Repainting a short run behind the batch covers the spill, and keeps the
+    per-frame cost proportional to what was revealed rather than to the whole
+    trail. Dense enough at 2000 points per trail that this is a small fraction
+    of one frame's work.
+    """
+
+    @classmethod
+    def _trail_outline_sizes(cls, sizes: Any) -> Any:
+        """Marker areas giving a constant-width halo around *sizes*.
+
+        Scatter sizes are areas, and a trail tapers from
+        ``_TRAIL_SIZE_START`` to ``_TRAIL_SIZE_END``, so scaling the area
+        would taper the halo along with it and leave the thin end unoutlined.
+        Growing the *radius* by a fixed amount keeps the outline even.
+        """
+        import numpy as np
+
+        radii = np.sqrt(np.asarray(sizes, dtype=float))
+        return (radii + 2.0 * cls._TRAIL_OUTLINE_WIDTH_PT) ** 2
+
     @staticmethod
     def _get_cmap(idx: int):
         """Return a truncated colormap starting at 0.25 for the idx-th entry."""
@@ -447,10 +480,23 @@ class _PlottingMixin:
         # Draw one combined scatter for all robot trails, sorted by time
         if trail is not None:
             combined_xy, combined_sizes, combined_colors, _combined_times = trail
+            # A white halo underneath, so the trail reads against whatever it
+            # crosses -- a scene image is busy and every trail colour appears
+            # somewhere in it. Drawn as one layer below the whole trail rather
+            # than as a per-marker stroke: markers overlap, so a stroke would
+            # paint over the neighbour drawn just before it and scallop the
+            # line.
+            ax.scatter(
+                combined_xy[:, 0], combined_xy[:, 1],
+                s=self._trail_outline_sizes(combined_sizes), c="white",
+                zorder=4.5, linewidths=0,
+            )
+            # Opaque, so the halo stays an outline instead of washing the
+            # colours out from behind.
             ax.scatter(
                 combined_xy[:, 0], combined_xy[:, 1],
                 s=combined_sizes, c=combined_colors,
-                zorder=5, alpha=0.7,
+                zorder=5,
             )
 
         # Optionally plot object trajectories
@@ -1115,6 +1161,11 @@ class _PlottingMixin:
         # never takes its single-element "stamp one marker" shortcut: that
         # shortcut antialiases slightly differently, which would show up
         # whenever a frame happens to add exactly one trail point.
+        # Revealed by the same time prefix as the trail below it, so the halo
+        # never runs ahead of the path it is outlining.
+        trail_outline = ax.scatter([], [], s=[], c="white", zorder=4.5,
+                                   linewidths=0, alpha=1.0)
+        trail_outline.set_antialiased([True, True])
         trail_scatter = ax.scatter([], [], s=[], zorder=5, alpha=1.0)
         trail_scatter.set_antialiased([True, True])
 
@@ -1261,7 +1312,8 @@ class _PlottingMixin:
         # instead. (Hiding the rest would move the title, whose placement
         # consults the tick bboxes.)
         layered: list[Any] = [
-            *stack_artists, *onboard_list, *hot_artists, trail_scatter,
+            *stack_artists, *onboard_list, *hot_artists,
+            trail_outline, trail_scatter,
         ]
         for artist in layered:
             artist.set_animated(True)
@@ -1289,10 +1341,30 @@ class _PlottingMixin:
             drawn_onboard_sizes = _onboard_sizes()
             return canvas.copy_from_bbox(fig.bbox)
 
-        def _set_trail(lo: int, hi: int) -> None:
-            trail_scatter.set_offsets(combined_xy[lo:hi])
-            trail_scatter.set_sizes(combined_sizes[lo:hi])
-            trail_scatter.set_facecolors(combined_colors[lo:hi])
+        def _draw_trail(lo: int, hi: int) -> None:
+            """Draw trail points ``[lo, hi)``: white halo first, then colour.
+
+            Only the new points, so a frame costs what it revealed rather than
+            the whole trail. Their halo does spill backwards over colours
+            already on the raster, so the colour pass starts a little earlier
+            than the halo pass and paints that spill back in.
+
+            What the overlap does not reach is a path *crossing*: there the new
+            halo covers an older segment that is nowhere near it in time. That
+            is left alone deliberately -- it is what makes the later path read
+            as passing over the earlier one, which is the whole reason for
+            outlining a line, and redrawing every colour to avoid it would cost
+            more than the outline itself.
+            """
+            trail_outline.set_offsets(combined_xy[lo:hi])
+            trail_outline.set_sizes(self._trail_outline_sizes(combined_sizes[lo:hi]))
+            fig.draw_artist(trail_outline)
+
+            start = max(0, lo - self._TRAIL_REPAINT_OVERLAP)
+            trail_scatter.set_offsets(combined_xy[start:hi])
+            trail_scatter.set_sizes(combined_sizes[start:hi])
+            trail_scatter.set_facecolors(combined_colors[start:hi])
+            fig.draw_artist(trail_scatter)
 
         chrome: Any = None
         stack: Any = None
@@ -1335,8 +1407,7 @@ class _PlottingMixin:
                     canvas.restore_region(chrome)
                 for artist in stack_artists:
                     fig.draw_artist(artist)
-                _set_trail(0, n_trail)
-                fig.draw_artist(trail_scatter)
+                _draw_trail(0, n_trail)
                 stack = canvas.copy_from_bbox(fig.bbox)
                 drawn_stack, drawn_trail = stack_key, n_trail
             else:
@@ -1344,8 +1415,7 @@ class _PlottingMixin:
                 if n_trail > drawn_trail:
                     # The trail only ever grows here, so draw the new points
                     # and fold them into the stack for the next frame.
-                    _set_trail(drawn_trail, n_trail)
-                    fig.draw_artist(trail_scatter)
+                    _draw_trail(drawn_trail, n_trail)
                     stack = canvas.copy_from_bbox(fig.bbox)
                     drawn_trail = n_trail
 
