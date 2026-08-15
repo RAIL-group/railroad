@@ -23,6 +23,7 @@ from railroad.core import Fluent as F, State
 from railroad.dashboard import PlannerDashboard
 from railroad.environment import ObjectSearchEnvironment
 from railroad.environment.types import TopDownView
+from railroad.navigation.constants import UNOBSERVED_VAL
 
 GRID_SHAPE = (30, 20)
 # Deliberately wider than the grid, as ProcTHOR's is: its grid spans only the
@@ -46,10 +47,13 @@ def _photo_view():
     return TopDownView(image=image, **PHOTO_EXTENT)
 
 
-def _dashboard(scene):
+def _dashboard(scene, *, unobserved: bool = False):
     grid = np.zeros(GRID_SHAPE)
     grid[0, :] = 1.0
     grid[-1, :] = 1.0
+    if unobserved:
+        # Mid-exploration: a band the robot has not looked at yet.
+        grid[:, GRID_SHAPE[1] // 2:] = UNOBSERVED_VAL
 
     move_op = operators.construct_move_operator_blocking(lambda r, a, b: 10.0)
     no_op = operators.construct_no_op_operator(no_op_time=1.0, extra_cost=10.0)
@@ -75,13 +79,19 @@ def _main_axes(db, coords):
     return figure, figure.axes[0]
 
 
+def _layer(ax, zorder):
+    """The image drawn at *zorder*: -1 photo, 0 grid, 0.5 known-region outline."""
+    matches = [im for im in ax.get_images() if im.get_zorder() == zorder]
+    assert len(matches) <= 1, f"{len(matches)} images at zorder {zorder}"
+    return matches[0] if matches else None
+
+
 class TestPhotoUnderlay:
     def test_the_image_is_drawn_below_the_grid(self):
         db, coords = _dashboard(_Scene(_photo_view()))
         _figure, ax = _main_axes(db, coords)
-        images = sorted(ax.get_images(), key=lambda im: im.get_zorder())
-        assert len(images) == 2
-        photo, grid = images
+        photo, grid = _layer(ax, -1), _layer(ax, 0)
+        assert photo is not None and grid is not None
         assert photo.get_zorder() < grid.get_zorder()
         left, right, bottom, top = photo.get_extent()
         assert (left, right, bottom, top) == pytest.approx((
@@ -89,12 +99,40 @@ class TestPhotoUnderlay:
             PHOTO_EXTENT["max_y"], PHOTO_EXTENT["min_y"],
         ))
 
+    def test_the_grid_vanishes_over_an_image_when_the_map_is_known(self):
+        """With the whole map known, the image says everything the grid does."""
+        db, coords = _dashboard(_Scene(_photo_view()))
+        _figure, ax = _main_axes(db, coords)
+        assert np.asarray(_layer(ax, 0).get_alpha()).max() == pytest.approx(0.0)
+
+    def test_how_far_the_robot_has_seen_is_outlined_not_shaded(self):
+        """The one thing an image cannot show is where the robot has not looked.
+
+        It renders ground truth everywhere, so the extent of what has been
+        observed is drawn -- but as an outline, since shading the unobserved
+        region buries the map the image is there to show.
+        """
+        db, coords = _dashboard(_Scene(_photo_view()), unobserved=True)
+        _figure, ax = _main_axes(db, coords)
+        outline = _layer(ax, 0.5)
+        assert outline is not None, "no known-region outline drawn"
+        opacity = np.asarray(outline.get_array())[:, :, 3]
+        assert opacity.max() > 0.5, "outline is invisible"
+        # An outline, not a wash: only a thin border is painted at all.
+        assert (opacity > 0).mean() < 0.2
+
+    def test_a_fully_known_map_gets_no_outline(self):
+        """Nothing to delimit: the robot has seen all of it."""
+        db, coords = _dashboard(_Scene(_photo_view()))
+        _figure, ax = _main_axes(db, coords)
+        outline = _layer(ax, 0.5)
+        assert outline is None or np.asarray(outline.get_array())[:, :, 3].max() == 0
+
     def test_the_grid_turns_translucent_only_over_an_image(self):
         """Opaque obstacle fill would hide the very thing being drawn under it."""
         db, coords = _dashboard(_Scene(_photo_view()))
         _figure, ax = _main_axes(db, coords)
-        grid = max(ax.get_images(), key=lambda im: im.get_zorder())
-        assert isinstance(grid.get_alpha(), np.ndarray)
+        assert isinstance(_layer(ax, 0).get_alpha(), np.ndarray)
 
         db, coords = _dashboard(None)
         _figure, ax = _main_axes(db, coords)

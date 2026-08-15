@@ -418,6 +418,14 @@ class _PlottingMixin:
             plot_grid_background(
                 ax, occupancy_grid, true_grid, translucent=photo is not None,
             )
+            if photo is not None:
+                # The image renders ground truth everywhere, including where
+                # the robot has not looked, so outline how far it has seen.
+                from railroad.navigation.plotting import make_known_boundary_rgba
+                ax.imshow(
+                    make_known_boundary_rgba(occupancy_grid),
+                    origin="upper", zorder=0.5,
+                )
             # Predicted frontier probabilities (LSP environments): color
             # each frontier's cells by its prob_feasible.
             overlays = getattr(self._env, 'frontier_probability_overlays', None)
@@ -979,8 +987,8 @@ class _PlottingMixin:
 
         # Animated navigation grid background
         from railroad.navigation.plotting import (
-            PHOTO_UNDERLAY_ALPHA, _BACKGROUND_GRAY, make_plotting_grid,
-            make_plotting_grid_alpha, make_plotting_grid_rgba,
+            PHOTO_UNDERLAY_ALPHA, _BACKGROUND_GRAY, make_known_boundary_rgba,
+            make_plotting_grid, make_plotting_grid_alpha, make_plotting_grid_rgba,
         )
 
         nav_grid_artist = None
@@ -1047,6 +1055,23 @@ class _PlottingMixin:
                 nav_grid_artist = ax.imshow(
                     _composite_frame(occupancy_grid), origin="upper", zorder=0,
                 )
+
+        # Animated outline of what the robot has observed. Drawn over an image
+        # only, since without one the grid itself already shows this, and it
+        # follows the same snapshots as the grid so the outline matches the
+        # frame rather than the final state.
+        known_boundary_artist = None
+        known_boundary_frames: list[tuple[float, Any]] = []
+        if occupancy_grid is not None and photo_artist is not None:
+            if self._nav_grid_snapshots:
+                known_boundary_frames = [
+                    (t, make_known_boundary_rgba(g))
+                    for t, g in self._nav_grid_snapshots
+                ]
+                first = known_boundary_frames[0][1]
+            else:
+                first = make_known_boundary_rgba(occupancy_grid)
+            known_boundary_artist = ax.imshow(first, origin="upper", zorder=0.5)
 
         # Animated frontier-probability overlay (LSP environments)
         frontier_overlay_artist = None
@@ -1201,7 +1226,7 @@ class _PlottingMixin:
 
         # Which snapshot each image artist is currently holding, so repeated
         # frames do not re-push identical data.
-        shown_idx = {"nav": -1, "overlay": -1}
+        shown_idx = {"nav": -1, "overlay": -1, "boundary": -1}
 
         def _apply_frame(frame: int) -> tuple[tuple, tuple, tuple, int]:
             """Point every artist at its state for *frame*.
@@ -1222,6 +1247,11 @@ class _PlottingMixin:
                 if nav_idx != shown_idx["nav"]:
                     nav_grid_artist.set_data(nav_grid_frames[nav_idx][1])
                     shown_idx["nav"] = nav_idx
+                # Same snapshots, so the same index keeps the outline in step.
+                if (known_boundary_artist is not None and known_boundary_frames
+                        and nav_idx != shown_idx["boundary"]):
+                    known_boundary_artist.set_data(known_boundary_frames[nav_idx][1])
+                    shown_idx["boundary"] = nav_idx
             # Frontier-probability overlay
             overlay_idx = -1
             if frontier_overlay_artist is not None and overlay_times is not None:
@@ -1293,7 +1323,8 @@ class _PlottingMixin:
         hot_artists.sort(key=lambda a: a.get_zorder())
 
         stack_artists: list[Any] = [
-            a for a in (nav_grid_artist, frontier_overlay_artist) if a is not None
+            a for a in (nav_grid_artist, known_boundary_artist,
+                        frontier_overlay_artist) if a is not None
         ]
         if stack_artists:
             # The grid images cover the whole data area, and a real draw puts
