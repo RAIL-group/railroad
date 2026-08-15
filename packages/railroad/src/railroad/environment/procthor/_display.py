@@ -1,10 +1,14 @@
-"""Making a headless X screen big enough for AI2-THOR to render into.
+"""Fitting the render to the X screen AI2-THOR will draw it on.
 
 AI2-THOR's Linux64 platform refuses a render larger than the X screen, and an
 X server with no outputs connected defaults to 1024x768 whatever the GPU can
-do -- so asking for a 2048 top-down image fails before Unity starts. The screen
-can simply be grown, since ``xrandr`` reports a maximum in the tens of
-thousands; it just needs asking.
+do -- so asking for a 2048 top-down image fails before Unity starts.
+
+An Xorg screen can simply be grown, since ``xrandr`` reports a maximum in the
+tens of thousands; it just needs asking. An Xvfb one cannot: its framebuffer is
+sized when the server starts and RandR offers that one size as both minimum and
+maximum, which is what Colab's 1024x768 default leaves you with. So grow what
+can be grown, then ask what is actually there and render no larger.
 """
 
 from __future__ import annotations
@@ -84,3 +88,74 @@ def screen_at_least(width: int, height: int) -> Iterator[bool]:
     finally:
         if grown is not None:
             _xrandr(grown[0], "--fb", f"{grown[1][0]}x{grown[1][1]}")
+
+
+def _usable_screens() -> list[tuple[int, int]]:
+    """The size of every screen AI2-THOR would accept, as it measures them.
+
+    Mirrors ``ai2thor.platform.Linux64._validate_screen``: a screen counts only
+    if it speaks GLX at 24-bit depth, so a screen this reports is one AI2-THOR
+    will consider. Empty when there is no X at all, or no Xlib to ask with.
+    """
+    try:
+        import Xlib.display
+        import Xlib.error
+    except ImportError:
+        return []
+
+    # A server that will not answer is a screen we cannot count, never a reason
+    # to fail: AI2-THOR is about to make the same connection itself, and its
+    # message about it is the better one. ConnectionClosedError is listed
+    # because Xlib does not derive it from XError.
+    unanswered = (
+        Xlib.error.DisplayError,
+        Xlib.error.XError,
+        Xlib.error.ConnectionClosedError,
+        OSError,
+    )
+
+    sizes = []
+    for display in _candidate_displays():
+        try:
+            connection = Xlib.display.Display(display)
+        except unanswered:
+            continue
+        try:
+            for index in range(connection.screen_count()):
+                # AI2-THOR connects per screen rather than indexing one
+                # connection, since ``list_extensions`` is per display.
+                screen_connection = Xlib.display.Display(f"{display}.{index}")
+                try:
+                    screen = screen_connection.screen()
+                    if (
+                        "GLX" in screen_connection.list_extensions()
+                        and screen["root_depth"] == 24
+                    ):
+                        sizes.append(
+                            (screen["width_in_pixels"], screen["height_in_pixels"])
+                        )
+                finally:
+                    screen_connection.close()
+        except unanswered:
+            continue
+        finally:
+            connection.close()
+    return sizes
+
+
+def render_px_at_most(preferred: int) -> int:
+    """The largest square render the X screens will take, capped at *preferred*.
+
+    Call inside :func:`screen_at_least`, so a screen that could be grown has
+    been. What is left is a screen that cannot: rendering smaller keeps the
+    scene generating -- softer than intended, but generated -- where AI2-THOR
+    would otherwise refuse to start.
+
+    Returns *preferred* untouched when nothing can be measured (no X, no Xlib,
+    macOS), leaving AI2-THOR to fail with its own clear message rather than
+    this quietly shrinking a render for a reason it invented.
+    """
+    fits = [min(width, height) for width, height in _usable_screens()]
+    # max, not min: AI2-THOR takes the first screen large enough, so it is the
+    # roomiest one that has to fit, not every one of them.
+    return min(preferred, max(fits)) if fits else preferred
