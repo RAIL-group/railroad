@@ -40,12 +40,16 @@ cached scene; raw-array images from either older version still load.
 _MAP_VIEW_ROTATION = {"x": 90.0, "y": 0.0, "z": 0.0}
 """Straight down, with camera-right along world +x and camera-up along +z."""
 
-TOP_DOWN_RENDER_PX = 2048
+TOP_DOWN_RENDER_PX = int(os.environ.get("PROCTHOR_TOP_DOWN_PX", 2048))
 """Square render size for the cached top-down images.
 
 Saved plots are dpi=300, which puts ~2000 pixels across the map axes; at the
 old 480 the image was upscaled about four times. Costs generation only -- the
 controller is stopped as soon as the cache is written.
+
+AI2-THOR's Linux64 platform refuses a render larger than the X display, and a
+headless screen defaults to 1024x768; ``_display.screen_at_least`` grows it for
+the duration. Lower this if that is not possible.
 """
 
 JPEG_QUALITY = 75
@@ -133,18 +137,22 @@ class ThorInterface:
                 self.cached_data = self._load_cache() if use_cache else None
                 if self.cached_data is None:
                     from ai2thor.controller import Controller
-                    self.controller = Controller(
-                        scene=self.scene,
-                        gridSize=self.grid_resolution,
-                        width=TOP_DOWN_RENDER_PX,
-                        height=TOP_DOWN_RENDER_PX,
-                    )
-                    self.cached_data = self._save_and_get_cache()
-                    # Inside the lock: otherwise every worker that generates a
-                    # scene keeps its Unity alive for the rest of the run, and
-                    # they accumulate exactly as the lock exists to prevent.
-                    self.controller.stop()
-                    self.controller = None
+                    from ._display import screen_at_least
+
+                    with screen_at_least(TOP_DOWN_RENDER_PX, TOP_DOWN_RENDER_PX):
+                        self.controller = Controller(
+                            scene=self.scene,
+                            gridSize=self.grid_resolution,
+                            width=TOP_DOWN_RENDER_PX,
+                            height=TOP_DOWN_RENDER_PX,
+                        )
+                        self.cached_data = self._save_and_get_cache()
+                        # Inside the lock: otherwise every worker that generates
+                        # a scene keeps its Unity alive for the rest of the run,
+                        # and they accumulate exactly as the lock exists to
+                        # prevent.
+                        self.controller.stop()
+                        self.controller = None
                 else:
                     print("-----------Using cached procthor data-----------")
                     self.controller = None
