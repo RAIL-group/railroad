@@ -192,6 +192,13 @@ class ThorInterface:
         try:
             with os.fdopen(handle, 'wb') as file:
                 pickle.dump(cache, file)
+            # mkstemp is 0600, where the plain open() this replaced took the
+            # umask default. PROCTHOR_RESOURCES_DIR exists to put this cache
+            # somewhere shared, and a 0600 entry there is unreadable to the
+            # next user -- who then regenerates it, launching Unity, every run.
+            umask = os.umask(0o777)
+            os.umask(umask)
+            os.chmod(temp_name, 0o666 & ~umask)
             os.replace(temp_name, target)
         except BaseException:  # including KeyboardInterrupt, the likely one
             Path(temp_name).unlink(missing_ok=True)

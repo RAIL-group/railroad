@@ -93,6 +93,20 @@ class TestTheCacheSurvivesAnInterruptedWrite:
         # And no half-written temporary file left lying beside it.
         assert [p.name for p in tmp_path.iterdir()] == ["scene_5.pkl"]
 
+    def test_a_written_cache_is_readable_by_whoever_shares_the_directory(self, tmp_path):
+        """mkstemp is 0600, but PROCTHOR_RESOURCES_DIR exists to point this
+        somewhere shared -- and an entry nobody else can read is one they
+        regenerate, launching Unity, on every run."""
+        import os
+        import stat
+
+        target = tmp_path / "scene_5.pkl"
+        _interface(5)._write_cache_atomically(self._cache("x"), target)
+
+        umask = os.umask(0o777)
+        os.umask(umask)
+        assert stat.S_IMODE(target.stat().st_mode) == 0o666 & ~umask
+
     def test_an_unreadable_cache_reads_as_a_miss_rather_than_raising(self, tmp_path):
         """Recovers files written before the atomic swap existed."""
         (tmp_path / "scene_9.pkl").write_bytes(b"\x80\x04\x95 truncated garbage")
