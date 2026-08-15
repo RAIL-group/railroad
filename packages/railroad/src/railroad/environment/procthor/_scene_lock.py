@@ -53,10 +53,11 @@ def scene_generation_lock(
         yield False
         return
 
-    target = path or lock_path()
     deadline = time.monotonic() + (DEFAULT_TIMEOUT if timeout is None else timeout)
 
     try:
+        # lock_path() creates the resources directory, so it fails open too.
+        target = path or lock_path()
         target.parent.mkdir(parents=True, exist_ok=True)
         handle = open(target, "a+")
     except OSError:

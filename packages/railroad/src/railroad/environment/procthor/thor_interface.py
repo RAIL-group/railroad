@@ -110,6 +110,11 @@ class ThorInterface:
                         height=480
                     )
                     self.cached_data = self._save_and_get_cache()
+                    # Inside the lock: otherwise every worker that generates a
+                    # scene keeps its Unity alive for the rest of the run, and
+                    # they accumulate exactly as the lock exists to prevent.
+                    self.controller.stop()
+                    self.controller = None
                 else:
                     print("-----------Using cached procthor data-----------")
                     self.controller = None
@@ -148,10 +153,10 @@ class ThorInterface:
     def _cache_dir(self) -> Path:
         """Where per-seed scene caches live.
 
-        Derived from the resources directory rather than hardcoded relative to
-        the working directory, so ``PROCTHOR_RESOURCES_DIR`` actually reaches
-        it. Without that, running from anywhere but the directory holding
-        ``resources/`` silently misses every cached scene and starts Unity.
+        Follows the resources directory, so ``PROCTHOR_RESOURCES_DIR`` reaches
+        it. Unset, that still falls back to ``Path.cwd() / "resources"`` fixed
+        at import, so running from elsewhere misses every cached scene and
+        starts Unity -- set the variable to work from more than one directory.
         """
         return get_procthor_10k_dir() / 'cache'
 
