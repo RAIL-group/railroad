@@ -49,7 +49,9 @@ controller is stopped as soon as the cache is written.
 
 AI2-THOR's Linux64 platform refuses a render larger than the X display, and a
 headless screen defaults to 1024x768; ``_display.screen_at_least`` grows it for
-the duration. Lower this if that is not possible.
+the duration, and where it cannot be grown -- Colab's Xvfb, whose framebuffer
+is fixed when the server starts -- ``_display.render_px_at_most`` clamps the
+render to what the screen does offer, so a scene still generates.
 """
 
 JPEG_QUALITY = 75
@@ -140,11 +142,12 @@ class ThorInterface:
                     from ._display import screen_at_least
 
                     with screen_at_least(TOP_DOWN_RENDER_PX, TOP_DOWN_RENDER_PX):
+                        render_px = self._render_px()
                         self.controller = Controller(
                             scene=self.scene,
                             gridSize=self.grid_resolution,
-                            width=TOP_DOWN_RENDER_PX,
-                            height=TOP_DOWN_RENDER_PX,
+                            width=render_px,
+                            height=render_px,
                         )
                         self.cached_data = self._save_and_get_cache()
                         # Inside the lock: otherwise every worker that generates
@@ -164,6 +167,31 @@ class ThorInterface:
         self.scene_graph = self._get_scene_graph()
         self.robot_pose = self._get_robot_pose()
         self.known_cost = self._get_known_costs()
+
+    def _render_px(self) -> int:
+        """The square render size to ask the controller for.
+
+        Call from inside :func:`_display.screen_at_least`, so a screen that
+        could be grown already has been; this is what to do about one that
+        could not. AI2-THOR would refuse to launch at all, which costs the
+        scene; rendering smaller costs sharpness in the cached top-down images
+        and nothing else, so it warns and carries on.
+        """
+        from ._display import render_px_at_most
+
+        render_px = render_px_at_most(TOP_DOWN_RENDER_PX)
+        if render_px < TOP_DOWN_RENDER_PX:
+            warnings.warn(
+                f"The X screen fits a {render_px}x{render_px} render, not "
+                f"{TOP_DOWN_RENDER_PX}x{TOP_DOWN_RENDER_PX}, and could not be "
+                f"grown; caching scene {self.seed}'s top-down images at the "
+                "smaller size. Start a larger server (Xvfb :2 -screen 0 "
+                "2048x2048x24 -ac +extension GLX +render) to keep the full "
+                "resolution, or set PROCTHOR_TOP_DOWN_PX to accept this one.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+        return render_px
 
     def _preprocess_containers(self) -> None:
         """Filter containers and their children."""
