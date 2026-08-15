@@ -162,3 +162,15 @@ class TestFilesystemsThatCannotLock:
         with scene_generation_lock(timeout=30.0, path=tmp_path / "lock") as held:
             assert held is True
         assert len(calls) >= 3
+
+
+def test_an_unwritable_resources_directory_fails_open(monkeypatch):
+    """Documented behaviour, but lock_path() creates that directory itself."""
+    from railroad.environment.procthor import _scene_lock
+
+    def unwritable():
+        raise OSError(13, "Permission denied")
+
+    monkeypatch.setattr(_scene_lock, "lock_path", unwritable)
+    with scene_generation_lock(timeout=1.0) as held:
+        assert held is False
