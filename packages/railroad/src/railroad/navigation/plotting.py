@@ -33,20 +33,22 @@ def make_plotting_grid(grid_map: np.ndarray) -> np.ndarray:
 
 
 PHOTO_UNDERLAY_ALPHA = {
-    "free": 0.15, "boundary": 1.0, "obstacle": 0.15, "unknown": 0.95,
+    "free": 0.0, "boundary": 0.0, "obstacle": 0.0, "unknown": 0.0,
 }
 """Per-class opacity when an aligned scene image is drawn underneath.
 
-Obstacle *outlines* stay opaque so the map still reads as a map, but obstacle
-*interiors* go nearly transparent -- that is where the scene image earns its
-place, and in ProcTHOR every cell that is not an agent-reachable position is
-"occupied", so an opaque interior would blot out the entire house.
+Currently all zero: with a scene image behind it the grid is redundant, and
+the image reads better without it. The grid is still drawn, so the layering,
+alpha plumbing and per-class classification stay exercised rather than rotting
+-- raising any of these brings it straight back.
 
-Unobserved cells stay nearly opaque. In an exploration run the observed /
-unobserved boundary is the most important thing on the plot, and letting the
-image bleed through the unobserved side blurs exactly that line -- it also
-shows the robot something it has not seen. Free space takes only a light wash,
-enough to lift the floor under a trail without hiding what is on it.
+The classes are kept apart because they want opposite treatment if that
+happens. Obstacle *outlines* can be opaque, since they are what makes the plot
+read as a map, but obstacle *interiors* must stay faint: in ProcTHOR every cell
+that is not an agent-reachable position is "occupied", so an opaque interior
+blots out the entire house. Unobserved cells want the opposite again -- in an
+exploration run the observed / unobserved boundary is the most important thing
+on the plot, and letting ground truth bleed through blurs exactly that line.
 """
 
 
