@@ -10,6 +10,8 @@ are pinned here instead of being discovered from a corrupted animation.
 import numpy as np
 import pytest
 
+from railroad.navigation.plotting import UNTRAVERSABLE_SHADE
+
 matplotlib = pytest.importorskip("matplotlib")
 matplotlib.use("Agg")
 
@@ -307,11 +309,19 @@ class TestSceneImageSurvivesCompositing:
 
         def photo_pixels(path):
             # The image overhangs the grid, so its colour is the only thing
-            # that can be in the corner of the axes.
+            # that can be in the corner of the axes -- darkened there by the
+            # untraversable shade, hence the generous tolerance.
             rgb = (mpimg.imread(str(path))[:, :, :3] * 255).astype(int)
-            return (np.abs(rgb - np.array(self.PHOTO_COLOR)).sum(axis=2) < 60).sum()
+            shaded = np.array(self.PHOTO_COLOR) * (1 - UNTRAVERSABLE_SHADE)
+            return min(
+                (np.abs(rgb - np.array(self.PHOTO_COLOR)).sum(axis=2) < 60).sum()
+                + (np.abs(rgb - shaded).sum(axis=2) < 60).sum(),
+                rgb.shape[0] * rgb.shape[1],
+            )
 
-        counts = [photo_pixels(p) for p in (frames[1], frames[-1])]
-        assert counts[0] > 500, "scene image missing from the composited frames"
-        # Static chrome: the same pixels every frame, modulo h264 noise.
-        assert abs(counts[0] - counts[1]) < 0.05 * counts[0]
+        # Present early and still present late: were it wired in as an
+        # animated artist it would drop out of the restored region and the
+        # later frames would go blank behind the map. Counted rather than
+        # compared exactly, since the trail grows over the image as it goes.
+        for frame in (frames[1], frames[-1]):
+            assert photo_pixels(frame) > 500, f"scene image missing from {frame.name}"

@@ -44,7 +44,7 @@ Still drawn rather than skipped, so the layering and the alpha plumbing stay
 exercised instead of rotting; raising this brings the grid straight back.
 """
 
-UNTRAVERSABLE_SHADE = 0.15
+UNTRAVERSABLE_SHADE = 0.25
 """How much to darken what the robot cannot stand on, over a scene image.
 
 An image shows the room, not the map: furniture the robot must go around looks
@@ -54,16 +54,37 @@ space it can actually move through read at a glance.
 
 
 def make_untraversable_shade_rgba(
-    grid_map: np.ndarray, *, alpha: float = UNTRAVERSABLE_SHADE,
-) -> np.ndarray:
+    grid_map: np.ndarray,
+    cover: tuple[float, float, float, float] | None = None,
+    *,
+    alpha: float = UNTRAVERSABLE_SHADE,
+) -> tuple[np.ndarray, tuple[float, float, float, float]]:
     """Black wash over occupied and unobserved cells, transparent over free.
 
-    Returns ``(n_y, n_x, 4)``, transposed like the other overlays.
+    *cover* is an ``imshow`` extent, in cell coordinates, the wash should reach.
+    A scene image is generally larger than the mapped area -- the grid spans
+    only the reachable bbox -- and everything beyond it is somewhere the robot
+    cannot be either, so the grid is padded out to meet it rather than leaving
+    that margin bright.
+
+    Returns the ``(n_y, n_x, 4)`` overlay, transposed like the others, and the
+    extent to draw it at.
     """
+    n_x, n_y = grid_map.shape
+    left, right, bottom, top = -0.5, n_x - 0.5, n_y - 0.5, -0.5
+    if cover is not None:
+        pad = [int(np.ceil(max(0.0, gap))) for gap in
+               (left - cover[0], cover[1] - right, top - cover[3], cover[2] - bottom)]
+        grid_map = np.pad(
+            grid_map, ((pad[0], pad[1]), (pad[2], pad[3])), constant_values=1.0,
+        )
+        left, right = left - pad[0], right + pad[1]
+        top, bottom = top - pad[2], bottom + pad[3]
+
     free = (grid_map >= FREE_VAL) & (grid_map < 0.5)
     rgba = np.zeros((*grid_map.shape, 4), dtype=float)
     rgba[~free, 3] = alpha
-    return np.transpose(rgba, (1, 0, 2))
+    return np.transpose(rgba, (1, 0, 2)), (left, right, bottom, top)
 
 
 KNOWN_WALL_COLOR = (0.0, 0.0, 0.0)

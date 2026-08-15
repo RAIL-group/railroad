@@ -416,11 +416,12 @@ class _PlottingMixin:
                     make_known_boundary_rgba, make_untraversable_shade_rgba,
                 )
                 # An image shows the room, not the map: darken what the robot
-                # cannot stand on so the space it can move through reads.
-                ax.imshow(
-                    make_untraversable_shade_rgba(occupancy_grid),
-                    origin="upper", zorder=0.25,
+                # cannot stand on so the space it can move through reads. Out
+                # to the image, which reaches past the mapped area.
+                shade, shade_extent = make_untraversable_shade_rgba(
+                    occupancy_grid, self._image_content_extent(photo),
                 )
+                ax.imshow(shade, origin="upper", extent=shade_extent, zorder=0.25)
                 # The image renders ground truth everywhere, including where
                 # the robot has not looked, so outline how far it has seen.
                 ax.imshow(
@@ -537,6 +538,7 @@ class _PlottingMixin:
             # Last, so everything above is inside the frame: pinning the
             # limits turns autoscale off.
             self._set_grid_limits(ax, occupancy_grid, photo, points=plotted_points)
+            self._label_axes_in_meters(ax)
 
         ax.set_title(f"Entity Trajectories  (cost = {t_end:.1f})",
                      fontfamily="monospace", fontsize=10)
@@ -647,6 +649,25 @@ class _PlottingMixin:
             _lerp(top, bottom, rows[-1] + 1, height),
             _lerp(top, bottom, rows[0], height),
         )
+
+    def _label_axes_in_meters(self: PlannerDashboard, ax: Any) -> None:
+        """Show metres on the axes when the scene knows its cell size.
+
+        The data stays in grid cells -- trajectories, extents and overlays all
+        share that frame -- so only the tick labels are converted. Scenes that
+        do not report a resolution keep cell numbering.
+        """
+        from matplotlib.ticker import FuncFormatter
+
+        resolution = getattr(getattr(self._env, "scene", None), "resolution", None)
+        if not resolution:
+            return
+        for axis, name in ((ax.xaxis, "x"), (ax.yaxis, "y")):
+            axis.set_major_formatter(
+                FuncFormatter(lambda cells, _pos: f"{cells * resolution:g}")
+            )
+        ax.set_xlabel("x (m)", fontsize=8)
+        ax.set_ylabel("y (m)", fontsize=8)
 
     def _set_grid_limits(
         self: PlannerDashboard, ax: Any, occupancy_grid: Any, photo: Any | None,
@@ -1042,11 +1063,19 @@ class _PlottingMixin:
         shade_artist = None
         shade_frames: list[tuple[float, Any]] = []
         if occupancy_grid is not None and photo_artist is not None:
-            for make, zorder in ((make_untraversable_shade_rgba, 0.25),
-                                 (make_known_boundary_rgba, 0.5)):
+            cover = self._image_content_extent(photo_artist)
+            _, shade_extent = make_untraversable_shade_rgba(occupancy_grid, cover)
+
+            def _shade(grid):
+                return make_untraversable_shade_rgba(grid, cover)[0]
+
+            for make, zorder, extent in ((_shade, 0.25, shade_extent),
+                                         (make_known_boundary_rgba, 0.5, None)):
                 frames = [(t, make(g)) for t, g in self._nav_grid_snapshots]
                 first = frames[0][1] if frames else make(occupancy_grid)
-                artist = ax.imshow(first, origin="upper", zorder=zorder)
+                artist = ax.imshow(
+                    first, origin="upper", zorder=zorder, extent=extent,
+                )
                 if zorder == 0.25:
                     shade_artist, shade_frames = artist, frames
                 else:
@@ -1092,6 +1121,7 @@ class _PlottingMixin:
                 points=[*map(tuple, combined_xy),
                         *(c for c in marker_coords if c is not None)],
             )
+            self._label_axes_in_meters(ax)
 
         n_frames = int(fps * duration)
         animation_times = np.linspace(0.0, t_end, n_frames)
