@@ -29,15 +29,10 @@ IGNORE_CONTAINERS = [
 SCENE_CACHE_VERSION = 2
 """Version 2 adds ``image_ortho_extent_m``.
 
-The extent is recomputable from the scene JSON via
-:meth:`ThorInterface.top_down_footprint`, but it is stored anyway, because its
-*presence* is what distinguishes an image rendered with that footprint from a
-version 1 image framed on AI2-THOR's ``sceneBounds``. Recomputing a footprint
-and applying it to a version 1 image would misalign it silently.
-
-Bumping this does *not* invalidate older caches: a scene missing the extent
-degrades to no overhead image rather than relaunching Unity for every scene
-already on disk.
+Stored even though :meth:`ThorInterface.top_down_footprint` recomputes it,
+because its *presence* is what distinguishes an image framed that way from a
+version 1 image framed on AI2-THOR's ``sceneBounds``. A missing extent degrades
+to no overhead image rather than relaunching Unity for every cached scene.
 """
 
 _MAP_VIEW_ROTATION = {"x": 90.0, "y": 0.0, "z": 0.0}
@@ -49,8 +44,7 @@ TOP_DOWN_MARGIN_M = 0.5
 _EXTENT_WARNED: set = set()
 """Seeds already warned about, so a per-frame render path stays quiet.
 
-Deliberately not left to ``warnings``' own deduplication, which keys on
-(message, category, module, lineno) and is reset to "always" inside
+Not left to ``warnings``' own deduplication, which is reset to "always" inside
 ``pytest.warns``.
 """
 
@@ -186,15 +180,11 @@ class ThorInterface:
     def _write_cache_atomically(cache: Dict, target: Path) -> None:
         """Write *cache* to *target*, or leave whatever was there alone.
 
-        Dumping straight to the destination means a Ctrl-C or a crash partway
-        through leaves a truncated pickle that every later run fails to load --
-        the scene is then permanently broken rather than simply regenerated.
-        The window is not small: these are two 480x480 images plus thousands of
-        reachable positions, and generating them is slow enough that
-        interrupting the run is a normal thing to do.
-
-        Writing beside the target and renaming makes the swap atomic within a
-        filesystem, so a reader sees either the old file or the whole new one.
+        Dumping straight to the destination leaves a truncated pickle on a
+        Ctrl-C, and the scene is then permanently broken rather than simply
+        regenerated. Not a small window: two 480x480 images plus thousands of
+        reachable positions, slow enough that interrupting is normal. Writing
+        beside the target and renaming makes the swap atomic.
         """
         handle, temp_name = tempfile.mkstemp(
             dir=target.parent, prefix=f'{target.stem}.', suffix='.tmp',
@@ -247,11 +237,10 @@ class ThorInterface:
     def scale_to_grid_continuous(
         self, point: Union[Tuple[float, float], Sequence[float]]
     ) -> Tuple[float, float]:
-        """World (x, z) meters -> fractional grid cells.
+        """World (x, z) meters -> fractional grid cells, unrounded.
 
-        Integers land on cell centers, which is exactly where matplotlib
-        places them. Callers positioning an image need the unrounded value:
-        rounding an outer edge to a cell center shifts it by up to half a cell.
+        Callers positioning an image need this: rounding an outer edge to a
+        cell center shifts it by up to half a cell.
         """
         x = (point[0] - self.grid_offset[0]) / self.grid_resolution
         y = (point[1] - self.grid_offset[1]) / self.grid_resolution
@@ -422,24 +411,18 @@ class ThorInterface:
         return known_cost
 
     def top_down_footprint(self) -> Tuple[float, float, float, float]:
-        """World footprint the top-down camera frames, ``(min_x, max_x, min_z, max_z)``.
+        """World footprint the camera frames, ``(min_x, max_x, min_z, max_z)``.
 
-        Chosen here rather than taken from AI2-THOR's map-view camera, so that
-        it is known exactly and offline. THOR frames on ``sceneBounds``, the
-        union of every enabled renderer's bounds -- which sweeps in geometry
-        that is not visible from above (ceilings, roof overhang) by a
-        scene-dependent amount, and is inconsistent enough across ProcTHOR-10k
-        that deriving world coordinates from it is an open upstream bug
-        (allenai/ai2thor#1181). Nothing downstream could then say where a pixel
-        sits without re-reading numbers only a live Unity has.
+        Chosen here rather than taken from THOR's map-view camera, so it is
+        known offline. THOR frames on ``sceneBounds`` -- the union of every
+        enabled renderer, which sweeps in geometry invisible from above and is
+        inconsistent enough across ProcTHOR-10k to be an open upstream bug
+        (allenai/ai2thor#1181).
 
-        The room floor polygons are exact, in the scene JSON, and the walls sit
-        on their boundary -- so the house footprint plus a small margin frames
-        the whole scene, including rooms the agent cannot enter.
-
-        Square, because a third-party camera inherits the main camera's
-        resolution and ``orthographicSize`` is a half-height: a non-square
-        request could not be honoured.
+        The room floor polygons are exact, in the scene JSON, with the walls on
+        their boundary, so the house plus a margin frames the whole scene
+        including rooms the agent cannot enter. Square, since a third-party
+        camera inherits the main camera's resolution.
         """
         corners = [
             (vertex["x"], vertex["z"])
@@ -546,7 +529,9 @@ class ThorInterface:
             image = self.cached_data.get('image_ortho')
             extent_m = self.cached_data.get('image_ortho_extent_m')
             if image is None or extent_m is None:
-                self._warn_missing_extent()
+                self._warn_unplaceable(
+                    "was cached before the top-down camera extent was recorded"
+                )
                 return None
             # The footprint is recomputable, so a cache that disagrees with it
             # was rendered against different framing -- a changed
@@ -554,7 +539,11 @@ class ThorInterface:
             # would now say, so treat it as stale rather than misplace it.
             expected = self.top_down_footprint()
             if not np.allclose(extent_m, expected, atol=1e-6):
-                self._warn_stale_extent(extent_m, expected)
+                self._warn_unplaceable(
+                    f"was rendered with the footprint "
+                    f"{tuple(round(v, 3) for v in extent_m)}, but this build "
+                    f"frames it at {tuple(round(v, 3) for v in expected)}"
+                )
                 return None
         else:
             image, extent_m = self._render_top_down_from_controller(orthographic=True)
@@ -567,11 +556,10 @@ class ThorInterface:
     ) -> TopDownView:
         """Place an image given its world footprint, in meters.
 
-        The bounds are the image's outer *edges*, and
-        ``scale_to_grid_continuous`` maps meters to cell coordinates where
-        integers are cell centers -- which is where matplotlib draws them. So
-        no half-cell correction belongs here: rounding to a cell index, as
-        ``scale_to_grid`` does, would put an outer edge on a center instead.
+        The bounds are outer *edges*, and ``scale_to_grid_continuous`` maps
+        meters to cell coordinates where integers are cell centers, which is
+        where matplotlib draws them. So no half-cell correction belongs here --
+        rounding, as ``scale_to_grid`` does, would put an edge on a center.
         """
         min_x, min_y = self.scale_to_grid_continuous((extent_m[0], extent_m[2]))
         max_x, max_y = self.scale_to_grid_continuous((extent_m[1], extent_m[3]))
@@ -579,21 +567,8 @@ class ThorInterface:
             image=image, min_x=min_x, max_x=max_x, min_y=min_y, max_y=max_y,
         )
 
-    def _warn_missing_extent(self) -> None:
-        """Warn once per scene that the cached image cannot be positioned."""
-        self._warn_unusable_cache(
-            "was cached before the top-down camera extent was recorded"
-        )
-
-    def _warn_stale_extent(self, cached: Any, expected: Any) -> None:
-        """Warn once per scene that the cached image was framed differently."""
-        self._warn_unusable_cache(
-            f"was rendered with the footprint {tuple(round(v, 3) for v in cached)}, "
-            f"but this build frames it at {tuple(round(v, 3) for v in expected)}"
-        )
-
-    def _warn_unusable_cache(self, reason: str) -> None:
-        """Warn once per scene, whatever made the cached image unplaceable."""
+    def _warn_unplaceable(self, reason: str) -> None:
+        """Warn once per scene that its cached image cannot be positioned."""
         if self.seed in _EXTENT_WARNED:
             return
         _EXTENT_WARNED.add(self.seed)
@@ -603,9 +578,8 @@ class ThorInterface:
             f"{self._cache_dir()} to regenerate it (this relaunches Unity for "
             f"the scenes you use).",
             RuntimeWarning,
-            stacklevel=4,
+            stacklevel=3,
         )
-
     def get_target_objs_info(self, num_objects: int = 1) -> Dict | List[Dict]:
         """Get info about target objects for search tasks."""
         object_name_to_idxs: Dict[str, List[int]] = {}

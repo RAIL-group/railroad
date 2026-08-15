@@ -66,23 +66,19 @@ class _PlottingMixin:
     _TRAIL_REPAINT_OVERLAP = 64
     """Trail points repainted behind each newly drawn batch, in the video.
 
-    Frames are composited incrementally: each one paints the newly revealed
-    points onto the previous frame's raster. The halo is wider than the trail,
-    so a batch's halo spills backwards over colours already on that raster.
-    Repainting a short run behind the batch covers the spill, and keeps the
-    per-frame cost proportional to what was revealed rather than to the whole
-    trail. Dense enough at 2000 points per trail that this is a small fraction
-    of one frame's work.
+    Frames composite incrementally, and a halo is wider than the trail, so a
+    batch's halo spills backwards over colours already on the raster.
+    Repainting a short run behind it covers the spill while keeping the frame
+    cost proportional to what was revealed.
     """
 
     @classmethod
     def _trail_outline_sizes(cls, sizes: Any) -> Any:
         """Marker areas giving a constant-width halo around *sizes*.
 
-        Scatter sizes are areas, and a trail tapers from
-        ``_TRAIL_SIZE_START`` to ``_TRAIL_SIZE_END``, so scaling the area
-        would taper the halo along with it and leave the thin end unoutlined.
-        Growing the *radius* by a fixed amount keeps the outline even.
+        Scatter sizes are areas and the trail tapers, so scaling the area would
+        taper the halo too and leave the thin end unoutlined; growing the
+        *radius* by a fixed amount keeps it even.
         """
         import numpy as np
 
@@ -406,14 +402,11 @@ class _PlottingMixin:
         occupancy_grid = getattr(self._env, 'occupancy_grid', None)
         if occupancy_grid is not None:
             from railroad.navigation.plotting import plot_grid_background
-            # A scene image is positioned in grid cells, so it is only drawn
-            # when the plot is in that frame. It goes underneath, and the grid
-            # over it turns translucent -- an opaque obstacle fill would hide
-            # the very thing being drawn under it.
+            # Positioned in grid cells, so only drawn when the plot is in that
+            # frame. The grid over it gets out of the way.
             photo = self._render_photo_underlay(ax)
-            # The faint true-grid underlay is a stand-in for ground truth in
-            # unknown-space runs. The scene image *is* ground truth, and shown
-            # at once they muddy each other, so the image wins.
+            # The faint true-grid underlay stands in for ground truth; the image
+            # *is* ground truth, and together they muddy each other.
             true_grid = None if photo is not None else getattr(self._env, 'true_grid', None)
             plot_grid_background(
                 ax, occupancy_grid, true_grid, translucent=photo is not None,
@@ -488,19 +481,16 @@ class _PlottingMixin:
         # Draw one combined scatter for all robot trails, sorted by time
         if trail is not None:
             combined_xy, combined_sizes, combined_colors, _combined_times = trail
-            # A white halo underneath, so the trail reads against whatever it
-            # crosses -- a scene image is busy and every trail colour appears
-            # somewhere in it. Drawn as one layer below the whole trail rather
-            # than as a per-marker stroke: markers overlap, so a stroke would
-            # paint over the neighbour drawn just before it and scallop the
-            # line.
+            # A white halo, so the trail reads against a busy image. One layer
+            # below the whole trail rather than a per-marker stroke: markers
+            # overlap, and a stroke would paint over its neighbour and scallop
+            # the line.
             ax.scatter(
                 combined_xy[:, 0], combined_xy[:, 1],
                 s=self._trail_outline_sizes(combined_sizes), c="white",
                 zorder=4.5, linewidths=0,
             )
-            # Opaque, so the halo stays an outline instead of washing the
-            # colours out from behind.
+            # Opaque, or the halo washes the colours out from behind.
             ax.scatter(
                 combined_xy[:, 0], combined_xy[:, 1],
                 s=combined_sizes, c=combined_colors,
@@ -528,9 +518,8 @@ class _PlottingMixin:
             ax.autoscale()
             ax.set_aspect("equal", adjustable="datalim")
         else:
-            # Last, so everything plotted above is inside the frame: pinning
-            # the limits turns autoscale off, and a caller's coordinates need
-            # not all fall within the grid.
+            # Last, so everything above is inside the frame: pinning the
+            # limits turns autoscale off.
             self._set_grid_limits(
                 ax, occupancy_grid, photo,
                 points=None if trail is None else trail[0],
@@ -613,15 +602,11 @@ class _PlottingMixin:
     def _image_content_extent(artist: Any) -> tuple[float, float, float, float]:
         """The data-space box of an image's non-background pixels.
 
-        ProcTHOR renders its overhead view through a square orthographic camera
-        onto a white skybox, so a house that is not square arrives padded with
-        blank margin -- often a third of the frame. Framing on the padding
-        shrinks the map for nothing.
-
-        Only the *framing* uses this; the image is still drawn at its true
-        extent, so a misfire here can crop the view slightly but can never
-        misplace anything. Images with no blank border (railsim's, which is one
-        pixel per cell) return their full extent unchanged.
+        A square orthographic camera pads a non-square house with blank
+        skybox -- often a third of the frame -- and framing on that shrinks the
+        map for nothing. Only the *framing* uses this; the image still draws at
+        its true extent, so a misfire crops the view slightly and can never
+        misplace anything.
         """
         import numpy as np
 
@@ -656,19 +641,11 @@ class _PlottingMixin:
     ) -> None:
         """Frame the occupancy grid, widened to include an image and *points*.
 
-        Set explicitly rather than left to autoscale: two images whose extents
-        run in opposite directions is exactly where autoscale surprises live,
-        and framing on an image's blank margin wastes most of the panel.
-
-        Widened to the image, because the grid spans only the agent-reachable
-        bbox -- it stops a collision radius short of every wall, and in scenes
-        with a room the agent cannot enter it misses that room entirely.
-
-        Widened to *points* (the plotted trajectory and location markers)
-        because pinning the limits turns autoscale off. Without this, anything
-        a caller plots outside the grid -- location coordinates that do not all
-        fall inside it, say -- would be silently cropped, where before it
-        simply expanded the view.
+        Widened to the image because the grid spans only the agent-reachable
+        bbox: it stops a collision radius short of every wall, and misses rooms
+        the agent cannot enter entirely. Widened to *points* because pinning
+        the limits turns autoscale off, so anything a caller plots outside the
+        grid would otherwise be cropped where it used to expand the view.
         """
         import numpy as np
 
@@ -878,9 +855,8 @@ class _PlottingMixin:
 
         n_onboard = len(onboard_robots) if onboard_robots else 0
 
-        # The scene's top-down image is drawn into the main axes underneath the
-        # trajectory (see _render_photo_underlay), so there is no longer a
-        # separate overhead column. Onboard images go in a bottom row.
+        # The image goes into the main axes under the trajectory, so there is
+        # no separate overhead column. Onboard images go in a bottom row.
         fig = plt.figure(figsize=figsize)
         onboard_spec = None
         n_rows = 2 if n_onboard else 1
@@ -988,7 +964,7 @@ class _PlottingMixin:
         # Animated navigation grid background
         from railroad.navigation.plotting import (
             PHOTO_UNDERLAY_ALPHA, _BACKGROUND_GRAY, make_known_boundary_rgba,
-            make_plotting_grid, make_plotting_grid_alpha, make_plotting_grid_rgba,
+            make_plotting_grid, make_plotting_grid_rgba,
         )
 
         nav_grid_artist = None
@@ -997,14 +973,10 @@ class _PlottingMixin:
         _nav_has_true_underlay = False
         photo_artist = None
         if occupancy_grid is not None:
-            # A scene image is positioned in grid cells, so it can only be
-            # placed when the plot is in that frame -- without a grid the
-            # trajectory is drawn in whatever space location_coords uses.
-            #
-            # Drawn once beneath the animated grid, and deliberately left out of
-            # the layered/hot artist sets below: the plain canvas.draw() in
-            # _draw_chrome then bakes it into the cached chrome region, so it
-            # costs nothing per frame and returns with every restore_region().
+            # Positioned in grid cells, so only placed when the plot is in
+            # that frame. Deliberately left out of the layered/hot artist sets
+            # below, so the plain canvas.draw() in _draw_chrome bakes it into
+            # the cached chrome region and it costs nothing per frame.
             photo_artist = self._render_photo_underlay(ax)
             # As in plot_trajectories: the scene image is ground truth, so the
             # faint true-grid stand-in steps aside when one is present.
@@ -1014,18 +986,6 @@ class _PlottingMixin:
             )
             has_unknown = bool(np.any(occupancy_grid == -1.0))
             _nav_has_true_underlay = true_grid is not None and has_unknown
-
-            def _with_photo_alpha(rgb: np.ndarray, obs_grid: np.ndarray) -> np.ndarray:
-                """Attach a per-class alpha so the scene image shows through.
-
-                Returned unconditionally as RGBA when an image is present, so
-                the channel count is fixed for the whole video and ``set_data``
-                stays happy.
-                """
-                if photo_artist is None:
-                    return rgb
-                alpha = make_plotting_grid_alpha(obs_grid.T, **PHOTO_UNDERLAY_ALPHA)
-                return np.dstack([rgb, alpha])
 
             if _nav_has_true_underlay:
                 assert true_grid is not None
@@ -1037,11 +997,10 @@ class _PlottingMixin:
                 def _composite_frame(obs_grid: np.ndarray) -> np.ndarray:
                     obs_rgba = make_plotting_grid_rgba(obs_grid.T)
                     obs_alpha = obs_rgba[:, :, 3:4]
-                    rgb = underlay * (1 - obs_alpha) + obs_rgba[:, :, :3] * obs_alpha
-                    return _with_photo_alpha(rgb, obs_grid)
+                    return underlay * (1 - obs_alpha) + obs_rgba[:, :, :3] * obs_alpha
             else:
                 def _composite_frame(obs_grid: np.ndarray) -> np.ndarray:
-                    return _with_photo_alpha(make_plotting_grid(obs_grid.T), obs_grid)
+                    return make_plotting_grid(obs_grid.T)
 
             if self._nav_grid_snapshots:
                 nav_grid_frames = [
@@ -1055,6 +1014,10 @@ class _PlottingMixin:
                 nav_grid_artist = ax.imshow(
                     _composite_frame(occupancy_grid), origin="upper", zorder=0,
                 )
+            if photo_artist is not None:
+                # Set once on the artist: the grid gets out of the image's way
+                # for the whole video, so there is nothing per-frame about it.
+                nav_grid_artist.set_alpha(PHOTO_UNDERLAY_ALPHA)
 
         # Animated outline of what the robot has observed. Drawn over an image
         # only, since without one the grid itself already shows this, and it
@@ -1375,17 +1338,14 @@ class _PlottingMixin:
         def _draw_trail(lo: int, hi: int) -> None:
             """Draw trail points ``[lo, hi)``: white halo first, then colour.
 
-            Only the new points, so a frame costs what it revealed rather than
-            the whole trail. Their halo does spill backwards over colours
-            already on the raster, so the colour pass starts a little earlier
-            than the halo pass and paints that spill back in.
+            Only the new points, so a frame costs what it revealed. The colour
+            pass starts earlier than the halo pass to paint back the spill.
 
-            What the overlap does not reach is a path *crossing*: there the new
-            halo covers an older segment that is nowhere near it in time. That
-            is left alone deliberately -- it is what makes the later path read
-            as passing over the earlier one, which is the whole reason for
-            outlining a line, and redrawing every colour to avoid it would cost
-            more than the outline itself.
+            What the overlap does not reach is a path *crossing*, where the new
+            halo covers a segment far away in time. Left alone deliberately:
+            that is what makes the later path read as passing over the earlier
+            one, and repainting every colour to avoid it costs more than the
+            outline itself.
             """
             trail_outline.set_offsets(combined_xy[lo:hi])
             trail_outline.set_sizes(self._trail_outline_sizes(combined_sizes[lo:hi]))

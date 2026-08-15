@@ -72,25 +72,20 @@ def test_top_down_view_is_transposed_to_match_the_plot(maze_scene: RailsimScene)
     """``get_top_down_image`` is indexed [x, y]; the plot draws ``grid.T``.
 
     That mismatch was invisible while the image had its own subplot. Drawn
-    underneath the trajectory it would render a mirrored map, so the view
-    transposes and the test pins which way round it ends up.
+    underneath the trajectory it renders a mirrored map, so the view transposes
+    -- and its extent is the one imshow would infer for the grid itself, since
+    it is exactly one pixel per cell.
     """
     view = maze_scene.get_top_down_view()
     n_x, n_y = maze_scene.raw_grid.shape
     assert view.image.shape == (n_y, n_x, 3)
+    assert view.extent == pytest.approx((-0.5, n_x - 0.5, n_y - 0.5, -0.5))
 
     raw = maze_scene.get_top_down_image()
     occupied = np.argwhere(maze_scene.raw_grid >= 0.5)
     free = np.argwhere(maze_scene.raw_grid < 0.5)
     for i, j in (occupied[len(occupied) // 2], free[len(free) // 2]):
         np.testing.assert_array_equal(view.image[j, i], raw[i, j])
-
-
-def test_top_down_view_covers_exactly_the_grid(maze_scene: RailsimScene) -> None:
-    """One pixel per cell, so it lands on the extent imshow infers for the grid."""
-    view = maze_scene.get_top_down_view()
-    n_x, n_y = maze_scene.grid.shape
-    assert view.extent == pytest.approx((-0.5, n_x - 0.5, n_y - 0.5, -0.5))
 
 
 def test_seeded_generation_is_deterministic() -> None:
