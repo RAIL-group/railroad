@@ -42,9 +42,10 @@ def scene_generation_lock(
     """Hold the exclusive scene-generation lock for the duration of the block.
 
     Yields True when the lock was held, False when it could not be taken (no
-    ``fcntl`` on this platform, an unwritable directory, or the timeout
-    elapsed). Failing open is deliberate: a locking problem should slow a
-    machine down, not stop a run that would otherwise have worked.
+    ``fcntl`` on this platform, an unwritable directory, a filesystem that
+    cannot lock, or the timeout elapsed). Failing open is deliberate: a locking
+    problem should slow a machine down, not stop a run that would otherwise
+    have worked.
     """
     try:
         import fcntl
@@ -68,7 +69,8 @@ def scene_generation_lock(
             try:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
-            except OSError:
+            except BlockingIOError:
+                # Someone else holds it. This is the case worth waiting out.
                 if time.monotonic() >= deadline:
                     yield False
                     return
@@ -77,6 +79,18 @@ def scene_generation_lock(
                           "generating a scene...")
                     announced = True
                 time.sleep(POLL_SECONDS)
+            except OSError as error:
+                # Anything else means flock will never succeed here, not that
+                # it is busy: ENOLCK, EOPNOTSUPP, or EINVAL on NFS without
+                # lockd, on CIFS, and on some container overlay filesystems.
+                # Retrying would poll for the whole timeout -- half an hour by
+                # default -- while claiming to wait on another process. That is
+                # a live path precisely because PROCTHOR_RESOURCES_DIR exists
+                # to put the cache somewhere shared.
+                print(f"[procthor] cannot lock {target} ({error.strerror}); "
+                      "generating without serialising across processes")
+                yield False
+                return
         try:
             yield True
         finally:
