@@ -168,12 +168,14 @@ class TestPhotoUnderlay:
         assert ax.get_ylim() == pytest.approx((n_y - 0.5, -0.5))
 
     @pytest.mark.parametrize("scene", [None, "photo"])
-    def test_a_path_leaving_the_grid_is_not_cropped(self, scene):
+    def test_what_a_caller_plots_outside_the_grid_is_not_cropped(self, scene):
         """Pinning the limits turns autoscale off, which used to be free.
 
-        Callers may plot coordinates that do not all fall inside the occupancy
-        grid; before the limits were set explicitly those simply expanded the
-        view, and they must still be visible rather than silently clipped.
+        ``plot_trajectories`` explicitly supports caller-supplied
+        ``location_coords``, which need not all fall inside the occupancy grid.
+        Before the limits were set explicitly those simply expanded the view;
+        they must still be visible rather than silently clipped -- the marker
+        and its label as much as the path reaching it.
         """
         db, _coords = _dashboard(_Scene(_photo_view()) if scene else None)
         n_x, n_y = GRID_SHAPE
@@ -181,6 +183,13 @@ class TestPhotoUnderlay:
         _figure, ax = _main_axes(db, outside)
         assert ax.get_xlim()[1] >= outside["B"][0]
         assert ax.get_ylim()[0] >= outside["B"][1]
+
+        # Every black location marker inside the frame, not just the trail.
+        left, right = ax.get_xlim()
+        bottom, top = ax.get_ylim()
+        for collection in ax.collections:
+            for x, y in collection.get_offsets():
+                assert left <= x <= right and top <= y <= bottom
 
     @pytest.mark.parametrize("scene", ["declines", "legacy"])
     def test_a_scene_that_cannot_place_an_image_gets_a_plain_grid(self, scene):

@@ -439,6 +439,12 @@ class _PlottingMixin:
                 if traj_times:
                     t_end = max(t_end, max(traj_times))
         trail = self._compute_trail_arrays(trajectories, t_end)
+        # Everything drawn in data coordinates, gathered for the frame below:
+        # pinning the limits turns autoscale off, so anything left out is
+        # cropped rather than expanding the view.
+        plotted_points: list[tuple[float, float]] = []
+        if trail is not None:
+            plotted_points.extend(map(tuple, trail[0]))
 
         # Plot robot location markers and labels
         for entity in sorted(self.known_robots & set(trajectories.keys())):
@@ -464,6 +470,7 @@ class _PlottingMixin:
 
             wx = [c[0] for _, c in annotated_locs]
             wy = [c[1] for _, c in annotated_locs]
+            plotted_points.extend(zip(wx, wy))
             ax.scatter(wx, wy, s=20, zorder=6, color="black")
 
             ax.annotate(
@@ -507,6 +514,7 @@ class _PlottingMixin:
 
                 x = [p[0] for p in waypoints]
                 y = [p[1] for p in waypoints]
+                plotted_points.extend(zip(x, y))
                 ax.plot(x, y, linestyle="--", linewidth=1, alpha=0.6, label=entity)
                 ax.scatter(x, y, s=10, zorder=5, alpha=0.6)
 
@@ -520,10 +528,7 @@ class _PlottingMixin:
         else:
             # Last, so everything above is inside the frame: pinning the
             # limits turns autoscale off.
-            self._set_grid_limits(
-                ax, occupancy_grid, photo,
-                points=None if trail is None else trail[0],
-            )
+            self._set_grid_limits(ax, occupancy_grid, photo, points=plotted_points)
 
         ax.set_title(f"Entity Trajectories  (cost = {t_end:.1f})",
                      fontfamily="monospace", fontsize=10)
@@ -1060,11 +1065,21 @@ class _PlottingMixin:
             combined_times = np.empty(0)
 
         if occupancy_grid is not None:
-            # Before label_offset below, which reads ax.get_ylim(). The trail is
-            # computed above so the frame can include a path that leaves the
-            # grid: pinning the limits turns autoscale off.
+            # Before label_offset below, which reads ax.get_ylim(). Pinning the
+            # limits turns autoscale off, so everything drawn in data
+            # coordinates has to be gathered first -- the trail, and the
+            # location markers placed further down, whose coordinates a caller
+            # supplies and need not fall inside the grid.
+            marker_coords = [
+                stored if stored is not None else env_coords.get(name)
+                for positions in self._entity_positions.values()
+                for _time, name, stored in positions
+                if not name.startswith("frontier_")
+            ]
             self._set_grid_limits(
-                ax, occupancy_grid, photo_artist, points=combined_xy,
+                ax, occupancy_grid, photo_artist,
+                points=[*map(tuple, combined_xy),
+                        *(c for c in marker_coords if c is not None)],
             )
 
         n_frames = int(fps * duration)
