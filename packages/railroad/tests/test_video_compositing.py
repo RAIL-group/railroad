@@ -235,6 +235,7 @@ class TestSaveVideoEndToEnd:
         assert int(frames) == 6
 
 
+@pytest.mark.skipif(not _have_ffmpeg(), reason="ffmpeg not installed")
 class TestSceneImageSurvivesCompositing:
     """The overhead image is static chrome, not a per-frame artist.
 
