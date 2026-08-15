@@ -60,3 +60,52 @@ def test_an_explicit_path_still_wins(cache_dir, tmp_path):
     somewhere.mkdir()
     (somewhere / "scene_3.pkl").write_bytes(pickle.dumps({"marker": True}))
     assert _interface(3)._load_cache(str(somewhere)) == {"marker": True}
+
+
+class TestTheCacheSurvivesAnInterruptedWrite:
+    """Generating a scene is slow, so it gets interrupted.
+
+    Dumping straight to the destination leaves a truncated pickle that every
+    later run fails to load -- the scene is permanently broken rather than
+    regenerated, and the cache is shared, so one bad file follows the host
+    around.
+    """
+
+    @staticmethod
+    def _cache(marker: str) -> dict:
+        return {"reachable_positions": [], "marker": marker}
+
+    def test_an_interrupted_write_leaves_the_previous_cache_intact(self, tmp_path):
+        thor = _interface(5)
+        target = tmp_path / "scene_5.pkl"
+        thor._write_cache_atomically(self._cache("original"), target)
+
+        def explode(obj, file):
+            file.write(b"\x80\x04\x95truncated")
+            raise KeyboardInterrupt
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(pickle, "dump", explode)
+            with pytest.raises(KeyboardInterrupt):
+                thor._write_cache_atomically(self._cache("replacement"), target)
+
+        assert thor._load_cache(str(tmp_path)) == self._cache("original")
+
+    def test_an_interrupted_write_leaves_no_debris(self, tmp_path):
+        thor = _interface(5)
+
+        def explode(obj, file):
+            raise KeyboardInterrupt
+
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(pickle, "dump", explode)
+            with pytest.raises(KeyboardInterrupt):
+                thor._write_cache_atomically(self._cache("x"), tmp_path / "scene_5.pkl")
+
+        assert list(tmp_path.iterdir()) == []
+
+    def test_an_unreadable_cache_reads_as_a_miss_rather_than_raising(self, tmp_path):
+        """Recovers files written before the atomic swap existed."""
+        (tmp_path / "scene_9.pkl").write_bytes(b"\x80\x04\x95 truncated garbage")
+        with pytest.warns(RuntimeWarning, match="could not be read"):
+            assert _interface(9)._load_cache(str(tmp_path)) is None
