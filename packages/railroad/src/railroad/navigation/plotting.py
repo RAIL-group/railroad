@@ -44,6 +44,28 @@ Still drawn rather than skipped, so the layering and the alpha plumbing stay
 exercised instead of rotting; raising this brings the grid straight back.
 """
 
+UNTRAVERSABLE_SHADE = 0.15
+"""How much to darken what the robot cannot stand on, over a scene image.
+
+An image shows the room, not the map: furniture the robot must go around looks
+much like floor from above. A wash over everything untraversable makes the
+space it can actually move through read at a glance.
+"""
+
+
+def make_untraversable_shade_rgba(
+    grid_map: np.ndarray, *, alpha: float = UNTRAVERSABLE_SHADE,
+) -> np.ndarray:
+    """Black wash over occupied and unobserved cells, transparent over free.
+
+    Returns ``(n_y, n_x, 4)``, transposed like the other overlays.
+    """
+    free = (grid_map >= FREE_VAL) & (grid_map < 0.5)
+    rgba = np.zeros((*grid_map.shape, 4), dtype=float)
+    rgba[~free, 3] = alpha
+    return np.transpose(rgba, (1, 0, 2))
+
+
 KNOWN_WALL_COLOR = (0.0, 0.0, 0.0)
 """Boundary the robot has seen the far side of -- an observed obstacle."""
 
