@@ -2,8 +2,10 @@
 
 import copy
 import json
+import os
 import pickle
 import random
+import tempfile
 import warnings
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
@@ -177,18 +179,54 @@ class ThorInterface:
         }
         save_dir = Path(path) if path is not None else self._cache_dir()
         save_dir.mkdir(parents=True, exist_ok=True)
-        with open(save_dir / f'scene_{self.seed}.pkl', 'wb') as f:
-            pickle.dump(cache, f)
+        self._write_cache_atomically(cache, save_dir / f'scene_{self.seed}.pkl')
         return cache
 
+    @staticmethod
+    def _write_cache_atomically(cache: Dict, target: Path) -> None:
+        """Write *cache* to *target*, or leave whatever was there alone.
+
+        Dumping straight to the destination means a Ctrl-C or a crash partway
+        through leaves a truncated pickle that every later run fails to load --
+        the scene is then permanently broken rather than simply regenerated.
+        The window is not small: these are two 480x480 images plus thousands of
+        reachable positions, and generating them is slow enough that
+        interrupting the run is a normal thing to do.
+
+        Writing beside the target and renaming makes the swap atomic within a
+        filesystem, so a reader sees either the old file or the whole new one.
+        """
+        handle, temp_name = tempfile.mkstemp(
+            dir=target.parent, prefix=f'{target.stem}.', suffix='.tmp',
+        )
+        try:
+            with os.fdopen(handle, 'wb') as file:
+                pickle.dump(cache, file)
+            os.replace(temp_name, target)
+        except BaseException:  # including KeyboardInterrupt, the likely one
+            Path(temp_name).unlink(missing_ok=True)
+            raise
+
     def _load_cache(self, path: Optional[str] = None) -> Optional[Dict]:
-        """Load cached scene data."""
+        """Load cached scene data, treating an unreadable file as a miss."""
         base = Path(path) if path is not None else self._cache_dir()
         cache_file = base / f'scene_{self.seed}.pkl'
         if not cache_file.exists():
             return None
-        with open(cache_file, 'rb') as f:
-            return pickle.load(f)
+        try:
+            with open(cache_file, 'rb') as f:
+                return pickle.load(f)
+        except Exception as error:
+            # Recover from files written before the atomic swap above, rather
+            # than failing every run until someone deletes them by hand. Loud,
+            # because regenerating means starting Unity.
+            warnings.warn(
+                f"ProcTHOR scene cache {cache_file} could not be read "
+                f"({type(error).__name__}: {error}); regenerating it.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            return None
 
     def _get_reachable_positions_from_controller(self) -> List[Dict[str, float]]:
         """Get reachable positions from controller."""
