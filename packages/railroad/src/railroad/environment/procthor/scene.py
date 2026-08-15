@@ -47,6 +47,11 @@ class ProcTHORScene:
         return self._thor.occupancy_grid
 
     @property
+    def resolution(self) -> float:
+        """Meters per grid cell."""
+        return float(self._thor.grid_resolution)
+
+    @property
     def scene_graph(self):
         """Scene graph for visualization/debugging."""
         return self._thor.scene_graph

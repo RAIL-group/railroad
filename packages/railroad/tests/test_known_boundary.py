@@ -124,7 +124,22 @@ def test_only_what_cannot_be_stood_on_is_shaded():
     grid = _room()
     grid[3:8, 3:8] = 0.0
 
-    shade = np.transpose(make_untraversable_shade_rgba(grid), (1, 0, 2))[:, :, 3]
+    rgba, extent = make_untraversable_shade_rgba(grid)
+    shade = np.transpose(rgba, (1, 0, 2))[:, :, 3]
     free = grid == 0.0
     np.testing.assert_allclose(shade[free], 0.0)
     np.testing.assert_allclose(shade[~free], UNTRAVERSABLE_SHADE)
+    assert extent == (-0.5, grid.shape[0] - 0.5, grid.shape[1] - 0.5, -0.5)
+
+
+def test_the_shade_reaches_an_image_wider_than_the_map():
+    """The grid spans only the reachable bbox, so a scene image runs past it --
+    and everything out there is somewhere the robot cannot be either."""
+    grid = np.zeros((6, 6))
+
+    rgba, extent = make_untraversable_shade_rgba(grid, (-4.5, 9.5, 9.5, -4.5))
+    assert extent[0] <= -4.5 and extent[1] >= 9.5
+    assert extent[3] <= -4.5 and extent[2] >= 9.5
+    # Padded with untraversable, so only the original free cells stay clear.
+    shade = np.transpose(rgba, (1, 0, 2))[:, :, 3]
+    assert (shade == 0.0).sum() == grid.size
