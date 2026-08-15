@@ -1,6 +1,7 @@
 """AI2-THOR interface for ProcTHOR environments."""
 
 import copy
+import io
 import json
 import os
 import pickle
@@ -26,17 +27,29 @@ IGNORE_CONTAINERS = [
     'box'
 ]
 
-SCENE_CACHE_VERSION = 2
-"""Version 2 adds ``image_ortho_extent_m``.
+SCENE_CACHE_VERSION = 3
+"""Version 2 adds ``image_ortho_extent_m``; version 3 stores images as JPEG.
 
-Stored even though :meth:`ThorInterface.top_down_footprint` recomputes it,
-because its *presence* is what distinguishes an image framed that way from a
-version 1 image framed on AI2-THOR's ``sceneBounds``. A missing extent degrades
-to no overhead image rather than relaunching Unity for every cached scene.
+The extent is stored even though :meth:`ThorInterface.top_down_footprint`
+recomputes it, because its *presence* is what distinguishes an image framed
+that way from a version 1 image framed on AI2-THOR's ``sceneBounds``. A missing
+extent degrades to no overhead image rather than relaunching Unity for every
+cached scene; raw-array images from either older version still load.
 """
 
 _MAP_VIEW_ROTATION = {"x": 90.0, "y": 0.0, "z": 0.0}
 """Straight down, with camera-right along world +x and camera-up along +z."""
+
+TOP_DOWN_RENDER_PX = 2048
+"""Square render size for the cached top-down images.
+
+Saved plots are dpi=300, which puts ~2000 pixels across the map axes; at the
+old 480 the image was upscaled about four times. Costs generation only -- the
+controller is stopped as soon as the cache is written.
+"""
+
+JPEG_QUALITY = 75
+"""Cached images are JPEG, which is ~50x smaller than raw at this size."""
 
 TOP_DOWN_MARGIN_M = 0.5
 """Slack around the room polygons, for wall thickness and exterior trim."""
@@ -47,6 +60,23 @@ _EXTENT_WARNED: set = set()
 Not left to ``warnings``' own deduplication, which is reset to "always" inside
 ``pytest.warns``.
 """
+
+
+def _encode_image(image: np.ndarray) -> bytes:
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.fromarray(image).save(buffer, "JPEG", quality=JPEG_QUALITY)
+    return buffer.getvalue()
+
+
+def _decode_image(data: Any) -> Any:
+    """Cached images are JPEG bytes; older caches hold raw arrays."""
+    if not isinstance(data, bytes):
+        return data
+    from PIL import Image
+
+    return np.array(Image.open(io.BytesIO(data)).convert("RGB"))
 
 
 def _is_axis_aligned_top_down(rotation: Any) -> bool:
@@ -106,8 +136,8 @@ class ThorInterface:
                     self.controller = Controller(
                         scene=self.scene,
                         gridSize=self.grid_resolution,
-                        width=480,
-                        height=480
+                        width=TOP_DOWN_RENDER_PX,
+                        height=TOP_DOWN_RENDER_PX,
                     )
                     self.cached_data = self._save_and_get_cache()
                     # Inside the lock: otherwise every worker that generates a
@@ -167,8 +197,8 @@ class ThorInterface:
         cache = {
             'cache_version': SCENE_CACHE_VERSION,
             'reachable_positions': self._get_reachable_positions_from_controller(),
-            'image_ortho': image_ortho,
-            'image_persp': image_persp,
+            'image_ortho': _encode_image(image_ortho),
+            'image_persp': _encode_image(image_persp),
             # Meters, not cells: the filename encodes no resolution, but
             # `resolution` is a constructor argument, so cells would silently
             # corrupt any run that does not use the default. Plain floats, not
@@ -527,7 +557,7 @@ class ThorInterface:
         """Get top-down image (from cache or controller)."""
         if self.cached_data is not None:
             key = 'image_ortho' if orthographic else 'image_persp'
-            return self.cached_data[key]
+            return _decode_image(self.cached_data[key])
         return self._render_top_down_from_controller(orthographic)[0]
 
     def get_top_down_view(self) -> Optional[TopDownView]:
@@ -538,7 +568,7 @@ class ThorInterface:
         image can only be drawn misaligned, which is worse than no image.
         """
         if self.cached_data is not None:
-            image = self.cached_data.get('image_ortho')
+            image = _decode_image(self.cached_data.get('image_ortho'))
             extent_m = self.cached_data.get('image_ortho_extent_m')
             if image is None or extent_m is None:
                 self._warn_unplaceable(

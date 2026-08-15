@@ -15,6 +15,7 @@ import pytest
 from railroad.environment.procthor import resources
 from railroad.environment.procthor.thor_interface import (
     SCENE_CACHE_VERSION,
+    _decode_image,
     TOP_DOWN_MARGIN_M,
     ThorInterface,
     _EXTENT_WARNED,
@@ -127,9 +128,13 @@ def test_the_cache_round_trips_or_is_refused(tmp_path, monkeypatch):
     writer._get_reachable_positions_from_controller = lambda: []  # ty: ignore[invalid-assignment]
     writer._save_and_get_cache(str(tmp_path))
     with open(tmp_path / "scene_11.pkl", 'rb') as handle:
-        stored = pickle.load(handle)['image_ortho_extent_m']
+        written = pickle.load(handle)
+    stored = written['image_ortho_extent_m']
     assert isinstance(stored, tuple)
     assert all(type(value) is float for value in stored)
+    # JPEG, since a 2048 render is ~50x this size raw.
+    assert isinstance(written['image_ortho'], bytes)
+    assert _decode_image(written['image_ortho']).shape == (4, 4, 3)
 
     monkeypatch.setattr(resources, "DEFAULT_RESOURCES_BASE", tmp_path / "elsewhere")
     for description, thor in [
