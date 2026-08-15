@@ -105,3 +105,60 @@ def test_the_lock_is_released_on_exit(tmp_path, timeout):
     for _ in range(3):
         with scene_generation_lock(timeout=timeout, path=lock) as held:
             assert held is True
+
+
+class TestFilesystemsThatCannotLock:
+    """``flock`` fails two very different ways, and only one is worth waiting on.
+
+    ``BlockingIOError`` means another process holds it -- wait. Everything else
+    (``ENOLCK``, ``EOPNOTSUPP``, ``EINVAL``) means this filesystem will never
+    grant it: NFS without lockd, CIFS, some container overlays. Retrying those
+    polls for the entire timeout -- half an hour by default -- while printing
+    that it is waiting on another process. ``PROCTHOR_RESOURCES_DIR`` exists to
+    put the cache somewhere shared, so this is a reachable path, not a theory.
+    """
+
+    @staticmethod
+    def _flock_raising(error: OSError):
+        def flock(fileno, flags):
+            raise error
+        return flock
+
+    def test_an_unsupported_filesystem_fails_open_immediately(
+        self, tmp_path, monkeypatch,
+    ):
+        import errno
+        import fcntl
+
+        monkeypatch.setattr(
+            fcntl, "flock",
+            self._flock_raising(OSError(errno.ENOLCK, "No locks available")),
+        )
+        started = time.monotonic()
+        with scene_generation_lock(
+            timeout=30.0, path=tmp_path / "lock",
+        ) as held:
+            assert held is False
+        # Not "did it eventually give up" -- did it give up without polling.
+        assert time.monotonic() - started < 1.0
+
+    def test_contention_is_still_waited_out(self, tmp_path, monkeypatch):
+        """The retry path must survive the narrowing above."""
+        import fcntl
+
+        calls = []
+        real_flock = fcntl.flock
+
+        def flock(fileno, flags):
+            calls.append(flags)
+            if len(calls) < 3:
+                raise BlockingIOError("busy")
+            return real_flock(fileno, flags)
+
+        monkeypatch.setattr(fcntl, "flock", flock)
+        monkeypatch.setattr(
+            "railroad.environment.procthor._scene_lock.POLL_SECONDS", 0.01,
+        )
+        with scene_generation_lock(timeout=30.0, path=tmp_path / "lock") as held:
+            assert held is True
+        assert len(calls) >= 3
