@@ -20,7 +20,11 @@ from ..environments import (
     # get_example_procthor_task_distribution,
 )
 from ..experiments import ExperimentConfig, ExperimentSeeds, run_experiment, ExperimentMode
-from ..utilities import DistributionType, RandomVariableType, TaskArrivalProb
+from ..utilities import DistributionType, RandomVariableType, TaskArrivalProb, randomize_task_distribution_order
+
+# CONSTANTS
+MODEL_NAME = "best_model_experiment8.pt"
+EXPERIMENT_REPEATS = 100
 
 
 def _get_cases() -> list[dict[str, Any]]:
@@ -34,7 +38,8 @@ def _get_cases() -> list[dict[str, Any]]:
             "task_dist_idx": 0,
             "interruption_prob": interruption_prob,
             "interruption_seed": seed,
-            "num_task_sequence": num_task_sequence
+            "num_task_sequence": num_task_sequence,
+            "randomize_task_sequence": True
         }
         for (interruption_prob, seed), num_task_sequence in itertools.product(
             zip(
@@ -57,6 +62,7 @@ def _setup_experiment_config(
     seeds = ExperimentSeeds(
         case.params["procthor_seed"],
         case.params["interruption_seed"] + case.repeat_idx,
+        case.repeat_idx,
         object_placement_seed=None
     )
     task_arrival_model = TaskArrivalProb(
@@ -70,16 +76,21 @@ def _setup_experiment_config(
         set(env.scene.locations),
         one_object_per_taskdist=True
     )
+    current_goal = get_example_procthor_goal()
+    if case.params["randomize_task_sequence"]:
+        current_goal, task_distribution = randomize_task_distribution_order(
+            task_distribution, seeds.task_sample_seed
+        )
 
     model_path = (
-        DEFAULT_RESOURCES_BASE / "models/best_model_experiment5.pt"
+        DEFAULT_RESOURCES_BASE / f"models/{MODEL_NAME}"
         if experiment_mode in [ExperimentMode.INTERRUPTION, ExperimentMode.ANTICIPATORY_PLANNING]
         else ""
     )
 
     config = ExperimentConfig(
         seeds,
-        get_example_procthor_goal(),
+        current_goal,
         task_distribution,
         task_arrival_model,
         ff_heuristic,
@@ -97,7 +108,7 @@ def _setup_experiment_config(
     ),
     tags=["interruption", "procthor"],
     timeout=600.0,
-    repeat=32,
+    repeat=EXPERIMENT_REPEATS,
 )
 def bench_interruption_kitchen(case: BenchmarkCase):
     """
@@ -118,7 +129,7 @@ bench_interruption_kitchen.add_cases(_get_cases())
     ),
     tags=["interruption", "procthor", "myopic"],
     timeout=600.0,
-    repeat=32,
+    repeat=EXPERIMENT_REPEATS,
 )
 def bench_myopic_interruption_kitchen(case: BenchmarkCase):
     """
@@ -139,7 +150,7 @@ bench_myopic_interruption_kitchen.add_cases(_get_cases())
     ),
     tags=["interruption", "procthor", "ap"],
     timeout=600.0,
-    repeat=32,
+    repeat=EXPERIMENT_REPEATS,
 )
 def bench_ap_interruption_kitchen(case: BenchmarkCase):
     """

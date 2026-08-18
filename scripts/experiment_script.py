@@ -11,17 +11,22 @@ from interruption.experiments import (
     TaskArrivalProb,
     run_experiment,
 )
-from interruption.utilities import DistributionType, RandomVariableType
+from interruption.utilities import (
+    DistributionType, RandomVariableType, randomize_task_distribution_order
+)
 from railroad.core import ff_heuristic
 from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 
 # constants
 MODEL_PATH = DEFAULT_RESOURCES_BASE / "models"
+RANDOMIZE_TASK_SEQUENCE = True
 
-def main():
-    model_name = "best_model_experiment5.pt"
+def main(randomize_order: bool = False):
+    model_name = "best_model_experiment8.pt"
 
-    seeds = ExperimentSeeds(procthor_seed=201, experiment_seed=20, object_placement_seed=11)
+    seeds = ExperimentSeeds(
+        procthor_seed=201, experiment_seed=20, object_placement_seed=None, task_sample_seed=91
+    )
     task_arrival_model = TaskArrivalProb(
         0, RandomVariableType.CONTINUOUS,
         DistributionType.EXPONENTIAL
@@ -33,16 +38,12 @@ def main():
         set(env.scene.locations),
         one_object_per_taskdist=True
     )
-
-    # testing
-    task_distribution = (list(task_distribution[0]), task_distribution[1])
-    task_distribution[0][0] = task_distribution[0][3]
-    current_goal = task_distribution[0][2]
-
-    # apple/egg to fridge
-    
-
-    # current_goal = get_example_procthor_goal()
+    if randomize_order:
+        current_goal, task_distribution = randomize_task_distribution_order(
+            task_distribution, seeds.task_sample_seed
+        )
+    else:
+        current_goal = get_example_procthor_goal()
 
 
     config = ExperimentConfig(
@@ -60,4 +61,4 @@ def main():
     )
 
 if __name__ == "__main__":
-    main()
+    main(RANDOMIZE_TASK_SEQUENCE)

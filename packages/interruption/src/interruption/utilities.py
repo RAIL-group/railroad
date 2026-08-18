@@ -1,9 +1,10 @@
 import json
 import math
+import random
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import Any, Sequence
 
 from railroad.core import (
     Action,
@@ -195,6 +196,22 @@ def get_augmented_task_dist(
         augmented_tasks.append(current_task & task)
         probs.append(prob)
     return (augmented_tasks, probs)
+
+
+def randomize_task_distribution_order(
+    task_distribution: tuple[Sequence[Goal], list[float]],
+    seed: int
+) -> tuple[Goal, tuple[list[Goal], list[float]]]:
+    """
+    Helper function that randomly selects a task from the task
+    distribution to be the current task and re-orders the tasks
+    in the task distribution.
+    """
+    tasks, probs = task_distribution
+    rng = random.Random(seed)
+    random_current_goal = rng.choice(tasks)
+    idxes = rng.sample(range(len(tasks)), k=len(tasks))
+    return random_current_goal, ([tasks[i] for i in idxes], [probs[i] for i in idxes])
 
 
 # helper functions for ProcTHOR-10k dataset experiments

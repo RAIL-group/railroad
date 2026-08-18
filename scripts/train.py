@@ -13,7 +13,7 @@ TRAIN_DATASET_PATH = get_procthor_10k_dir() / "procthor_data_201.csv"
 TEST_DATASET_PATH = None
 
 # if supplying only 1 dataset, specify how it should be split for train and test datasets
-TRAIN_TEST_SPLIT = 1
+TRAIN_TEST_SPLIT = 0.85
 
 # specify learning hyperparameters
 HYPERPARAMETERS = {
@@ -26,7 +26,7 @@ HYPERPARAMETERS = {
 }
 
 # output directories specifications
-EXPERIMENT_NAME = "experiment7"
+EXPERIMENT_NAME = "experiment8_val"
 LOG_DIRECTORY = DEFAULT_RESOURCES_BASE / f"run_logs/{EXPERIMENT_NAME}"
 OUTPUT_MODEL_DIRECTORY = DEFAULT_RESOURCES_BASE / "models"
 
@@ -85,7 +85,7 @@ def training_loop(
     train_loader, test_loader = data_loaders
     # keep track of lowest losses seen during training for early stopping
     lowest_training_loss = float("inf")
-    # lowest_validation_loss = float("inf")
+    lowest_validation_loss = float("inf")
     early_stopping_counter = 0
 
     # epoch-based training loop
@@ -121,8 +121,10 @@ def training_loop(
 
         # TODO - later on it might be better to only evaluate on the validation loss
         # for right now, overfitting is chill
-        if train_loss < lowest_training_loss:
+        # if train_loss < lowest_training_loss:
+        if val_loss < lowest_validation_loss:
             lowest_training_loss = train_loss
+            lowest_validation_loss = val_loss
             early_stopping_counter = 0
             # write out best model
             torch.save(
@@ -134,6 +136,8 @@ def training_loop(
         if early_stopping_counter >= HYPERPARAMETERS["early_stopping_num_epochs"]:
             print(f"Early stopping at epoch {epoch}")
             break
+
+    print(f"Best model: avg train loss {lowest_training_loss:.4f}| avg val loss {lowest_validation_loss:.4f}")
 
 
 def train_epoch(
