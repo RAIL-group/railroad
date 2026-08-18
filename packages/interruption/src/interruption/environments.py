@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Sequence
 import random
 import numpy as np
@@ -196,23 +197,39 @@ def get_example_procthor_task_distribution(index: int) -> tuple[Sequence[Goal], 
 
     return list(zip(tasks_dists, probs))[index]
 
+
 def get_alfred_task_distribution(
     scene_objects: set[str],
     scene_locations: set[str],
     size: int = 10,
-    seed: int = 63
+    seed: int = 63,
+    one_object_per_taskdist: bool = True
 ) -> tuple[Sequence[Goal], list[float]]:
     """
     Returns a task distribution of tasks from the ALFRED dataset 
     of a specified size for a ProcTHOR scene.
     """
     rng = random.Random(seed)
+
     task_list = get_task_list(
-        [loc.split("_")[0] for loc in scene_locations],
-        [loc.split("_")[0] for loc in scene_objects]
+        {loc.split("_")[0] for loc in scene_locations},
+        {loc.split("_")[0] for loc in scene_objects}
     )
-    goals = [LiteralGoal(F(f"at {obj} {loc}")) for obj, loc in rng.sample(task_list, size)]
-    probs = [1/size] * size
+
+    # each object will only be contained in one task of the task distribution
+    if one_object_per_taskdist:
+        task_dict = defaultdict(list)
+        for obj, location in task_list:
+            task_dict[obj].append(location)
+
+        # sample from the task dict
+        goals = [
+            LiteralGoal(F(f"at {object_key} {rng.choice(possible_locations)}"))
+            for object_key, possible_locations in task_dict.items()
+        ]
+    else:
+        goals = [LiteralGoal(F(f"at {obj} {loc}")) for obj, loc in rng.sample(task_list, size)]
+    probs = [1/len(goals)] * len(goals)
 
     return goals, probs
 

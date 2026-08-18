@@ -18,7 +18,7 @@ TRAIN_TEST_SPLIT = 1
 # specify learning hyperparameters
 HYPERPARAMETERS = {
     "num_epochs": 500,
-    "learning_rate": 0.01,
+    "learning_rate": 0.005,
     "batch_size": 8,
     "lr_decay_factor": 0.5,
     "early_stopping_num_epochs": 100,

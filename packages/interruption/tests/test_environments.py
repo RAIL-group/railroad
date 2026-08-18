@@ -1,6 +1,8 @@
+import random
 import types
+import pytest
 
-from interruption.environments import KitchenProcTHOREnvironment
+from interruption.environments import KitchenProcTHOREnvironment, get_alfred_task_distribution
 from interruption.utilities import _update_held_objects_position
 from railroad.core import Fluent as F, Action
 from railroad.environment.procthor.scene import ProcTHORScene
@@ -355,3 +357,65 @@ def test_update_held_objects_position_handles_multiple_grippers():
 
     assert sg.nodes[idx.spoon]["position"] == sg.nodes[idx.robot]["position"]
     assert sg.nodes[cup_idx]["position"] == sg.nodes[idx.robot]["position"]
+
+
+@pytest.mark.parametrize(
+        'objects, locations',
+        [(
+            {
+                'knife_19', 'egg_22', 'peppershaker_9', 'papertowelroll_17',
+                'tomato_11', 'pen_14', 'potato_13', 'tomato_10', 'pencil_15',
+                'egg_21', 'spoon_16', 'apple_23', 'spraybottle_24',
+                'pan_18', 'tomato_12', 'tomato_20'
+            },
+            {
+                'fridge_4', 'garbagecan_5', 'countertop_3', 'stool_6',
+                'shelvingunit_7', 'stool_8', 'start_loc'
+            }
+        )]
+)
+def test_get_alfred_task_distribution_ordering(objects, locations):
+    baseline, _ = get_alfred_task_distribution(objects, locations)
+    for seed in range(1000):
+        reordered_objects = _reordered_set(objects, seed)
+        reordered_locations = _reordered_set(locations, seed + 100)
+        result, _ = get_alfred_task_distribution(reordered_objects, reordered_locations)
+        assert result == baseline, f"order differs for shuffle seed {seed}"
+
+
+def _reordered_set(items: set[str], seed: int) -> set[str]:
+    shuffled = list(items)
+    random.Random(seed).shuffle(shuffled)
+    result = set()
+    for item in shuffled:
+        result.add(item)
+    return result
+
+
+@pytest.mark.parametrize(
+        'objects, locations',
+        [(
+            {
+                'knife_19', 'egg_22', 'peppershaker_9', 'papertowelroll_17',
+                'tomato_11', 'pen_14', 'potato_13', 'tomato_10', 'pencil_15',
+                'egg_21', 'spoon_16', 'apple_23', 'spraybottle_24',
+                'pan_18', 'tomato_12', 'tomato_20'
+            },
+            {
+                'fridge_4', 'garbagecan_5', 'countertop_3', 'stool_6',
+                'shelvingunit_7', 'stool_8', 'start_loc'
+            }
+        )]
+)
+def test_get_alfred_task_distribution_size_matching(objects, locations):
+    baseline, probs = get_alfred_task_distribution(objects, locations)
+
+    assert len(baseline) == len(probs)
+
+    baseline, probs = get_alfred_task_distribution(
+        objects,
+        locations,
+        one_object_per_taskdist=True
+    )
+
+    assert len(baseline) == len(probs)

@@ -52,7 +52,11 @@ def main():
 
     # get task distribution from alfred tasks
     env = construct_procthor_kitchen_environment(procthor_seed)
-    task_distribution = get_alfred_task_distribution(env.scene.objects, set(env.scene.locations))
+    task_distribution = get_alfred_task_distribution(
+        env.scene.objects,
+        set(env.scene.locations),
+        one_object_per_taskdist=True
+    )
 
     # generic_task_distribution = get_example_procthor_task_distribution(1)
     num_objects = len(env.scene.objects)
@@ -68,10 +72,7 @@ def main():
             num_locations
         )
 
-        # this check isn't really needed since get_randomized_procthor_data requires
-        # a valid task_distribution to be passed in, but it removes type checking errors
-        if data.search_problem.interrupting_task_dist is None:
-            return
+        assert data.search_problem.interrupting_task_dist is not None
 
         random.seed(DATA_GENERATION_SEED+count)
         while True:

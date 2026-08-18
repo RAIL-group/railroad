@@ -21,18 +21,33 @@ MODEL_PATH = DEFAULT_RESOURCES_BASE / "models"
 def main():
     model_name = "best_model_experiment5.pt"
 
-    seeds = ExperimentSeeds(procthor_seed=201, experiment_seed=20, object_placement_seed=None)
+    seeds = ExperimentSeeds(procthor_seed=201, experiment_seed=20, object_placement_seed=11)
     task_arrival_model = TaskArrivalProb(
         0, RandomVariableType.CONTINUOUS,
         DistributionType.EXPONENTIAL
     )
     # get task distribution from alfred dataset used during training
     env = construct_procthor_kitchen_environment(seeds.procthor_seed)
-    task_distribution = get_alfred_task_distribution(env.scene.objects, set(env.scene.locations))
+    task_distribution = get_alfred_task_distribution(
+        env.scene.objects,
+        set(env.scene.locations),
+        one_object_per_taskdist=True
+    )
+
+    # testing
+    task_distribution = (list(task_distribution[0]), task_distribution[1])
+    task_distribution[0][0] = task_distribution[0][3]
+    current_goal = task_distribution[0][2]
+
+    # apple/egg to fridge
+    
+
+    # current_goal = get_example_procthor_goal()
+
 
     config = ExperimentConfig(
         seeds,
-        get_example_procthor_goal(),
+        current_goal,
         task_distribution,
         task_arrival_model,
         ff_heuristic,
@@ -40,7 +55,9 @@ def main():
         num_task_sequence=2
     )
 
-    run_experiment(config, ExperimentMode.ANTICIPATORY_PLANNING, show_plot=True)
+    run_experiment(
+        config, ExperimentMode.ANTICIPATORY_PLANNING, show_plot=True
+    )
 
 if __name__ == "__main__":
     main()

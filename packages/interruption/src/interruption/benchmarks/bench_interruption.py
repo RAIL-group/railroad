@@ -65,11 +65,15 @@ def _setup_experiment_config(
     )
     # get task distribution from alfred dataset used during training
     env = construct_procthor_kitchen_environment(seeds.procthor_seed)
-    task_distribution = get_alfred_task_distribution(env.scene.objects, set(env.scene.locations))
+    task_distribution = get_alfred_task_distribution(
+        env.scene.objects,
+        set(env.scene.locations),
+        one_object_per_taskdist=True
+    )
 
     model_path = (
         DEFAULT_RESOURCES_BASE / "models/best_model_experiment5.pt"
-        if experiment_mode == ExperimentMode.INTERRUPTION
+        if experiment_mode in [ExperimentMode.INTERRUPTION, ExperimentMode.ANTICIPATORY_PLANNING]
         else ""
     )
 
@@ -114,7 +118,7 @@ bench_interruption_kitchen.add_cases(_get_cases())
     ),
     tags=["interruption", "procthor", "myopic"],
     timeout=600.0,
-    repeat=100,
+    repeat=32,
 )
 def bench_myopic_interruption_kitchen(case: BenchmarkCase):
     """
@@ -127,4 +131,22 @@ def bench_myopic_interruption_kitchen(case: BenchmarkCase):
 bench_myopic_interruption_kitchen.add_cases(_get_cases())
 
 
-# TODO - add bench mark for anticipatory planner
+@benchmark(
+    name="ap_procthor_interruption",
+    description=(
+        "Evaluates the anticipatory planning planner across "
+        "task-arrival probabilities in specified procthor environments."
+    ),
+    tags=["interruption", "procthor", "ap"],
+    timeout=600.0,
+    repeat=32,
+)
+def bench_ap_interruption_kitchen(case: BenchmarkCase):
+    """
+    Wrapper function to evaluate the interruption-based planner on procthor kitchen
+    environments. 
+    """
+    config = _setup_experiment_config(case, ExperimentMode.ANTICIPATORY_PLANNING)
+    return run_experiment(config, ExperimentMode.ANTICIPATORY_PLANNING, True)
+
+bench_ap_interruption_kitchen.add_cases(_get_cases())

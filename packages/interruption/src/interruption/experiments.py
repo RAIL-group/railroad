@@ -266,7 +266,7 @@ def initialize_experiment_data(
     preprocessing.
     """
     env = construct_procthor_kitchen_environment(
-            config.seeds.procthor_seed, object_seed=config.seeds.object_placement_seed
+        config.seeds.procthor_seed, object_seed=config.seeds.object_placement_seed
     )
 
     # convert generic name of objects/containers in goals to actual names of
@@ -411,7 +411,8 @@ def _get_results(
         dash_data.dashboard.show_plots(
             show_plot=dash_data.show_plot,
             save_video=dash_data.save_video,
-            save_plot=dash_data.save_plot
+            save_plot=dash_data.save_plot,
+            show_ground_truth_objects=True
         )
 
     return result

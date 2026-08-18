@@ -1,6 +1,8 @@
 """
 Data-generation script for expected value over interrupting task distribution for
 ProcTHOR environments.
+NOTE: this file contains a fix for the objects_seed misrecording issue that is not currently 
+updated in datagen.py
 """
 from typing import Sequence
 import multiprocessing
@@ -66,7 +68,11 @@ def main():
 
     # get task distribution from alfred tasks
     env = construct_procthor_kitchen_environment(PROCTHOR_SEED)
-    task_distribution = get_alfred_task_distribution(env.scene.objects, set(env.scene.locations))
+    task_distribution = get_alfred_task_distribution(
+        env.scene.objects,
+        set(env.scene.locations),
+        one_object_per_taskdist=True
+    )
     num_objects = len(env.scene.objects)
     num_locations = len(env.scene.locations)
 
@@ -118,10 +124,7 @@ def _generate_worker_share(
             num_locations
         )
 
-        # this check isn't really needed since get_randomized_procthor_data requires
-        # a valid task_distribution to be passed in, but it removes type checking errors
-        if data.search_problem.interrupting_task_dist is None:
-            return -1
+        assert data.search_problem.interrupting_task_dist is not None
 
         random.seed(DATA_GENERATION_SEED + worker_id * SEED_STRIDE + count)
         while True:
@@ -174,6 +177,10 @@ def _generate_worker_share(
             data.env.act(action)
             if isinstance(data.env, KitchenProcTHOREnvironment):
                 data.env.update_scene_graph(action)
+
+        # increment the object placement seed, since the get_randomized_procthor_data
+        # now returns the matching object seed rather than the next object seed
+        objects_seed+=1
 
     return count
 
@@ -268,12 +275,14 @@ def get_randomized_procthor_data(
             ),
             ExperimentMode.MYOPIC
         )
-        start_seed+=1
+
         if (
             len(data.env.scene.objects) == num_objects and
             len(data.env.scene.locations) == num_locations
         ):
             return data, start_seed
+
+        start_seed+=1
 
 
 if __name__ == "__main__":

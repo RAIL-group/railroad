@@ -67,6 +67,11 @@ class ObjectSearchEnvironment(SymbolicEnvironment):
             seed=seed,
         )
 
+    @property
+    def objects_at_locations(self) -> Dict[str, Set[str]]:
+        """Ground-truth object locations, keyed by location name."""
+        return self._objects_at_locations
+
     def runtime_mutated_predicates(self) -> Set[str]:
         """Revelation mutates these outside operator effects (must stay
         dynamic for grounding's static inference)."""
