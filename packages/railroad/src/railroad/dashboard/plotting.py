@@ -63,6 +63,22 @@ class _PlottingMixin:
     narrow enough not to swallow the thin tail of the trail.
     """
 
+    _SPRITE_ZORDER = 7.0
+    """Above the trail (5) and the location dots (6), below the robot marker (10).
+
+    A carried object should read without hiding the robot carrying it.
+    """
+
+    _SPRITE_FADE_FRACTION = 0.02
+    """Fade-in length, as a fraction of the plan's duration.
+
+    Tied to plan length rather than frame rate so the fade reads the same in a
+    ten-second video and a two-minute one.
+    """
+
+    _MAX_SPRITES = 12
+    """Past this the map is unreadable anyway, and each sprite costs a redraw."""
+
     _TRAIL_REPAINT_OVERLAP = 64
     """Trail points repainted behind each newly drawn batch, in the video.
 
@@ -361,6 +377,8 @@ class _PlottingMixin:
         *,
         show_objects: bool = False,
         location_coords: dict[str, tuple[float, float]] | None = None,
+        object_sprites: bool | None = None,
+        glyph_objects: Any = None,
     ) -> Any:
         """Plot entity trajectories collected during planning.
 
@@ -377,6 +395,10 @@ class _PlottingMixin:
                 provided, any positions that already have non-None coordinates
                 from the environment will raise a ValueError to prevent
                 conflicting coordinate sources.
+            object_sprites: Draw emoji glyphs for the objects the plan is about.
+                Defaults to drawing them when a glyph source is available.
+            glyph_objects: Objects to draw glyphs for, overriding the derived
+                plan-relevant set.
 
         Returns:
             The matplotlib axes with the plotted trajectories.
@@ -513,6 +535,14 @@ class _PlottingMixin:
                 zorder=5,
             )
 
+        # Objects the plan is about, at their final positions. After the trail
+        # so they read over it; their coordinates join `plotted_points` because
+        # the framing below turns autoscale off.
+        plotted_points.extend(self._draw_object_sprites(
+            ax, trajectories, env_coords, t_end,
+            glyph_objects=glyph_objects, object_sprites=object_sprites,
+        ))
+
         # Optionally plot object trajectories
         if show_objects:
             object_entities = {e: trajectories[e] for e in trajectories if e not in self.known_robots}
@@ -532,6 +562,10 @@ class _PlottingMixin:
 
         # Auto-scale for non-grid plots
         if occupancy_grid is None:
+            if plotted_points:
+                # Sprites are not part of dataLim, which is what both autoscale
+                # and the equal-aspect adjustment work from.
+                ax.update_datalim(plotted_points)
             ax.autoscale()
             ax.set_aspect("equal", adjustable="datalim")
         else:
@@ -590,6 +624,131 @@ class _PlottingMixin:
             result[entity] = np.column_stack([x_interp, y_interp])
 
         return result
+
+    def _build_sprites(
+        self: PlannerDashboard,
+        env_coords: dict[str, tuple[float, float]],
+        *,
+        glyph_objects: Any = None,
+        object_sprites: bool | None = None,
+    ) -> tuple[Any, dict[str, Any], Any] | None:
+        """Work out which objects get a sprite, and where each one sits.
+
+        Returns ``(provider, timelines, offset_for)`` or ``None`` when there is
+        nothing to draw -- no glyph source on this machine, or no object that the
+        plan is actually about. ``None`` is the ordinary case, not an error: the
+        plot then looks exactly as it did before sprites existed.
+        """
+        if object_sprites is False:
+            return None
+
+        from railroad.dashboard import _sprites
+
+        # Lookup only. Auto-enabling must never turn a plot into a download.
+        provider = _sprites.get_glyph_provider()
+        if provider is None:
+            return None
+
+        selected = _sprites.select_objects(
+            goal_fluents=self.goal_fluents,
+            actions_taken=self.actions_taken,
+            history=self.history,
+            entity_positions=self._entity_positions,
+            known_robots=self.known_robots,
+            objects_by_type=getattr(self._env, "objects_by_type", None),
+            glyph_objects=glyph_objects,
+        )
+        timelines = _sprites.build_timelines(
+            history=self.history,
+            entity_positions=self._entity_positions,
+            selected=selected,
+            env_coords=env_coords,
+        )
+        if not timelines:
+            return None
+        if len(timelines) > self._MAX_SPRITES:
+            kept = sorted(timelines)[: self._MAX_SPRITES]
+            self.console.print(
+                f"[yellow]Showing {self._MAX_SPRITES} of {len(timelines)} object "
+                f"glyphs; the rest are omitted.[/yellow]"
+            )
+            timelines = {name: timelines[name] for name in kept}
+
+        # Slots are assigned from the whole timeline rather than per frame, so a
+        # sprite does not jump sideways when a neighbour is picked up.
+        rest_slots = _sprites.assign_slots(
+            {name: line.rest_locations for name, line in timelines.items()}
+        )
+        carried: dict[str, list[str]] = {}
+        for name, line in timelines.items():
+            for anchor in line.anchors:
+                if anchor.kind == "ride" and anchor.robot:
+                    carried.setdefault(name, []).append(anchor.robot)
+        ride_slots = _sprites.assign_slots(carried)
+        resolution = getattr(getattr(self._env, "scene", None), "resolution", None)
+
+        def offset_for(name: str) -> Any:
+            def offset(anchor: Any) -> tuple[float, float]:
+                if anchor.kind == "rest" and anchor.loc:
+                    slot, size = rest_slots.get((name, anchor.loc), (0, 1))
+                else:
+                    slot, size = ride_slots.get((name, anchor.robot or ""), (0, 1))
+                return _sprites.fan_offset(
+                    slot, size, _sprites.ring_radius(size, resolution)
+                )
+
+            return offset
+
+        return provider, timelines, offset_for
+
+    def _draw_object_sprites(
+        self: PlannerDashboard,
+        ax: Any,
+        trajectories: dict[str, tuple[list[tuple[float, float]], list[float]]],
+        env_coords: dict[str, tuple[float, float]],
+        t_end: float,
+        *,
+        glyph_objects: Any = None,
+        object_sprites: bool | None = None,
+    ) -> list[tuple[float, float]]:
+        """Draw each object's glyph at its final position, for the static plot.
+
+        Returns the positions drawn, which the caller must fold into the framing:
+        the axis limits get pinned below, and a sprite outside them is clipped
+        away entirely rather than hanging off the edge.
+        """
+        import numpy as np
+
+        from railroad.dashboard import _sprites
+        from railroad.dashboard._sprites.artists import make_sprite
+
+        built = self._build_sprites(
+            env_coords, glyph_objects=glyph_objects, object_sprites=object_sprites,
+        )
+        if built is None:
+            return []
+        provider, timelines, offset_for = built
+
+        times = np.array([t_end], dtype=float)
+        robot_xy = self.get_entity_positions_at_times(
+            times, trajectories=trajectories,
+        )
+        fade = max(self._SPRITE_FADE_FRACTION * t_end, 1e-9)
+
+        drawn: list[tuple[float, float]] = []
+        for name, line in sorted(timelines.items()):
+            rgba = provider.glyph_for(name)
+            if rgba is None:
+                continue
+            position, alpha = _sprites.sample(
+                line, times, robot_xy, fade=fade, offset_for=offset_for(name),
+            )
+            if alpha[0] <= 0.0:
+                continue
+            xy = (float(position[0][0]), float(position[0][1]))
+            make_sprite(ax, rgba, xy, zorder=self._SPRITE_ZORDER)
+            drawn.append(xy)
+        return drawn
 
     def _render_photo_underlay(self: PlannerDashboard, ax: Any) -> Any | None:
         """Draw the scene's aligned top-down image as the bottom layer of *ax*.
@@ -925,6 +1084,8 @@ class _PlottingMixin:
         duration: float = 10.0,
         figsize: tuple[float, float] = (12.8, 7.2),
         dpi: int = 150,
+        object_sprites: bool | None = None,
+        glyph_objects: Any = None,
     ) -> None:
         """Save an animated trajectory video/GIF.
 
@@ -936,6 +1097,10 @@ class _PlottingMixin:
             duration: Total animation duration in seconds.
             figsize: Figure size in inches.
             dpi: Resolution in dots per inch.
+            object_sprites: Animate emoji glyphs for the objects the plan is
+                about. Defaults to animating them when a glyph source exists.
+            glyph_objects: Objects to draw glyphs for, overriding the derived
+                plan-relevant set.
         """
         import numpy as np
         import matplotlib as mpl
@@ -1104,25 +1269,6 @@ class _PlottingMixin:
             combined_colors = np.empty((0, 4))
             combined_times = np.empty(0)
 
-        if occupancy_grid is not None:
-            # Before label_offset below, which reads ax.get_ylim(). Pinning the
-            # limits turns autoscale off, so everything drawn in data
-            # coordinates has to be gathered first -- the trail, and the
-            # location markers placed further down, whose coordinates a caller
-            # supplies and need not fall inside the grid.
-            marker_coords = [
-                stored if stored is not None else env_coords.get(name)
-                for positions in self._entity_positions.values()
-                for _time, name, stored in positions
-                if not name.startswith("frontier_")
-            ]
-            self._set_grid_limits(
-                ax, occupancy_grid, photo_artist,
-                points=[*map(tuple, combined_xy),
-                        *(c for c in marker_coords if c is not None)],
-            )
-            self._label_axes_in_meters(ax)
-
         n_frames = int(fps * duration)
         animation_times = np.linspace(0.0, t_end, n_frames)
         # Prepend the final time as frame 0 so the video thumbnail/poster
@@ -1144,6 +1290,59 @@ class _PlottingMixin:
             frame_times, location_coords=location_coords,
             trajectories=trajectories,
         )
+
+        # Sprites are sampled before the limits are pinned, because a sprite
+        # outside them is clipped away entirely rather than expanding the view --
+        # and a fan offset routinely pushes one just past the trail's own bounds.
+        sprite_build = self._build_sprites(
+            env_coords, glyph_objects=glyph_objects, object_sprites=object_sprites,
+        )
+        sprite_xy: dict[str, Any] = {}
+        sprite_alpha: dict[str, Any] = {}
+        sprite_rgba: dict[str, Any] = {}
+        if sprite_build is not None:
+            from railroad.dashboard import _sprites
+
+            _provider, sprite_timelines, sprite_offset_for = sprite_build
+            fade = max(self._SPRITE_FADE_FRACTION * t_end, 1e-9)
+            for name, line in sorted(sprite_timelines.items()):
+                rgba = _provider.glyph_for(name)
+                if rgba is None:
+                    continue
+                positions, alphas = _sprites.sample(
+                    line, frame_times, marker_positions,
+                    fade=fade, offset_for=sprite_offset_for(name),
+                )
+                sprite_rgba[name] = rgba
+                sprite_xy[name] = positions
+                sprite_alpha[name] = alphas
+        # Every position the sprite ever occupies, not just where it rests: it
+        # is carried, so it strays wherever its robot goes plus its own offset.
+        sprite_points = [
+            (float(x), float(y))
+            for track in sprite_xy.values()
+            for x, y in track
+        ]
+
+        if occupancy_grid is not None:
+            # Before label_offset below, which reads ax.get_ylim(). Pinning the
+            # limits turns autoscale off, so everything drawn in data
+            # coordinates has to be gathered first -- the trail, and the
+            # location markers placed further down, whose coordinates a caller
+            # supplies and need not fall inside the grid.
+            marker_coords = [
+                stored if stored is not None else env_coords.get(name)
+                for positions in self._entity_positions.values()
+                for _time, name, stored in positions
+                if not name.startswith("frontier_")
+            ]
+            self._set_grid_limits(
+                ax, occupancy_grid, photo_artist,
+                points=[*map(tuple, combined_xy),
+                        *(c for c in marker_coords if c is not None),
+                        *sprite_points],
+            )
+            self._label_axes_in_meters(ax)
 
         # Location markers + labels (skip transient frontiers). Their content
         # never changes, but they sit above the navigation grid, so they are
@@ -1213,6 +1412,19 @@ class _PlottingMixin:
         trail_scatter = ax.scatter([], [], s=[], zorder=5, alpha=1.0)
         trail_scatter.set_antialiased([True, True])
 
+        # Above the trail so they read over it, below the robot marker so a
+        # carried object never hides its carrier. Animated, and composited by
+        # hand each frame along with the markers.
+        from railroad.dashboard._sprites.artists import make_sprite, update_sprite
+
+        sprite_artists: dict[str, tuple[Any, Any]] = {}
+        for name, rgba in sprite_rgba.items():
+            first = sprite_xy[name][0]
+            sprite_artists[name] = make_sprite(
+                ax, rgba, (float(first[0]), float(first[1])),
+                zorder=self._SPRITE_ZORDER, animated=True,
+            )
+
         legend_artist = ax.legend(fontsize=7, loc="upper right")
         # Fixed-width title so it doesn't jump during animation
         t_width = len(f"{t_end:.1f}")
@@ -1222,6 +1434,13 @@ class _PlottingMixin:
         )
 
         if occupancy_grid is None:
+            if sprite_points:
+                # Through the data limits rather than the view limits: an
+                # AnnotationBbox contributes nothing to dataLim, and
+                # adjustable="datalim" recomputes the view from dataLim at draw
+                # time -- so anything merely set with set_ylim is discarded, and
+                # a sprite left outside is clipped away entirely.
+                ax.update_datalim(sprite_points)
             ax.autoscale()
             ax.set_aspect("equal", adjustable="datalim")
 
@@ -1288,6 +1507,18 @@ class _PlottingMixin:
                 markers[idx].set_data([pos[frame, 0]], [pos[frame, 1]])
                 # Update label position (just above the marker)
                 labels[idx].set_position((pos[frame, 0], pos[frame, 1] + label_offset))
+            for name, (box, offset_image) in sprite_artists.items():
+                alpha = float(sprite_alpha[name][frame])
+                if alpha <= 0.0:
+                    # Hidden rather than transparent: AnnotationBbox.draw
+                    # returns immediately, so a not-yet-found object is free.
+                    box.set_visible(False)
+                    continue
+                box.set_visible(True)
+                update_sprite(
+                    box, offset_image, sprite_rgba[name],
+                    sprite_xy[name][frame], alpha,
+                )
             # Trail points up to the current time. combined_times is sorted,
             # so the visible set is always a prefix.
             n_trail = int(np.searchsorted(combined_times, current_time, side="right"))
@@ -1334,7 +1565,10 @@ class _PlottingMixin:
         # and the handful of artists that move every frame are drawn on top.
         # Artists cached in a layer are marked animated so a plain canvas draw
         # skips them and leaves them to be composited in the right order.
-        hot_artists: list[Any] = [*markers, *labels, title_artist, legend_artist]
+        sprite_boxes = [box for box, _image in sprite_artists.values()]
+        hot_artists: list[Any] = [
+            *markers, *labels, *sprite_boxes, title_artist, legend_artist,
+        ]
         # Draw them in the same order a full figure draw would, so anything
         # that overlaps still stacks the way it does in the static plot.
         # Ordering only holds within a layer: a hot artist always lands on top
@@ -1514,6 +1748,8 @@ class _PlottingMixin:
         figsize: tuple[float, float],
         *,
         location_coords: dict[str, tuple[float, float]] | None = None,
+        object_sprites: bool | None = None,
+        glyph_objects: Any = None,
     ) -> Any | None:
         """Create a complete static trajectory figure with sidebar, or ``None``."""
         result = self._create_trajectory_figure(figsize, location_coords=location_coords)
@@ -1521,7 +1757,10 @@ class _PlottingMixin:
             return None
         fig, main_ax, sidebar_ax, trajectories, env_coords, t_end, _ = result
 
-        self.plot_trajectories(ax=main_ax, location_coords=location_coords)
+        self.plot_trajectories(
+            ax=main_ax, location_coords=location_coords,
+            object_sprites=object_sprites, glyph_objects=glyph_objects,
+        )
 
         goal_snapshots_at_end: dict[str, bool] = {}
         if self.history:
@@ -1582,6 +1821,8 @@ class _PlottingMixin:
         video_fps: int = 60,
         video_dpi: int = 150,
         location_coords: dict[str, tuple[float, float]] | None = None,
+        object_sprites: bool | None = None,
+        glyph_objects: Any = None,
     ) -> None:
         """Convenience method that handles plot/video output based on CLI flags.
 
@@ -1592,6 +1833,10 @@ class _PlottingMixin:
             video_fps: Frames per second for video (default: 60).
             video_dpi: Resolution in dots per inch for video (default: 150).
             location_coords: Optional explicit location->(x,y) mapping.
+            object_sprites: Draw emoji glyphs for the objects the plan is about.
+                Defaults to drawing them when a glyph source is available.
+            glyph_objects: Objects to draw glyphs for, overriding the derived
+                plan-relevant set.
         """
         if not save_plot and not show_plot and not save_video:
             return
@@ -1601,6 +1846,7 @@ class _PlottingMixin:
 
             fig = self._render_static_plot(
                 (12.8, 7.2), location_coords=location_coords,
+                object_sprites=object_sprites, glyph_objects=glyph_objects,
             )
             if fig is not None:
                 if save_plot:
@@ -1615,5 +1861,6 @@ class _PlottingMixin:
             self.save_video(
                 save_video, location_coords=location_coords,
                 fps=video_fps, dpi=video_dpi,
+                object_sprites=object_sprites, glyph_objects=glyph_objects,
             )
             self.console.print(f"Saved video to [yellow]{save_video}[/yellow]")
