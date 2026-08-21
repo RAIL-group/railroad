@@ -138,3 +138,13 @@ def ensure_all_resources(
     ensure_procthor_10k(base_dir=base_dir, force=force)
     ensure_sbert_model(base_dir=base_dir, force=force)
     ensure_ai2thor_simulator(base_dir=base_dir, force=force)
+    # Assets for the object glyphs on trajectory plots. Fetched here, with the
+    # rest, because plotting itself only ever *looks* for them -- drawing a
+    # figure must never turn into a download. Imported inside the function so
+    # this module keeps no dependency on the dashboard.
+    from railroad.dashboard._sprites.resources import (
+        ensure_emoji_font, ensure_emoji_sbert_model,
+    )
+
+    ensure_emoji_font(base_dir=base_dir, force=force)
+    ensure_emoji_sbert_model(base_dir=base_dir, force=force)
