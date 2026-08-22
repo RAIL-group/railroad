@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
 
 import numpy as np
 import pytest
+
+from lsp.helpers import FakeRecord
 
 from railroad.environment.types import Pose
 from railroad.lsp import (
@@ -86,19 +87,9 @@ def test_egocentric_xy_conventions() -> None:
     assert y == pytest.approx(0.0, abs=1e-9)
 
 
-@dataclass
-class _FakeRecord:
-    robot: str
-    time: float
-    pose_cells: Pose
-    pose_meters: tuple
-    image: np.ndarray
-    visibility_polygon: np.ndarray | None = None
-
-
 def test_make_training_view() -> None:
     pose = Pose(10.0, 10.0, 0.3)
-    record = _FakeRecord(
+    record = FakeRecord(
         robot="robot1",
         time=1.0,
         pose_cells=pose,

@@ -5,6 +5,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from lsp.helpers import make_frontier
+
 from railroad.experimental.unknown_search.types import Frontier
 from railroad.lsp import (
     build_lookahead_grid,
@@ -18,17 +20,6 @@ from railroad.navigation.constants import (
     FREE_VAL,
     UNOBSERVED_VAL,
 )
-
-
-def _frontier(fid: str, cells: list[tuple[int, int]]) -> Frontier:
-    arr = np.array(cells, dtype=int).T
-    centroid = arr.mean(axis=1)
-    return Frontier(
-        id=fid,
-        centroid_row=int(round(centroid[0])),
-        centroid_col=int(round(centroid[1])),
-        cells=arr,
-    )
 
 
 def _t_junction() -> tuple[np.ndarray, np.ndarray, Frontier, Frontier, tuple[int, int]]:
@@ -47,15 +38,15 @@ def _t_junction() -> tuple[np.ndarray, np.ndarray, Frontier, Frontier, tuple[int
     observed[6, 3:13] = FREE_VAL
     observed[4:6, 10] = FREE_VAL
 
-    f_goal = _frontier("f_goal", [(6, 12)])
-    f_dead = _frontier("f_dead", [(4, 10)])
+    f_goal = make_frontier("f_goal", [(6, 12)])
+    f_dead = make_frontier("f_dead", [(4, 10)])
     return true_grid, observed, f_goal, f_dead, (6, 19)
 
 
 def test_mask_grid_with_frontiers() -> None:
     grid = FREE_VAL * np.ones((10, 10))
-    f1 = _frontier("f1", [(2, 2), (2, 3)])
-    f2 = _frontier("f2", [(7, 7)])
+    f1 = make_frontier("f1", [(2, 2), (2, 3)])
+    f2 = make_frontier("f2", [(7, 7)])
     original = grid.copy()
 
     masked = mask_grid_with_frontiers(grid, [f1, f2], keep=f1)
@@ -91,9 +82,9 @@ def test_is_goal_observed() -> None:
 
 
 def test_frontier_cells_hash_order_invariant() -> None:
-    f_a = _frontier("a", [(1, 2), (3, 4), (5, 6)])
-    f_b = _frontier("b", [(5, 6), (1, 2), (3, 4)])
-    f_c = _frontier("c", [(1, 2), (3, 4)])
+    f_a = make_frontier("a", [(1, 2), (3, 4), (5, 6)])
+    f_b = make_frontier("b", [(5, 6), (1, 2), (3, 4)])
+    f_c = make_frontier("c", [(1, 2), (3, 4)])
     assert frontier_cells_hash(f_a) == frontier_cells_hash(f_b)
     assert frontier_cells_hash(f_a) != frontier_cells_hash(f_c)
 
@@ -157,7 +148,7 @@ def test_optimistic_cost_below_true_cost_with_detour() -> None:
     observed = UNOBSERVED_VAL * np.ones_like(true_grid)
     observed[5:8, 1:5] = FREE_VAL
 
-    frontier = _frontier("f", [(5, 4), (6, 4), (7, 4)])
+    frontier = make_frontier("f", [(5, 4), (6, 4), (7, 4)])
     goal = (6, 18)
 
     labels = compute_oracle_frontier_labels(true_grid, observed, [frontier], goal)
@@ -176,7 +167,7 @@ def test_unreachable_goal_and_no_unknown_region() -> None:
     observed = UNOBSERVED_VAL * np.ones_like(true_grid)
     observed[6, 1:11] = FREE_VAL
 
-    frontier = _frontier("f", [(6, 10)])
+    frontier = make_frontier("f", [(6, 10)])
     goal = (2, 2)
 
     labels = compute_oracle_frontier_labels(true_grid, observed, [frontier], goal)

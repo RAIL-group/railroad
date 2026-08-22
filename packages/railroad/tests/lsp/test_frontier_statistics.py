@@ -8,6 +8,8 @@ from typing import Any, Dict, List, Sequence
 import numpy as np
 import pytest
 
+from lsp.helpers import FakeRecord, make_frontier
+
 from railroad.environment.types import Pose
 from railroad.experimental.unknown_search.types import Frontier
 from railroad.lsp import (
@@ -19,16 +21,6 @@ from railroad.lsp import (
     OracleFrontierLabel,
     OracleFrontierStatistics,
 )
-
-
-@dataclass
-class _FakeRecord:
-    robot: str
-    time: float
-    pose_cells: Pose
-    pose_meters: tuple
-    image: np.ndarray
-    visibility_polygon: np.ndarray | None = None
 
 
 @dataclass
@@ -45,17 +37,6 @@ class _FakeEnv:
     goal_cell: tuple = (50, 50)
     observed_grid: np.ndarray = field(
         default_factory=lambda: np.zeros((4, 4), dtype=float)
-    )
-
-
-def _frontier(fid: str, cells: list[tuple[int, int]]) -> Frontier:
-    arr = np.array(cells, dtype=int).T
-    centroid = arr.mean(axis=1)
-    return Frontier(
-        id=fid,
-        centroid_row=int(round(centroid[0])),
-        centroid_col=int(round(centroid[1])),
-        cells=arr,
     )
 
 
@@ -100,8 +81,8 @@ def test_oracle_estimator_requires_its_own_true_map() -> None:
 
 
 def test_learned_estimator_predicts_from_observations() -> None:
-    frontier = _frontier("f1", [(5, 5), (5, 6)])
-    record = _FakeRecord(
+    frontier = make_frontier("f1", [(5, 5), (5, 6)])
+    record = FakeRecord(
         robot="robot1",
         time=1.0,
         pose_cells=Pose(10.0, 10.0, 0.0),
@@ -135,7 +116,7 @@ def test_learned_estimator_predicts_from_observations() -> None:
 def test_learned_estimator_defaults_without_vantage() -> None:
     # A frontier no panorama has seen falls back to the default; the
     # model is never called with an empty batch.
-    frontier = _frontier("f1", [(5, 5)])
+    frontier = make_frontier("f1", [(5, 5)])
     env = _FakeEnv(frontiers={"f1": frontier}, pano_records=[])
 
     def model(
@@ -149,8 +130,8 @@ def test_learned_estimator_defaults_without_vantage() -> None:
 
 
 def test_learned_estimator_drops_stale_predictions() -> None:
-    frontier = _frontier("f1", [(5, 5), (5, 6)])
-    record = _FakeRecord(
+    frontier = make_frontier("f1", [(5, 5), (5, 6)])
+    record = FakeRecord(
         robot="robot1",
         time=1.0,
         pose_cells=Pose(10.0, 10.0, 0.0),

@@ -347,11 +347,25 @@ corrections at the bottom for why.
   comments collapse to one. `test_dashboard.py` 430 → 304, `test_video_compositing.py` 393 → 364,
   `test_dashboard_overhead.py` 213 → 191.
 
-- [ ] **C2-03** `experimental/unknown_search/conftest.py` is an **empty file**; the grid builders
-  and env constructor are inlined in 3 places. **[R]** (~60)
-- [ ] **C2-04** `lsp/` has **no conftest**; `_FakeRecord` is copy-pasted in 4 files
-  (`test_vantage.py:15`, `test_pano.py:90`, `test_generator.py:21`,
-  `test_frontier_statistics.py:25`), plus `_square_polygon`, `_frontier`, `experiment_dir`. **[R]** (~70)
+- [x] **C2-03 `experimental/unknown_search/` shared builders — REJECTED.** **[C]**
+  The empty `conftest.py` is real and is deleted. The rest of the finding does not hold: the four
+  "grid builders" build **four different grids** — a branching corridor (`test_environment`), a
+  3-row corridor (`test_explore_operator`), a walled box with a gap in an internal wall
+  (`test_mapping`), and a partially-observed map (`test_frontiers`). `_corridor_grid` and
+  `_make_corridor_grid` have near-identical *names* and unrelated contents, which is probably what
+  the scan keyed on. The two environment constructors are likewise different: `_make_environment`
+  is a parameterised two-robot builder with hidden sites, `_make_env` is a single-robot one with a
+  different operator set. Nothing to share.
+
+- [x] **C2-04** `lsp/` shared fakes. **[C]** (−~40, not ~70)
+  Three of the four claimed duplicates are real; one is not. **Real:** `_FakeRecord` is
+  byte-identical in 4 files, `_square_polygon` in 2, `_frontier` in 4 (3 identical, plus
+  `test_vantage`'s with the id hard-coded). Now `lsp/helpers.py` — a module, not `conftest.py`,
+  because these are imported by name. **Not a duplicate:** the two `experiment_dir` fixtures
+  share only their name — `test_train`'s builds 4 seeds × 3 RNG-generated data, `test_dataset`'s
+  builds 2 seeds with fixed labels *plus* an in-flight `.tmp` directory it then asserts is
+  ignored. Merging them would have broken both. Named `make_frontier`, not `frontier`: three
+  tests bind a local variable of that name, and the first attempt shadowed the import.
 
 > Model all of these on `replay/conftest.py` — the best-factored conftest in the repo
 > (ASCII-map DSL → `RolloutLog`).
@@ -435,6 +449,52 @@ corrections at the bottom for why.
   satisfied by any pruning at all. Measured what actually happens — 396 groundings → 132, all of
   them r1's, *including moves from locations r1 is not standing in*. Pruning drops robots that
   cannot act, not actions that do not currently apply. That is now pinned.
+
+---
+
+## Where it landed
+
+All 38 items closed. Every `[R]` was verified before action, and **seven were rejected or
+materially corrected on measurement** — recorded above and in *Corrections* rather than quietly
+dropped.
+
+| | Start | End |
+|---|---|---|
+| Test lines (net) | — | **−410** (1,460 deleted / 1,050 added across 43 files) |
+| Passing tests | 763 | **765** (+2 discriminating rows, −1 unfailable, −1 xfail demo) |
+| Full suite | 58.8 s | **~41 s** |
+| `-m 'not slow'` | 12.9 s | **8.8 s** |
+| Warnings | 112 | **0** — fixed at the cause, not filtered |
+| `print()` in tests | 54 | **0** |
+
+Four source bugs came out of the test triage, which was the unexpected return:
+
+1. **`stacklevel` misattribution** (A-01) — every deprecation named the library instead of the
+   caller, which is what made 105 warnings look like one problem. Fixing attribution turned them
+   into 63 real call sites and exposed a *production* one the audit had missed.
+2. **File-descriptor leak** (A-02) — `TrainingDataWriter` opened `index.jsonl` in `__init__` but
+   closed it only in `close()`; a bulk sweep over failing seeds leaked one fd per failure.
+3. **Timeouts silently disabled below one second** (B-02) — `signal.alarm(int(task.timeout))` on
+   a field declared `float`. `timeout=0.5` became `alarm(0)`, which *cancels* the alarm. Proven,
+   then fixed with `setitimer`.
+4. **A wrong docstring on the FF heuristic** (C3-03) — it claimed to assume `when` conditions
+   optimistically; it does not, and the test that "covered" it asserted only `h < inf`.
+
+The two biggest estimate errors, both in the same direction — line counts assumed text was
+boilerplate when it was irreducible content:
+
+- **C1-02** predicted ~70 lines; 59 of the 101 were PDDL domain text. Actual: 14.
+- **C2-01** predicted ~250 lines from "26 copies of one operator". There were 18 distinct forms
+  and **two different semantics** sharing a name. Actual: 59 — but naming the two semantics was
+  worth more than the lines.
+
+What did **not** get cut, deliberately: the replay integration test (B-05, earns its 10.9 s), the
+statistical MCTS test (B-06, the repetition *is* the assertion), the antialias canary (C4-02,
+reports on a live workaround), and the ProcTHOR iteration budget (B-04 — measured as a cliff, not
+a dial: 4000 passes in 25 s, 2000 *fails* in 96 s).
+
+Still open, out of scope by design: the source-consolidation pass surveyed below, plus one
+pre-existing lint (`typing.Collection` unused in `environment/symbolic.py:5`) left for it.
 
 ---
 

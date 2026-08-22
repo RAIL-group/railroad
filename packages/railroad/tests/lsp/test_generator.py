@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 
 import numpy as np
+
+from lsp.helpers import FakeRecord, make_frontier, square_polygon
 
 from railroad.environment.types import Pose
 from railroad.experimental.unknown_search.types import Frontier
@@ -15,34 +16,6 @@ from railroad.lsp import (
     frontier_cells_hash,
     read_index,
 )
-
-
-@dataclass
-class _FakeRecord:
-    robot: str
-    time: float
-    pose_cells: Pose
-    pose_meters: tuple
-    image: np.ndarray
-    visibility_polygon: np.ndarray | None = None
-
-
-def _square_polygon(r0: float, c0: float, r1: float, c1: float) -> np.ndarray:
-    return np.array([
-        [r0, r0, r1, r1, r0],
-        [c0, c1, c1, c0, c0],
-    ])
-
-
-def _frontier(fid: str, cells: list[tuple[int, int]]) -> Frontier:
-    arr = np.array(cells, dtype=int).T
-    centroid = arr.mean(axis=1)
-    return Frontier(
-        id=fid,
-        centroid_row=int(round(centroid[0])),
-        centroid_col=int(round(centroid[1])),
-        cells=arr,
-    )
 
 
 def _label(frontier: Frontier, feasible: bool) -> OracleFrontierLabel:
@@ -56,15 +29,15 @@ def _label(frontier: Frontier, feasible: bool) -> OracleFrontierLabel:
     )
 
 
-def _record(time: float, pose_rc: tuple[float, float]) -> _FakeRecord:
+def _record(time: float, pose_rc: tuple[float, float]) -> FakeRecord:
     rng = np.random.default_rng(int(time * 100))
-    return _FakeRecord(
+    return FakeRecord(
         robot="robot1",
         time=time,
         pose_cells=Pose(pose_rc[0], pose_rc[1], 0.0),
         pose_meters=(0.0, 0.0, 0.0),
         image=rng.integers(0, 255, size=(4, 16, 3), dtype=np.uint8),
-        visibility_polygon=_square_polygon(0, 0, 20, 20),
+        visibility_polygon=square_polygon(0, 0, 20, 20),
     )
 
 
@@ -72,7 +45,7 @@ def test_generator_emits_on_change_only(tmp_path) -> None:  # noqa: ANN001
     writer = TrainingDataWriter(tmp_path)
     generator = TrainingDataGenerator(goal_cell=(50, 50), writer=writer)
 
-    frontier = _frontier("f1", [(5, 5), (5, 6)])
+    frontier = make_frontier("f1", [(5, 5), (5, 6)])
     label = _label(frontier, feasible=True)
     records = [_record(1.0, (10.0, 10.0))]
 
@@ -108,9 +81,9 @@ def test_generator_skips_unlabeled_or_unseen_frontiers(tmp_path) -> None:  # noq
     writer = TrainingDataWriter(tmp_path)
     generator = TrainingDataGenerator(goal_cell=(50, 50), writer=writer)
 
-    seen = _frontier("seen", [(5, 5)])
-    unseen = _frontier("unseen", [(100, 100)])  # outside every polygon
-    unlabeled = _frontier("unlabeled", [(6, 6)])
+    seen = make_frontier("seen", [(5, 5)])
+    unseen = make_frontier("unseen", [(100, 100)])  # outside every polygon
+    unlabeled = make_frontier("unlabeled", [(6, 6)])
     records = [_record(1.0, (10.0, 10.0))]
 
     written = generator.update(
@@ -128,7 +101,7 @@ def test_generator_skips_unlabeled_or_unseen_frontiers(tmp_path) -> None:  # noq
 
 def test_generator_without_writer_is_noop() -> None:
     generator = TrainingDataGenerator(goal_cell=(50, 50), writer=None)
-    frontier = _frontier("f1", [(5, 5)])
+    frontier = make_frontier("f1", [(5, 5)])
     assert generator.update(
         frontiers={"f1": frontier},
         labels={"f1": _label(frontier, feasible=True)},
@@ -143,7 +116,7 @@ def test_generator_datum_contents(tmp_path) -> None:  # noqa: ANN001
     writer = TrainingDataWriter(tmp_path)
     generator = TrainingDataGenerator(goal_cell=(10, 30), writer=writer)
 
-    frontier = _frontier("f1", [(10, 18)])
+    frontier = make_frontier("f1", [(10, 18)])
     record = _record(1.0, (10.0, 10.0))
     generator.update(
         frontiers={"f1": frontier},
