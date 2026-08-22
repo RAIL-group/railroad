@@ -37,10 +37,9 @@ Baseline (this machine, `-n auto`, 12 workers): **765 collected / 763 pass, 1 sk
       Currently we are just dropping warnings.
       """
   ```
-  **This is neutralised by `filterwarnings = ["error"]` (X-05).** A warning that is an error is
-  never *just* a warning: it fails the run and is reported in full, with source context. Verified
-  end to end — `--rich -W error` on a warning-emitting test prints
-  `DeprecationWarning: THIS-WARNING-MUST-BE-VISIBLE` with a code frame and exits 1.
+  **This is fixed by the warnings summary restored in the root `conftest.py` (X-05)**, not by
+  making warnings fatal. Verified end to end: a warning-emitting test on a tty passes, the wall
+  renders, and the warning is listed under `=== warnings summary (1) ===` at the end of the run.
 
   `--rich` is safe in `addopts` because the plugin guards on `sys.stdout.isatty()`: in CI it is
   inert and the standard reporter (with its warnings summary) takes over. Confirmed both ways.
@@ -87,12 +86,21 @@ Baseline (this machine, `-n auto`, 12 workers): **765 collected / 763 pass, 1 sk
   it. Removed. Without it the suite still reports 0 warnings, so "0" is now a real 0 rather than
   a filtered one.
 
-- [x] **X-05 `filterwarnings = ["error"]`.** **[V]**
-  **DONE.** Warnings are now errors. Verified the suite is clean under it across five runs, and
-  that an injected warning fails with
-  `E DeprecationWarning: A-NEW-WARNING-SLIPPED-IN`. This is what makes X-02's reporter choice
-  safe, and it means a warning can no longer accumulate unnoticed the way the 105 `operators=`
-  ones did. Silence an entry here only with a comment explaining why the cause cannot be fixed.
+- [x] **X-05 Warnings warn; they do not fail the build.** **[V]**
+  **DONE.** I first set `filterwarnings = ["error"]` and that was the wrong call — it makes every
+  warning a build break, which is not what a warning is for. Reverted.
+
+  That put back the real problem: `pytest-richer` discards the warnings summary, so on a tty
+  warnings would simply be invisible. Fixed at the cause instead — the root `conftest.py` now
+  implements `pytest_warning_recorded` to tally warnings and prints a summary from
+  `pytest_unconfigure`. It is a separate plugin, so neither of pytest-richer's two suppression
+  mechanisms reaches it (the no-op hook on its own reporter, and the class-level nop it patches
+  onto the standard reporter's `pytest_terminal_summary`). It prints **only** when the rich
+  reporter is actually installed, so CI's standard summary is not duplicated — verified in both
+  modes.
+
+  Net: the wall on a tty, warnings visible as warnings in both modes, and a passing build when
+  the only finding is a warning.
 
 ---
 
@@ -365,11 +373,14 @@ real coverage. This is why every **[R]** above is verified before action.
 | | Tests | Lines | Warnings | Full | `not slow` |
 |---|---|---|---|---|---|
 | Baseline | 763 pass | ~18.6k | 112 | 50–69 s | 12.9 s |
-| After Tranche 0 + A + B-01 | **764 pass** | ~18.7k | **0, enforced** | ~69 s | ~14 s |
+| After Tranche 0 + A + B-01 | **764 pass** | ~18.7k | **0** | ~46–69 s | ~14 s |
 | Target | 763 pass¹ | ~16.3k | 0 | ~35 s | ~5 s |
 
-² **Tranche A is complete: 112 warnings → 0, and now enforced** — `filterwarnings = ["error"]`
-means a new warning fails the run rather than joining a backlog. Test count rose by one (A-05
+² **Tranche A is complete: 112 warnings → 0.** Warnings still warn rather than failing the build
+(X-05); what changed is that they are now *visible* under the rich reporter instead of being
+discarded. Proof the deprecations are genuinely fixed and not suppressed: reverting a single call
+site to `ObjectSearchEnvironment(..., operators=[...])` makes the warning reappear immediately at
+`test_active_skill.py:80` — the caller, not the library. Test count rose by one (A-05
 added a deprecation-contract test). Lines rose slightly too: Tranche A *adds* structure, and the
 line reduction all comes from Tranche C.
 
