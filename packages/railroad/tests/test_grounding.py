@@ -13,7 +13,6 @@ from railroad._bindings import (
     GoalType,
     LiteralGoal,
     OrGoal,
-    State,
 )
 from railroad.core import (
     Effect,

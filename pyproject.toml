@@ -15,11 +15,13 @@ dependencies = [
     # Testing and formatting (monorepo-level)
     "pytest-html",
     "pytest-xdist>=3.8.0",
-    # Rich-styled summary. Chosen over pytest-richer/pytest-rich, which both
-    # stub pytest_warning_recorded and silently swallow the warning summary
-    # (pytest-rich additionally crashes under xdist). pytest-pretty subclasses
-    # TerminalReporter, so warning handling is inherited and stays intact.
-    "pytest-pretty",
+    # Live progress wall for xdist runs. It drops the warnings summary
+    # (pytest_warning_recorded is a no-op: "Currently we are just dropping
+    # warnings"), which is why filterwarnings=["error"] below is not optional --
+    # with it, a warning fails the run and is reported in full, so nothing can
+    # be silently swallowed. Only activates on a tty, so CI keeps the standard
+    # reporter and its warnings summary.
+    "pytest-richer",
     # ruff has no [tool.ruff] config here, so it runs on defaults; 0.16 widened the
     # default rule set enough to surface ~1400 new findings. Pin until configured.
     "ruff>=0.15.10,<0.16",
@@ -42,14 +44,19 @@ extra-paths = [
 ]
 
 [tool.pytest.ini_options]
-filterwarnings = [
-    "ignore:invalid escape sequence:SyntaxWarning"
-]
 # --dist worksteal: idle workers steal queued tests instead of being handed a
 # fixed up-front slice. The default (`load`) can deal the 25s ProcTHOR test to a
 # worker late and leave the rest idle -- measured 50-69s across runs, vs 54+-1s
 # for worksteal. Slightly worse best case, far better worst case.
-addopts = "-v -n auto --dist worksteal --html=data/test_logs/test_report.html --self-contained-html"
+# --rich: pytest-richer's progress wall, in place of the per-test scroll that
+# -v produced. Silently inert without a tty (CI), where the standard reporter
+# and its warnings summary take over.
+addopts = "-n auto --dist worksteal --rich --html=data/test_logs/test_report.html --self-contained-html"
+
+# Warnings are errors. The suite is warning-clean, and the reporter above hides
+# warning summaries on a tty, so anything less lets a warning pass unnoticed.
+# Silence one here only with a comment saying why the cause cannot be fixed.
+filterwarnings = ["error"]
 markers = [
     "slow: marks tests as slow to run (deselect with '-m \"not slow\"')"
 ]

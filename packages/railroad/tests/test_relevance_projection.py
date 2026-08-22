@@ -6,7 +6,6 @@ pin the readers it must never drop and check that projection does not change
 which action MCTS picks.
 """
 
-import pytest
 
 from railroad._bindings import Fluent as F, GroundedEffect, State
 from railroad.core import (
@@ -364,7 +363,7 @@ def test_found_reservation_preserves_at_implies_found():
     actions = ground_operators(
         [
             ops.construct_move_operator_blocking(lambda r, a, b: 5.0),
-            ops.construct_search_operator(lambda r, l, o: 0.5, 10.0),
+            ops.construct_search_operator(lambda r, loc, o: 0.5, 10.0),
             ops.construct_pick_operator_blocking(10.0),
             ops.construct_place_operator_blocking(10.0),
         ],
