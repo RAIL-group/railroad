@@ -349,42 +349,6 @@ class TestObjectSpritesSurviveCompositing:
         monkeypatch.setattr(_sprites, "get_glyph_provider", lambda **_kw: _Provider())
         return block
 
-    @pytest.fixture
-    def fetch_dashboard(self):
-        from railroad import operators
-        from railroad._bindings import State
-        from railroad.core import Fluent as F, get_action_by_name
-        from railroad.dashboard import PlannerDashboard
-        from railroad.environment import ObjectSearchEnvironment
-
-        class FetchEnvironment(ObjectSearchEnvironment):
-            def define_operators(self):
-                return [
-                    operators.construct_search_operator(1.0, 10.0),
-                    operators.construct_pick_operator_blocking(4.0),
-                    operators.construct_move_operator_blocking(lambda r, a, b: 8.0),
-                    operators.construct_place_operator_blocking(6.0),
-                ]
-
-        env = FetchEnvironment(
-            state=State(0.0, {F("at r1 shelf"), F("free r1")}, []),
-            objects_by_type={
-                "robot": {"r1"},
-                "location": {"shelf", "counter"},
-                "object": {"mug"},
-            },
-            true_object_locations={"shelf": {"mug"}, "counter": set()},
-        )
-        dashboard = PlannerDashboard(
-            F("at mug counter"), env, force_interactive=False, print_on_exit=False,
-        )
-        with dashboard:
-            for name in ("search r1 shelf mug", "pick r1 shelf mug",
-                         "move r1 shelf counter", "place r1 counter mug"):
-                env.act(get_action_by_name(env.get_actions(), name))
-                dashboard._do_update(env.state, last_action_name=name)
-        return dashboard
-
     def _frames(self, dashboard, tmp_path):
         import subprocess
 

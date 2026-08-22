@@ -29,6 +29,7 @@ def test_vocabulary_contains_named_objects_but_not_sequence_parts(font_path):
         ("creditcard", 0x1F4B3),
         ("laptop_9", 0x1F4BB),
         ("dumbbell", 0x1F3CB),
+        ("Mug_3", 0x2615),
         ("houseplant", 0x1FAB4),
     ],
 )

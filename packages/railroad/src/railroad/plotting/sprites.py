@@ -8,12 +8,12 @@ from typing import Any, Callable, Iterable, Literal, Sequence
 
 import numpy as np
 
-from .emoji import GlyphProvider, get_glyph_provider
+from .emoji import GlyphProvider, get_glyph_provider, object_sprites_enabled
 
 Coord = tuple[float, float]
-RING_RADIUS_M = 0.30
-SPRITE_DIAMETER_M = 0.25
 SPRITE_POINTS = 18.0
+RING_RADIUS_FACTOR = 1.2
+"""Ring radius as a multiple of the glyph's own width."""
 
 
 @dataclass(frozen=True)
@@ -116,11 +116,17 @@ def build_timelines(
                     holder = args[0]
                 elif name == "found" and args and args[0] == obj and found_time is None:
                     found_time = time
-            if at_loc is not None:
-                xy = stored.get(at_loc) or env_coords.get(at_loc)
-                if xy is not None:
-                    first_at_time = time if first_at_time is None else first_at_time
-                    anchors.append(Anchor(time, "rest", xy=xy, loc=at_loc))
+            # Resolved first, so that an `at` naming a location with no
+            # coordinate falls through to the holder rather than swallowing
+            # the timestep: the object is still somewhere, on a robot.
+            xy = (
+                (stored.get(at_loc) or env_coords.get(at_loc))
+                if at_loc is not None
+                else None
+            )
+            if xy is not None:
+                first_at_time = time if first_at_time is None else first_at_time
+                anchors.append(Anchor(time, "rest", xy=xy, loc=at_loc))
             elif holder is not None:
                 anchors.append(Anchor(time, "ride", robot=holder))
 
@@ -154,7 +160,11 @@ def sample(
     fallback = next(
         (anchor.xy for anchor in anchors if anchor.xy is not None), (0.0, 0.0)
     )
-    tracks = np.broadcast_to(fallback, (len(anchors), len(query), 2)).copy()
+    # Coordinates a caller supplies may be integers; the fan offsets below are
+    # not, and an int64 track refuses them.
+    tracks = np.broadcast_to(
+        np.asarray(fallback, dtype=float), (len(anchors), len(query), 2)
+    ).copy()
     for index, anchor in enumerate(anchors):
         source = (
             anchor.xy if anchor.kind == "rest" else robot_xy.get(anchor.robot or "")
@@ -162,7 +172,8 @@ def sample(
         if source is not None:
             tracks[index] = np.asarray(source, dtype=float)
     offsets = np.asarray(
-        [offset_for(anchor) if offset_for else (0.0, 0.0) for anchor in anchors]
+        [offset_for(anchor) if offset_for else (0.0, 0.0) for anchor in anchors],
+        dtype=float,
     )
     tracks += offsets[:, None, :]
 
@@ -216,11 +227,30 @@ def assign_slots(
     return slots
 
 
-def ring_radius(group_size: int, resolution: float | None) -> float:
-    radius = RING_RADIUS_M / resolution if resolution else 1.0
+def sprite_extent(ax: Any, size_points: float = SPRITE_POINTS) -> float:
+    """Width of a sprite in x data units, as `make_sprite` will draw it.
+
+    Glyphs are drawn at a fixed point size, so their footprint in data units is
+    a property of the axes, not of the world: the same 18pt glyph covers a
+    fifth of a metre on a house-scale map and fifteen cells on a fine grid.
+    Deriving the ring from a metre constant instead let co-located objects
+    overlap on exactly the scenes the fan exists for.
+    """
+    # viewLim is only refreshed on draw, and this runs before one, so an
+    # autoscaling axes would otherwise still be reporting its default 0-1 box.
+    if ax.get_autoscalex_on():
+        ax.autoscale_view()
+    inverse = ax.transData.inverted()
+    origin, offset = inverse.transform(
+        [(0.0, 0.0), (size_points * ax.figure.dpi / 72.0, 0.0)]
+    )
+    return abs(float(offset[0] - origin[0]))
+
+
+def ring_radius(group_size: int, sprite_size: float) -> float:
+    radius = RING_RADIUS_FACTOR * sprite_size
     if group_size > 1:
-        diameter = SPRITE_DIAMETER_M / resolution if resolution else 1.0
-        radius = max(radius, group_size * diameter / (2 * math.pi))
+        radius = max(radius, group_size * sprite_size / (2 * math.pi))
     return radius
 
 
@@ -270,8 +300,10 @@ __all__ = [
     "fan_offset",
     "get_glyph_provider",
     "make_sprite",
+    "object_sprites_enabled",
     "ring_radius",
     "sample",
     "select_objects",
+    "sprite_extent",
     "update_sprite",
 ]

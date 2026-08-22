@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
 from pathlib import Path
 from typing import Optional
 
@@ -141,4 +142,10 @@ def ensure_all_resources(
     from railroad.plotting.emoji import ensure_emoji_resources, object_sprites_enabled
 
     if object_sprites_enabled():
-        ensure_emoji_resources(base_dir=base_dir, force=force)
+        try:
+            ensure_emoji_resources(base_dir=base_dir, force=force)
+        except Exception as exc:
+            # This runs at `import railroad.environment.procthor`. Plot glyphs
+            # are not worth failing that import for, and plotting already
+            # degrades to no glyphs when the font and model are absent.
+            warnings.warn(f"Object glyph resources unavailable: {exc}", stacklevel=2)

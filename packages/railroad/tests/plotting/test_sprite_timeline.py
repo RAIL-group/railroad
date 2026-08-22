@@ -117,3 +117,28 @@ def test_unresolvable_objects_are_dropped():
         selected=["mug"],
         env_coords=COORDS,
     )
+
+
+def test_unresolvable_rest_location_falls_through_to_the_carrier(robot_track):
+    line = timeline(
+        [
+            entry(10, "found mug", "at mug shelf"),
+            entry(20, "at mug nowhere", "holding r1 mug"),
+            entry(40, "at mug nowhere", "holding r1 mug"),
+        ]
+    )
+    assert [a.kind for a in line.anchors] == ["rest", "ride", "ride"]
+    positions, _ = sample(line, [40], robot_track([40]), fade=1)
+    assert positions[0] == pytest.approx((20, 2))
+
+
+def test_integer_coordinates_still_take_offsets():
+    line = build_timelines(
+        history=[entry(10, "found mug", "at mug shelf")],
+        entity_positions={"mug": []},
+        selected=["mug"],
+        # Integers, as a caller's hand-written location_coords tend to be.
+        env_coords={"shelf": (10, 0)},
+    )["mug"]
+    positions, _ = sample(line, [10], {}, fade=1, offset_for=lambda _anchor: (0.0, -1.5))
+    assert positions[0] == pytest.approx((10.0, -1.5))

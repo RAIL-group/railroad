@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import subprocess
-from typing import Any, TYPE_CHECKING
+from typing import Any, Iterable, TYPE_CHECKING
 
 from ._goals import format_goal
 from ._tui import _generate_coordinates, _is_ci_environment
@@ -66,6 +66,10 @@ class _PlottingMixin:
     _SPRITE_ZORDER = 7.0
     _SPRITE_FADE_FRACTION = 0.02
     _MAX_SPRITES = 12
+
+    _sprite_warned = False
+    _sprite_cap_warned = False
+    """Set per dashboard, so a two-render call says each of these once."""
 
     _TRAIL_REPAINT_OVERLAP = 64
     """Trail points repainted behind each newly drawn batch, in the video.
@@ -366,7 +370,7 @@ class _PlottingMixin:
         show_objects: bool = False,
         location_coords: dict[str, tuple[float, float]] | None = None,
         object_sprites: bool = True,
-        glyph_objects: Any = None,
+        glyph_objects: Iterable[str] | None = None,
     ) -> Any:
         """Plot entity trajectories collected during planning.
 
@@ -613,18 +617,61 @@ class _PlottingMixin:
 
         return result
 
+    def _sprite_fade(self: PlannerDashboard, found_time: float, t_end: float) -> float:
+        """How long a glyph takes to fade in, never outlasting the plan.
+
+        Frame 0 of a video repeats the last instant as its poster, so a glyph
+        still mid-fade at ``t_end`` would render that one moment solid at the
+        front and translucent at the end. Fading over whatever time is left
+        lands it at full opacity either way; an object found at or past
+        ``t_end`` collapses the window to the step it degenerates to.
+        """
+        return max(min(self._SPRITE_FADE_FRACTION * t_end, t_end - found_time), 0.0)
+
+    def _warn_sprites_unavailable(self: PlannerDashboard, exc: BaseException) -> None:
+        if not self._sprite_warned:
+            self.console.print(
+                f"[yellow]Object glyphs unavailable "
+                f"({type(exc).__name__}: {exc}); plotting without them.[/yellow]"
+            )
+            self._sprite_warned = True
+
     def _build_sprites(
         self: PlannerDashboard,
+        ax: Any,
         env_coords: dict[str, tuple[float, float]],
         *,
-        glyph_objects: Any = None,
+        glyph_objects: Iterable[str] | None = None,
         object_sprites: bool = True,
     ) -> tuple[Any, dict[str, Any], Any] | None:
-        """Return the provider, timelines, and stable offset function."""
-        if object_sprites is False:
+        """Return the provider, timelines, and stable offset function.
+
+        Glyphs are decoration on a figure the caller asked for, and alone in
+        this module they reach for a font, a sentence model and a cache
+        directory. A read-only resources dir or a font deleted mid-run costs
+        the glyphs; it must never cost the plot.
+        """
+        try:
+            return self._compose_sprites(
+                ax, env_coords,
+                glyph_objects=glyph_objects, object_sprites=object_sprites,
+            )
+        except Exception as exc:
+            self._warn_sprites_unavailable(exc)
             return None
 
+    def _compose_sprites(
+        self: PlannerDashboard,
+        ax: Any,
+        env_coords: dict[str, tuple[float, float]],
+        *,
+        glyph_objects: Iterable[str] | None = None,
+        object_sprites: bool = True,
+    ) -> tuple[Any, dict[str, Any], Any] | None:
         from railroad.plotting import sprites as _sprites
+
+        if not object_sprites or not _sprites.object_sprites_enabled():
+            return None
 
         # Lookup only. Auto-enabling must never turn a plot into a download.
         provider = _sprites.get_glyph_provider()
@@ -640,6 +687,16 @@ class _PlottingMixin:
             objects_by_type=getattr(self._env, "objects_by_type", None),
             glyph_objects=glyph_objects,
         )
+        # Before the timelines rather than after: building one walks every
+        # fluent of every snapshot, and the surplus is only thrown away.
+        if len(selected) > self._MAX_SPRITES:
+            if not self._sprite_cap_warned:
+                self.console.print(
+                    f"[yellow]Showing {self._MAX_SPRITES} of {len(selected)} "
+                    f"objects as glyphs; the rest are omitted.[/yellow]"
+                )
+                self._sprite_cap_warned = True
+            selected = set(sorted(selected)[: self._MAX_SPRITES])
         timelines = _sprites.build_timelines(
             history=self.history,
             entity_positions=self._entity_positions,
@@ -648,13 +705,6 @@ class _PlottingMixin:
         )
         if not timelines:
             return None
-        if len(timelines) > self._MAX_SPRITES:
-            kept = sorted(timelines)[: self._MAX_SPRITES]
-            self.console.print(
-                f"[yellow]Showing {self._MAX_SPRITES} of {len(timelines)} object "
-                f"glyphs; the rest are omitted.[/yellow]"
-            )
-            timelines = {name: timelines[name] for name in kept}
 
         # Slots are assigned from the whole timeline rather than per frame, so a
         # sprite does not jump sideways when a neighbour is picked up.
@@ -667,7 +717,7 @@ class _PlottingMixin:
                 if anchor.kind == "ride" and anchor.robot:
                     carried.setdefault(name, []).append(anchor.robot)
         ride_slots = _sprites.assign_slots(carried)
-        resolution = getattr(getattr(self._env, "scene", None), "resolution", None)
+        sprite_size = _sprites.sprite_extent(ax)
 
         def offset_for(name: str) -> Any:
             def offset(anchor: Any) -> tuple[float, float]:
@@ -676,7 +726,7 @@ class _PlottingMixin:
                 else:
                     slot, size = ride_slots.get((name, anchor.robot or ""), (0, 1))
                 return _sprites.fan_offset(
-                    slot, size, _sprites.ring_radius(size, resolution)
+                    slot, size, _sprites.ring_radius(size, sprite_size)
                 )
 
             return offset
@@ -690,7 +740,7 @@ class _PlottingMixin:
         env_coords: dict[str, tuple[float, float]],
         t_end: float,
         *,
-        glyph_objects: Any = None,
+        glyph_objects: Iterable[str] | None = None,
         object_sprites: bool = True,
     ) -> list[tuple[float, float]]:
         """Draw final sprites and return their positions for axis framing."""
@@ -700,7 +750,8 @@ class _PlottingMixin:
         from railroad.plotting.sprites import make_sprite
 
         built = self._build_sprites(
-            env_coords, glyph_objects=glyph_objects, object_sprites=object_sprites,
+            ax, env_coords,
+            glyph_objects=glyph_objects, object_sprites=object_sprites,
         )
         if built is None:
             return []
@@ -711,18 +762,23 @@ class _PlottingMixin:
             times, trajectories=trajectories,
         )
         drawn: list[tuple[float, float]] = []
-        for name, line in sorted(timelines.items()):
-            rgba = provider.glyph_for(name)
-            if rgba is None:
-                continue
-            position, alpha = _sprites.sample(
-                line, times, robot_xy, fade=0.0, offset_for=offset_for(name),
-            )
-            if alpha[0] <= 0.0:
-                continue
-            xy = (float(position[0][0]), float(position[0][1]))
-            make_sprite(ax, rgba, xy, zorder=self._SPRITE_ZORDER)
-            drawn.append(xy)
+        # Rasterizing a glyph is the other half of the font dependency; the
+        # sprites already placed stay on the figure if a later one fails.
+        try:
+            for name, line in sorted(timelines.items()):
+                rgba = provider.glyph_for(name)
+                if rgba is None:
+                    continue
+                position, alpha = _sprites.sample(
+                    line, times, robot_xy, fade=0.0, offset_for=offset_for(name),
+                )
+                if alpha[0] <= 0.0:
+                    continue
+                xy = (float(position[0][0]), float(position[0][1]))
+                make_sprite(ax, rgba, xy, zorder=self._SPRITE_ZORDER)
+                drawn.append(xy)
+        except Exception as exc:
+            self._warn_sprites_unavailable(exc)
         return drawn
 
     def _render_photo_underlay(self: PlannerDashboard, ax: Any) -> Any | None:
@@ -1060,7 +1116,7 @@ class _PlottingMixin:
         figsize: tuple[float, float] = (12.8, 7.2),
         dpi: int = 150,
         object_sprites: bool = True,
-        glyph_objects: Any = None,
+        glyph_objects: Iterable[str] | None = None,
     ) -> None:
         """Save an animated trajectory video/GIF.
 
@@ -1269,8 +1325,16 @@ class _PlottingMixin:
         # Sprites are sampled before the limits are pinned, because a sprite
         # outside them is clipped away entirely rather than expanding the view --
         # and a fan offset routinely pushes one just past the trail's own bounds.
+        # The offsets are sized against the axes, though, and with no grid image
+        # nothing has given it a scale yet: seed the data limits from what the
+        # autoscale further down works off anyway.
+        if occupancy_grid is None:
+            seed = [*map(tuple, combined_xy), *env_coords.values()]
+            if seed:
+                ax.update_datalim(seed)
         sprite_build = self._build_sprites(
-            env_coords, glyph_objects=glyph_objects, object_sprites=object_sprites,
+            ax, env_coords,
+            glyph_objects=glyph_objects, object_sprites=object_sprites,
         )
         sprite_xy: dict[str, Any] = {}
         sprite_alpha: dict[str, Any] = {}
@@ -1279,21 +1343,22 @@ class _PlottingMixin:
             from railroad.plotting import sprites as _sprites
 
             _provider, sprite_timelines, sprite_offset_for = sprite_build
-            fade = max(self._SPRITE_FADE_FRACTION * t_end, 1e-9)
-            for name, line in sorted(sprite_timelines.items()):
-                rgba = _provider.glyph_for(name)
-                if rgba is None:
-                    continue
-                positions, alphas = _sprites.sample(
-                    line, frame_times, marker_positions,
-                    fade=fade, offset_for=sprite_offset_for(name),
-                )
-                alphas[0] = 1.0
-                if line.found_time >= t_end:
-                    alphas[frame_times >= line.found_time] = 1.0
-                sprite_rgba[name] = rgba
-                sprite_xy[name] = positions
-                sprite_alpha[name] = alphas
+            try:
+                for name, line in sorted(sprite_timelines.items()):
+                    rgba = _provider.glyph_for(name)
+                    if rgba is None:
+                        continue
+                    positions, alphas = _sprites.sample(
+                        line, frame_times, marker_positions,
+                        fade=self._sprite_fade(line.found_time, t_end),
+                        offset_for=sprite_offset_for(name),
+                    )
+                    alphas[0] = 1.0
+                    sprite_rgba[name] = rgba
+                    sprite_xy[name] = positions
+                    sprite_alpha[name] = alphas
+            except Exception as exc:
+                self._warn_sprites_unavailable(exc)
         # Every position the sprite ever occupies, not just where it rests: it
         # is carried, so it strays wherever its robot goes plus its own offset.
         sprite_points = [
@@ -1727,7 +1792,7 @@ class _PlottingMixin:
         *,
         location_coords: dict[str, tuple[float, float]] | None = None,
         object_sprites: bool = True,
-        glyph_objects: Any = None,
+        glyph_objects: Iterable[str] | None = None,
     ) -> Any | None:
         """Create a complete static trajectory figure with sidebar, or ``None``."""
         result = self._create_trajectory_figure(figsize, location_coords=location_coords)
@@ -1759,6 +1824,8 @@ class _PlottingMixin:
         figsize: tuple[float, float] = (12.8, 7.2),
         dpi: int = 150,
         quality: int = 85,
+        object_sprites: bool = True,
+        glyph_objects: Iterable[str] | None = None,
     ) -> bytes | None:
         """Render the trajectory plot to JPEG bytes in memory.
 
@@ -1769,6 +1836,10 @@ class _PlottingMixin:
             figsize: Figure size in inches.
             dpi: Resolution in dots per inch.
             quality: JPEG quality (1-95).
+            object_sprites: Draw emoji glyphs for the objects the plan is about.
+                Defaults to drawing them when a glyph source is available.
+            glyph_objects: Objects to draw glyphs for, overriding the derived
+                plan-relevant set.
 
         Returns:
             JPEG image bytes, or None if there are no trajectories to display.
@@ -1778,7 +1849,10 @@ class _PlottingMixin:
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
 
-        fig = self._render_static_plot(figsize, location_coords=location_coords)
+        fig = self._render_static_plot(
+            figsize, location_coords=location_coords,
+            object_sprites=object_sprites, glyph_objects=glyph_objects,
+        )
         if fig is None:
             return None
 
@@ -1800,7 +1874,7 @@ class _PlottingMixin:
         video_dpi: int = 150,
         location_coords: dict[str, tuple[float, float]] | None = None,
         object_sprites: bool = True,
-        glyph_objects: Any = None,
+        glyph_objects: Iterable[str] | None = None,
     ) -> None:
         """Convenience method that handles plot/video output based on CLI flags.
 

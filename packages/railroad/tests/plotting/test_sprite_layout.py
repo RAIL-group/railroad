@@ -21,8 +21,7 @@ def test_slots_are_stable_across_input_order_and_locations():
     assert slots[("mug", "counter")] == (0, 1)
 
 
-def test_radius_uses_scene_resolution_and_expands_for_crowds():
-    assert ring_radius(1, 0.05) == pytest.approx(6)
-    assert ring_radius(1, 0.25) == pytest.approx(1.2)
-    assert ring_radius(1, None) == pytest.approx(1)
-    assert ring_radius(20, 0.05) > ring_radius(3, 0.05)
+def test_radius_tracks_the_glyph_size_and_expands_for_crowds():
+    assert ring_radius(1, 0.5) == pytest.approx(0.6)
+    assert ring_radius(1, 12.0) == pytest.approx(14.4)
+    assert ring_radius(20, 0.5) > ring_radius(3, 0.5)
