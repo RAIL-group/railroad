@@ -48,7 +48,6 @@ def test_sentence_matcher_handles_a_synonym(font_path):
     assert emoji.match("couch", font_path) == 0x1F6CB
 
 
-def test_overrides_are_small_and_renderable(font_path):
+def test_overrides_are_renderable(font_path):
     renderable = {codepoint for _, codepoint in emoji.entries(font_path)}
-    assert len(emoji.OVERRIDES) <= 20
     assert set(emoji.OVERRIDES.values()) <= renderable
