@@ -15,6 +15,11 @@ dependencies = [
     # Testing and formatting (monorepo-level)
     "pytest-html",
     "pytest-xdist>=3.8.0",
+    # Rich-styled summary. Chosen over pytest-richer/pytest-rich, which both
+    # stub pytest_warning_recorded and silently swallow the warning summary
+    # (pytest-rich additionally crashes under xdist). pytest-pretty subclasses
+    # TerminalReporter, so warning handling is inherited and stays intact.
+    "pytest-pretty",
     # ruff has no [tool.ruff] config here, so it runs on defaults; 0.16 widened the
     # default rule set enough to surface ~1400 new findings. Pin until configured.
     "ruff>=0.15.10,<0.16",

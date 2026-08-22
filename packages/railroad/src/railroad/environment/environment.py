@@ -1,5 +1,6 @@
 """Base Environment class for planning environments."""
 
+import sys
 import warnings
 from abc import ABC, abstractmethod
 from typing import Callable, Collection, Dict, List, Optional, Protocol, Set, Tuple, runtime_checkable
@@ -11,6 +12,28 @@ from railroad.core import (
     dynamic_predicates,
     ground_operators,
 )
+
+def _caller_stacklevel() -> int:
+    """`stacklevel` naming the code that passed the deprecated kwarg.
+
+    Deprecated constructor kwargs reach here through a chain of subclass
+    ``__init__``s of varying length -- ``SymbolicEnvironment`` is three frames
+    from the caller, ``ObjectSearchEnvironment`` four -- so any fixed
+    ``stacklevel`` names one of our own files instead of the code that needs
+    changing. Walk out past the forwarding chain to the first frame that is not
+    a constructor.
+
+    Keyed on ``__init__`` rather than on "outside the railroad package" so that
+    in-package callers are still named: the examples pass ``operators=`` from
+    ordinary functions, and a package-path test would skip straight past them
+    to the CLI.
+    """
+    level = 1
+    frame = sys._getframe(1)
+    while frame is not None and frame.f_code.co_name == "__init__":
+        frame = frame.f_back
+        level += 1
+    return level
 
 
 @runtime_checkable
@@ -73,7 +96,7 @@ class Environment(ABC):
                 "will be removed in a future release. Prefer overriding "
                 "define_operators().",
                 DeprecationWarning,
-                stacklevel=2,
+                stacklevel=_caller_stacklevel(),
             )
         self._operators = self._resolve_operators(operators, _from_init=True)
         self._time: float = state.time
@@ -117,7 +140,7 @@ class Environment(ABC):
                 "removed in a future release. Prefer overriding "
                 "define_operators().",
                 DeprecationWarning,
-                stacklevel=2,
+                stacklevel=_caller_stacklevel(),
             )
         has_custom_define_operators = type(self).define_operators is not Environment.define_operators
 
