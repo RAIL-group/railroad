@@ -40,7 +40,11 @@ extra-paths = [
 filterwarnings = [
     "ignore:invalid escape sequence:SyntaxWarning"
 ]
-addopts = "-v -n auto --html=data/test_logs/test_report.html --self-contained-html"
+# --dist worksteal: idle workers steal queued tests instead of being handed a
+# fixed up-front slice. The default (`load`) can deal the 25s ProcTHOR test to a
+# worker late and leave the rest idle -- measured 50-69s across runs, vs 54+-1s
+# for worksteal. Slightly worse best case, far better worst case.
+addopts = "-v -n auto --dist worksteal --html=data/test_logs/test_report.html --self-contained-html"
 markers = [
     "slow: marks tests as slow to run (deselect with '-m \"not slow\"')"
 ]
