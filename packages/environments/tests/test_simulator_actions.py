@@ -292,22 +292,14 @@ def test_no_oscillation_pick_place_move_search():
     actions_taken = []
 
     # time the planning
-    import time
     for _ in range(15):
-        t1 = time.time()
         action_name = mcts(sim.state, goal, max_iterations=2000, c=20)
-        t2 = time.time()
-        print(f'Planning time: {t2 - t1:.2f} seconds')
-        print(f'{action_name=}')
         if action_name != 'NONE':
             action = get_action_by_name(all_actions, action_name)
             sim.advance(action)
-            # print(sim.state.fluents)
             actions_taken.append(action_name)
 
         if goal.evaluate(sim.state.fluents):
-            print("Goal reached!")
             break
 
-    print(f"Actions taken: {actions_taken}")
     assert goal.evaluate(sim.state.fluents)

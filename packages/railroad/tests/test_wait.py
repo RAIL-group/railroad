@@ -108,7 +108,6 @@ def test_planner_mcts_move_visit_wait_multirobot(initial_fluents):
     mcts = MCTSPlanner(all_actions)
     for _ in range(25):
         if goal.evaluate(state.fluents):
-            print("Goal found!")
             break
         action_name = mcts(state, goal, 10000, c=5)
         if action_name == "NONE":
@@ -117,220 +116,97 @@ def test_planner_mcts_move_visit_wait_multirobot(initial_fluents):
 
         state = transition(state, action)[0][0]
 
-        print(action_name, state, goal.evaluate(state.fluents))
     assert goal.evaluate(state.fluents)
 
 
+# Distances between the four locations. r1 starts far from the couch (5s), r2
+# close (2s), so r2 necessarily arrives first and has to wait.
+_COUCH_DISTANCES = {
+    ("l1", "l3"): 5.0, ("l3", "l1"): 5.0,
+    ("l2", "l3"): 2.0, ("l3", "l2"): 2.0,
+    ("l1", "l2"): 3.0, ("l2", "l1"): 3.0,
+    ("l1", "l4"): 7.0, ("l4", "l1"): 7.0,
+    ("l2", "l4"): 4.0, ("l4", "l2"): 4.0,
+    ("l3", "l4"): 3.0, ("l4", "l3"): 3.0,
+}
+
+_COUCH_OBJECTS = {
+    "robot": ["r1", "r2"],
+    "couch": ["couch1"],
+    "location": ["l1", "l2", "l3", "l4"],
+}
+
+
+def _couch_actions():
+    """Every grounding of the two-robot couch-carrying domain.
+
+    Shared by both couch tests. The fixed-plan test below used to hand-write
+    six `Action` objects that were exactly these groundings -- two copies of
+    one domain in one file, with nothing keeping them in step.
+    """
+    operators = [
+        construct_move_operator(
+            lambda r, frm, to: _COUCH_DISTANCES.get((frm, to), 1.0)),
+        construct_wait_operator(),
+        construct_lift_couch_operator(lift_time=1.0),
+        construct_move_couch_operator(move_time=3.0),
+        construct_put_down_couch_operator(put_down_time=1.0),
+    ]
+    return {a.name: a
+            for op in operators
+            for a in op.instantiate(_COUCH_OBJECTS)}
+
+
+def _couch_initial_state():
+    return State(time=0, fluents={
+        F("at r1 l1"), F("at r2 l2"), F("at couch1 l3"),
+        F("on-floor couch1"), F("free r1"), F("free r2"),
+    })
+
+
+#: (action, time after it resolves, fluents that must hold, fluents that must not)
+_COUCH_PLAN = [
+    ("move r1 l1 l3", 0.0,
+     set(), {"free r1", "at r1 l1"}),
+    # r2 arrives at t=2; r1 is still in transit.
+    ("move r2 l2 l3", 2.0,
+     {"free r2", "at r2 l3"}, {"free r1"}),
+    # Waiting advances time to r1's arrival and then releases r2.
+    ("wait r2 r1", 5.0,
+     {"free r1", "at r1 l3", "free r2"}, {"waiting r2 r1"}),
+    # The primary carrier goes free after the lift; the helper stays committed.
+    ("lift-couch-together r1 r2 couch1 l3", 6.0,
+     {"carrying-primary r1 couch1", "carrying-helper r2 couch1", "free r1"},
+     {"on-floor couch1", "free r2"}),
+    ("move-couch r1 r2 couch1 l3 l4", 9.0,
+     {"at r1 l4", "at r2 l4", "at couch1 l4", "free r1"}, {"free r2"}),
+    ("put-down-couch-together r1 r2 couch1 l4", 10.0,
+     {"on-floor couch1", "at couch1 l4", "free r1", "free r2"},
+     {"carrying-primary r1 couch1", "carrying-helper r2 couch1"}),
+]
+
+
 def test_couch_carry_with_wait():
+    """A fixed plan through the couch domain, checked step by step.
+
+    Two robots must carry a couch together. r2 reaches it first and waits;
+    they lift, carry and put down as a pair. The point of the fixed plan (as
+    opposed to `test_couch_carry_with_operators_and_planner`, which lets the
+    planner find it) is that every intermediate *time* is pinned, which is what
+    makes the wait and the concurrent execution observable.
     """
-    Test scenario: Two robots must move a couch together.
-    - r1 starts at l1 (5 seconds away from couch)
-    - r2 starts at l2 (2 seconds away from couch)
-    - couch1 is at l3 (on floor)
-    - Goal: couch1 at l4 (on floor)
+    actions = _couch_actions()
+    state = _couch_initial_state()
 
-    Expected behavior:
-    1. Both robots move to l3 (r2 arrives first)
-    2. r2 waits for r1 to arrive
-    3. Once both at l3, they lift the couch together
-    4. They move the couch to l4
-    5. They put down the couch at l4
-    """
+    for name, expected_time, present, absent in _COUCH_PLAN:
+        state = transition(state, actions[name])[0][0]
+        assert state.time == expected_time, f"wrong time after {name!r}"
+        for fluent in present:
+            assert F(fluent) in state.fluents, f"{fluent!r} missing after {name!r}"
+        for fluent in absent:
+            assert F(fluent) not in state.fluents, f"{fluent!r} present after {name!r}"
 
-    # Define initial state
-    initial_state = State(
-        time=0,
-        fluents={
-            F("at r1 l1"),
-            F("at r2 l2"),
-            F("at couch1 l3"),
-            F("on-floor couch1"),
-            F("free r1"),
-            F("free r2"),
-        }
-    )
-
-    # Define actions
-    # Action 1: r1 moves from l1 to l3 (takes 5 seconds)
-    move_r1_l1_l3 = Action(
-        name="move r1 l1 l3",
-        preconditions={F("at r1 l1"), F("free r1")},
-        effects=[
-            GroundedEffect(0, {~F("free r1"), ~F("at r1 l1")}),
-            GroundedEffect(5.0, {F("free r1"), F("at r1 l3")}),
-        ]
-    )
-
-    # Action 2: r2 moves from l2 to l3 (takes 2 seconds)
-    move_r2_l2_l3 = Action(
-        name="move r2 l2 l3",
-        preconditions={F("at r2 l2"), F("free r2")},
-        effects=[
-            GroundedEffect(0, {~F("free r2"), ~F("at r2 l2")}),
-            GroundedEffect(2.0, {F("free r2"), F("at r2 l3")}),
-        ]
-    )
-
-    # Action 3: r2 waits for r1
-    wait_r2_r1 = Action(
-        name="wait r2 r1",
-        preconditions={F("free r2"), ~F("free r1")},
-        effects=[
-            GroundedEffect(0, {~F("free r2"), F("waiting r2 r1")}),
-        ]
-    )
-
-    # Action 4: lift couch together (both robots must be at l3, both free)
-    lift_couch = Action(
-        name="lift-couch-together r1 r2 couch1 l3",
-        preconditions={
-            F("at r1 l3"),
-            F("at r2 l3"),
-            F("at couch1 l3"),
-            F("on-floor couch1"),
-            F("free r1"),
-            F("free r2"),
-        },
-        effects=[
-            GroundedEffect(0, {
-                ~F("on-floor couch1"),
-                ~F("free r1"),
-                ~F("free r2"),
-                F("carrying-primary r1 couch1"),
-                F("carrying-helper r2 couch1"),
-            }),
-            GroundedEffect(1.0, {
-                F("free r1"),  # Primary robot becomes free after lift
-                # Note: helper robot stays not-free until put-down
-            }),
-        ]
-    )
-
-    # Action 5: move couch from l3 to l4 (takes 3 seconds)
-    move_couch = Action(
-        name="move-couch r1 r2 couch1 l3 l4",
-        preconditions={
-            F("carrying-primary r1 couch1"),
-            F("carrying-helper r2 couch1"),
-            F("at r1 l3"),
-            F("at r2 l3"),
-            F("at couch1 l3"),
-            F("free r1"),
-        },
-        effects=[
-            GroundedEffect(0, {
-                ~F("free r1"),
-                ~F("at r1 l3"),
-                ~F("at r2 l3"),
-                ~F("at couch1 l3"),
-            }),
-            GroundedEffect(3.0, {
-                F("free r1"),
-                F("at r1 l4"),
-                F("at r2 l4"),
-                F("at couch1 l4"),
-            }),
-        ]
-    )
-
-    # Action 6: put down couch at l4
-    put_down_couch = Action(
-        name="put-down-couch-together r1 r2 couch1 l4",
-        preconditions={
-            F("carrying-primary r1 couch1"),
-            F("carrying-helper r2 couch1"),
-            F("at r1 l4"),
-            F("at r2 l4"),
-            F("at couch1 l4"),
-            F("free r1"),
-        },
-        effects=[
-            GroundedEffect(0, {
-                ~F("free r1"),
-            }),
-            GroundedEffect(1.0, {
-                F("on-floor couch1"),
-                ~F("carrying-primary r1 couch1"),
-                ~F("carrying-helper r2 couch1"),
-                F("free r1"),
-                F("free r2"),
-            }),
-        ]
-    )
-
-    # Execute the sequence
-    state = initial_state
-    print(f"\nInitial state (t={state.time}): {sorted(str(f) for f in state.fluents)}")
-
-    # Step 1: r1 starts moving to l3
-    state = transition(state, move_r1_l1_l3)[0][0]
-    print(f"\nAfter 'move r1 l1 l3' (t={state.time}):")
-    print("  - r1 is moving (not free)")
-    assert state.time == 0
-    assert F("free r1") not in state.fluents
-    assert F("at r1 l1") not in state.fluents
-
-    # Step 2: r2 starts moving to l3
-    state = transition(state, move_r2_l2_l3)[0][0]
-    print(f"\nAfter 'move r2 l2 l3' (t={state.time}):")
-    print("  - r2 is moving (not free)")
-    print("  - Time advances to t=2 when r2 arrives at l3")
-    assert state.time == 2  # Time advances to when r2 finishes
-    assert F("free r2") in state.fluents
-    assert F("at r2 l3") in state.fluents
-    assert F("free r1") not in state.fluents  # r1 still moving
-
-    # Step 3: r2 waits for r1
-    state = transition(state, wait_r2_r1)[0][0]
-    print(f"\nAfter 'wait r2 r1' (t={state.time}):")
-    print("  - r2 is waiting (not free)")
-    print("  - Time advances to t=5 when r1 arrives at l3")
-    assert state.time == 5  # Time advances to when r1 finishes
-    assert F("free r1") in state.fluents
-    assert F("at r1 l3") in state.fluents
-    assert F("free r2") in state.fluents  # r2 becomes free when r1 arrives
-    assert F("waiting r2 r1") not in state.fluents
-
-    # Step 4: Both robots lift the couch
-    state = transition(state, lift_couch)[0][0]
-    print(f"\nAfter 'lift-couch-together r1 r2 couch1 l3' (t={state.time}):")
-    print("  - Couch is no longer on floor")
-    print("  - r1 is primary carrier (becomes free after 1 second)")
-    print("  - r2 is helper (stays not-free)")
-    assert state.time == 6  # 5 + 1 second lift time
-    assert F("on-floor couch1") not in state.fluents
-    assert F("carrying-primary r1 couch1") in state.fluents
-    assert F("carrying-helper r2 couch1") in state.fluents
-    assert F("free r1") in state.fluents
-    assert F("free r2") not in state.fluents  # Helper stays not-free
-
-    # Step 5: Move couch to l4
-    state = transition(state, move_couch)[0][0]
-    print(f"\nAfter 'move-couch r1 r2 couch1 l3 l4' (t={state.time}):")
-    print("  - Couch and both robots at l4")
-    assert state.time == 9  # 6 + 3 seconds travel
-    assert F("at r1 l4") in state.fluents
-    assert F("at r2 l4") in state.fluents
-    assert F("at couch1 l4") in state.fluents
-    assert F("free r1") in state.fluents
-    assert F("free r2") not in state.fluents  # Helper still not-free
-
-    # Step 6: Put down couch
-    state = transition(state, put_down_couch)[0][0]
-    print(f"\nAfter 'put-down-couch-together r1 r2 couch1 l4' (t={state.time}):")
-    print("  - Couch is on floor at l4")
-    print("  - Both robots are free")
-    assert state.time == 10  # 9 + 1 second put-down time
-    assert F("on-floor couch1") in state.fluents
-    assert F("at couch1 l4") in state.fluents
-    assert F("carrying-primary r1 couch1") not in state.fluents
-    assert F("carrying-helper r2 couch1") not in state.fluents
-    assert F("free r1") in state.fluents
-    assert F("free r2") in state.fluents
-
-    # Verify goal is achieved
-    print("\nGoal achieved: couch1 is at l4 and on floor")
-    print(f"Total time: {state.time} seconds")
+    # Goal: the couch is at l4 and back on the floor.
     assert F("at couch1 l4") in state.fluents
     assert F("on-floor couch1") in state.fluents
 
@@ -489,45 +365,8 @@ def test_couch_carry_with_operators_and_planner():
     """
 
     # Define object types
-    objects_by_type = {
-        "robot": ["r1", "r2"],
-        "couch": ["couch1"],
-        "location": ["l1", "l2", "l3", "l4"],
-    }
+    all_actions = list(_couch_actions().values())
 
-    # Define travel times for different routes
-    def get_move_time(robot, from_loc, to_loc):
-        # Define distances
-        distances = {
-            ("l1", "l3"): 5.0,  # r1 far from couch
-            ("l2", "l3"): 2.0,  # r2 close to couch
-            ("l3", "l1"): 5.0,
-            ("l3", "l2"): 2.0,
-            ("l1", "l2"): 3.0,
-            ("l2", "l1"): 3.0,
-            ("l1", "l4"): 7.0,
-            ("l4", "l1"): 7.0,
-            ("l2", "l4"): 4.0,
-            ("l4", "l2"): 4.0,
-            ("l3", "l4"): 3.0,
-            ("l4", "l3"): 3.0,
-        }
-        return distances.get((from_loc, to_loc), 1.0)
-
-    # Create operators
-    operators = [
-        construct_move_operator(get_move_time),
-        construct_wait_operator(),
-        construct_lift_couch_operator(lift_time=1.0),
-        construct_move_couch_operator(move_time=3.0),
-        construct_put_down_couch_operator(put_down_time=1.0)
-    ]
-
-    # Instantiate all actions
-    all_actions = [act for op in operators
-                   for act in op.instantiate(objects_by_type)]
-
-    print(f"\nTotal actions instantiated: {len(all_actions)}")
 
     # Initial state
     initial_state = State(
@@ -547,25 +386,14 @@ def test_couch_carry_with_operators_and_planner():
 
     # Filter to only usable actions
     usable_actions = get_usable_actions(initial_state, all_actions)
-    print(f"Usable actions: {len(usable_actions)}")
 
     # Run MCTS planner
     state = initial_state
     mcts = MCTSPlanner(usable_actions)
 
-    print(f"\n{'='*60}")
-    print("Starting MCTS Planning for Couch Carry Task")
-    print(f"{'='*60}")
-    print(f"Initial state (t={state.time}):")
-    for fluent in sorted(str(f) for f in state.fluents):
-        print(f"  {fluent}")
-
     max_steps = 20
     for step in range(max_steps):
         if goal.evaluate(state.fluents):
-            print(f"\n{'='*60}")
-            print("GOAL ACHIEVED!")
-            print(f"{'='*60}")
             break
 
         # Get next action from MCTS
@@ -578,7 +406,6 @@ def test_couch_carry_with_operators_and_planner():
         )
 
         if action_name == "NONE":
-            print("\nPlanner returned NONE - no valid action found")
             break
 
         # Execute action
@@ -586,19 +413,8 @@ def test_couch_carry_with_operators_and_planner():
         next_states = transition(state, action)
         state = next_states[0][0]  # Take first (deterministic) outcome
 
-        print(f"\nStep {step + 1}: {action_name}")
-        print(f"  Time: {state.time}")
-        print("  Key fluents:")
-
-        # Print relevant fluents
-        for fluent_str in sorted(str(f) for f in state.fluents):
-            if any(keyword in fluent_str for keyword in
-                   ["at ", "free", "carrying", "waiting", "on-floor"]):
-                print(f"    {fluent_str}")
-
     # Verify goal was achieved
     assert goal.evaluate(state.fluents), f"Goal not achieved after {max_steps} steps"
-    print(f"\nFinal time: {state.time} seconds")
 
     # Verify both robots are free at the end
     assert F("free r1") in state.fluents, "r1 should be free at the end"
@@ -608,4 +424,3 @@ def test_couch_carry_with_operators_and_planner():
     assert F("at couch1 l4") in state.fluents
     assert F("on-floor couch1") in state.fluents
 
-    print("\nAll assertions passed!")

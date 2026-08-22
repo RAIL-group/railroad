@@ -1,5 +1,7 @@
-from railroad.core import Fluent, State, transition, get_action_by_name
-from railroad.operators import construct_move_visited_operator
+from railroad.core import (
+    Effect, Fluent, Operator, State, get_action_by_name, transition,
+)
+from railroad.operators import _to_numeric, construct_move_visited_operator
 from railroad.operators import construct_search_and_pick_operator
 from railroad import operators
 from railroad._bindings import get_next_actions
@@ -31,7 +33,15 @@ def test_no_op_offered_only_when_only_option():
 
 
 def test_pruning_unavailable_actions():
-    initial_state = State(time=0, fluents=set())
+    """Pruning is per-robot, and keeps more than the currently-applicable moves.
+
+    `len(after) < len(before)` used to be the whole assertion, which any
+    pruning at all satisfies. What actually happens is narrower and worth
+    pinning: r2 and r3 are neither placed nor free, so every one of their
+    actions goes; r1 keeps *all* of its 132, including moves from locations it
+    is not standing in. Pruning drops robots that cannot act, not actions that
+    do not currently apply.
+    """
     objects_by_type = {
         "robot": ["r1", "r2", "r3"],
         "location": ["start", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"],
@@ -39,15 +49,17 @@ def test_pruning_unavailable_actions():
     random.seed(8616)
     move_op = construct_move_visited_operator(lambda *args: 5.0 + random.random())
     all_actions = move_op.instantiate(objects_by_type)
+    assert len(all_actions) == 3 * 12 * 11
 
-    initial_state = State(time=0, fluents={F("at r1 start"), F("free r1"),
-                                        F("visited start")}, )
-    num_actions_before = len(all_actions)
-    all_actions = get_usable_actions(initial_state, all_actions)
+    initial_state = State(
+        time=0,
+        fluents={F("at r1 start"), F("free r1"), F("visited start")},
+    )
+    names = {a.name for a in get_usable_actions(initial_state, all_actions)}
 
-    assert len(all_actions) < num_actions_before
+    assert all(n.startswith("move r1 ") for n in names)
+    assert len(names) == 12 * 11
 
-    
 
 @pytest.mark.parametrize(
     "initial_fluents",
@@ -97,7 +109,6 @@ def test_planner_mcts_move_visit_multirobot(initial_fluents):
     mcts = MCTSPlanner(all_actions)
     for _ in range(15):
         if goal.evaluate(state.fluents):
-            print("Goal found!")
             break
         action_name = mcts(state, goal, 2000, c=10)
         if action_name == "NONE":
@@ -105,7 +116,6 @@ def test_planner_mcts_move_visit_multirobot(initial_fluents):
         action = get_action_by_name(all_actions, action_name)
 
         state = transition(state, action)[0][0]
-        print(action_name, state, goal.evaluate(state.fluents))
     assert goal.evaluate(state.fluents)
 
 
@@ -176,33 +186,6 @@ def test_mcts_search_picks_more_likely_location(roomA_prob, num_robots, attempts
     assert (
         roomA_count >= 0.8 * num_planning_attempts
     ), f"Expected roomA in at least 80% actions, got {roomA_count}/{num_planning_attempts} for roomA_prob={roomA_prob}"
-
-
-def test_basic_planning():
-    """Test basic planning functionality."""
-    # Simple test setup
-    objects_by_type = {
-        "robot": ["r1"],
-        "location": ["start", "a", "b"],
-    }
-    move_op = construct_move_visited_operator(lambda *args: 5.0)
-    all_actions = move_op.instantiate(objects_by_type)
-
-    initial_state = State(
-        time=0,
-        fluents={F("at r1 start"), F("free r1"), F("visited start")}
-    )
-    goal = F("visited a")
-
-    # Create planner
-    mcts = MCTSPlanner(all_actions)
-
-    # Run planner
-    action_name = mcts(initial_state, goal, max_iterations=100, c=1.414)
-
-    # Verify we got a valid result (either an action name or "NONE")
-    assert isinstance(action_name, str)
-    assert len(action_name) > 0
 
 
 def test_mcts_planner_lambdas_propagate_to_heuristic():
@@ -345,3 +328,80 @@ def test_dead_end_penalty_is_flat_not_added_to_elapsed_cost():
 
     assert planner(early, goal, max_iterations=2000, c=100) == "pad r1 vase"
     assert planner(late, goal, max_iterations=2000, c=100) == "pad r1 vase"
+
+
+# ---------------------------------------------------------------------------
+# Feasibility (was test_feasible_actions.py)
+# ---------------------------------------------------------------------------
+
+
+def _no_revisit_move_op(move_time):
+    """`construct_move_visited_operator` *plus* a `not visited ?to` precondition.
+
+    The production builder deliberately omits that precondition -- its docstring
+    says so, to allow revisits -- which is exactly why this test declares its
+    own: forbidding revisits is what makes the feasible set small enough to
+    assert exactly.
+    """
+    return Operator(
+        name="move",
+        parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F("at ?r ?from"), F("free ?r"), F("not visited ?to")],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free ?r")}),
+            Effect(
+                time=(_to_numeric(move_time), ["?r", "?from", "?to"]),
+                resulting_fluents={
+                    F("free ?r"),
+                    F("not at ?r ?from"),
+                    F("at ?r ?to"),
+                    F("visited ?to"),
+                },
+            ),
+        ],
+    )
+
+
+def test_feasible_set_shrinks_to_exactly_one_as_a_robot_commits():
+    """Exact sets at each step, not just "fewer than before".
+
+    Two robots can reach roomA; once r1 commits, r2's move is the only feasible
+    action left, and the planner must choose it.
+    """
+    state = State(
+        time=0,
+        fluents={
+            F("free r1"), F("free r2"),
+            F("visited r1_loc"), F("visited r2_loc"),
+            F("at r1 r1_loc"), F("at r2 r2_loc"),
+        },
+    )
+    objects_by_type = {
+        "robot": ["r1", "r2"],
+        "location": ["r1_loc", "r2_loc", "roomA"],
+    }
+    all_actions = _no_revisit_move_op(lambda r, a, b: 5.0).instantiate(objects_by_type)
+
+    assert {a.name for a in all_actions if state.satisfies_precondition(a)} == {
+        "move r1 r1_loc roomA",
+        "move r2 r2_loc roomA",
+    }
+
+    next_state = transition(
+        state, get_action_by_name(all_actions, "move r1 r1_loc roomA")
+    )[0][0]
+
+    # r1 is committed, r2 is untouched, and roomA is not visited until arrival.
+    assert F("free r1") not in next_state.fluents
+    assert F("free r2") in next_state.fluents
+    assert F("visited roomA") not in next_state.fluents
+
+    assert [a.name for a in all_actions if next_state.satisfies_precondition(a)] == [
+        "move r2 r2_loc roomA"
+    ]
+
+    action_name = MCTSPlanner(all_actions)(
+        next_state, F("visited roomA"),
+        max_iterations=1000, c=10, max_depth=10, heuristic_multiplier=2,
+    )
+    assert action_name == "move r2 r2_loc roomA"

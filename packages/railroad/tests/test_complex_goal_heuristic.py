@@ -138,7 +138,6 @@ class TestNegativeGoalHeuristic:
 
         h_value = ff_heuristic(converted_state, converted_goal, converted_actions)
 
-        print(f"Heuristic for negative goal (after conversion): {h_value}")
         # The goal is achievable by picking up the book
         # Heuristic should return a finite positive value
         assert h_value < float('inf'), \
@@ -185,7 +184,6 @@ class TestMCTSPlannerWithNegativeGoals:
         # Try to plan
         action_name = mcts(initial_state, goal, max_iterations=1000, c=10)
 
-        print(f"Selected action: {action_name}")
 
         # Should select pick action to remove Book from table
         assert action_name != 'NONE', "Planner should find an action for achievable goal"
@@ -230,7 +228,6 @@ class TestMCTSPlannerWithNegativeGoals:
         # Try to plan
         action_name = mcts(initial_state, goal, max_iterations=2000, c=10)
 
-        print(f"Selected action: {action_name}")
 
         # Should select a pick action
         assert action_name != 'NONE', "Planner should find an action for achievable goal"
@@ -293,7 +290,6 @@ class TestNegativeGoalSolutions:
         goal = LiteralGoal(F("not-at Book table"))
 
         h_value = ff_heuristic(initial_state, goal, all_actions)
-        print(f"\nReframed goal heuristic: {h_value}")
 
         # This should work because "not-at Book table" is added by pick action
         assert h_value < float('inf'), \

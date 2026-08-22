@@ -122,3 +122,53 @@ def move_dashboard(
     if actions_taken is not None:
         dashboard.actions_taken = list(actions_taken)
     return dashboard
+
+
+# --- Move operators --------------------------------------------------------- #
+#
+# 27 `Operator(name="move", ...)` literals across the test suite, in 18 distinct
+# forms -- but only two distinct *semantics*, and nothing in the copies said
+# which one you were looking at. That is the reason these are named, more than
+# the line count.
+
+
+def make_move_op(time: float = 5.0, *, robot: str = "?robot", extra_preconditions=()):
+    """A move that keeps the robot at its origin until it arrives.
+
+    `at ?robot ?from` survives until the arrival effect, so the robot is
+    somewhere at every instant. This is what the environment/skill tests want,
+    because a robot that is briefly nowhere breaks `at`-keyed bookkeeping.
+    """
+    from railroad.core import Effect, Fluent as F, Operator
+
+    return Operator(
+        name="move",
+        parameters=[(robot, "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F(f"at {robot} ?from"), F(f"free {robot}"), *extra_preconditions],
+        effects=[
+            Effect(time=0.0, resulting_fluents={~F(f"free {robot}")}),
+            Effect(time=time, resulting_fluents={
+                ~F(f"at {robot} ?from"), F(f"at {robot} ?to"), F(f"free {robot}"),
+            }),
+        ],
+    )
+
+
+def make_transit_move_op(time: float = 5.0, *, robot: str = "?r", extra_preconditions=()):
+    """A move that vacates the origin at once, so the robot is *nowhere* in transit.
+
+    The difference from `move_op` is the `~at ?r ?from` in the t=0 effect. It
+    matters to planning and grounding tests, where a robot that still holds an
+    `at` fluent mid-move would keep origin-dependent actions applicable.
+    """
+    from railroad.core import Effect, Fluent as F, Operator
+
+    return Operator(
+        name="move",
+        parameters=[(robot, "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F(f"at {robot} ?from"), F(f"free {robot}"), *extra_preconditions],
+        effects=[
+            Effect(time=0.0, resulting_fluents={~F(f"free {robot}"), ~F(f"at {robot} ?from")}),
+            Effect(time=time, resulting_fluents={F(f"free {robot}"), F(f"at {robot} ?to")}),
+        ],
+    )

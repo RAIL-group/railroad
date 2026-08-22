@@ -5,7 +5,7 @@ from railroad._bindings import Fluent as F, GroundedEffect, State
 from railroad.core import Effect, Operator
 from railroad.environment import LocationRegistry, SymbolicEnvironment
 
-from env_helpers import env_with_operators
+from env_helpers import env_with_operators, make_move_op, make_transit_move_op
 
 
 # =============================================================================
@@ -17,15 +17,7 @@ def test_symbolic_environment_construction():
     """Test basic construction of SymbolicEnvironment."""
     initial_fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
 
-    move_op = Operator(
-        name="move",
-        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
-        preconditions=[F("at", "?robot", "?from"), F("free", "?robot")],
-        effects=[
-            Effect(time=0.0, resulting_fluents={~F("free", "?robot")}),
-            Effect(time=5.0, resulting_fluents={~F("at", "?robot", "?from"), F("at", "?robot", "?to"), F("free", "?robot")}),
-        ]
-    )
+    move_op = make_move_op()
 
     env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, initial_fluents, []),
@@ -48,15 +40,7 @@ def test_symbolic_environment_act():
 
     initial_fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
 
-    move_op = Operator(
-        name="move",
-        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
-        preconditions=[F("at", "?robot", "?from"), F("free", "?robot")],
-        effects=[
-            Effect(time=0.0, resulting_fluents={~F("free", "?robot")}),
-            Effect(time=5.0, resulting_fluents={~F("at", "?robot", "?from"), F("at", "?robot", "?to"), F("free", "?robot")}),
-        ]
-    )
+    move_op = make_move_op()
 
     env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, initial_fluents, []),
@@ -87,15 +71,7 @@ def test_symbolic_environment_multi_robot_interrupt():
         F("free", "robot2"),
     }
 
-    move_op = Operator(
-        name="move",
-        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
-        preconditions=[F("at", "?robot", "?from"), F("free", "?robot")],
-        effects=[
-            Effect(time=0.0, resulting_fluents={~F("free", "?robot")}),
-            Effect(time=10.0, resulting_fluents={~F("at", "?robot", "?from"), F("at", "?robot", "?to"), F("free", "?robot")}),
-        ]
-    )
+    move_op = make_move_op(10.0)
     # Short action for robot2
     wait_op = Operator(
         name="wait",
@@ -315,19 +291,7 @@ def test_symbolic_environment_create_move_skill():
         operators=[],
     )
 
-    op = Operator(
-        name="move",
-        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
-        preconditions=[F("at", "?robot", "?from"), F("free", "?robot")],
-        effects=[
-            Effect(time=0.0, resulting_fluents={~F("free", "?robot")}),
-            Effect(time=10.0, resulting_fluents={
-                ~F("at", "?robot", "?from"),
-                F("at", "?robot", "?to"),
-                F("free", "?robot")
-            }),
-        ]
-    )
+    op = make_move_op(10.0)
     actions = op.instantiate({"robot": ["r1"], "location": ["kitchen", "bedroom"]})
     action = [a for a in actions if "kitchen" in a.name and "bedroom" in a.name][0]
 
@@ -365,22 +329,7 @@ def test_symbolic_environment_interruptible_override_requires_location_registry(
         skill_overrides={"move": InterruptibleNavigationMoveSkill},
     )
 
-    op = Operator(
-        name="move",
-        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
-        preconditions=[F("at", "?robot", "?from"), F("free", "?robot")],
-        effects=[
-            Effect(time=0.0, resulting_fluents={~F("free", "?robot")}),
-            Effect(
-                time=10.0,
-                resulting_fluents={
-                    ~F("at", "?robot", "?from"),
-                    F("at", "?robot", "?to"),
-                    F("free", "?robot"),
-                },
-            ),
-        ],
-    )
+    op = make_move_op(10.0)
     actions = op.instantiate({"robot": ["r1"], "location": ["kitchen", "bedroom"]})
     action = [a for a in actions if "kitchen" in a.name and "bedroom" in a.name][0]
 
@@ -558,15 +507,7 @@ def test_action_filter_sees_live_state_on_a_grounding_cache_hit():
     often enough; here nothing changes the key at all between calls, so a
     cached filter verdict would be visible immediately.
     """
-    move_op = Operator(
-        name="move",
-        parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
-        preconditions=[F("at ?r ?from"), F("free ?r")],
-        effects=[
-            Effect(time=0.0, resulting_fluents={~F("free ?r"), ~F("at ?r ?from")}),
-            Effect(time=2.0, resulting_fluents={F("free ?r"), F("at ?r ?to")}),
-        ],
-    )
+    move_op = make_transit_move_op(2.0)
 
     class BlockingEnvironment(SymbolicEnvironment):
         blocked: set[str] = set()
@@ -608,15 +549,7 @@ def test_environment_static_preconditions_end_to_end():
     stripped from grounded actions, while staying in the environment state."""
     from railroad.core import get_action_by_name
 
-    move_op = Operator(
-        name="move",
-        parameters=[("?r", "robot"), ("?from", "location"), ("?to", "location")],
-        preconditions=[F("at ?r ?from"), F("free ?r"), F("connected ?from ?to")],
-        effects=[
-            Effect(time=0.0, resulting_fluents={~F("free ?r"), ~F("at ?r ?from")}),
-            Effect(time=2.0, resulting_fluents={F("free ?r"), F("at ?r ?to")}),
-        ],
-    )
+    move_op = make_transit_move_op(2.0, extra_preconditions=[F("connected ?from ?to")])
     env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, {
             F("at r1 kitchen"), F("free r1"),
