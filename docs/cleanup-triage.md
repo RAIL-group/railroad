@@ -327,10 +327,16 @@ corrections at the bottom for why.
 
 ### C2 — Shared fixtures
 
-- [ ] **C2-01 The move operator is declared ~26 times.** **[R]** (~250 lines)
-  ~14 lines each. **Do not write a new factory** — `test_grounding.py:33` already has the right
-  one (`_move_op`); promote it to the root `conftest.py`. Heaviest users:
-  `test_symbolic_environment.py` (5), `test_active_skill.py` (4), `test_environment_base.py` (3).
+- [x] **C2-01 The move operator is declared ~26 times.** **[C]** (−59, not ~250)
+  **The "26 copies of one thing" framing was wrong.** 27 literals, but an AST scan says
+  **18 distinct forms** — and, more importantly, **two distinct semantics** hiding behind the same
+  name: one deletes `at ?r ?from` at t=0 (the robot is *nowhere* in transit), the other holds it
+  until arrival. Nothing in the copies said which you were reading. Now
+  `make_move_op()` / `make_transit_move_op()` in `env_helpers.py`, named and documented for that
+  difference — which is worth more than the lines. 12 of the 27 shared a convertible shape and
+  were converted; the rest are genuinely different domains (briefcase, frontier), callable move
+  times, or deliberately minimal grounding operators, and were left alone. 27 → 15 literals.
+
 - [x] **C2-02** `move_env()` / `move_dashboard()` factories for the 7 hand-built
   one-robot A→B dashboards. **[V]** (−126 in `test_dashboard.py` alone)
   Seven sites across three files, ~20 lines each: `test_dashboard.py` ×4,
@@ -372,9 +378,10 @@ corrections at the bottom for why.
 
 ### C4 — Verified deletions
 
-- [ ] **C4-01 `test_planner.py:177 test_basic_planning` — cannot fail.** **[V]** (~25 lines)
-  Read in full: asserts only `isinstance(action_name, str)` and `len(action_name) > 0`. `"NONE"`
-  is a valid planner return and satisfies both. Textbook non-enforcing test.
+- [x] **C4-01 `test_planner.py:177 test_basic_planning` — deleted.** **[V]** (−25)
+  Confirmed by reading: asserted only `isinstance(action_name, str)` and `len(action_name) > 0`.
+  `"NONE"` is a valid planner return and satisfies both, so the test could not fail.
+
 - [x] **C4-02 `test_video_compositing.py:83` — REJECTED, keep it.** **[C]**
   The mechanics were verified correctly (no assertion on the non-skip path) but the conclusion
   was wrong. It is a deliberate, documented canary: it reports when a matplotlib workaround in
@@ -385,24 +392,49 @@ corrections at the bottom for why.
   `set_antialiased([True, True])` (the two-element list it exists for), and the test currently
   **passes rather than skips**, i.e. it is actively reporting the workaround is still needed.
   Deleting it would remove the only signal that will say when it can go.
-- [ ] **C4-03 `test_core.py:338-361`** — deepcopies 264 actions into locals and asserts nothing. **[R]** (~24)
-- [ ] **C4-04 `packages/environments/tests/test_pyrobosim_demo.py`** — permanent non-strict
-  `xfail`, zero assertions, `except Exception: pass`. **[V]** (~50)
-  It genuinely xfails (does not xpass), so the underlying path bug is live and nothing will alert
-  you when it starts passing. Delete, or fix the resource path and make it `strict=True`.
-- [ ] **C4-05** 55 stray `print()` calls in test bodies (39 in `test_wait.py`). **[R]** (~55)
+
+- [x] **C4-03 `test_core.py` deepcopy tail — replaced, not deleted.** **[V]** (−12)
+  Confirmed: it deepcopied 264 groundings and a state, then asserted nothing. But "Action and
+  State survive deepcopy" is worth *something*, so rather than delete it outright it is now one
+  of each with actual assertions (distinct object, preserved name / fluents). The hash-equality
+  assertions earlier in the same test were already meaningful and are untouched.
+
+- [x] **C4-04 `packages/environments/tests/test_pyrobosim_demo.py` — deleted.** **[V]** (−50, −14 s)
+  Verified: genuinely xfails (does not xpass), zero assertions, `except Exception: pass`, and
+  **~14 s of runtime the audit did not mention**. The missing resource does exist, at
+  `packages/railroad/src/railroad/environment/pyrobosim/resources/worlds/test_world.yaml` — but
+  path-fixing it would not make this a test: it asserts nothing, swallows every exception, and
+  ends in `env.canvas.wait_for_close()`, which blocks on a GUI window. It is a demo. Recoverable
+  from git history if someone wants to restore it as an example.
+
+- [x] **C4-05** stray `print()` calls in test bodies. **[V]** (−63 lines, 54 → 0)
+  Removed via AST so a `print` that was the sole body of a `for`/`if` could not be silently
+  turned into an `IndentationError` — two such cases existed in `test_wait.py`, and both loops
+  existed *only* to print, so the loops went with them.
 
 ### C5 — Domain rewrites
 
-- [ ] **C5-01 `test_wait.py::test_couch_carry_with_wait`.** **[R]** (~120 of 212 lines)
-  Hand-writes six `Action` objects (`:154-258`) that are the groundings of
-  `construct_lift_couch_operator` / `construct_move_couch_operator` /
-  `construct_put_down_couch_operator` — defined 3 lines below it in the same file (`:337-469`)
-  and used by the next test. Two copies of one domain in one file. Rewrite on the helpers,
-  keeping the fixed plan and timing assertions. `test_wait.py` is the worst lines-per-test in the
-  repo (610 lines / 4 tests = 152).
-- [ ] **C5-02 `test_feasible_actions.py`** — merge into `test_planner.py`, **do not delete**.
-  See correction **[C-02]**. **[V]** (~40)
+- [x] **C5-01 `test_wait.py::test_couch_carry_with_wait`.** **[V]** (−185 across the file)
+  Confirmed and rewritten. **Proved the rewrite safe before making it**: built the operator set
+  the way the sibling test does, ground it, ran the same six-step plan, and checked it reproduces
+  the hand-written actions *exactly* — all six timings (0, 2, 5, 6, 9, 10) and every fluent. The
+  plan is now a `(action, expected_time, must_hold, must_not_hold)` table, so every assertion the
+  212-line version made survives, with the failure message naming the step. The distances and
+  operator set are hoisted to module level and shared with
+  `test_couch_carry_with_operators_and_planner`, which declared them a second time. File
+  611 → 426.
+
+- [x] **C5-02 `test_feasible_actions.py`** — merged into `test_planner.py`, **not deleted**.
+  **[V]** See correction **[C-02]**.
+  Also found while merging: the file's local `construct_move_visited_operator` is **not** a copy
+  of the production one. The production builder deliberately omits the `not visited ?to`
+  precondition (its docstring says so, to allow revisits); the local one adds it, which is
+  exactly what makes the feasible set small enough to assert exactly. Renamed
+  `_no_revisit_move_op` and documented, rather than "deduplicated" into a behaviour change.
+  **And `test_pruning_unavailable_actions` was strengthened**: `len(after) < len(before)` is
+  satisfied by any pruning at all. Measured what actually happens — 396 groundings → 132, all of
+  them r1's, *including moves from locations r1 is not standing in*. Pruning drops robots that
+  cannot act, not actions that do not currently apply. That is now pinned.
 
 ---
 

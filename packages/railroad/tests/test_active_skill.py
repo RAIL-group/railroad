@@ -1,7 +1,7 @@
 """Tests for ActiveSkill protocol."""
 import pytest
 
-from env_helpers import env_with_operators
+from env_helpers import env_with_operators, make_move_op
 
 
 def test_symbolic_skill_base_class():
@@ -31,19 +31,9 @@ def test_symbolic_skill_base_class():
 def test_symbolic_skill_move_not_interruptible_by_default():
     """Test that SymbolicSkill is NOT interruptible for move actions by default."""
     from railroad.environment import SymbolicSkill
-    from railroad._bindings import Fluent as F
-    from railroad.core import Effect, Operator
 
     # Create a move action
-    op = Operator(
-        name="move",
-        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
-        preconditions=[F("at", "?robot", "?from"), F("free", "?robot")],
-        effects=[
-            Effect(time=0.0, resulting_fluents={~F("free", "?robot")}),
-            Effect(time=10.0, resulting_fluents={~F("at", "?robot", "?from"), F("at", "?robot", "?to"), F("free", "?robot")}),
-        ]
-    )
+    op = make_move_op(10.0)
     actions = op.instantiate({"robot": ["r1"], "location": ["kitchen", "bedroom"]})
     action = [a for a in actions if "kitchen" in a.name and "bedroom" in a.name][0]
 
@@ -58,18 +48,9 @@ def test_interruptible_navigation_move_skill_interrupt_behavior():
     import numpy as np
     from railroad.environment import InterruptibleNavigationMoveSkill, LocationRegistry, ObjectSearchEnvironment
     from railroad._bindings import Fluent as F, State
-    from railroad.core import Effect, Operator
 
     # Create move operator
-    move_op = Operator(
-        name="move",
-        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
-        preconditions=[F("at", "?robot", "?from"), F("free", "?robot")],
-        effects=[
-            Effect(time=0.0, resulting_fluents={~F("free", "?robot")}),
-            Effect(time=10.0, resulting_fluents={~F("at", "?robot", "?from"), F("at", "?robot", "?to"), F("free", "?robot")}),
-        ]
-    )
+    move_op = make_move_op(10.0)
 
     # Create environment with registry for trajectory construction
     initial_state = State(0.0, {F("at", "r1", "kitchen"), F("free", "r1")})
@@ -165,7 +146,6 @@ def test_location_registry_interrupt_registers_coords():
     import numpy as np
     from railroad.environment import InterruptibleNavigationMoveSkill, LocationRegistry, ObjectSearchEnvironment
     from railroad._bindings import Fluent as F, State
-    from railroad.core import Effect, Operator
 
     # Create registry with locations
     locations = {
@@ -175,15 +155,7 @@ def test_location_registry_interrupt_registers_coords():
     registry = LocationRegistry(locations)
 
     # Create move operator
-    move_op = Operator(
-        name="move",
-        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
-        preconditions=[F("at", "?robot", "?from"), F("free", "?robot")],
-        effects=[
-            Effect(time=0.0, resulting_fluents={~F("free", "?robot")}),
-            Effect(time=10.0, resulting_fluents={~F("at", "?robot", "?from"), F("at", "?robot", "?to"), F("free", "?robot")}),
-        ]
-    )
+    move_op = make_move_op(10.0)
 
     # Create environment with registry
     initial_state = State(0.0, {F("at", "r1", "kitchen"), F("free", "r1")})

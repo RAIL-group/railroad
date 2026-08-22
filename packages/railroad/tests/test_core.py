@@ -11,7 +11,6 @@ from railroad.core import (
     Operator,
 )
 from railroad.operators import construct_move_operator, construct_search_and_pick_operator
-import random
 
 F = Fluent
 
@@ -153,7 +152,6 @@ def test_effect_instantiation():
     pe = GroundedEffect(3.0, prob_effects=[(0.5, [e]), (0.5, [e])])
     assert len(pe.prob_effects) == 2
     for prob, e in pe.prob_effects:
-        print(e)
         assert prob == 0.5
         assert len(e) == 1
 
@@ -283,13 +281,8 @@ def test_move_sequence(move_time):
             Fluent("free", "r2"),
         },
     )
-    for a in move_actions:
-        print(a)
-    print(initial_state)
-
     # First transition: move r1 from roomA to roomB
     available = get_next_actions(initial_state, move_actions)
-    print(available)
     assert any(a.name == "move r1 roomA roomB" for a in available)
     a1 = get_action_by_name(available, "move r1 roomA roomB")
     outcomes = transition(initial_state, a1)
@@ -335,30 +328,20 @@ def test_deepcopy():
     ge_prob_copy = copy.deepcopy(ge_prob)
     assert hash(ge_prob) == hash(ge_prob_copy)
 
-    # Get all actions
-    objects_by_type = {
-        "robot": ["r1", "r2"],
-        "location": ["start", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k"],
-    }
-    random.seed(8616)
-    move_op = construct_move_operator(lambda *args: 5.0 + random.random())
-    all_actions = move_op.instantiate(objects_by_type)
+    # Action and State are deepcopy-able too. This used to copy all 264
+    # groundings and then assert nothing at all -- one of each, checked, covers
+    # the same ground.
+    action = construct_move_operator(lambda *args: 5.0).instantiate(
+        {"robot": ["r1"], "location": ["start", "a"]}
+    )[0]
+    action_copy = copy.deepcopy(action)
+    assert action_copy is not action
+    assert action_copy.name == action.name
 
-    # Initial state
-    initial_state = State(
-        time=0,
-        fluents={
-            F("at r1 start"),
-            F("free r1"),
-            F("at r2 start"),
-            F("free r2"),
-            F("visited start"),
-        },
-    )
-
-    # Test deepcopy
-    all_actions = [copy.deepcopy(a) for a in all_actions]
-    initial_state = copy.deepcopy(initial_state)
+    state = State(time=0, fluents={F("at r1 start"), F("free r1")})
+    state_copy = copy.deepcopy(state)
+    assert state_copy is not state
+    assert state_copy.fluents == state.fluents
 
 
 def test_search_sequence():
@@ -398,9 +381,6 @@ def test_search_sequence():
             assert not hash(eff.prob_effects[0]) == hash(
                 eff.prob_effects[1]
             ), "Hashes for the probabilistic effects must be different!"
-            for peff in eff.prob_effects:
-                print(peff.prob)
-                print(peff.effects)
             break
     else:
         raise ValueError("At least one effect must be probabilistic.")

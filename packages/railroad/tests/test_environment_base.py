@@ -1,5 +1,7 @@
 """Tests for base Environment class."""
 import pytest
+
+from env_helpers import make_move_op
 from typing import Dict, Set, List
 from railroad._bindings import Fluent as F, State
 from railroad.core import Effect, Operator
@@ -113,15 +115,7 @@ def test_environment_get_actions():
     fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
     state = State(0.0, fluents, [])
 
-    move_op = Operator(
-        name="move",
-        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
-        preconditions=[F("at ?robot ?from"), F("free ?robot")],
-        effects=[
-            Effect(time=0.0, resulting_fluents={~F("free ?robot")}),
-            Effect(time=5.0, resulting_fluents={~F("at ?robot ?from"), F("at ?robot ?to"), F("free ?robot")}),
-        ]
-    )
+    move_op = make_move_op()
 
     env = MinimalEnvironment(state=state, operators=[move_op], fluents=fluents)
     actions = env.get_actions()
@@ -135,15 +129,7 @@ def test_environment_act_executes_action():
     fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
     state = State(0.0, fluents, [])
 
-    move_op = Operator(
-        name="move",
-        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
-        preconditions=[F("at ?robot ?from"), F("free ?robot")],
-        effects=[
-            Effect(time=0.0, resulting_fluents={~F("free ?robot")}),
-            Effect(time=5.0, resulting_fluents={~F("at ?robot ?from"), F("at ?robot ?to"), F("free ?robot")}),
-        ]
-    )
+    move_op = make_move_op()
 
     env = MinimalEnvironment(state=state, operators=[move_op], fluents=fluents)
     actions = env.get_actions()
