@@ -8,16 +8,12 @@ degrades to a plain grid when a scene cannot place its image.
 
 import matplotlib
 
-from env_helpers import env_with_operators
+from env_helpers import move_dashboard, move_env
 matplotlib.use("Agg")
 
 import numpy as np
 import pytest
 
-from railroad import operators
-from railroad.core import Fluent as F, State
-from railroad.dashboard import PlannerDashboard
-from railroad.environment import ObjectSearchEnvironment
 from railroad.environment.types import TopDownView
 from railroad.navigation.constants import UNOBSERVED_VAL
 
@@ -51,21 +47,7 @@ def _dashboard(scene, *, unobserved: bool = False):
         # Mid-exploration: a band the robot has not looked at yet.
         grid[:, GRID_SHAPE[1] // 2:] = UNOBSERVED_VAL
 
-    move_op = operators.construct_move_operator_blocking(lambda r, a, b: 10.0)
-    no_op = operators.construct_no_op_operator(no_op_time=1.0, extra_cost=10.0)
-    env = env_with_operators(ObjectSearchEnvironment,
-        state=State(0.0, {F("at r1 A"), F("free r1")}, []),
-        objects_by_type={"robot": {"r1"}, "location": {"A", "B"}},
-        operators=[move_op, no_op],
-    )
-    env.occupancy_grid = grid  # ty: ignore[unresolved-attribute]
-    if scene is not None:
-        env.scene = scene  # ty: ignore[unresolved-attribute]
-
-    db = PlannerDashboard(F("at r1 B"), env, force_interactive=False, print_on_exit=False)
-    db.known_robots = {"r1"}
-    db._entity_positions = {"r1": [(0.0, "A", None), (10.0, "B", None)]}
-    db._goal_time = 10.0
+    db = move_dashboard(move_env(occupancy_grid=grid, scene=scene))
     return db, {"A": (4.0, 4.0), "B": (25.0, 15.0)}
 
 

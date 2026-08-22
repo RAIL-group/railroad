@@ -8,8 +8,9 @@ robot intermediate locations, and the move/place/search action filters.
 
 import pytest
 
+from railroad import operators
 from railroad._bindings import Fluent as F, GroundedEffect, State
-from railroad.core import Effect, Operator
+from railroad.core import Effect, Operator, get_action_by_name
 from railroad.environment import ObjectSearchEnvironment
 
 from env_helpers import env_with_operators
@@ -315,65 +316,67 @@ def test_object_search_environment_resolve_probabilistic_effect():
 # =============================================================================
 
 
-def test_search_skill_resolves_probabilistically():
-    """Test that search skill resolves probabilistic effects via environment."""
-    from railroad.core import get_action_by_name
-    from railroad import operators
+@pytest.mark.parametrize(
+    ("find_prob", "true_loc", "expect_found"),
+    [
+        # Ground truth decides the outcome, not the probability -- so the
+        # probability is varied across its whole range and nothing changes.
+        (0.5, "kitchen", True),
+        (0.9, "bedroom", False),
+        # The two edge rows are regressions, and are the reason the middle rows
+        # cannot simply be dropped: each drives a branch whose weight is 0.0.
+        # find_prob=1.0 with the object absent gives the *failure* branch weight
+        # 0.0, which used to raise "Total of weights must be greater than zero";
+        # find_prob=0.0 with the object present gives the *success* branch weight
+        # 0.0 and must still succeed.
+        (1.0, "bedroom", False),
+        (0.0, "kitchen", True),
+        (1.0, "kitchen", True),
+    ],
+    ids=["indifferent", "absent", "certain_but_absent", "impossible_but_present",
+         "certain_and_present"],
+)
+def test_search_outcome_follows_ground_truth(find_prob, true_loc, expect_found):
+    """Searching kitchen finds Knife iff Knife is really in the kitchen.
 
-    # Object IS at kitchen - search should succeed
-    fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
-
+    ``object_find_prob`` is the planner's *belief*; ``ObjectSearchEnvironment``
+    resolves the search against ``true_object_locations`` instead, so the belief
+    must not change the outcome at any value -- including the two ends, where
+    the branch that has to be taken has probability zero.
+    """
     search_op = operators.construct_search_operator(
-        object_find_prob=0.5,  # Probability doesn't matter - ground truth does
+        object_find_prob=find_prob,
         search_time=3.0,
     )
-
-    env = env_with_operators(ObjectSearchEnvironment,
-        state=State(0.0, fluents, []),
-        objects_by_type={"robot": {"robot1"}, "location": {"kitchen"}, "object": {"Knife"}},
+    env = env_with_operators(
+        ObjectSearchEnvironment,
+        state=State(0.0, {F("at", "robot1", "kitchen"), F("free", "robot1")}, []),
+        objects_by_type={
+            "robot": {"robot1"},
+            "location": {"kitchen", true_loc},
+            "object": {"Knife"},
+        },
         operators=[search_op],
-        true_object_locations={"kitchen": {"Knife"}},
+        true_object_locations={true_loc: {"Knife"}},
     )
     actions = env.get_actions()
-    search_action = get_action_by_name(actions, "search robot1 kitchen Knife")
+    env.act(get_action_by_name(actions, "search robot1 kitchen Knife"))
 
-    env.act(search_action)
-
-    # Since Knife IS at kitchen, search should succeed
+    # Searched and released regardless of the outcome.
     assert F("searched", "kitchen", "Knife") in env.state.fluents
-    assert F("found", "Knife") in env.state.fluents
-    assert F("at", "Knife", "kitchen") in env.state.fluents
     assert F("free", "robot1") in env.state.fluents
+    # The search takes its declared time whether or not it succeeds. (Only the
+    # last of the five merged tests used to check this; it holds for all of them.)
+    assert env.time == pytest.approx(3.0, abs=0.1)
+
+    if expect_found:
+        assert F("found", "Knife") in env.state.fluents
+        assert F("at", "Knife", "kitchen") in env.state.fluents
+    else:
+        assert F("found", "Knife") not in env.state.fluents
+        assert F("at", "Knife", "kitchen") not in env.state.fluents
 
 
-def test_search_skill_fails_when_object_not_at_location():
-    """Test that search fails when object is NOT at the searched location."""
-    from railroad.core import get_action_by_name
-    from railroad import operators
-
-    # Object is NOT at kitchen (it's at bedroom)
-    fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
-
-    search_op = operators.construct_search_operator(
-        object_find_prob=0.9,  # High probability, but ground truth says object NOT here
-        search_time=3.0,
-    )
-
-    env = env_with_operators(ObjectSearchEnvironment,
-        state=State(0.0, fluents, []),
-        objects_by_type={"robot": {"robot1"}, "location": {"kitchen", "bedroom"}, "object": {"Knife"}},
-        operators=[search_op],
-        true_object_locations={"bedroom": {"Knife"}},  # Knife is NOT at kitchen
-    )
-    actions = env.get_actions()
-    search_action = get_action_by_name(actions, "search robot1 kitchen Knife")
-
-    env.act(search_action)
-
-    # Search should complete but NOT find the object
-    assert F("searched", "kitchen", "Knife") in env.state.fluents
-    assert F("found", "Knife") not in env.state.fluents
-    assert F("free", "robot1") in env.state.fluents
 
 
 # =============================================================================
@@ -516,113 +519,7 @@ def test_nested_effects_with_timing_are_scheduled():
     assert F("at", "robot1", "kitchen") in env.state.fluents
 
 
-def test_search_with_certainty_probability_object_not_present():
-    """Test search with object_find_prob=1.0 when object is NOT at location.
-
-    This is a regression test: when ground truth says object isn't there,
-    the environment should deterministically return the failure branch,
-    even when the failure branch has probability 0.0 (from 1.0 - 1.0).
-    """
-    from railroad.core import get_action_by_name
-    from railroad import operators
-
-    fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
-
-    # Probability of 1.0 means failure branch has probability 0.0
-    search_op = operators.construct_search_operator(
-        object_find_prob=1.0,  # 100% find probability
-        search_time=3.0,
-    )
-
-    env = env_with_operators(ObjectSearchEnvironment,
-        state=State(0.0, fluents, []),
-        objects_by_type={"robot": {"robot1"}, "location": {"kitchen", "bedroom"}, "object": {"Knife"}},
-        operators=[search_op],
-        true_object_locations={"bedroom": {"Knife"}},  # Knife is NOT at kitchen
-    )
-    actions = env.get_actions()
-    search_action = get_action_by_name(actions, "search robot1 kitchen Knife")
-
-    # This should NOT raise "Total of weights must be greater than zero"
-    env.act(search_action)
-
-    # Search should complete but NOT find the object (ground truth overrides probability)
-    assert F("searched", "kitchen", "Knife") in env.state.fluents
-    assert F("found", "Knife") not in env.state.fluents
-    assert F("free", "robot1") in env.state.fluents
 
 
-def test_search_with_zero_probability_object_present():
-    """Test search with object_find_prob=0.0 when object IS at location.
-
-    When ground truth says object is there, the environment should
-    deterministically return the success branch, even when the success
-    branch has probability 0.0.
-    """
-    from railroad.core import get_action_by_name
-    from railroad import operators
-
-    fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
-
-    # Probability of 0.0 means success branch has probability 0.0
-    search_op = operators.construct_search_operator(
-        object_find_prob=0.0,  # 0% find probability
-        search_time=3.0,
-    )
-
-    env = env_with_operators(ObjectSearchEnvironment,
-        state=State(0.0, fluents, []),
-        objects_by_type={"robot": {"robot1"}, "location": {"kitchen"}, "object": {"Knife"}},
-        operators=[search_op],
-        true_object_locations={"kitchen": {"Knife"}},  # Knife IS at kitchen
-    )
-    actions = env.get_actions()
-    search_action = get_action_by_name(actions, "search robot1 kitchen Knife")
-
-    # This should NOT raise any errors - ground truth determines outcome
-    env.act(search_action)
-
-    # Search should find the object (ground truth overrides probability)
-    assert F("searched", "kitchen", "Knife") in env.state.fluents
-    assert F("found", "Knife") in env.state.fluents
-    assert F("at", "Knife", "kitchen") in env.state.fluents
-    assert F("free", "robot1") in env.state.fluents
 
 
-def test_nested_effects_immediate_still_work():
-    """Test that nested effects with time=0 are still applied immediately."""
-    from railroad import operators
-    from railroad.core import get_action_by_name
-
-    # Use regular search operator which has nested effects with time=0
-    search_op = operators.construct_search_operator(
-        object_find_prob=1.0,  # Always find
-        search_time=3.0,
-    )
-
-    initial_fluents = {
-        F("at", "robot1", "kitchen"),
-        F("free", "robot1"),
-    }
-
-    env = env_with_operators(ObjectSearchEnvironment,
-        state=State(0.0, initial_fluents, []),
-        objects_by_type={
-            "robot": {"robot1"},
-            "location": {"kitchen"},
-            "object": {"Knife"},
-        },
-        operators=[search_op],
-        true_object_locations={"kitchen": {"Knife"}},
-    )
-
-    actions = env.get_actions()
-    action = get_action_by_name(actions, "search robot1 kitchen Knife")
-
-    env.act(action)
-
-    # Verify the search completed correctly
-    assert F("found", "Knife") in env.state.fluents
-    assert F("searched", "kitchen", "Knife") in env.state.fluents
-    assert F("free", "robot1") in env.state.fluents
-    assert env.time == pytest.approx(3.0, abs=0.1)

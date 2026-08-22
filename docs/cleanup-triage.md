@@ -298,18 +298,32 @@ corrections at the bottom for why.
 
 ### C1 — Parametrize merges
 
-- [ ] **C1-01 Five search tests are one test.** **[V]** (~120 lines)
-  `test_object_search_environment.py:316, 347, 517, 553, 590`. I diffed `:316` against `:553`:
-  the entire delta is the `object_find_prob` literal (0.5 vs 0.0) and comment wording. The five
-  vary only in `object_find_prob` × object-present × expected-found. One
-  `@pytest.mark.parametrize("find_prob, true_loc, expect_found", [...])`. **The single largest
-  parametrize win in the repo.**
-- [ ] **C1-02** 8 `*_rejected` tests → one `(domain, problem, exc, reason)` table. **[R]** (~70)
-  `pddl_converter/test_converter.py:111, 270, 317, 328, 406, 416, 592, 605`.
-- [ ] **C1-03** 8 pickle round-trip tests → one parametrize. **[R]** (~45)
-  `test_goal_pickle.py:12-60`; keep `test_goal_evaluate_after_pickle:62` separate.
-- [ ] **C1-04** `TestComputeBestPathProgress` (7 tests) + `TestGetEntityPositionsAtTimes`
-  (5 tests) → two parametrizes. **[R]** (~63) `test_dashboard.py:174-213, 286-334`.
+- [x] **C1-01 Five search tests are one test.** **[V]** (−103 lines)
+  `test_object_search_environment.py`. Confirmed all five vary only in
+  `object_find_prob` × object-present. Now one `@pytest.mark.parametrize` over
+  `(find_prob, true_loc, expect_found)`. **Strengthened while merging**: the timing assertion
+  (`env.time == 3.0`) existed in only one of the five and is true of all of them, and the
+  not-found rows now also assert `at Knife kitchen` is *absent* — previously unchecked. File
+  628 → 525.
+
+- [x] **C1-02** 8 `*_rejected` tests → one `(domain, problem, exc, reason)` table. **[C]** (−14, not ~70)
+  Nine, not eight. **The ~70-line estimate was wrong by 4×**: of the 101 lines those tests
+  occupy, **59 are the PDDL domain text itself**, which is irreducible — only the `def` /
+  `with pytest.raises` / `assert reason` boilerplate can go. Done anyway for the structure
+  (one table answering "what does this converter refuse?" instead of nine tests filed under
+  whichever feature each happens to involve), but the honest saving is 14 lines. First attempt
+  hoisted each domain to a named constant and came out *longer* than the original; the domains
+  are inlined in the table instead.
+
+- [x] **C1-03** 8 pickle round-trip tests → one parametrize. **[V]** (−21)
+  `test_goal_pickle.py` 71 → 50. **Strengthened**: only 4 of the 8 asserted
+  `hash(goal) == hash(restored)`; all 8 do now. That check is the point — benchmark workers put
+  goals in sets and dict keys across a process boundary, so a goal that compares equal but
+  hashes differently would silently duplicate.
+
+- [x] **C1-04** `TestComputeBestPathProgress` (7) + `TestGetEntityPositionsAtTimes` (5 of 6)
+  → two parametrizes. **[V]** `test_stationary_segment_holds_position` kept separate (different
+  trajectory). Folded into the C2-02 rewrite of the same file; see the combined figure there.
 
 ### C2 — Shared fixtures
 
@@ -317,10 +331,16 @@ corrections at the bottom for why.
   ~14 lines each. **Do not write a new factory** — `test_grounding.py:33` already has the right
   one (`_move_op`); promote it to the root `conftest.py`. Heaviest users:
   `test_symbolic_environment.py` (5), `test_active_skill.py` (4), `test_environment_base.py` (3).
-- [ ] **C2-02** `make_dashboard(...)` factory for the 5 copies of the
-  `PlannerDashboard` + `ObjectSearchEnvironment` setup. **[R]** (~110)
-  `test_dashboard.py:153,255,373,409`, `test_video_compositing.py:193,253`,
-  `test_dashboard_overhead.py:_dashboard()`. Root `conftest.py` already hosts `fetch_dashboard`.
+- [x] **C2-02** `move_env()` / `move_dashboard()` factories for the 7 hand-built
+  one-robot A→B dashboards. **[V]** (−126 in `test_dashboard.py` alone)
+  Seven sites across three files, ~20 lines each: `test_dashboard.py` ×4,
+  `test_video_compositing.py` ×2, `test_dashboard_overhead.py::_dashboard()`. Both helpers live
+  in `env_helpers.py` next to `env_with_operators` — the same reason applies (several
+  `conftest.py` files exist and `ty` binds the name to the wrong one). `move_env()` also absorbs
+  the `occupancy_grid` / `scene` doctoring, so the three `ty: ignore[unresolved-attribute]`
+  comments collapse to one. `test_dashboard.py` 430 → 304, `test_video_compositing.py` 393 → 364,
+  `test_dashboard_overhead.py` 213 → 191.
+
 - [ ] **C2-03** `experimental/unknown_search/conftest.py` is an **empty file**; the grid builders
   and env constructor are inlined in 3 places. **[R]** (~60)
 - [ ] **C2-04** `lsp/` has **no conftest**; `_FakeRecord` is copy-pasted in 4 files
@@ -332,25 +352,39 @@ corrections at the bottom for why.
 
 ### C3 — Strengthen weak assertions (do not delete)
 
-- [ ] **C3-01 `TestGetSatisfiedBranch` never checks *which* branch.** **[V]** (~18 lines)
-  `test_dashboard.py:76-105`. Read in full: `:81`, `:93`, `:99` assert only `result is not None`,
-  so an implementation returning an arbitrary goal passes 3 of 5. (`:87` and `:105` assert
-  `is None` and *are* meaningful — keep their intent.) Merge to a parametrize asserting branch
-  **identity**.
-- [ ] **C3-02 `TestGetBestBranch::test_or_picks_satisfied`.** **[V]** (~8 lines)
-  `test_dashboard.py:115` asserts `isinstance(result, LiteralGoal)` — true of *either* child, so
-  it cannot detect picking the wrong branch. Assert the specific goal.
-- [ ] **C3-03** `pddl_converter/test_converter.py:617` asserts only `h < float("inf")`; any finite
-  value passes. Pin an exact value. **[R]**
+- [x] **C3-01 `TestGetSatisfiedBranch` never checks *which* branch.** **[V]**
+  Now one parametrize asserting branch **identity** (goals compare by value). Added the row the
+  original set was missing: an OR with only the *second* disjunct satisfied. A "return the first
+  child" bug returns non-None and passed every one of the old assertions; it fails this row.
+
+- [x] **C3-02 `TestGetBestBranch::test_or_picks_satisfied`.** **[V]**
+  `isinstance(result, LiteralGoal)` was true of *either* child. Now pins the branch, and checks
+  both directions (`{a}` → a, `{b}` → b).
+
+- [x] **C3-03** `test_converter.py` heuristic assertion. **[C]** — the finding understated it.
+  The audit said "asserts only `h < inf`; pin an exact value". True, but the docstring was also
+  **wrong**: it claimed the relaxed heuristic "optimistically assumes conditions hold". Measured —
+  with `fragile` reachable h = **1.0**; with `fragile` unreachable h = **inf**. So the condition
+  still has to be *reachable*; the heuristic is delete-relaxed, not blindly optimistic. Now a
+  two-row parametrize pinning both exact values. The second row is the one with teeth: dropping
+  conditional effects from the relaxed graph entirely gives `inf` in both rows, which the old
+  `h < inf` assertion on the first row alone would not have caught.
 
 ### C4 — Verified deletions
 
 - [ ] **C4-01 `test_planner.py:177 test_basic_planning` — cannot fail.** **[V]** (~25 lines)
   Read in full: asserts only `isinstance(action_name, str)` and `len(action_name) > 0`. `"NONE"`
   is a valid planner return and satisfies both. Textbook non-enforcing test.
-- [ ] **C4-02 `test_video_compositing.py:81`** — no assertion on its non-skip path; it renders two
-  buffers and falls off the end. A reporting mechanism, not a test. **[V]** (~30)
-  (One of only **2** tests in the whole repo with no assertion at all.)
+- [x] **C4-02 `test_video_compositing.py:83` — REJECTED, keep it.** **[C]**
+  The mechanics were verified correctly (no assertion on the non-skip path) but the conclusion
+  was wrong. It is a deliberate, documented canary: it reports when a matplotlib workaround in
+  `save_video` stops being necessary, and its own docstring explains why it must *skip* rather
+  than fail — whether one-element collections render differently is a property of the installed
+  matplotlib, not of this repo, so asserting it would break CI on an unrelated version bump.
+  Checked that it still guards something live: `dashboard/plotting.py:1454,1456` still calls
+  `set_antialiased([True, True])` (the two-element list it exists for), and the test currently
+  **passes rather than skips**, i.e. it is actively reporting the workaround is still needed.
+  Deleting it would remove the only signal that will say when it can go.
 - [ ] **C4-03 `test_core.py:338-361`** — deepcopies 264 actions into locals and asserts nothing. **[R]** (~24)
 - [ ] **C4-04 `packages/environments/tests/test_pyrobosim_demo.py`** — permanent non-strict
   `xfail`, zero assertions, `except Exception: pass`. **[V]** (~50)

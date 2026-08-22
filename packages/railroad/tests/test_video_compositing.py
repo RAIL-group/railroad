@@ -12,7 +12,7 @@ import pytest
 
 from railroad.navigation.plotting import UNTRAVERSABLE_SHADE
 
-from env_helpers import env_with_operators
+from env_helpers import move_dashboard, move_env
 
 matplotlib = pytest.importorskip("matplotlib")
 matplotlib.use("Agg")
@@ -194,26 +194,9 @@ def _have_ffmpeg() -> bool:
 class TestSaveVideoEndToEnd:
     @pytest.fixture
     def dashboard(self):
-        from railroad import operators
-        from railroad._bindings import State
-        from railroad.core import Fluent as F
-        from railroad.dashboard import PlannerDashboard
-        from railroad.environment import ObjectSearchEnvironment
-
-        move_op = operators.construct_move_operator_blocking(lambda r, a, b: 10.0)
-        env = env_with_operators(ObjectSearchEnvironment,
-            state=State(0.0, {F("at r1 A"), F("free r1")}, []),
-            objects_by_type={"robot": {"r1"}, "location": {"A", "B"}},
-            operators=[move_op],
+        return move_dashboard(
+            with_no_op=False, actions_taken=[("move r1 A B", 0.0)],
         )
-        db = PlannerDashboard(
-            F("at r1 B"), env, force_interactive=False, print_on_exit=False,
-        )
-        db.known_robots = {"r1"}
-        db._entity_positions = {"r1": [(0.0, "A", None), (10.0, "B", None)]}
-        db._goal_time = 10.0
-        db.actions_taken = [("move r1 A B", 0.0)]
-        return db
 
     def test_writes_the_requested_frames_at_the_requested_size(
         self, dashboard, tmp_path,
@@ -254,11 +237,6 @@ class TestSceneImageSurvivesCompositing:
 
     @pytest.fixture
     def dashboard(self):
-        from railroad import operators
-        from railroad._bindings import State
-        from railroad.core import Fluent as F
-        from railroad.dashboard import PlannerDashboard
-        from railroad.environment import ObjectSearchEnvironment
         from railroad.environment.types import TopDownView
 
         image = np.zeros((32, 32, 3), dtype=np.uint8)
@@ -270,21 +248,14 @@ class TestSceneImageSurvivesCompositing:
                 return TopDownView(image=image, min_x=-20.0, max_x=39.0,
                                    min_y=-20.0, max_y=39.0)
 
-        env = env_with_operators(ObjectSearchEnvironment,
-            state=State(0.0, {F("at r1 A"), F("free r1")}, []),
-            objects_by_type={"robot": {"r1"}, "location": {"A", "B"}},
-            operators=[operators.construct_move_operator_blocking(lambda r, a, b: 10.0)],
+        db = move_dashboard(
+            move_env(
+                with_no_op=False,
+                occupancy_grid=np.zeros((20, 20)),
+                scene=Scene(),
+            ),
+            actions_taken=[("move r1 A B", 0.0)],
         )
-        env.occupancy_grid = np.zeros((20, 20))  # ty: ignore[unresolved-attribute]
-        env.scene = Scene()  # ty: ignore[unresolved-attribute]
-
-        db = PlannerDashboard(
-            F("at r1 B"), env, force_interactive=False, print_on_exit=False,
-        )
-        db.known_robots = {"r1"}
-        db._entity_positions = {"r1": [(0.0, "A", None), (10.0, "B", None)]}
-        db._goal_time = 10.0
-        db.actions_taken = [("move r1 A B", 0.0)]
         return db
 
     def test_the_image_is_present_and_unchanged_across_frames(
