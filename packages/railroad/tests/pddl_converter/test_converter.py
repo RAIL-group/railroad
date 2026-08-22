@@ -108,31 +108,6 @@ def test_zero_cost_gets_epsilon_duration():
     assert action.effects[1].time == pytest.approx(EPSILON_DURATION)
 
 
-def test_unsupported_metric_rejected():
-    domain = """
-    (define (domain d) (:requirements :strips)
-      (:predicates (p ?x)) (:action a :parameters (?x) :precondition () :effect (p ?x)))
-    """
-    problem = _minimal_problem().replace(
-        "(:goal (p x1))", "(:goal (p x1)) (:metric maximize (reward))"
-    )
-    with pytest.raises(UnsupportedPDDLError) as excinfo:
-        convert_texts(domain, problem)
-    assert excinfo.value.reason == "metric:maximize (reward)"
-
-
-def test_reward_effects_rejected():
-    domain = """
-    (define (domain d) (:requirements :strips :rewards)
-      (:predicates (p ?x))
-      (:action a :parameters (?x) :precondition ()
-               :effect (and (p ?x) (increase (reward) 1))))
-    """
-    with pytest.raises(UnsupportedPDDLError) as excinfo:
-        convert_texts(domain, _minimal_problem())
-    assert excinfo.value.reason == "rewards"
-
-
 # ============================================================================
 # Grounding: equality, duplicates, static pruning
 # ============================================================================
@@ -267,18 +242,6 @@ def test_disjunctive_and_negated_goals():
     assert not converted.goal.evaluate({F("p x1"), F("q x1")})
 
 
-def test_disjunctive_precondition_rejected():
-    domain = """
-    (define (domain d) (:requirements :strips :disjunctive-preconditions)
-      (:predicates (p ?x) (q ?x))
-      (:action a :parameters (?x) :precondition (or (p ?x) (q ?x))
-               :effect (p ?x)))
-    """
-    with pytest.raises(UnsupportedPDDLError) as excinfo:
-        convert_texts(domain, _minimal_problem())
-    assert excinfo.value.reason == "disjunctive-preconditions"
-
-
 # ============================================================================
 # Probabilistic effects
 # ============================================================================
@@ -312,29 +275,6 @@ def test_probabilistic_remainder_branch_added():
     branches = action.effects[1].prob_effects
     assert [b.prob for b in branches] == pytest.approx([0.4, 0.6])
     assert list(branches[1].effects) == []  # implicit no-op remainder
-
-
-def test_probability_sum_over_one_rejected():
-    domain = """
-    (define (domain d) (:requirements :strips :probabilistic-effects)
-      (:predicates (p ?x))
-      (:action a :parameters (?x) :precondition ()
-               :effect (probabilistic 0.8 (p ?x) 0.7 (not (p ?x)))))
-    """
-    with pytest.raises(PDDLParseError):
-        convert_texts(domain, _minimal_problem())
-
-
-def test_cost_inside_probabilistic_branch_rejected():
-    domain = """
-    (define (domain d) (:requirements :strips :probabilistic-effects :action-costs)
-      (:predicates (p ?x)) (:functions (total-cost))
-      (:action a :parameters (?x) :precondition ()
-               :effect (probabilistic 0.5 (increase (total-cost) 2))))
-    """
-    with pytest.raises(UnsupportedPDDLError) as excinfo:
-        convert_texts(domain, _minimal_problem())
-    assert excinfo.value.reason == "probabilistic-cost"
 
 
 # ============================================================================
@@ -401,22 +341,6 @@ def test_reserved_set_tracks_the_core_list():
     assert {f.name for f in converted.goal.get_all_literals()} == {"pddl-found"}
     look = _get_action(converted, "look k table")
     assert F("pddl-at k table") in look.preconditions
-
-
-def test_unbound_variable_rejected():
-    domain = """
-    (define (domain d) (:requirements :strips)
-      (:predicates (p ?x ?y))
-      (:action a :parameters (?x) :precondition () :effect (p ?x ?z)))
-    """
-    with pytest.raises(PDDLParseError):
-        convert_texts(domain, _minimal_problem())
-
-
-def test_domain_problem_mismatch_rejected():
-    domain = "(define (domain d1) (:predicates (p)) (:action a :parameters () :precondition () :effect (p)))"
-    with pytest.raises(PDDLParseError):
-        convert_texts(domain, _minimal_problem().replace("(:domain d)", "(:domain other)"))
 
 
 def test_bundled_domain_and_problem_in_one_text():
@@ -589,34 +513,21 @@ def test_when_inside_probabilistic_branch():
     assert F("hit") in successor.fluents
 
 
-def test_unsupported_when_condition_rejected():
-    domain = """
-    (define (domain d) (:requirements :strips :conditional-effects)
-      (:predicates (p ?x) (q ?x) (r ?x))
-      (:action a :parameters (?x)
-               :precondition ()
-               :effect (when (or (p ?x) (q ?x)) (r ?x))))
+@pytest.mark.parametrize(
+    ("init", "expected_h"),
+    [("(fragile vase)", 1.0), ("", float("inf"))],
+    ids=["condition_reachable", "condition_unreachable"],
+)
+def test_conditional_effect_fluents_reach_the_heuristic(init, expected_h):
+    """A goal reachable only through a `when` effect must not look unreachable.
+
+    Both rows are needed, and the second is the one with teeth. The relaxed
+    heuristic does not blindly assume the condition holds -- it still has to be
+    *reachable*. So dropping conditional effects from the relaxed graph
+    entirely would give `inf` in both rows and pass a test that only asserted
+    `h < inf` on the first. Exact values, because "finite" is satisfied by any
+    number and would not notice the effect being counted twice either.
     """
-    with pytest.raises(UnsupportedPDDLError) as excinfo:
-        convert_texts(domain, _minimal_problem())
-    assert excinfo.value.reason == "conditional-effect-condition"
-
-
-def test_cost_inside_conditional_rejected():
-    domain = """
-    (define (domain d) (:requirements :strips :conditional-effects :action-costs)
-      (:predicates (p ?x)) (:functions (total-cost))
-      (:action a :parameters (?x) :precondition ()
-               :effect (when (p ?x) (increase (total-cost) 2))))
-    """
-    with pytest.raises(UnsupportedPDDLError) as excinfo:
-        convert_texts(domain, _minimal_problem())
-    assert excinfo.value.reason == "conditional-cost"
-
-
-def test_conditional_effects_visible_to_heuristic():
-    """The relaxed heuristic optimistically assumes conditions hold, so a
-    goal reachable only through a conditional effect gets a finite h."""
     from railroad.core import ff_heuristic
 
     domain = """
@@ -626,15 +537,15 @@ def test_conditional_effects_visible_to_heuristic():
                :precondition ()
                :effect (and (dropped ?x) (when (fragile ?x) (broken ?x)))))
     """
-    problem = """
+    problem = f"""
     (define (problem p) (:domain d) (:objects vase)
-      (:init (fragile vase)) (:goal (broken vase)))
+      (:init {init}) (:goal (broken vase)))
     """
     converted = convert_texts(domain, problem)
     h = ff_heuristic(
         converted.initial_state, converted.goal, converted.ground_actions()
     )
-    assert h < float("inf")
+    assert h == expected_h
 
 
 def test_equality_in_when_condition():
@@ -766,3 +677,90 @@ def test_eq_conditions_are_seeded_through_forall_effects():
         )],
     )
     assert _uses_eq_conditions([effect])
+
+
+# ============================================================================
+# Rejections: what the converter refuses, and what it says
+# ============================================================================
+
+# One table rather than nine tests filed under whichever feature each happens
+# to involve -- "what does this converter not support?" should be answerable in
+# one place. Most of the bulk below is the PDDL itself, which is irreducible.
+# `reason` is None where the input is malformed rather than unsupported: those
+# raise PDDLParseError, which carries no reason code.
+@pytest.mark.parametrize(
+    ("domain", "problem", "exc", "reason"),
+    [
+        ("""
+    (define (domain d) (:requirements :strips)
+      (:predicates (p ?x)) (:action a :parameters (?x) :precondition () :effect (p ?x)))
+    """,
+         _minimal_problem().replace(
+             "(:goal (p x1))", "(:goal (p x1)) (:metric maximize (reward))"),
+         UnsupportedPDDLError, "metric:maximize (reward)"),
+
+        ("""
+    (define (domain d) (:requirements :strips :rewards)
+      (:predicates (p ?x))
+      (:action a :parameters (?x) :precondition ()
+               :effect (and (p ?x) (increase (reward) 1))))
+    """, _minimal_problem(), UnsupportedPDDLError, "rewards"),
+
+        ("""
+    (define (domain d) (:requirements :strips :disjunctive-preconditions)
+      (:predicates (p ?x) (q ?x))
+      (:action a :parameters (?x) :precondition (or (p ?x) (q ?x))
+               :effect (p ?x)))
+    """, _minimal_problem(), UnsupportedPDDLError, "disjunctive-preconditions"),
+
+        ("""
+    (define (domain d) (:requirements :strips :probabilistic-effects :action-costs)
+      (:predicates (p ?x)) (:functions (total-cost))
+      (:action a :parameters (?x) :precondition ()
+               :effect (probabilistic 0.5 (increase (total-cost) 2))))
+    """, _minimal_problem(), UnsupportedPDDLError, "probabilistic-cost"),
+
+        ("""
+    (define (domain d) (:requirements :strips :conditional-effects)
+      (:predicates (p ?x) (q ?x) (r ?x))
+      (:action a :parameters (?x)
+               :precondition ()
+               :effect (when (or (p ?x) (q ?x)) (r ?x))))
+    """, _minimal_problem(), UnsupportedPDDLError, "conditional-effect-condition"),
+
+        ("""
+    (define (domain d) (:requirements :strips :conditional-effects :action-costs)
+      (:predicates (p ?x)) (:functions (total-cost))
+      (:action a :parameters (?x) :precondition ()
+               :effect (when (p ?x) (increase (total-cost) 2))))
+    """, _minimal_problem(), UnsupportedPDDLError, "conditional-cost"),
+
+        ("""
+    (define (domain d) (:requirements :strips :probabilistic-effects)
+      (:predicates (p ?x))
+      (:action a :parameters (?x) :precondition ()
+               :effect (probabilistic 0.8 (p ?x) 0.7 (not (p ?x)))))
+    """, _minimal_problem(), PDDLParseError, None),
+
+        ("""
+    (define (domain d) (:requirements :strips)
+      (:predicates (p ?x ?y))
+      (:action a :parameters (?x) :precondition () :effect (p ?x ?z)))
+    """, _minimal_problem(), PDDLParseError, None),
+
+        ("(define (domain d1) (:predicates (p)) "
+         "(:action a :parameters () :precondition () :effect (p)))",
+         _minimal_problem().replace("(:domain d)", "(:domain other)"),
+         PDDLParseError, None),
+    ],
+    ids=["metric", "rewards", "disjunctive_precondition", "probabilistic_cost",
+         "when_condition", "conditional_cost", "probability_sum_over_one",
+         "unbound_variable", "domain_problem_mismatch"],
+)
+def test_unsupported_input_is_rejected(domain, problem, exc, reason):
+    """Refusing is the contract: silently accepting any of these would convert
+    the problem into a different problem."""
+    with pytest.raises(exc) as excinfo:
+        convert_texts(domain, problem)
+    if reason is not None:
+        assert excinfo.value.reason == reason

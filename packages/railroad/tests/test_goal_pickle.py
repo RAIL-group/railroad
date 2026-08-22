@@ -2,70 +2,49 @@
 
 import pickle
 
+import pytest
+
 from railroad.core import Fluent as F
 from railroad._bindings import TrueGoal, FalseGoal
 
 
-class TestGoalPickle:
-    """Test that all Goal types can be pickled and unpickled correctly."""
+@pytest.mark.parametrize(
+    "goal",
+    [
+        TrueGoal(),
+        FalseGoal(),
+        F("at robot1 kitchen"),
+        ~F("at robot1 kitchen"),
+        F("at robot1 kitchen") & F("at robot2 bedroom") & F("found Knife"),
+        F("at robot1 kitchen") | F("at robot1 bedroom"),
+        # AND containing OR children.
+        (F("at robot1 kitchen") | F("at robot1 bedroom")) & F("found Knife"),
+        # Both levels branching.
+        ((F("a") & F("b")) | (F("c") & F("d"))) & (F("e") | F("f")),
+    ],
+    ids=["true", "false", "literal", "negated_literal", "and", "or", "nested",
+         "deeply_nested"],
+)
+def test_goal_survives_a_pickle_round_trip(goal):
+    """Every Goal type reconstructs equal to -- and hashing as -- the original.
 
-    def test_true_goal_pickle(self):
-        goal = TrueGoal()
-        restored = pickle.loads(pickle.dumps(goal))
-        assert goal == restored
+    The hash check matters as much as equality: benchmark workers put goals in
+    sets and dict keys across the process boundary, so a goal that compares
+    equal but hashes differently would silently duplicate. Only half of the
+    merged tests used to assert it.
+    """
+    restored = pickle.loads(pickle.dumps(goal))
+    assert goal == restored
+    assert hash(goal) == hash(restored)
 
-    def test_false_goal_pickle(self):
-        goal = FalseGoal()
-        restored = pickle.loads(pickle.dumps(goal))
-        assert goal == restored
 
-    def test_literal_goal_pickle(self):
-        goal = F("at robot1 kitchen")
-        restored = pickle.loads(pickle.dumps(goal))
-        assert goal == restored
-        assert hash(goal) == hash(restored)
+def test_goal_evaluate_after_pickle():
+    """Verify restored goals still evaluate correctly."""
+    goal = F("at robot1 kitchen") & ~F("holding robot1 obj")
+    restored = pickle.loads(pickle.dumps(goal))
 
-    def test_negated_literal_pickle(self):
-        goal = ~F("at robot1 kitchen")
-        restored = pickle.loads(pickle.dumps(goal))
-        assert goal == restored
+    state_satisfied = {F("at robot1 kitchen")}
+    state_not_satisfied = {F("at robot1 kitchen"), F("holding robot1 obj")}
 
-    def test_and_goal_pickle(self):
-        goal = F("at robot1 kitchen") & F("at robot2 bedroom") & F("found Knife")
-        restored = pickle.loads(pickle.dumps(goal))
-        assert goal == restored
-        assert hash(goal) == hash(restored)
-
-    def test_or_goal_pickle(self):
-        goal = F("at robot1 kitchen") | F("at robot1 bedroom")
-        restored = pickle.loads(pickle.dumps(goal))
-        assert goal == restored
-        assert hash(goal) == hash(restored)
-
-    def test_nested_goal_pickle(self):
-        """Test AND containing OR children."""
-        goal = (F("at robot1 kitchen") | F("at robot1 bedroom")) & F("found Knife")
-        restored = pickle.loads(pickle.dumps(goal))
-        assert goal == restored
-
-    def test_deeply_nested_goal_pickle(self):
-        """Test complex nested structure."""
-        goal = (
-            (F("a") & F("b")) | (F("c") & F("d"))
-        ) & (
-            F("e") | F("f")
-        )
-        restored = pickle.loads(pickle.dumps(goal))
-        assert goal == restored
-        assert hash(goal) == hash(restored)
-
-    def test_goal_evaluate_after_pickle(self):
-        """Verify restored goals still evaluate correctly."""
-        goal = F("at robot1 kitchen") & ~F("holding robot1 obj")
-        restored = pickle.loads(pickle.dumps(goal))
-
-        state_satisfied = {F("at robot1 kitchen")}
-        state_not_satisfied = {F("at robot1 kitchen"), F("holding robot1 obj")}
-
-        assert restored.evaluate(state_satisfied) is True
-        assert restored.evaluate(state_not_satisfied) is False
+    assert restored.evaluate(state_satisfied) is True
+    assert restored.evaluate(state_not_satisfied) is False

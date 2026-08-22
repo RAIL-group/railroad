@@ -9,22 +9,17 @@ import math
 import pytest
 
 from railroad._bindings import (
-    Fluent,
     LiteralGoal,
     AndGoal,
     OrGoal,
     TrueGoal,
     FalseGoal,
-    State,
 )
 from railroad.core import Fluent as F
 from railroad.dashboard._goals import format_goal, get_satisfied_branch, get_best_branch
 from railroad.dashboard._tui import _shorten_name, _generate_coordinates
-from railroad.dashboard import PlannerDashboard
-from railroad.environment import ObjectSearchEnvironment
-from railroad import operators
 
-from env_helpers import env_with_operators
+from env_helpers import move_dashboard
 
 
 # ------------------------------------------------------------------ #
@@ -76,45 +71,42 @@ class TestFormatGoal:
 
 
 class TestGetSatisfiedBranch:
-    def test_literal_satisfied(self):
-        goal = LiteralGoal(F("at r1 kitchen"))
-        fluents = {F("at r1 kitchen")}
-        result = get_satisfied_branch(goal, fluents)
-        assert result is not None
+    """Which branch comes back, not merely whether one does.
 
-    def test_literal_unsatisfied(self):
-        goal = LiteralGoal(F("at r1 kitchen"))
-        fluents: set[Fluent] = set()
-        result = get_satisfied_branch(goal, fluents)
-        assert result is None
+    The three positive cases used to assert `result is not None`, which an
+    implementation returning any arbitrary goal would satisfy. The `{b}` row is
+    the one that discriminates: with only the *second* disjunct satisfied, a
+    "return the first child" bug returns non-None and would have passed.
+    """
 
-    def test_or_first_satisfied(self):
-        goal = OrGoal([LiteralGoal(F("a")), LiteralGoal(F("b"))])
-        fluents = {F("a")}
-        result = get_satisfied_branch(goal, fluents)
-        assert result is not None
+    A, B = LiteralGoal(F("a")), LiteralGoal(F("b"))
+    LIT = LiteralGoal(F("at r1 kitchen"))
 
-    def test_and_both_satisfied(self):
-        goal = AndGoal([LiteralGoal(F("a")), LiteralGoal(F("b"))])
-        fluents = {F("a"), F("b")}
-        result = get_satisfied_branch(goal, fluents)
-        assert result is not None
-
-    def test_and_partial_returns_none(self):
-        goal = AndGoal([LiteralGoal(F("a")), LiteralGoal(F("b"))])
-        fluents = {F("a")}
-        result = get_satisfied_branch(goal, fluents)
-        assert result is None
+    @pytest.mark.parametrize(
+        ("goal", "fluents", "expected"),
+        [
+            (LIT, {F("at r1 kitchen")}, LIT),
+            (LIT, set(), None),
+            (OrGoal([A, B]), {F("a")}, A),
+            (OrGoal([A, B]), {F("b")}, B),
+            (AndGoal([A, B]), {F("a"), F("b")}, AndGoal([A, B])),
+            (AndGoal([A, B]), {F("a")}, None),
+        ],
+        ids=["literal_satisfied", "literal_unsatisfied", "or_first", "or_second",
+             "and_both", "and_partial"],
+    )
+    def test_returns_the_satisfied_branch(self, goal, fluents, expected):
+        assert get_satisfied_branch(goal, fluents) == expected
 
 
 class TestGetBestBranch:
     def test_or_picks_satisfied(self):
-        goal = OrGoal([LiteralGoal(F("a")), LiteralGoal(F("b"))])
-        fluents = {F("a")}
-        result = get_best_branch(goal, fluents)
-        # Should pick branch with A (ratio 1.0 > 0.0)
-        assert result is not None
-        assert isinstance(result, LiteralGoal)
+        a, b = LiteralGoal(F("a")), LiteralGoal(F("b"))
+        goal = OrGoal([a, b])
+        # Pin the branch, not its type: `isinstance(result, LiteralGoal)` was
+        # true of either child, so it could not detect picking the wrong one.
+        assert get_best_branch(goal, {F("a")}) == a
+        assert get_best_branch(goal, {F("b")}) == b
 
     def test_or_of_ands_picks_better(self):
         branch1 = AndGoal([LiteralGoal(F("a")), LiteralGoal(F("b"))])
@@ -154,65 +146,34 @@ class TestComputeBestPathProgress:
 
     @pytest.fixture
     def dashboard(self):
-        """Minimal dashboard for testing _compute_best_path_progress."""
-        move_op = operators.construct_move_operator_blocking(lambda r, a, b: 1.0)
-        no_op = operators.construct_no_op_operator(no_op_time=1.0, extra_cost=10.0)
-        initial_state = State(0.0, {F("at r1 kitchen"), F("free r1")}, [])
-        env = env_with_operators(ObjectSearchEnvironment,
-            state=initial_state,
-            objects_by_type={
-                "robot": {"r1"},
-                "location": {"kitchen", "bedroom"},
-            },
-            operators=[move_op, no_op],
-        )
-        goal = F("at r1 bedroom")
-        return PlannerDashboard(
-            goal, env,
-            force_interactive=False,
-            print_on_exit=False,
+        return move_dashboard(
+            locations=("kitchen", "bedroom"), start="kitchen", move_time=1.0,
+            goal_loc="bedroom", trajectory=None,
         )
 
-    def test_literal_satisfied(self, dashboard):
-        goal = LiteralGoal(F("a"))
-        fluents = {F("a")}
-        assert dashboard._compute_best_path_progress(goal, fluents) == (1, 1)
-
-    def test_literal_unsatisfied(self, dashboard):
-        goal = LiteralGoal(F("a"))
-        fluents: set[Fluent] = set()
-        assert dashboard._compute_best_path_progress(goal, fluents) == (0, 1)
-
-    def test_and_both_satisfied(self, dashboard):
-        goal = AndGoal([LiteralGoal(F("a")), LiteralGoal(F("b"))])
-        fluents = {F("a"), F("b")}
-        assert dashboard._compute_best_path_progress(goal, fluents) == (2, 2)
-
-    def test_and_one_satisfied(self, dashboard):
-        goal = AndGoal([LiteralGoal(F("a")), LiteralGoal(F("b"))])
-        fluents = {F("a")}
-        assert dashboard._compute_best_path_progress(goal, fluents) == (1, 2)
-
-    def test_or_one_satisfied(self, dashboard):
-        goal = OrGoal([LiteralGoal(F("a")), LiteralGoal(F("b"))])
-        fluents = {F("a")}
-        assert dashboard._compute_best_path_progress(goal, fluents) == (1, 1)
-
-    def test_and_or_nested_both(self, dashboard):
-        goal = AndGoal([
-            LiteralGoal(F("a")),
-            OrGoal([LiteralGoal(F("b")), LiteralGoal(F("c"))]),
-        ])
-        fluents = {F("a"), F("b")}
-        assert dashboard._compute_best_path_progress(goal, fluents) == (2, 2)
-
-    def test_and_or_nested_partial(self, dashboard):
-        goal = AndGoal([
-            LiteralGoal(F("a")),
-            OrGoal([LiteralGoal(F("b")), LiteralGoal(F("c"))]),
-        ])
-        fluents = {F("a")}
-        assert dashboard._compute_best_path_progress(goal, fluents) == (1, 2)
+    @pytest.mark.parametrize(
+        ("goal", "fluents", "expected"),
+        [
+            (LiteralGoal(F("a")), {F("a")}, (1, 1)),
+            (LiteralGoal(F("a")), set(), (0, 1)),
+            (AndGoal([LiteralGoal(F("a")), LiteralGoal(F("b"))]),
+             {F("a"), F("b")}, (2, 2)),
+            (AndGoal([LiteralGoal(F("a")), LiteralGoal(F("b"))]),
+             {F("a")}, (1, 2)),
+            # An OR contributes only its best branch, so the denominator is 1.
+            (OrGoal([LiteralGoal(F("a")), LiteralGoal(F("b"))]), {F("a")}, (1, 1)),
+            (AndGoal([LiteralGoal(F("a")),
+                      OrGoal([LiteralGoal(F("b")), LiteralGoal(F("c"))])]),
+             {F("a"), F("b")}, (2, 2)),
+            (AndGoal([LiteralGoal(F("a")),
+                      OrGoal([LiteralGoal(F("b")), LiteralGoal(F("c"))])]),
+             {F("a")}, (1, 2)),
+        ],
+        ids=["literal_satisfied", "literal_unsatisfied", "and_both", "and_one",
+             "or_one", "and_or_nested_both", "and_or_nested_partial"],
+    )
+    def test_progress_counts_the_best_path(self, dashboard, goal, fluents, expected):
+        assert dashboard._compute_best_path_progress(goal, fluents) == expected
 
 
 # ------------------------------------------------------------------ #
@@ -256,84 +217,34 @@ class TestGetEntityPositionsAtTimes:
 
     @pytest.fixture
     def dashboard_with_trajectory(self):
-        """Dashboard with known entity positions for interpolation testing."""
-        move_op = operators.construct_move_operator_blocking(lambda r, a, b: 10.0)
-        no_op = operators.construct_no_op_operator(no_op_time=1.0, extra_cost=10.0)
-        initial_state = State(0.0, {F("at r1 A"), F("free r1")}, [])
-        env = env_with_operators(ObjectSearchEnvironment,
-            state=initial_state,
-            objects_by_type={
-                "robot": {"r1"},
-                "location": {"A", "B"},
-            },
-            operators=[move_op, no_op],
-        )
-        goal = F("at r1 B")
-        db = PlannerDashboard(
-            goal, env,
-            force_interactive=False,
-            print_on_exit=False,
-        )
-        db.known_robots = {"r1"}
-        # Manually set up trajectory: A at (0,0) time 0 -> B at (10,0) time 10
-        db._entity_positions = {
-            "r1": [
-                (0.0, "A", None),
-                (10.0, "B", None),
-            ],
-        }
-        db._goal_time = 10.0
-        return db
+        """r1 travels A (0,0) -> B (10,0) between t=0 and t=10."""
+        return move_dashboard()
 
-    def test_query_at_start(self, dashboard_with_trajectory):
+    COORDS = {"A": (0.0, 0.0), "B": (10.0, 0.0)}
+
+    @pytest.mark.parametrize(
+        ("query_time", "expected"),
+        [
+            (0.0, [0.0, 0.0]),
+            (10.0, [10.0, 0.0]),
+            (5.0, [5.0, 0.0]),
+            # Outside the trajectory, clamp to its ends rather than
+            # extrapolating off the map.
+            (-5.0, [0.0, 0.0]),
+            (20.0, [10.0, 0.0]),
+        ],
+        ids=["at_start", "at_end", "at_midpoint", "before_start_clamps",
+             "after_end_clamps"],
+    )
+    def test_position_is_interpolated_and_clamped(
+        self, dashboard_with_trajectory, query_time, expected,
+    ):
         import numpy as np
-        db = dashboard_with_trajectory
-        coords = {"A": (0.0, 0.0), "B": (10.0, 0.0)}
-        result = db.get_entity_positions_at_times(
-            [0.0], location_coords=coords,
+        result = dashboard_with_trajectory.get_entity_positions_at_times(
+            [query_time], location_coords=self.COORDS,
         )
         assert "r1" in result
-        np.testing.assert_allclose(result["r1"][0], [0.0, 0.0], atol=1e-6)
-
-    def test_query_at_end(self, dashboard_with_trajectory):
-        import numpy as np
-        db = dashboard_with_trajectory
-        coords = {"A": (0.0, 0.0), "B": (10.0, 0.0)}
-        result = db.get_entity_positions_at_times(
-            [10.0], location_coords=coords,
-        )
-        assert "r1" in result
-        np.testing.assert_allclose(result["r1"][0], [10.0, 0.0], atol=1e-6)
-
-    def test_query_at_midpoint(self, dashboard_with_trajectory):
-        import numpy as np
-        db = dashboard_with_trajectory
-        coords = {"A": (0.0, 0.0), "B": (10.0, 0.0)}
-        result = db.get_entity_positions_at_times(
-            [5.0], location_coords=coords,
-        )
-        assert "r1" in result
-        np.testing.assert_allclose(result["r1"][0], [5.0, 0.0], atol=1e-6)
-
-    def test_query_before_start_clamps(self, dashboard_with_trajectory):
-        import numpy as np
-        db = dashboard_with_trajectory
-        coords = {"A": (0.0, 0.0), "B": (10.0, 0.0)}
-        result = db.get_entity_positions_at_times(
-            [-5.0], location_coords=coords,
-        )
-        assert "r1" in result
-        np.testing.assert_allclose(result["r1"][0], [0.0, 0.0], atol=1e-6)
-
-    def test_query_after_end_clamps(self, dashboard_with_trajectory):
-        import numpy as np
-        db = dashboard_with_trajectory
-        coords = {"A": (0.0, 0.0), "B": (10.0, 0.0)}
-        result = db.get_entity_positions_at_times(
-            [20.0], location_coords=coords,
-        )
-        assert "r1" in result
-        np.testing.assert_allclose(result["r1"][0], [10.0, 0.0], atol=1e-6)
+        np.testing.assert_allclose(result["r1"][0], expected, atol=1e-6)
 
     def test_stationary_segment_holds_position(self, dashboard_with_trajectory):
         """A B->B segment (e.g. pick/place) must keep the robot at B for the
@@ -372,34 +283,10 @@ class TestGetPlotImage:
 
     def test_returns_jpeg_bytes(self):
         """Dashboard with entity positions produces valid JPEG bytes."""
-        move_op = operators.construct_move_operator_blocking(lambda r, a, b: 10.0)
-        no_op = operators.construct_no_op_operator(no_op_time=1.0, extra_cost=10.0)
-        initial_state = State(0.0, {F("at r1 A"), F("free r1")}, [])
-        env = env_with_operators(ObjectSearchEnvironment,
-            state=initial_state,
-            objects_by_type={
-                "robot": {"r1"},
-                "location": {"A", "B"},
-            },
-            operators=[move_op, no_op],
+        db = move_dashboard()
+        image_bytes = db.get_plot_image(
+            location_coords={"A": (0.0, 0.0), "B": (10.0, 0.0)},
         )
-        goal = F("at r1 B")
-        db = PlannerDashboard(
-            goal, env,
-            force_interactive=False,
-            print_on_exit=False,
-        )
-        db.known_robots = {"r1"}
-        db._entity_positions = {
-            "r1": [
-                (0.0, "A", None),
-                (10.0, "B", None),
-            ],
-        }
-        db._goal_time = 10.0
-
-        coords = {"A": (0.0, 0.0), "B": (10.0, 0.0)}
-        image_bytes = db.get_plot_image(location_coords=coords)
 
         assert image_bytes is not None
         # JPEG magic bytes
@@ -408,22 +295,9 @@ class TestGetPlotImage:
 
     def test_returns_none_when_no_trajectories(self):
         """Empty dashboard with no entity positions returns None."""
-        move_op = operators.construct_move_operator_blocking(lambda r, a, b: 1.0)
-        no_op = operators.construct_no_op_operator(no_op_time=1.0, extra_cost=10.0)
-        initial_state = State(0.0, {F("at r1 kitchen"), F("free r1")}, [])
-        env = env_with_operators(ObjectSearchEnvironment,
-            state=initial_state,
-            objects_by_type={
-                "robot": {"r1"},
-                "location": {"kitchen"},
-            },
-            operators=[move_op, no_op],
-        )
-        goal = F("at r1 kitchen")
-        db = PlannerDashboard(
-            goal, env,
-            force_interactive=False,
-            print_on_exit=False,
+        db = move_dashboard(
+            locations=("kitchen",), start="kitchen", goal_loc="kitchen",
+            move_time=1.0, trajectory=None,
         )
 
         image_bytes = db.get_plot_image()
