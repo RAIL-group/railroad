@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import os
 import re
@@ -194,6 +195,29 @@ def _key(name: str) -> str:
     return _NON_ALNUM.sub("", _phrase(name))
 
 
+@contextlib.contextmanager
+def _quiet_model_load() -> Any:
+    """Silence the model libraries' progress bars for the duration.
+
+    Resolving a name to a glyph is a side effect of drawing a figure, and it
+    loads the matcher once per process off a model already on disk. A plot has
+    no business printing a weight-loading bar over whatever the caller was
+    saying. Scoped rather than set globally, since the setting is the caller's.
+    """
+    try:
+        from transformers.utils import logging as transformers_logging
+    except ImportError:
+        yield
+        return
+    enabled = transformers_logging.is_progress_bar_enabled()
+    transformers_logging.disable_progress_bar()
+    try:
+        yield
+    finally:
+        if enabled:
+            transformers_logging.enable_progress_bar()
+
+
 def _load_model(base_dir: Path | None = None) -> Any:
     directory = model_dir(base_dir)
     if not (directory / "modules.json").is_file():
@@ -204,7 +228,8 @@ def _load_model(base_dir: Path | None = None) -> Any:
             from sentence_transformers import SentenceTransformer
         except ImportError:
             return None
-        _MODELS[key] = SentenceTransformer(key)
+        with _quiet_model_load():
+            _MODELS[key] = SentenceTransformer(key)
     return _MODELS[key]
 
 
