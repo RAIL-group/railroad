@@ -98,18 +98,20 @@ class ReplayKnownMapSearchEnvironment(
         super().__init__(
             state=state,
             objects_by_type=objects_by_type,
-            operators=self._build_operators(search_time),
             true_object_locations=recorded_object_locations,
             location_registry=location_registry,
         )
 
-    def _build_operators(self, search_time: float) -> List[Operator]:
-        # search reads the estimator through self._object_find_statistics, so
-        # the candidate can be swapped without rebuilding the arena.
+    def define_operators(self) -> List[Operator]:
+        # Called from Environment.__init__, after the attributes read below are
+        # set. search reads the estimator through self._object_find_statistics,
+        # so the candidate can be swapped without rebuilding the arena.
         return [
             _operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0),
             _operators.construct_move_operator_blocking(self.estimate_move_time),
-            _operators.construct_search_operator(self._container_find_prob, search_time),
+            _operators.construct_search_operator(
+                self._container_find_prob, self._search_time
+            ),
         ]
 
     def apply_policy(self, policy: ObjectFindEstimator) -> None:

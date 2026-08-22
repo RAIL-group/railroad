@@ -19,6 +19,8 @@ from railroad.environment.environment import ActiveSkill
 from railroad.environment.skill import InterruptibleNavigationMoveSkill, NavigationMoveSkill
 from railroad.operators import construct_no_op_operator
 
+from env_helpers import env_with_operators
+
 F = Fluent
 
 
@@ -141,7 +143,7 @@ def _make_environment(
     if include_no_op:
         operators.append(construct_no_op_operator(2.0))
 
-    return UnknownSpaceEnvironment(
+    return env_with_operators(UnknownSpaceEnvironment,
         state=state,
         objects_by_type=objects_by_type,
         operators=operators,
@@ -451,7 +453,7 @@ def test_unreachable_move_is_filtered_out():
 
     operators = [construct_move_navigable_operator(move_time_fn)]
 
-    env = UnknownSpaceEnvironment(
+    env = env_with_operators(UnknownSpaceEnvironment,
         state=State(0.0, {F("at robot1 start"), F("free robot1")}, []),
         objects_by_type={
             "robot": {"robot1"},
@@ -524,7 +526,7 @@ def test_move_time_cache_updates_when_location_moves():
         assert env_ref[0] is not None
         return env_ref[0].estimate_move_time(robot, loc_from, loc_to)
 
-    env = UnknownSpaceEnvironment(
+    env = env_with_operators(UnknownSpaceEnvironment,
         state=State(
             0.0,
             {F("at robot1 robot1_loc"), F("free robot1")},

@@ -52,12 +52,21 @@ Baseline (this machine, `-n auto`, 12 workers): **765 collected / 763 pass, 1 sk
   `-n 4 --dist worksteal`: 58 passed, all 39 warnings printed **and** promoted to the summary
   (`24 warnings` / `39 warnings` lines).
 
-- [ ] **X-03 Two competing pytest configs.** **[V]**
+- [x] **X-03 Two competing pytest configs.** **[V]**
+  **DONE.** Removed `[tool.pytest.ini_options]` from `packages/railroad/pyproject.toml`; the root
+  config is now the single source of truth. A subdirectory invocation that previously reported
+  `rootdir: .../packages/railroad` and ran serially now reports the repo root and spins up 12
+  workers. Checked that the one behaviour this could change — a bare `pytest` from inside
+  `packages/railroad` — was already broken before the change (that directory's venv has no
+  `railroad` installed), so nothing regressed.
+  <details><summary>Original finding</summary>
+
   Root `pyproject.toml:38` and `packages/railroad/pyproject.toml:71` both define
   `[tool.pytest.ini_options]`. The nested one has **no `addopts`**, so any invocation whose
   rootdir resolves to `packages/railroad` silently loses `-n auto`, `--dist worksteal`, and the
   HTML report. Observed live during this investigation: running a single test file printed
   `rootdir: .../packages/railroad` and ran serially. Consolidate to one config.
+  </details>
 
 ---
 
@@ -99,28 +108,50 @@ Baseline (this machine, `-n auto`, 12 workers): **765 collected / 763 pass, 1 sk
   `lsp/test_bulk.py:187::test_failed_seed_leaves_no_final_dir_and_retries_cleanly`.
   </details>
 
-- [ ] **A-03 Dead deprecation branch.** **[V]** (~9 lines)
+- [x] **A-03 Dead deprecation branch.** **[V]** (~9 lines)
+  **DONE.** Branch and the `_from_init` parameter removed; `_resolve_operators` is now a
+  plain two-argument method.
+  <details><summary>Original finding</summary>
+
   `environment/environment.py:115-121` — the `if not _from_init:` warning in
   `_resolve_operators` is unreachable. Verified: the method has exactly one caller repo-wide,
   `environment.py:78`, which always passes `_from_init=True`. Delete the branch and the
   `_from_init` parameter; consider inlining the method.
+  </details>
 
-- [ ] **A-04 ~55 test call sites pass `operators=[...]`.** **[R]** (105 warnings)
+- [x] **A-04 ~55 test call sites pass `operators=[...]`.** **[V]** (105 warnings)
+  **DONE — 56 call sites across 11 files, plus 1 in *source*.** A-01's attribution fix revealed
+  a production call site the audit had missed: `replay/environments/known_map_search.py:101`
+  passed `operators=self._build_operators(...)` through `super().__init__`; converted to a
+  `define_operators()` override. Test sites go through a new `tests/env_helpers.py`
+  (`env_with_operators`), which synthesises the subclass so each call site is a one-token
+  change and keeps `operators=` verbatim. Two things the plan did not anticipate:
+  `UnknownSpaceEnvironment` takes `operators` as a *required positional*, so the helper passes
+  `None` rather than dropping the kwarg; and the helper had to live in a uniquely-named module
+  rather than `conftest`, because `ty` binds `conftest` to the wrong one of the repo's several.
   Convert to `define_operators()`. Concentrated in `test_symbolic_environment.py` (24),
   `test_object_search_environment.py` (16), `test_dashboard.py` (15), `test_dashboard_overhead.py`
   (12), `experimental/unknown_search/test_environment.py` (11). Many pass `operators=[]` purely
   to satisfy the signature — trivial. Do **after** A-01, so the warnings point at real callers.
 
-- [ ] **A-05 `test_environment_base.py:15` — keep, but assert it.** **[R]** (4 warnings)
+- [x] **A-05 `test_environment_base.py:15` — keep, but assert it.** **[V]** (4 warnings)
+  **DONE.** Split the test double: `_MinimalBody` holds the shared abstract-method bodies,
+  `MinimalEnvironment` resolves via `define_operators()`, and `LegacyKwargEnvironment` keeps the
+  deprecated path. New `test_deprecated_operators_kwarg_still_resolves_and_warns` asserts the
+  kwarg still works, warns, **and blames the caller** — so A-01 cannot silently regress.
   This one is *intentional*: `MinimalEnvironment` exercises the base-class contract through the
   deprecated kwarg. Wrap in `pytest.warns(DeprecationWarning)` to turn noise into coverage.
 
-- [ ] **A-06 `fork()` in a threaded worker.** **[R]** (3 warnings)
+- [x] **A-06 `fork()` in a threaded worker.** **[V]** (3 warnings)
+  **DONE.** `mp.get_context("fork")` -> `"spawn"` at both sites; 8 tests pass, no warnings.
   `test_scene_lock.py:58,81` use `mp.get_context("fork")` inside an xdist worker; Python 3.12
   warns, 3.14 changes the default. The test already reports through append-only files
   (see its module docstring) so it does not need `fork` — switch to `"spawn"`.
 
-- [ ] **A-07 Preventive: unclosed figures.** **[R]** (0 warnings today)
+- [x] **A-07 Preventive: unclosed figures — FALSE FINDING, no action.** **[C]**
+  The report claimed 9 `plt.subplots()` with no `plt.close()`. Every one of the 9 is already
+  paired with `plt.close("all")` (lines 32/42, 48/53, 57/62, 67/70, 77/80, 84/89, 96/99,
+  109/113, 117/122). Adding the proposed autouse fixture would have been redundant.
   `dashboard/test_sprite_static_plot.py` calls `plt.subplots()` 9× with no `plt.close()`. Under
   matplotlib's 20-figure threshold now; one added test from warning. An autouse
   `plt.close("all")` fixture in a `tests/dashboard/conftest.py` forecloses it.
@@ -308,12 +339,13 @@ real coverage. This is why every **[R]** above is verified before action.
 | | Tests | Lines | Warnings | Full | `not slow` |
 |---|---|---|---|---|---|
 | Baseline | 763 pass | ~18.6k | 112 | 50–69 s | 12.9 s |
-| After X-01/02, A-01/02, B-01 | 763 pass | ~18.6k | 112² | 50–60 s | ~11 s |
+| After X-01/02/03, Tranche A, B-01 | **764 pass** | ~18.7k | **0** | ~55 s | ~14 s |
 | Target | 763 pass¹ | ~16.3k | 0 | ~35 s | ~5 s |
 
-² Count is unchanged **by design**: A-01 fixed warning *attribution*, not volume — the 105
-`operators=` warnings are retired by A-04, which is still unapproved. The ResourceWarning (A-02)
-is gone, so the residue is 105 `operators=` + 4 `test_environment_base` + 3 `fork()`.
+² **Tranche A is complete: 112 warnings → 0**, verified by
+`uv run pytest -W error::DeprecationWarning` passing clean. Test count rose by one (A-05 added a
+deprecation-contract test). Lines rose slightly too — Tranche A *adds* structure; the reduction
+comes from Tranche C.
 
 ¹ **Test count is the wrong metric.** Parametrize merges *keep* the passing count while cutting
 lines. Track lines and passing-count separately; any drop in passing-count must map to an

@@ -24,6 +24,8 @@ from railroad.dashboard import PlannerDashboard
 from railroad.environment import ObjectSearchEnvironment
 from railroad import operators
 
+from env_helpers import env_with_operators
+
 
 # ------------------------------------------------------------------ #
 # Goal analysis functions
@@ -156,7 +158,7 @@ class TestComputeBestPathProgress:
         move_op = operators.construct_move_operator_blocking(lambda r, a, b: 1.0)
         no_op = operators.construct_no_op_operator(no_op_time=1.0, extra_cost=10.0)
         initial_state = State(0.0, {F("at r1 kitchen"), F("free r1")}, [])
-        env = ObjectSearchEnvironment(
+        env = env_with_operators(ObjectSearchEnvironment,
             state=initial_state,
             objects_by_type={
                 "robot": {"r1"},
@@ -258,7 +260,7 @@ class TestGetEntityPositionsAtTimes:
         move_op = operators.construct_move_operator_blocking(lambda r, a, b: 10.0)
         no_op = operators.construct_no_op_operator(no_op_time=1.0, extra_cost=10.0)
         initial_state = State(0.0, {F("at r1 A"), F("free r1")}, [])
-        env = ObjectSearchEnvironment(
+        env = env_with_operators(ObjectSearchEnvironment,
             state=initial_state,
             objects_by_type={
                 "robot": {"r1"},
@@ -373,7 +375,7 @@ class TestGetPlotImage:
         move_op = operators.construct_move_operator_blocking(lambda r, a, b: 10.0)
         no_op = operators.construct_no_op_operator(no_op_time=1.0, extra_cost=10.0)
         initial_state = State(0.0, {F("at r1 A"), F("free r1")}, [])
-        env = ObjectSearchEnvironment(
+        env = env_with_operators(ObjectSearchEnvironment,
             state=initial_state,
             objects_by_type={
                 "robot": {"r1"},
@@ -409,7 +411,7 @@ class TestGetPlotImage:
         move_op = operators.construct_move_operator_blocking(lambda r, a, b: 1.0)
         no_op = operators.construct_no_op_operator(no_op_time=1.0, extra_cost=10.0)
         initial_state = State(0.0, {F("at r1 kitchen"), F("free r1")}, [])
-        env = ObjectSearchEnvironment(
+        env = env_with_operators(ObjectSearchEnvironment,
             state=initial_state,
             objects_by_type={
                 "robot": {"r1"},

@@ -21,6 +21,8 @@ from railroad.experimental.unknown_search.operators import (
     construct_move_navigable_operator,
 )
 
+from env_helpers import env_with_operators
+
 F = Fluent
 
 pytestmark = pytest.mark.slow
@@ -42,7 +44,7 @@ def maze_scene() -> RailsimScene:
 
 def _make_env(scene: RailsimScene, **env_kwargs: Any) -> VisualUnknownSpaceEnvironment:
     start = scene.locations["start_loc"]
-    return VisualUnknownSpaceEnvironment(
+    return env_with_operators(VisualUnknownSpaceEnvironment,
         scene=scene,
         state=State(0.0, {
             F("at robot1 start_loc"),

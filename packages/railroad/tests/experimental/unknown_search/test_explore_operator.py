@@ -20,11 +20,13 @@ from railroad.experimental.unknown_search.operators import (
 )
 from railroad.navigation.constants import COLLISION_VAL, FREE_VAL
 
+from env_helpers import env_with_operators
+
 F = Fluent
 
 
 def _make_env(grid: np.ndarray, sensor_range: float) -> UnknownSpaceEnvironment:
-    return UnknownSpaceEnvironment(
+    return env_with_operators(UnknownSpaceEnvironment,
         state=State(0.0, {
             F("at robot1 start"),
             F("free robot1"),

@@ -7,6 +7,8 @@ degrades to a plain grid when a scene cannot place its image.
 """
 
 import matplotlib
+
+from env_helpers import env_with_operators
 matplotlib.use("Agg")
 
 import numpy as np
@@ -51,7 +53,7 @@ def _dashboard(scene, *, unobserved: bool = False):
 
     move_op = operators.construct_move_operator_blocking(lambda r, a, b: 10.0)
     no_op = operators.construct_no_op_operator(no_op_time=1.0, extra_cost=10.0)
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=State(0.0, {F("at r1 A"), F("free r1")}, []),
         objects_by_type={"robot": {"r1"}, "location": {"A", "B"}},
         operators=[move_op, no_op],

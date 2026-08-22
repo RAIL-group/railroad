@@ -1,6 +1,8 @@
 """Tests for ActiveSkill protocol."""
 import pytest
 
+from env_helpers import env_with_operators
+
 
 def test_symbolic_skill_base_class():
     """Test SymbolicSkill base implementation."""
@@ -75,7 +77,7 @@ def test_interruptible_navigation_move_skill_interrupt_behavior():
         "kitchen": np.array([0.0, 0.0]),
         "bedroom": np.array([10.0, 0.0]),
     })
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=initial_state,
         objects_by_type={"robot": {"r1"}, "location": {"kitchen", "bedroom"}},
         operators=[move_op],
@@ -185,7 +187,7 @@ def test_location_registry_interrupt_registers_coords():
 
     # Create environment with registry
     initial_state = State(0.0, {F("at", "r1", "kitchen"), F("free", "r1")})
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=initial_state,
         objects_by_type={"robot": {"r1"}, "location": {"kitchen", "bedroom"}},
         operators=[move_op],
@@ -233,7 +235,7 @@ def test_skill_overrides_mapping():
     registry = LocationRegistry({"kitchen": np.array([0, 0]), "bedroom": np.array([10, 0])})
 
     # Create environment with skill override for move actions
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=State(0.0, {F("at", "r1", "kitchen"), F("free", "r1")}, []),
         objects_by_type={"robot": {"r1"}, "location": {"kitchen", "bedroom"}},
         operators=[],

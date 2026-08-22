@@ -19,6 +19,8 @@ from railroad.experimental.unknown_search.operators import (
 )
 from railroad.navigation.constants import COLLISION_VAL, FREE_VAL
 
+from env_helpers import env_with_operators
+
 F = Fluent
 
 
@@ -38,7 +40,7 @@ def test_on_laser_scan_hook_called_per_scan() -> None:
     grid[4:7, 4:27] = FREE_VAL
 
     num_rays = 91
-    env = _RecordingEnv(
+    env = env_with_operators(_RecordingEnv,
         state=State(0.0, {
             F("at robot1 start"),
             F("free robot1"),

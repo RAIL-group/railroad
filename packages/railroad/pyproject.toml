@@ -68,15 +68,6 @@ railroad = [
     "environment/procthor/resources/models/*.pt",
 ]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-filterwarnings = [
-    "ignore:invalid escape sequence:SyntaxWarning",
-]
-markers = [
-    "slow: marks tests as slow to run (deselect with '-m \"not slow\"')",
-]
-
 [tool.uv]
 cache-keys = [
   { file = "pyproject.toml" },

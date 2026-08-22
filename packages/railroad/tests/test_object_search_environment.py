@@ -12,6 +12,8 @@ from railroad._bindings import Fluent as F, GroundedEffect, State
 from railroad.core import Effect, Operator
 from railroad.environment import ObjectSearchEnvironment
 
+from env_helpers import env_with_operators
+
 
 # =============================================================================
 # Robot Intermediate Locations (robot_loc)
@@ -81,7 +83,7 @@ def test_interrupt_then_move_to_different_destination():
         ]
     )
 
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=State(0.0, initial_fluents, initial_effects),
         objects_by_type={"robot": {"robot1", "robot2"}, "location": {"kitchen", "bedroom", "living_room"}},
         operators=[move_op, wait_op],
@@ -146,7 +148,7 @@ def test_object_search_environment_filters_zero_duration_moves():
             Effect(time=0.0, resulting_fluents={~F("at", "?robot", "?from"), F("at", "?robot", "?to")}),
         ],
     )
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=State(0.0, {F("at", "robot1", "kitchen"), F("free", "robot1")}, []),
         objects_by_type={"robot": {"robot1"}, "location": {"kitchen", "bedroom"}},
         operators=[move_op],
@@ -163,7 +165,7 @@ def test_object_search_environment_revelation():
     """Test that searching a location reveals objects at that location."""
     fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
 
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=State(0.0, fluents, []),
         objects_by_type={"robot": {"robot1"}, "location": {"kitchen"}},
         operators=[],
@@ -192,7 +194,7 @@ def test_object_search_environment_revelation():
 
 def test_object_search_environment_objects_at_locations():
     """Test internal objects_at_locations tracking."""
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=State(0.0, set(), []),
         objects_by_type={},
         operators=[],
@@ -207,7 +209,7 @@ def test_object_search_environment_objects_at_locations():
 def test_object_search_environment_object_location_from_fluents():
     """Test that object locations are derived from fluents."""
     # Initial ground truth: Knife and Fork at kitchen
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=State(0.0, set(), []),
         objects_by_type={},
         operators=[],
@@ -233,7 +235,7 @@ def test_object_search_environment_object_location_from_fluents():
 def test_object_search_environment_fluent_overrides_ground_truth():
     """Test that fluents override initial ground truth for object locations."""
     # Initial ground truth: Knife at kitchen
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=State(0.0, set(), []),
         objects_by_type={},
         operators=[],
@@ -258,7 +260,7 @@ def test_object_search_environment_fluent_overrides_ground_truth():
 def test_object_search_environment_resolve_probabilistic_effect():
     """Test resolving probabilistic effects based on ground truth."""
     # Create an environment where "obj" IS at "loc"
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=State(0.0, set(), []),
         objects_by_type={},
         operators=[],
@@ -297,7 +299,7 @@ def test_object_search_environment_resolve_probabilistic_effect():
     assert effects[0] == branch1_effect
 
     # Now test when object is NOT at location
-    env2 = ObjectSearchEnvironment(
+    env2 = env_with_operators(ObjectSearchEnvironment,
         state=State(0.0, set(), []),
         objects_by_type={},
         operators=[],
@@ -326,7 +328,7 @@ def test_search_skill_resolves_probabilistically():
         search_time=3.0,
     )
 
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=State(0.0, fluents, []),
         objects_by_type={"robot": {"robot1"}, "location": {"kitchen"}, "object": {"Knife"}},
         operators=[search_op],
@@ -357,7 +359,7 @@ def test_search_skill_fails_when_object_not_at_location():
         search_time=3.0,
     )
 
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=State(0.0, fluents, []),
         objects_by_type={"robot": {"robot1"}, "location": {"kitchen", "bedroom"}, "object": {"Knife"}},
         operators=[search_op],
@@ -391,7 +393,7 @@ def test_pick_skill_updates_fluents():
 
     pick_op = operators.construct_pick_operator_blocking(pick_time=2.0)
 
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=State(0.0, fluents, []),
         objects_by_type={
             "robot": {"robot1"},
@@ -426,7 +428,7 @@ def test_place_skill_updates_fluents():
 
     place_op = operators.construct_place_operator_blocking(place_time=2.0)
 
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=State(0.0, fluents, []),
         objects_by_type={
             "robot": {"robot1"},
@@ -481,7 +483,7 @@ def test_nested_effects_with_timing_are_scheduled():
         F("free", "robot1"),
     }
 
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=State(0.0, initial_fluents, []),
         objects_by_type={
             "robot": {"robot1"},
@@ -532,7 +534,7 @@ def test_search_with_certainty_probability_object_not_present():
         search_time=3.0,
     )
 
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=State(0.0, fluents, []),
         objects_by_type={"robot": {"robot1"}, "location": {"kitchen", "bedroom"}, "object": {"Knife"}},
         operators=[search_op],
@@ -568,7 +570,7 @@ def test_search_with_zero_probability_object_present():
         search_time=3.0,
     )
 
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=State(0.0, fluents, []),
         objects_by_type={"robot": {"robot1"}, "location": {"kitchen"}, "object": {"Knife"}},
         operators=[search_op],
@@ -603,7 +605,7 @@ def test_nested_effects_immediate_still_work():
         F("free", "robot1"),
     }
 
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=State(0.0, initial_fluents, []),
         objects_by_type={
             "robot": {"robot1"},

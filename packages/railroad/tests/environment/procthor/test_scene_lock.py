@@ -55,7 +55,7 @@ def _intervals(log: Path) -> list[tuple[float, float]]:
 def test_lock_is_exclusive_across_processes(tmp_path):
     """The second process must wait for the first, not run alongside it."""
     lock, log = tmp_path / "lock", tmp_path / "log"
-    ctx = mp.get_context("fork")
+    ctx = mp.get_context("spawn")
 
     first = ctx.Process(target=_hold, args=(str(lock), str(log), 1.0))
     first.start()
@@ -79,7 +79,7 @@ def test_lock_is_exclusive_across_processes(tmp_path):
 def test_timeout_fails_open_rather_than_blocking_a_run(tmp_path):
     """A lock we cannot take should slow things down, never stop them."""
     lock, log = tmp_path / "lock", tmp_path / "log"
-    ctx = mp.get_context("fork")
+    ctx = mp.get_context("spawn")
     holder = ctx.Process(target=_hold, args=(str(lock), str(log), 3.0))
     holder.start()
     _wait_for(log, "enter")
