@@ -17,10 +17,8 @@ dependencies = [
     "pytest-xdist>=3.8.0",
     # Live progress wall for xdist runs. It drops the warnings summary
     # (pytest_warning_recorded is a no-op: "Currently we are just dropping
-    # warnings"), which is why filterwarnings=["error"] below is not optional --
-    # with it, a warning fails the run and is reported in full, so nothing can
-    # be silently swallowed. Only activates on a tty, so CI keeps the standard
-    # reporter and its warnings summary.
+    # warnings"), so conftest.py reinstates one -- warnings stay visible as
+    # warnings. Only activates on a tty; CI keeps the standard reporter.
     "pytest-richer",
     # ruff has no [tool.ruff] config here, so it runs on defaults; 0.16 widened the
     # default rule set enough to surface ~1400 new findings. Pin until configured.
@@ -53,10 +51,6 @@ extra-paths = [
 # and its warnings summary take over.
 addopts = "-n auto --dist worksteal --rich --html=data/test_logs/test_report.html --self-contained-html"
 
-# Warnings are errors. The suite is warning-clean, and the reporter above hides
-# warning summaries on a tty, so anything less lets a warning pass unnoticed.
-# Silence one here only with a comment saying why the cause cannot be fixed.
-filterwarnings = ["error"]
 markers = [
     "slow: marks tests as slow to run (deselect with '-m \"not slow\"')"
 ]
