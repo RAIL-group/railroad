@@ -105,7 +105,11 @@ def _execute_task_worker(
             if use_signal_timeout:
                 # Set timeout using signal (Unix)
                 old_handler = signal.signal(signal.SIGALRM, _timeout_handler)
-                signal.alarm(int(task.timeout))
+                # setitimer, not alarm(): alarm() takes whole seconds, so
+                # int(task.timeout) turned any sub-second timeout into
+                # alarm(0) -- which *cancels* the alarm rather than firing it,
+                # silently disabling the timeout. Task.timeout is a float.
+                signal.setitimer(signal.ITIMER_REAL, task.timeout)
 
             try:
                 result = task.benchmark_fn(case)
@@ -133,7 +137,7 @@ def _execute_task_worker(
                 task.stderr = (captured.stderr or "") + "\n" + traceback.format_exc()
             finally:
                 if use_signal_timeout:
-                    signal.alarm(0)  # Cancel alarm
+                    signal.setitimer(signal.ITIMER_REAL, 0)  # Cancel timer
                     signal.signal(signal.SIGALRM, old_handler)
 
         task.stdout = captured.stdout

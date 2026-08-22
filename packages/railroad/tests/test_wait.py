@@ -76,6 +76,7 @@ def test_wait_for_transition():
     ],
     ids=["two robots", "three robots"],
 )
+@pytest.mark.slow
 def test_planner_mcts_move_visit_wait_multirobot(initial_fluents):
     # Get all actions
     objects_by_type = {
