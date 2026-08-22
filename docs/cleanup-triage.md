@@ -24,12 +24,12 @@ Baseline (this machine, `-n auto`, 12 workers): **765 collected / 763 pass, 1 sk
   far more predictable. Cause: the 25.6 s ProcTHOR test gets dealt to a worker late under
   `load`'s up-front slicing, leaving workers idle. Re-verified after the edit: 763 passed, 50.3 s.
 
-- [x] **X-02 Rich terminal reporter — do not use `pytest-richer`; use `pytest-pretty`.** **[V]**
-  **DONE.** `pytest-pretty` added to root `pyproject.toml`. Full suite: 763 passed with all
-  **112 warnings retained** and surfaced in the Results panel. No flag needed — it activates on
-  install; `--html` and `-n auto --dist worksteal` are unaffected.
-  `pytest-richer` drops warnings **by design**, not by misconfiguration. From its own source,
-  `pytest_richer/terminal.py:759`:
+- [x] **X-02 Rich terminal reporter — `pytest-richer` + warnings-as-errors.** **[V]**
+  **DONE.** The requirement is the live progress *wall* during xdist runs, not a restyled
+  summary. Only `pytest-richer` provides it, and it does work under xdist
+  (`@main_process_only` throughout, `PYTEST_XDIST_WORKER` handled explicitly).
+
+  Its one flaw is real and comes from its own source, `pytest_richer/terminal.py:759`:
   ```python
   def pytest_warning_recorded(self, warning_message, nodeid) -> None:
       """Note standard Python warning.
@@ -37,20 +37,30 @@ Baseline (this machine, `-n auto`, 12 workers): **765 collected / 763 pass, 1 sk
       Currently we are just dropping warnings.
       """
   ```
-  The hook body is empty. Confirmed empirically: 0 occurrences of a deliberately-emitted warning,
-  serial *and* under `-n 2`. Its xdist support is real (`@main_process_only` throughout, no
-  internal error) — so both halves of the original observation were correct. Last release
-  2023-10-27.
+  **This is neutralised by `filterwarnings = ["error"]` (X-05).** A warning that is an error is
+  never *just* a warning: it fails the run and is reported in full, with source context. Verified
+  end to end — `--rich -W error` on a warning-emitting test prints
+  `DeprecationWarning: THIS-WARNING-MUST-BE-VISIBLE` with a code frame and exits 1.
 
-  Do not confuse with **`pytest-rich`** (one letter apart): an explicit proof-of-concept
-  "looking for a maintainer", which *also* stubs `pytest_warning_recorded` to `...` **and**
-  crashes under xdist (`INTERNALERROR: KeyError` in `_update_task`, reports "0 Total Tests").
-  It has zero xdist references in its source, on PyPI 0.2.0 or upstream `main`.
+  `--rich` is safe in `addopts` because the plugin guards on `sys.stdout.isatty()`: in CI it is
+  inert and the standard reporter (with its warnings summary) takes over. Confirmed both ways.
+  `-v` was dropped from `addopts` — the per-test scroll it produced is exactly what the wall
+  replaces.
 
-  **`pytest-pretty` 1.3.0** is the substitute — it *subclasses* `TerminalReporter` rather than
-  replacing it, so warning handling is inherited. Verified in this repo under
-  `-n 4 --dist worksteal`: 58 passed, all 39 warnings printed **and** promoted to the summary
-  (`24 warnings` / `39 warnings` lines).
+  <details><summary>Two corrections to my own earlier testing</summary>
+
+  1. My first "empirical" check of `pytest-richer` used `--richer`; the real flag is `--rich`, so
+     the plugin never activated and the run died on an unrecognised argument. The "0 warnings" I
+     reported was that usage error, not evidence. Re-tested in a clean venv: the conclusion holds,
+     but it now rests on a valid measurement.
+  2. A follow-up test was polluted by having `pytest-rich` *and* `pytest-richer` installed
+     together — they both register `--rich` and collide with
+     `ValueError: option names {'--rich'} already added`.
+
+  `pytest-pretty` (my earlier recommendation) is removed: it preserves warnings but has no
+  progress wall, so it did not meet the actual requirement. `pytest-rich` remains unusable —
+  proof-of-concept, stubs the same hook, and crashes under xdist.
+  </details>
 
 - [x] **X-03 Two competing pytest configs.** **[V]**
   **DONE.** Removed `[tool.pytest.ini_options]` from `packages/railroad/pyproject.toml`; the root
@@ -67,6 +77,22 @@ Baseline (this machine, `-n auto`, 12 workers): **765 collected / 763 pass, 1 sk
   HTML report. Observed live during this investigation: running a single test file printed
   `rootdir: .../packages/railroad` and ran serially. Consolidate to one config.
   </details>
+
+---
+
+- [x] **X-04 An obsolete `filterwarnings` ignore was hiding SyntaxWarnings.** **[V]**
+  **DONE.** `filterwarnings = ["ignore:invalid escape sequence:SyntaxWarning"]` sat in *both*
+  pytest configs. Compiling all 266 tracked project files with warnings forced on produced **zero**
+  invalid-escape warnings — the cause had been fixed at some point and the suppression outlived
+  it. Removed. Without it the suite still reports 0 warnings, so "0" is now a real 0 rather than
+  a filtered one.
+
+- [x] **X-05 `filterwarnings = ["error"]`.** **[V]**
+  **DONE.** Warnings are now errors. Verified the suite is clean under it across five runs, and
+  that an injected warning fails with
+  `E DeprecationWarning: A-NEW-WARNING-SLIPPED-IN`. This is what makes X-02's reporter choice
+  safe, and it means a warning can no longer accumulate unnoticed the way the 105 `operators=`
+  ones did. Silence an entry here only with a comment explaining why the cause cannot be fixed.
 
 ---
 
@@ -339,13 +365,18 @@ real coverage. This is why every **[R]** above is verified before action.
 | | Tests | Lines | Warnings | Full | `not slow` |
 |---|---|---|---|---|---|
 | Baseline | 763 pass | ~18.6k | 112 | 50–69 s | 12.9 s |
-| After X-01/02/03, Tranche A, B-01 | **764 pass** | ~18.7k | **0** | ~55 s | ~14 s |
+| After Tranche 0 + A + B-01 | **764 pass** | ~18.7k | **0, enforced** | ~69 s | ~14 s |
 | Target | 763 pass¹ | ~16.3k | 0 | ~35 s | ~5 s |
 
-² **Tranche A is complete: 112 warnings → 0**, verified by
-`uv run pytest -W error::DeprecationWarning` passing clean. Test count rose by one (A-05 added a
-deprecation-contract test). Lines rose slightly too — Tranche A *adds* structure; the reduction
-comes from Tranche C.
+² **Tranche A is complete: 112 warnings → 0, and now enforced** — `filterwarnings = ["error"]`
+means a new warning fails the run rather than joining a backlog. Test count rose by one (A-05
+added a deprecation-contract test). Lines rose slightly too: Tranche A *adds* structure, and the
+line reduction all comes from Tranche C.
+
+**On the timing column:** these numbers are not comparable across rows — the machine was under
+much lighter load when the 50–69 s baseline was taken. Measured back to back under identical
+conditions, the current config runs **69 s against the original config's 76–79 s**. Always
+re-measure the comparison point rather than quoting an older row.
 
 ¹ **Test count is the wrong metric.** Parametrize merges *keep* the passing count while cutting
 lines. Track lines and passing-count separately; any drop in passing-count must map to an

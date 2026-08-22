@@ -5,7 +5,7 @@ the import: several `conftest.py` files exist in this repo and `ty` binds the
 name to the wrong one.
 """
 
-from typing import Any, List, Type, TypeVar
+from typing import Any, List, Type, TypeVar, cast
 
 from railroad.core import Operator
 from railroad.environment import Environment
@@ -37,5 +37,6 @@ def env_with_operators(env_cls: Type[E], /, **kwargs: Any) -> E:
         (env_cls,),
         {"define_operators": lambda self: ops},
     )
-    # type() defeats inference; the subclass is an env_cls by construction.
-    return subclass(**kwargs)  # ty: ignore[invalid-return-type]
+    # type() erases the parameter, so state the relationship rather than
+    # silencing the checker: the synthesised class derives from env_cls.
+    return cast(Type[E], subclass)(**kwargs)
