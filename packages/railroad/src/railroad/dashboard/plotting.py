@@ -64,20 +64,8 @@ class _PlottingMixin:
     """
 
     _SPRITE_ZORDER = 7.0
-    """Above the trail (5) and the location dots (6), below the robot marker (10).
-
-    A carried object should read without hiding the robot carrying it.
-    """
-
     _SPRITE_FADE_FRACTION = 0.02
-    """Fade-in length, as a fraction of the plan's duration.
-
-    Tied to plan length rather than frame rate so the fade reads the same in a
-    ten-second video and a two-minute one.
-    """
-
     _MAX_SPRITES = 12
-    """Past this the map is unreadable anyway, and each sprite costs a redraw."""
 
     _TRAIL_REPAINT_OVERLAP = 64
     """Trail points repainted behind each newly drawn batch, in the video.
@@ -377,7 +365,7 @@ class _PlottingMixin:
         *,
         show_objects: bool = False,
         location_coords: dict[str, tuple[float, float]] | None = None,
-        object_sprites: bool | None = None,
+        object_sprites: bool = True,
         glyph_objects: Any = None,
     ) -> Any:
         """Plot entity trajectories collected during planning.
@@ -630,19 +618,13 @@ class _PlottingMixin:
         env_coords: dict[str, tuple[float, float]],
         *,
         glyph_objects: Any = None,
-        object_sprites: bool | None = None,
+        object_sprites: bool = True,
     ) -> tuple[Any, dict[str, Any], Any] | None:
-        """Work out which objects get a sprite, and where each one sits.
-
-        Returns ``(provider, timelines, offset_for)`` or ``None`` when there is
-        nothing to draw -- no glyph source on this machine, or no object that the
-        plan is actually about. ``None`` is the ordinary case, not an error: the
-        plot then looks exactly as it did before sprites existed.
-        """
+        """Return the provider, timelines, and stable offset function."""
         if object_sprites is False:
             return None
 
-        from railroad.dashboard import _sprites
+        from railroad.plotting import sprites as _sprites
 
         # Lookup only. Auto-enabling must never turn a plot into a download.
         provider = _sprites.get_glyph_provider()
@@ -709,18 +691,13 @@ class _PlottingMixin:
         t_end: float,
         *,
         glyph_objects: Any = None,
-        object_sprites: bool | None = None,
+        object_sprites: bool = True,
     ) -> list[tuple[float, float]]:
-        """Draw each object's glyph at its final position, for the static plot.
-
-        Returns the positions drawn, which the caller must fold into the framing:
-        the axis limits get pinned below, and a sprite outside them is clipped
-        away entirely rather than hanging off the edge.
-        """
+        """Draw final sprites and return their positions for axis framing."""
         import numpy as np
 
-        from railroad.dashboard import _sprites
-        from railroad.dashboard._sprites.artists import make_sprite
+        from railroad.plotting import sprites as _sprites
+        from railroad.plotting.sprites import make_sprite
 
         built = self._build_sprites(
             env_coords, glyph_objects=glyph_objects, object_sprites=object_sprites,
@@ -733,15 +710,13 @@ class _PlottingMixin:
         robot_xy = self.get_entity_positions_at_times(
             times, trajectories=trajectories,
         )
-        fade = max(self._SPRITE_FADE_FRACTION * t_end, 1e-9)
-
         drawn: list[tuple[float, float]] = []
         for name, line in sorted(timelines.items()):
             rgba = provider.glyph_for(name)
             if rgba is None:
                 continue
             position, alpha = _sprites.sample(
-                line, times, robot_xy, fade=fade, offset_for=offset_for(name),
+                line, times, robot_xy, fade=0.0, offset_for=offset_for(name),
             )
             if alpha[0] <= 0.0:
                 continue
@@ -1084,7 +1059,7 @@ class _PlottingMixin:
         duration: float = 10.0,
         figsize: tuple[float, float] = (12.8, 7.2),
         dpi: int = 150,
-        object_sprites: bool | None = None,
+        object_sprites: bool = True,
         glyph_objects: Any = None,
     ) -> None:
         """Save an animated trajectory video/GIF.
@@ -1301,7 +1276,7 @@ class _PlottingMixin:
         sprite_alpha: dict[str, Any] = {}
         sprite_rgba: dict[str, Any] = {}
         if sprite_build is not None:
-            from railroad.dashboard import _sprites
+            from railroad.plotting import sprites as _sprites
 
             _provider, sprite_timelines, sprite_offset_for = sprite_build
             fade = max(self._SPRITE_FADE_FRACTION * t_end, 1e-9)
@@ -1313,6 +1288,9 @@ class _PlottingMixin:
                     line, frame_times, marker_positions,
                     fade=fade, offset_for=sprite_offset_for(name),
                 )
+                alphas[0] = 1.0
+                if line.found_time >= t_end:
+                    alphas[frame_times >= line.found_time] = 1.0
                 sprite_rgba[name] = rgba
                 sprite_xy[name] = positions
                 sprite_alpha[name] = alphas
@@ -1415,7 +1393,7 @@ class _PlottingMixin:
         # Above the trail so they read over it, below the robot marker so a
         # carried object never hides its carrier. Animated, and composited by
         # hand each frame along with the markers.
-        from railroad.dashboard._sprites.artists import make_sprite, update_sprite
+        from railroad.plotting.sprites import make_sprite, update_sprite
 
         sprite_artists: dict[str, tuple[Any, Any]] = {}
         for name, rgba in sprite_rgba.items():
@@ -1748,7 +1726,7 @@ class _PlottingMixin:
         figsize: tuple[float, float],
         *,
         location_coords: dict[str, tuple[float, float]] | None = None,
-        object_sprites: bool | None = None,
+        object_sprites: bool = True,
         glyph_objects: Any = None,
     ) -> Any | None:
         """Create a complete static trajectory figure with sidebar, or ``None``."""
@@ -1821,7 +1799,7 @@ class _PlottingMixin:
         video_fps: int = 60,
         video_dpi: int = 150,
         location_coords: dict[str, tuple[float, float]] | None = None,
-        object_sprites: bool | None = None,
+        object_sprites: bool = True,
         glyph_objects: Any = None,
     ) -> None:
         """Convenience method that handles plot/video output based on CLI flags.

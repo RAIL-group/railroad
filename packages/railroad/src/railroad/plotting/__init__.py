@@ -1,0 +1,1 @@
+"""Shared plotting support."""

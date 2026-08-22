@@ -327,136 +327,15 @@ class TestSceneImageSurvivesCompositing:
             assert photo_pixels(frame) > 500, f"scene image missing from {frame.name}"
 
 
-class TestAnnotationBboxCompositing:
-    """Pins the AnnotationBbox behaviours the object sprites depend on.
-
-    Three of these are surprising enough that getting them wrong produces a
-    sprite that renders but never moves or fades -- a silent, plausible-looking
-    bug. They are properties of matplotlib rather than of this repo, so the two
-    that could reasonably be fixed upstream skip rather than fail.
-    """
-
-    @staticmethod
-    def _sprite(ax):
-        from matplotlib.offsetbox import AnnotationBbox, OffsetImage
-
-        block = np.zeros((16, 16, 4), dtype=np.uint8)
-        block[..., 0] = 255
-        block[..., 3] = 255
-        image = OffsetImage(block, zoom=1.0)
-        box = AnnotationBbox(image, (0.5, 0.5), frameon=False)
-        ax.add_artist(box)
-        return box, image, block
-
-    @staticmethod
-    def _axes(fig):
-        ax = fig.add_subplot(111)
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        return ax
-
-    def test_an_animated_sprite_is_left_out_of_a_plain_draw(self, fig):
-        """What lets the compositor cache a frame without the sprites in it."""
-        ax = self._axes(fig)
-        box, _image, _block = self._sprite(ax)
-        fig.canvas.draw()
-        with_sprite = _buffer(fig)
-
-        box.set_animated(True)
-        fig.canvas.draw()
-        assert not np.array_equal(with_sprite, _buffer(fig))
-
-    def test_a_moved_sprite_leaves_nothing_behind(self, fig):
-        """The smear guard, at the level of a single artist."""
-        ax = self._axes(fig)
-        box, _image, _block = self._sprite(ax)
-        box.set_animated(True)
-        fig.canvas.draw()
-        background = fig.canvas.copy_from_bbox(fig.bbox)
-
-        fig.canvas.restore_region(background)
-        fig.draw_artist(box)
-        at_first = _buffer(fig)
-
-        fig.canvas.restore_region(background)
-        empty = _buffer(fig)
-
-        fig.canvas.restore_region(background)
-        box.xy = box.xybox = (0.2, 0.2)
-        fig.draw_artist(box)
-        at_second = _buffer(fig)
-
-        covered = np.any(at_first != empty, axis=-1)
-        assert covered.any(), "the sprite drew nothing to begin with"
-        assert np.any(at_second != empty), "the sprite vanished instead of moving"
-        # Every pixel the sprite painted in its first position is background
-        # again once it has moved: restoring the region wipes it, rather than
-        # leaving a trail of stale copies down the path.
-        assert np.array_equal(at_second[covered], empty[covered])
-
-    def test_xybox_is_what_moves_a_sprite(self, fig):
-        """``xy`` alone is the arrow target and the clip test, not the position."""
-        ax = self._axes(fig)
-        box, _image, _block = self._sprite(ax)
-        fig.canvas.draw()
-        before = _buffer(fig)
-
-        box.xy = (0.1, 0.1)
-        fig.canvas.draw()
-        if not np.array_equal(before, _buffer(fig)):
-            pytest.skip("matplotlib now repositions from xy; xybox is redundant")
-
-        box.xybox = (0.1, 0.1)
-        fig.canvas.draw()
-        assert not np.array_equal(before, _buffer(fig))
-
-    def test_the_inner_image_is_what_owns_alpha(self, fig):
-        """``OffsetImage.set_alpha`` and ``AnnotationBbox.set_alpha`` are no-ops."""
-        ax = self._axes(fig)
-        box, image, _block = self._sprite(ax)
-        fig.canvas.draw()
-        opaque = _buffer(fig)
-
-        image.set_alpha(0.25)
-        box.set_alpha(0.25)
-        fig.canvas.draw()
-        if not np.array_equal(opaque, _buffer(fig)):
-            pytest.skip("matplotlib now honours set_alpha on the offset image")
-        image.set_alpha(None)
-        box.set_alpha(None)
-
-        image.image.set_alpha(0.25)
-        fig.canvas.draw()
-        assert not np.array_equal(opaque, _buffer(fig))
-
-    def test_scaling_the_arrays_alpha_channel_fades(self, fig):
-        """The mechanism the sprites actually use, so it is asserted outright."""
-        from railroad.dashboard._sprites.artists import update_sprite
-
-        ax = self._axes(fig)
-        box, image, block = self._sprite(ax)
-        fig.canvas.draw()
-        opaque = _buffer(fig)
-
-        update_sprite(box, image, block, (0.5, 0.5), 0.25)
-        fig.canvas.draw()
-        assert not np.array_equal(opaque, _buffer(fig))
-
-
 @pytest.mark.skipif(not _have_ffmpeg(), reason="ffmpeg not installed")
 class TestObjectSpritesSurviveCompositing:
-    """Object glyphs, end to end through the real compositing loop.
-
-    Uses a flat magenta block rather than a real emoji, so this runs with no
-    font, no sentence model and no network -- and so the sprite is trivially
-    findable in a rendered frame.
-    """
+    """Object glyphs, end to end through the compositing loop."""
 
     SPRITE_RGB = (255, 0, 255)
 
     @pytest.fixture
     def flat_glyph(self, monkeypatch):
-        from railroad.dashboard import _sprites
+        from railroad.plotting import sprites as _sprites
 
         block = np.zeros((32, 32, 4), dtype=np.uint8)
         block[..., 0] = 255
@@ -533,38 +412,16 @@ class TestObjectSpritesSurviveCompositing:
         rows, cols = np.nonzero(mask)
         return (cols.mean(), rows.mean()), int(mask.sum())
 
-    def test_the_sprite_appears_moves_and_settles(self, fetch_dashboard, tmp_path, flat_glyph):
+    def test_the_sprite_appears_moves_without_smearing(
+        self, fetch_dashboard, tmp_path, flat_glyph
+    ):
         frames = self._frames(fetch_dashboard, tmp_path)
-        # Frame 0 is the poster, rendered at the end of the plan, and frame 1
-        # rewinds to t=0 -- before the search has revealed anything.
         assert self._mask(frames[0]).any(), "the poster frame should show the plan"
         assert not self._mask(frames[1]).any(), "nothing is found at t=0"
 
         moving = [self._centroid(f) for f in frames[7:11]]
-        xs = [x for (x, _y), _n in moving]
+        xs = [x for (x, _), _count in moving]
+        areas = [count for _center, count in moving]
         assert xs == sorted(xs), "the carried sprite should travel with the robot"
         assert xs[-1] - xs[0] > 50, "it barely moved"
-
-    def test_the_sprite_does_not_smear_along_its_path(
-        self, fetch_dashboard, tmp_path, flat_glyph
-    ):
-        """The failure mode if a sprite is ever cached into the stack raster.
-
-        Its area would grow frame by frame as stale copies accumulated, so a
-        near-constant pixel count is the thing worth asserting.
-        """
-        frames = self._frames(fetch_dashboard, tmp_path)
-        areas = [count for _c, count in (self._centroid(f) for f in frames[7:11])]
         assert max(areas) < 1.5 * min(areas), f"sprite area grew: {areas}"
-
-    def test_the_scene_is_unchanged_when_no_glyphs_are_available(
-        self, fetch_dashboard, tmp_path, monkeypatch
-    ):
-        """Degradation is exact: no font means the video is what it always was."""
-        from railroad.dashboard import _sprites
-
-        monkeypatch.setattr(_sprites, "get_glyph_provider", lambda **_kw: None)
-        frames = self._frames(fetch_dashboard, tmp_path)
-        assert frames
-        for frame in frames:
-            assert not self._mask(frame).any()

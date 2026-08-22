@@ -12,11 +12,3 @@ def pytest_configure(config):
             from railroad.environment.procthor import ensure_all_resources
             ensure_all_resources()
             (DATA_DIR / ".download_complete").touch()
-        # The glyph assets are not part of the procthor extra, so they are
-        # fetched even where that is unavailable. Tests never download; this
-        # warms the cache once, in the controller, before any worker looks.
-        from railroad.dashboard._sprites.resources import (
-            ensure_emoji_font, ensure_emoji_sbert_model,
-        )
-        ensure_emoji_font()
-        ensure_emoji_sbert_model()

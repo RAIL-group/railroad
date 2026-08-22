@@ -4,7 +4,8 @@ This module provides integration with ProcTHOR 3D indoor environments.
 Requires optional dependencies: pip install railroad[procthor]
 
 Resources are automatically downloaded on first import when dependencies are
-available. Set PROCTHOR_AUTO_DOWNLOAD=0 to disable auto-download.
+available. Set PROCTHOR_AUTO_DOWNLOAD=0 to disable auto-download, or
+RAILROAD_OBJECT_SPRITES=0 to skip the plotting font and matching model.
 """
 
 import os
