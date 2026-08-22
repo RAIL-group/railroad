@@ -1,4 +1,9 @@
-"""Shared plan fixtures for the sprite tests."""
+"""Shared plan fixtures for the sprite tests.
+
+At the tests root rather than under ``dashboard/`` because the compositing
+suite in ``test_video_compositing.py`` drives the same plan, and a conftest one
+directory down is invisible to it.
+"""
 
 import pytest
 
