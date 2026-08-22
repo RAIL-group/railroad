@@ -36,7 +36,11 @@ class _FakeDashboard:
             raise RuntimeError("render blew up")
 
 
-def _make_task(fn, timeout=1.0):
+def _make_task(fn, timeout=0.1):
+    # Sub-second on purpose: it keeps the two timeout tests fast *and* pins the
+    # setitimer fix. Under the old signal.alarm(int(timeout)) this rounded to
+    # alarm(0), which cancels the alarm -- the sleeps below would run to
+    # completion and report SUCCESS.
     return Task(
         id="t::case_0_0",
         benchmark_name="t::case",
@@ -96,7 +100,7 @@ def test_timeout_logs_captured_partial_result():
     def slow_bench(case: BenchmarkCase):
         dash = _FakeDashboard()
         with capture_timeout_log(case, dash):
-            time.sleep(5)  # exceeds the 1s timeout
+            time.sleep(2)  # exceeds the timeout
         return {"success": True, "log_html": "<full/>"}
 
     task = _execute_task_worker(_make_task(slow_bench))
@@ -109,7 +113,7 @@ def test_timeout_without_capture_has_no_result():
     """Without capture_timeout_log, a timeout still reports TIMEOUT, no result."""
 
     def slow_bench(case: BenchmarkCase):
-        time.sleep(5)
+        time.sleep(2)
         return {"success": True}
 
     task = _execute_task_worker(_make_task(slow_bench))

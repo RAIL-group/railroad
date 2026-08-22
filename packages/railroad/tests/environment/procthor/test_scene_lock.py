@@ -52,8 +52,14 @@ def _intervals(log: Path) -> list[tuple[float, float]]:
     return spans
 
 
+@pytest.mark.slow
 def test_lock_is_exclusive_across_processes(tmp_path):
-    """The second process must wait for the first, not run alongside it."""
+    """The second process must wait for the first, not run alongside it.
+
+    Marked slow rather than shortened: the 1.0s hold has to outlast the second
+    process's spawn, or the first would be done before the second ever reached
+    the lock and ``b_start >= a_end`` would hold vacuously.
+    """
     lock, log = tmp_path / "lock", tmp_path / "log"
     ctx = mp.get_context("spawn")
 
@@ -76,18 +82,28 @@ def test_lock_is_exclusive_across_processes(tmp_path):
     assert b_end >= b_start
 
 
-def test_timeout_fails_open_rather_than_blocking_a_run(tmp_path):
+def test_timeout_fails_open_rather_than_blocking_a_run(tmp_path, monkeypatch):
     """A lock we cannot take should slow things down, never stop them."""
     lock, log = tmp_path / "lock", tmp_path / "log"
     ctx = mp.get_context("spawn")
-    holder = ctx.Process(target=_hold, args=(str(lock), str(log), 3.0))
+    holder = ctx.Process(target=_hold, args=(str(lock), str(log), 0.6))
     holder.start()
     _wait_for(log, "enter")
 
+    # Without this the retry loop sleeps POLL_SECONDS (1.0) before rechecking
+    # the deadline, so *every* timeout below a second still costs a second.
+    monkeypatch.setattr(
+        "railroad.environment.procthor._scene_lock.POLL_SECONDS", 0.01,
+    )
     began = time.monotonic()
-    with scene_generation_lock(timeout=0.5, path=lock) as held:
+    with scene_generation_lock(timeout=0.2, path=lock) as held:
         assert held is False
-    assert time.monotonic() - began < 3.0, "should have given up, not waited it out"
+    elapsed = time.monotonic() - began
+    # Upper bound: it gave up rather than waiting the holder out. Lower bound:
+    # it gave up *because of the timeout* -- a lock that failed open instantly
+    # (unwritable path, unsupported filesystem) also returns False, and without
+    # this the test could not tell the two apart.
+    assert 0.2 <= elapsed < 0.6, f"expected a ~0.2s give-up, got {elapsed:.2f}s"
     holder.join(timeout=30)
 
 

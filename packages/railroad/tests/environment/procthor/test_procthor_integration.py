@@ -1,5 +1,8 @@
 """Integration tests for ProcTHOR end-to-end planning with MCTS.
 
+Named for what they assert. They were `test_visualization.py`, but nothing here
+renders by default or asserts anything about an image.
+
 Each test drives a full plan/act loop on a real ProcTHOR scene and asserts the
 goal is reached — that assertion is what these tests are for.
 
@@ -46,14 +49,29 @@ def _maybe_render(dashboard: PlannerDashboard, filename: str) -> None:
     dashboard.show_plots(save_plot=str(figpath))
 
 
-@pytest.fixture
-def scene():
-    """Create ProcTHOR scene for tests."""
+@pytest.fixture(autouse=True)
+def _deterministic_rng():
+    """Re-seed the global RNG per test.
+
+    Split out of the `scene` fixture when that became module-scoped: sharing
+    the scene must not also mean tests 2 and 3 inherit whatever RNG position
+    test 1 left behind.
+    """
     random.seed(SEED)
+
+
+@pytest.fixture(scope="module")
+def scene():
+    """The ProcTHOR scene these tests read from.
+
+    Module-scoped: building it costs ~0.8s and all three tests only *read*
+    it (location names and object placements) -- each test constructs its own
+    environment from `seed=` rather than from this object.
+    """
     return ProcTHORScene(seed=SEED, resolution=0.05)
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def target_objects(scene):
     """Select two objects from the scene that have known locations."""
     # Pick objects that actually exist in scene.object_locations
@@ -73,7 +91,7 @@ def target_objects(scene):
     return objects_with_locations[:2]
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def target_locations(scene, target_objects):
     """Select target locations for placing objects (different from where they are)."""
     # Find where objects currently are
@@ -96,7 +114,7 @@ def target_locations(scene, target_objects):
 
 @pytest.mark.slow
 @pytest.mark.timeout(120)
-def test_single_robot_plotting(scene, target_objects, target_locations):
+def test_single_robot_pick_and_place(scene, target_objects, target_locations):
     """Test visualization for single robot pick-and-place scenario.
 
     Creates a planning scenario where one robot must pick objects and place
@@ -160,7 +178,7 @@ def test_single_robot_plotting(scene, target_objects, target_locations):
             if goal.evaluate(env.state.fluents):
                 break
 
-    _maybe_render(dashboard, f'test_visualization_single_robot_{SEED}.png')
+    _maybe_render(dashboard, f'test_procthor_single_robot_{SEED}.png')
 
     # Verify goal reached
     assert goal.evaluate(env.state.fluents), f"Goal not reached. Final fluents: {env.state.fluents}"
@@ -168,7 +186,7 @@ def test_single_robot_plotting(scene, target_objects, target_locations):
 
 @pytest.mark.slow
 @pytest.mark.timeout(180)
-def test_multi_robot_unknown_plotting(scene, target_objects, target_locations):
+def test_multi_robot_search_then_place(scene, target_objects, target_locations):
     """Test multi-robot planning with unknown object locations.
 
     Two robots search for objects (locations unknown) and move them to targets.
@@ -244,14 +262,14 @@ def test_multi_robot_unknown_plotting(scene, target_objects, target_locations):
             if goal.evaluate(env.state.fluents):
                 break
 
-    _maybe_render(dashboard, f'test_visualization_unknown_multi_robot_{SEED}.png')
+    _maybe_render(dashboard, f'test_procthor_multi_robot_search_{SEED}.png')
 
     assert goal.evaluate(env.state.fluents), f"Goal not reached. Final fluents: {env.state.fluents}"
 
 
 @pytest.mark.slow
 @pytest.mark.timeout(120)
-def test_multi_robot_known_plotting(scene, target_objects, target_locations):
+def test_multi_robot_known_locations_place(scene, target_objects, target_locations):
     """Test multi-robot planning with known object locations.
 
     Two robots know where objects are located and only need to pick/place.
@@ -324,6 +342,6 @@ def test_multi_robot_known_plotting(scene, target_objects, target_locations):
             if goal.evaluate(env.state.fluents):
                 break
 
-    _maybe_render(dashboard, f'test_visualization_known_multi_robot_{SEED}.png')
+    _maybe_render(dashboard, f'test_procthor_multi_robot_known_{SEED}.png')
 
     assert goal.evaluate(env.state.fluents), f"Goal not reached. Final fluents: {env.state.fluents}"

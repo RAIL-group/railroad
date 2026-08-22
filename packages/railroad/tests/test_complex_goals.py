@@ -358,11 +358,13 @@ class TestHouseholdScenarios:
 # Planner integration (smoke tests)
 # -----------------------------
 
-@pytest.mark.slow
+@pytest.mark.stochastic
 class TestPlannerWithGoals:
     """Integration tests for planner + Goal objects.
 
-    These can be stochastic (depending on planner implementation). Marked slow.
+    Planner-driven, so the outcome is stochastic -- but the whole file runs in
+    0.03s, so `slow` was deselecting real coverage from the fast path for no
+    runtime saving. `stochastic` keeps the property selectable.
     """
 
     @pytest.mark.parametrize("goal_factory,assertion_msg", [
@@ -641,7 +643,7 @@ class TestFluentOperatorOverloading:
         for child in children:
             assert child.get_type() == GoalType.AND
 
-    @pytest.mark.slow
+    @pytest.mark.stochastic
     def test_operator_with_planner(self):
         objects_by_type = {"robot": ["r1"], "location": ["start", "kitchen", "bedroom"]}
         move_op = construct_move_visited_operator(lambda *args: 5.0)

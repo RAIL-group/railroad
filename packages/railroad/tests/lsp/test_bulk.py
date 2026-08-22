@@ -263,6 +263,7 @@ def test_config_mismatch_warns(tmp_path: Path) -> None:
     assert "prior_prob" in text
 
 
+@pytest.mark.slow
 def test_parallel_workers_smoke(tmp_path: Path) -> None:
     summary = generate_data(
         [0, 1, 2, 3],

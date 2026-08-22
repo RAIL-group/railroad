@@ -109,15 +109,19 @@ def test_planner_mcts_move_visit_multirobot(initial_fluents):
     assert goal.evaluate(state.fluents)
 
 
-@pytest.mark.parametrize(("roomA_prob", "num_robots"), [
-    (1.0, 1),
-    (0.8, 1),
-    (0.6, 1),
-    (1.0, 2),
-    (0.8, 2),
-    (0.6, 2),
+# `attempts` is the sample count behind the >=80% claim below. The roomA_prob=1.0
+# rows are degenerate -- roomA strictly dominates the 0.4 alternatives, so there is
+# no distribution left to sample and 20 draws only cost time. The rows that carry
+# the statistical claim keep their full sample.
+@pytest.mark.parametrize(("roomA_prob", "num_robots", "attempts"), [
+    (1.0, 1, 5),
+    (0.8, 1, 20),
+    (0.6, 1, 20),
+    (1.0, 2, 5),
+    (0.8, 2, 20),
+    (0.6, 2, 20),
 ])
-def test_mcts_search_picks_more_likely_location(roomA_prob, num_robots):
+def test_mcts_search_picks_more_likely_location(roomA_prob, num_robots, attempts):
     # Define objects
     objects_by_type = {
         "robot": ["r1", "r2"],
@@ -160,7 +164,7 @@ def test_mcts_search_picks_more_likely_location(roomA_prob, num_robots):
 
     # Run MCTS N times and collect chosen actions
     selected_actions = []
-    num_planning_attempts = 20
+    num_planning_attempts = attempts
     for _ in range(num_planning_attempts):
         action = mcts(initial_state, goal, max_iterations=10000, c=100, heuristic_multiplier=2)
         selected_actions.append(action)

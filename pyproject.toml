@@ -52,7 +52,11 @@ extra-paths = [
 addopts = "-n auto --dist worksteal --rich --html=data/test_logs/test_report.html --self-contained-html"
 
 markers = [
-    "slow: marks tests as slow to run (deselect with '-m \"not slow\"')"
+    "slow: marks tests as slow to run (deselect with '-m \"not slow\"')",
+    # Distinct from `slow`: these are planner-driven, so their outcome is
+    # sampled rather than fixed. They are cheap, and were previously marked
+    # `slow` -- which kept real coverage off the fast path for no time saved.
+    "stochastic: outcome depends on planner sampling (deselect with '-m \"not stochastic\"')",
 ]
 testpaths = ["packages"]
 norecursedirs = ["packages/environments/scratch"]

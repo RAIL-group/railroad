@@ -218,48 +218,76 @@ buy their time back with **zero** coverage loss, so they are the best value in t
   `DEFAULT_RESOURCES_BASE`, which is the sole reason the fixture exists — `test_emoji_matching.py`
   never touches them. Make it non-autouse and request it explicitly in `test_emoji_glyphs.py`.
 
-- [ ] **B-02 Artificial sleeps in bench timeout tests.** **[R]** (2.0 s → ~0.2 s)
-  `bench/test_parallel_timeout.py:39` arms `timeout=1.0` against `time.sleep(5)`, twice
-  (`:93`, `:108`). `timeout=0.1` / `sleep(1)` asserts the identical behaviour.
+- [x] **B-02 Artificial sleeps in bench timeout tests.** **[V]** (2.0 s → 0.20 s)
+  **Landed a source bug on the way.** The audit said "use `timeout=0.1`" — that would have
+  *broken* the tests, because `bench/parallel.py:108` armed the timeout with
+  `signal.alarm(int(task.timeout))`. `alarm()` takes whole seconds, so any sub-second timeout
+  truncated to `alarm(0)`, which **cancels** the alarm rather than firing it: the timeout was
+  silently disabled. `Task.timeout` is declared `float`. Proved it — a `timeout=0.5` task against
+  `sleep(2)` ran the full 2.0 s and reported `SUCCESS`. Fixed with
+  `signal.setitimer(signal.ITIMER_REAL, task.timeout)` (same signal, accepts floats); the same
+  probe then timed out at 0.50 s. With that fixed, `_make_task` drops to `timeout=0.1` and the
+  sleeps to 2 s — and the two tests now *pin* the fix, since reverting to `alarm(int(...))` makes
+  both report `SUCCESS`. File: 2.05 s → 0.23 s.
 
-- [ ] **B-03 Lock-timeout hold is 6× longer than needed.** **[R]** (3.0 s → ~1.0 s)
-  `test_scene_lock.py:79` holds a lock 3.0 s to prove a 0.5 s acquisition gives up
-  (`assert elapsed < 3.0`). A 1.0 s hold with `timeout=0.2` and `assert elapsed < 0.9` proves the
-  same property. Companion `:55` is intrinsically ~1 s — mark `slow` instead.
+- [x] **B-03 Lock-timeout hold is 6× longer than needed.** **[V]** (3.41 s → 0.99 s)
+  The audit missed the actual cost driver: `_scene_lock.POLL_SECONDS` is **1.0**, and the retry
+  loop sleeps a full poll before rechecking the deadline — so `timeout=0.5` already cost ~1 s, and
+  no sub-second timeout could be cheaper without monkeypatching the poll (as
+  `test_contention_is_still_waited_out` already does). Now: hold 0.6 s, `POLL_SECONDS=0.01`,
+  `timeout=0.2`. Also **strengthened** — the old `assert elapsed < 3.0` equalled the hold, and
+  could not distinguish "timed out" from "failed open instantly" (both return `False`). Now
+  bounded on both sides: `0.2 <= elapsed < 0.6`. File: 5.25 s → 2.83 s.
 
-- [ ] **B-04 ProcTHOR "visualization" tests — keep, retarget, rename.** **[R]** (46.6 s → ~10 s?)
-  `environment/procthor/test_visualization.py:99` (25.6 s), `:171` (18.7 s), `:254` (2.3 s).
-  Despite the name these **never render** — plotting is gated behind `RAILROAD_TEST_PLOTS`
-  (`:35,38-40`), and the file's own docstring concedes the image was never asserted. They are
-  ProcTHOR *integration* smoke tests whose only assertion is `goal.evaluate(...)`. Three changes:
-  make the `scene` fixture (`:50`) module-scoped rather than function-scoped (~2 s of triplicated
-  setup), cut `max_iterations` 4000 → ~1000 (`:148,224,312`), rename the file to match what it
-  tests. If it goes flaky at a lower budget, **that flakiness is itself a finding** — do not just
-  restore the number.
+- [x] **B-04 ProcTHOR "visualization" tests — retarget and rename; iteration cut REJECTED.**
+  **[V]** (58.4 s → 45.7 s)
+  Two of three changes landed. **Module-scoped fixtures**: verified the tests only *read* `scene`
+  (location names, object placements) — each builds its own environment from `seed=`, so sharing
+  is safe. The per-test `random.seed(SEED)` that lived in the fixture was split into a
+  function-scoped autouse fixture so tests 2 and 3 do not inherit test 1's RNG position.
+  Predicted ~2 s; measured **11.4 s**. **Renamed** `test_visualization.py` →
+  `test_procthor_integration.py`, and the three `*_plotting` functions to what they assert.
+  **`max_iterations` 4000 → 1000: rejected, with evidence.** The budget is a *cliff, not a dial* —
+  measured: 4000 → 25.5 s **pass**; 2000 → 95.6 s **fail**; 1000 → 47.2 s **fail**. Under-budgeting
+  is *slower*, because a weaker search runs more plan/act steps against the 50-step loop cap, each
+  re-grounding and re-searching. Restored to 4000. Per-test budgets were considered and declined:
+  `test_multi_robot_search_then_place` does pass at 2000 in 9.2 s vs 18.1 s, but its sibling just
+  demonstrated a stochastic pass/fail cliff at exactly that budget, and it is not on the critical
+  path anyway (the 24 s single-robot test is).
 
-- [ ] **B-05 `replay/test_search_replay_integration.py:103` — keep as-is, no change.** **[R]** (10.9 s)
+- [x] **B-05 `replay/test_search_replay_integration.py:103` — keep as-is, no change.** **[R]** (10.9 s)
   Earns its runtime. Sole end-to-end record → rebuild → replay coverage in the repo; asserts
   recorded truth, outcome resolution, and bound admissibility in deployment units. Already
-  correctly `slow`. Listed only so it is not swept up by a "long test" pass.
+  correctly `slow`. Listed only so it is not swept up by a "long test" pass. **No action taken.**
 
-- [ ] **B-06 `test_planner.py:112` — keep, mark `slow`, trim degenerate rows.** **[R]** (2.7 s)
-  6 params × 20 attempts × 10,000 iterations = 1.2 M MCTS iterations, asserting roomA is chosen
-  ≥80% of the time. The repetition **is** the test (a statistical claim) — do not cut the sample
-  count for the non-degenerate rows. The `roomA_prob=1.0` rows are degenerate and can drop to ~5
-  attempts.
+- [x] **B-06 `test_planner.py:112` — degenerate rows trimmed; `slow` marker REJECTED.** **[C]**
+  **The 2.7 s figure was wrong.** Measured: the whole file is 2.09 s, and this parametrized test is
+  **1.86 s spread over 6 rows**, worst row 0.72 s. `slow` is a per-test marker, so there is no
+  single slow test here to mark — marking it would deselect a genuine statistical claim
+  (roomA chosen ≥80% of samples) to save under 2 s of *parallel* work. Applied only the half that
+  is free: `attempts` is now a parametrize column, and the two degenerate `roomA_prob=1.0` rows
+  (where roomA strictly dominates the 0.4 alternatives, so there is no distribution left to
+  sample) drop 20 → 5 attempts. The rows carrying the claim keep their full sample.
 
-- [ ] **B-07 `test_complex_goals.py:361,644` — remove the `slow` marker.** **[R]** (5 tests)
-  Marked `slow` but run at 800/400 iterations on a 3-location toy and appear nowhere in the top
-  40 durations (<0.1 s). The docstring at `:365-367` says they are marked because they are
-  *stochastic*, not slow — so the marker deselects real coverage from the fast path for no
-  runtime benefit. Either drop it, or add a distinct `stochastic` marker if that property is
-  worth selecting on. Same question for the 6 `railsim` tests, whose `slow` marker stands in for
-  "needs GL" — already handled properly by `railsim/conftest.py:7-8`.
+- [x] **B-07 `test_complex_goals.py` — `slow` → `stochastic`.** **[V]** (5 tests back on the fast path)
+  Confirmed: **all 52 tests in the file run in 0.03 s**, every duration under 5 ms. The marker was
+  deselecting real coverage for literally zero runtime benefit — the docstring itself said they
+  were marked because they are *stochastic*, not slow. Introduced a registered `stochastic` marker
+  so the property stays selectable (`-m 'not stochastic'`) without costing the fast path.
 
-- [ ] **B-08 Mark the remaining unmarked >1 s tests `slow`.** **[R]**
-  `lsp/test_bulk.py:266` (2.2 s, real `ProcessPoolExecutor` — also the one test that fails under
-  a sandbox, so a marker gives a clean escape hatch), `lsp/test_train.py:66` (1.3 s) and `:84`
-  (0.6 s, real torch training loops), `test_wait.py:79` (1.1 s), `test_scene_lock.py:55` (1.1 s).
+- [x] **B-08 Mark the remaining unmarked >1 s tests `slow`.** **[C]** (2 of 5, not 5)
+  Re-measured; the list was overstated. Actually over 1 s: `lsp/test_bulk.py::test_parallel_workers_smoke`
+  (1.40 s, not 2.2 s — real `ProcessPoolExecutor`, and the one test that fails under a sandbox, so
+  the marker doubles as a clean escape hatch) and
+  `test_wait.py::test_planner_mcts_move_visit_wait_multirobot[three robots]` (1.31 s). **Not
+  marked**, because they are not slow: `lsp/test_train.py::test_train_network_custom_filename`
+  (0.72 s, reported as 1.3 s) and `::test_train_network` (0.28 s). `test_scene_lock.py:55` was
+  marked under B-03 — its 1.0 s hold is a real synchronisation margin (it must outlast the second
+  process's spawn, or `b_start >= a_end` holds vacuously), so it is marked rather than shortened.
+
+**Tranche B result:** full suite **56.8 s → 52.9 s**, fast path **12.9 s → 11.5 s**, counts
+unchanged at 764 passed / 1 skipped / 1 xfailed. One source bug fixed (`setitimer`), one
+assertion strengthened, one proposed change rejected by measurement.
 
 ---
 
