@@ -3,6 +3,9 @@
 At the tests root rather than under ``dashboard/`` because the compositing
 suite in ``test_video_compositing.py`` drives the same plan, and a conftest one
 directory down is invisible to it.
+
+Environment construction helpers live in ``env_helpers.py`` next door, so that
+static tooling can resolve them by an unambiguous module name.
 """
 
 import pytest

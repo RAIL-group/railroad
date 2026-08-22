@@ -39,6 +39,8 @@ from railroad.replay import (
     run_replay,
 )
 
+from env_helpers import env_with_operators
+
 pytestmark = pytest.mark.slow
 
 SEED = 1089
@@ -116,7 +118,7 @@ def test_procthor_object_search_replay_end_to_end() -> None:
 
     # --- Deployment: informed (decisive) policy finds the target. ---
     env_ref: list = [None]
-    dep_env = UnknownSpaceEnvironment(
+    dep_env = env_with_operators(UnknownSpaceEnvironment,
         operators=_operators(
             env_ref, lambda r, loc, o: 1.0 if o in true_obj_locs.get(loc, set()) else 0.0
         ),

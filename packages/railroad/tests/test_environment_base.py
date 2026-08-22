@@ -6,13 +6,12 @@ from railroad.core import Effect, Operator
 from railroad.environment.environment import Environment
 
 
-class MinimalEnvironment(Environment):
-    """Minimal concrete implementation for testing base class."""
+class _MinimalBody:
+    """Abstract-method bodies shared by the two minimal environments below."""
 
-    def __init__(self, state: State, operators: List[Operator], fluents: Set[F]):
-        self._fluents_set = fluents
-        self._objects = {"robot": {"robot1"}, "location": {"kitchen", "bedroom"}}
-        super().__init__(state=state, operators=operators)
+    # Set by each subclass's __init__ before super().__init__ runs.
+    _fluents_set: Set[F]
+    _objects: Dict[str, Set[str]]
 
     @property
     def fluents(self) -> Set[F]:
@@ -46,6 +45,55 @@ class MinimalEnvironment(Environment):
 
     def resolve_probabilistic_effect(self, effect, current_fluents):
         return [effect], current_fluents
+
+
+class MinimalEnvironment(_MinimalBody, Environment):
+    """Minimal concrete implementation for testing base class."""
+
+    def __init__(self, state: State, operators: List[Operator], fluents: Set[F]):
+        self._fluents_set = fluents
+        self._objects = {"robot": {"robot1"}, "location": {"kitchen", "bedroom"}}
+        self._operators_to_define = list(operators)
+        super().__init__(state=state)
+
+    def define_operators(self) -> List[Operator]:
+        return self._operators_to_define
+
+
+class LegacyKwargEnvironment(_MinimalBody, Environment):
+    """Resolves operators through the deprecated ``operators=`` kwarg.
+
+    Kept deliberately: the kwarg is still supported, so something has to pin
+    that it works and that it warns. Everything else in this file goes through
+    ``define_operators()``.
+    """
+
+    def __init__(self, state: State, operators: List[Operator], fluents: Set[F]):
+        self._fluents_set = fluents
+        self._objects = {"robot": {"robot1"}, "location": {"kitchen", "bedroom"}}
+        super().__init__(state=state, operators=operators)
+
+
+def test_deprecated_operators_kwarg_still_resolves_and_warns():
+    """The deprecated path works, warns, and blames the caller -- not the library."""
+    fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
+    move_op = Operator(
+        name="move",
+        parameters=[("?robot", "robot"), ("?from", "location"), ("?to", "location")],
+        preconditions=[F("at ?robot ?from"), F("free ?robot")],
+        effects=[Effect(time=5.0, resulting_fluents={F("at ?robot ?to")})],
+    )
+
+    with pytest.warns(DeprecationWarning, match="Prefer overriding") as recorded:
+        env = LegacyKwargEnvironment(
+            state=State(0.0, fluents, []), operators=[move_op], fluents=fluents
+        )
+
+    # The operators still take effect...
+    assert "move robot1 kitchen bedroom" in [a.name for a in env.get_actions()]
+    # ...and the warning points at this file, not at environment.py. A fixed
+    # stacklevel used to name the library for every caller.
+    assert recorded[0].filename == __file__
 
 
 def test_environment_state_assembly():

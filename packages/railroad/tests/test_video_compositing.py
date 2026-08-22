@@ -12,6 +12,8 @@ import pytest
 
 from railroad.navigation.plotting import UNTRAVERSABLE_SHADE
 
+from env_helpers import env_with_operators
+
 matplotlib = pytest.importorskip("matplotlib")
 matplotlib.use("Agg")
 
@@ -199,7 +201,7 @@ class TestSaveVideoEndToEnd:
         from railroad.environment import ObjectSearchEnvironment
 
         move_op = operators.construct_move_operator_blocking(lambda r, a, b: 10.0)
-        env = ObjectSearchEnvironment(
+        env = env_with_operators(ObjectSearchEnvironment,
             state=State(0.0, {F("at r1 A"), F("free r1")}, []),
             objects_by_type={"robot": {"r1"}, "location": {"A", "B"}},
             operators=[move_op],
@@ -268,7 +270,7 @@ class TestSceneImageSurvivesCompositing:
                 return TopDownView(image=image, min_x=-20.0, max_x=39.0,
                                    min_y=-20.0, max_y=39.0)
 
-        env = ObjectSearchEnvironment(
+        env = env_with_operators(ObjectSearchEnvironment,
             state=State(0.0, {F("at r1 A"), F("free r1")}, []),
             objects_by_type={"robot": {"r1"}, "location": {"A", "B"}},
             operators=[operators.construct_move_operator_blocking(lambda r, a, b: 10.0)],

@@ -13,6 +13,7 @@ from railroad.core import (
     ground_operators,
 )
 
+
 def _caller_stacklevel() -> int:
     """`stacklevel` naming the code that passed the deprecated kwarg.
 
@@ -98,7 +99,7 @@ class Environment(ABC):
                 DeprecationWarning,
                 stacklevel=_caller_stacklevel(),
             )
-        self._operators = self._resolve_operators(operators, _from_init=True)
+        self._operators = self._resolve_operators(operators)
         self._time: float = state.time
         self._active_skills: List[ActiveSkill] = []
 
@@ -127,21 +128,8 @@ class Environment(ABC):
         """Optional operator factory hook for subclasses."""
         return None
 
-    def _resolve_operators(
-        self,
-        operators: List[Operator] | None,
-        *,
-        _from_init: bool = False,
-    ) -> List[Operator]:
+    def _resolve_operators(self, operators: List[Operator] | None) -> List[Operator]:
         """Resolve operators from explicit input or define_operators hook."""
-        if not _from_init:
-            warnings.warn(
-                "Environment._resolve_operators() is deprecated and will be "
-                "removed in a future release. Prefer overriding "
-                "define_operators().",
-                DeprecationWarning,
-                stacklevel=_caller_stacklevel(),
-            )
         has_custom_define_operators = type(self).define_operators is not Environment.define_operators
 
         if operators is not None:

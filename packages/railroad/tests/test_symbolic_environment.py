@@ -5,6 +5,8 @@ from railroad._bindings import Fluent as F, GroundedEffect, State
 from railroad.core import Effect, Operator
 from railroad.environment import LocationRegistry, SymbolicEnvironment
 
+from env_helpers import env_with_operators
+
 
 # =============================================================================
 # Construction Tests
@@ -25,7 +27,7 @@ def test_symbolic_environment_construction():
         ]
     )
 
-    env = SymbolicEnvironment(
+    env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, initial_fluents, []),
         objects_by_type={"robot": {"robot1"}, "location": {"kitchen", "bedroom"}},
         operators=[move_op],
@@ -56,7 +58,7 @@ def test_symbolic_environment_act():
         ]
     )
 
-    env = SymbolicEnvironment(
+    env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, initial_fluents, []),
         objects_by_type={"robot": {"robot1"}, "location": {"kitchen", "bedroom"}},
         operators=[move_op],
@@ -105,7 +107,7 @@ def test_symbolic_environment_multi_robot_interrupt():
         ]
     )
 
-    env = SymbolicEnvironment(
+    env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, initial_fluents, []),
         objects_by_type={"robot": {"robot1", "robot2"}, "location": {"kitchen", "bedroom", "living_room"}},
         operators=[move_op, wait_op],
@@ -144,7 +146,7 @@ def test_symbolic_environment_multi_robot_interrupt():
 def test_symbolic_environment_apply_effect():
     """Test applying effects modifies fluents."""
     fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
-    env = SymbolicEnvironment(
+    env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, fluents, []),
         objects_by_type={},
         operators=[],
@@ -164,7 +166,7 @@ def test_symbolic_environment_apply_effect():
 def test_symbolic_environment_apply_effect_add():
     """Test applying effects that add fluents."""
     fluents = {F("at", "robot1", "kitchen")}
-    env = SymbolicEnvironment(
+    env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, fluents, []),
         objects_by_type={},
         operators=[],
@@ -183,7 +185,7 @@ def test_symbolic_environment_apply_effect_add():
 
 def test_symbolic_environment_apply_effect_deletes_before_adds():
     """An effect that deletes and adds the same fluent leaves it present."""
-    env = SymbolicEnvironment(
+    env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, {F("at", "robot1", "kitchen")}, []),
         objects_by_type={},
         operators=[],
@@ -203,7 +205,7 @@ def test_symbolic_environment_apply_effect_deletes_before_adds():
 
 def test_symbolic_environment_apply_effect_conditional():
     """Conditional branches fire iff their conditions hold pre-effect."""
-    env = SymbolicEnvironment(
+    env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, {F("in", "doc")}, []),
         objects_by_type={},
         operators=[],
@@ -256,7 +258,7 @@ def test_symbolic_environment_act_conditional_effects():
             ),
         ],
     )
-    env = SymbolicEnvironment(
+    env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, {
             F("free briefcase"), F("at briefcase home"),
             F("at doc home"), F("at pen home"), F("in doc"),
@@ -283,7 +285,7 @@ def test_symbolic_environment_create_skill():
     """Test skill creation via factory method."""
     from railroad.environment import SymbolicSkill
 
-    env = SymbolicEnvironment(
+    env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, set(), []),
         objects_by_type={},
         operators=[],
@@ -307,7 +309,7 @@ def test_symbolic_environment_create_move_skill():
     import numpy as np
     from railroad.environment import InterruptibleNavigationMoveSkill, SymbolicSkill
 
-    env = SymbolicEnvironment(
+    env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, set(), []),
         objects_by_type={},
         operators=[],
@@ -337,7 +339,7 @@ def test_symbolic_environment_create_move_skill():
     assert not skill.is_interruptible
 
     # Can use skill_overrides to make moves interruptible
-    env_with_override = SymbolicEnvironment(
+    env_with_override = env_with_operators(SymbolicEnvironment,
         state=State(0.0, set(), []),
         objects_by_type={},
         operators=[],
@@ -356,7 +358,7 @@ def test_symbolic_environment_interruptible_override_requires_location_registry(
     """Env-aware interruptible move skill requires registry-backed pathing."""
     from railroad.environment import InterruptibleNavigationMoveSkill
 
-    env = SymbolicEnvironment(
+    env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, set(), []),
         objects_by_type={},
         operators=[],
@@ -391,7 +393,7 @@ def test_symbolic_environment_create_search_skill():
     from railroad.environment import SymbolicSkill
     from railroad import operators
 
-    env = SymbolicEnvironment(
+    env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, set(), []),
         objects_by_type={"robot": {"r1"}, "location": {"kitchen"}, "object": {"Knife"}},
         operators=[],
@@ -415,7 +417,7 @@ def test_symbolic_environment_create_pick_skill():
     from railroad.environment import SymbolicSkill
     from railroad import operators
 
-    env = SymbolicEnvironment(
+    env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, set(), []),
         objects_by_type={"robot": {"r1"}, "location": {"kitchen"}, "object": {"Knife"}},
         operators=[],
@@ -436,7 +438,7 @@ def test_symbolic_environment_create_place_skill():
     from railroad.environment import SymbolicSkill
     from railroad import operators
 
-    env = SymbolicEnvironment(
+    env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, set(), []),
         objects_by_type={"robot": {"r1"}, "location": {"bedroom"}, "object": {"Knife"}},
         operators=[],
@@ -457,7 +459,7 @@ def test_symbolic_environment_create_place_skill():
 
 def test_symbolic_environment_no_special_fluent_names():
     """The generic base gives no fluent name special meaning (no revelation)."""
-    env = SymbolicEnvironment(
+    env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, set(), []),
         objects_by_type={},
         operators=[],
@@ -481,7 +483,7 @@ def test_symbolic_environment_no_action_name_filtering():
             Effect(time=0.0, resulting_fluents={~F("at", "?robot", "?from"), F("at", "?robot", "?to")}),
         ],
     )
-    env = SymbolicEnvironment(
+    env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, {F("at", "robot1", "kitchen"), F("free", "robot1")}, []),
         objects_by_type={"robot": {"robot1"}, "location": {"kitchen", "bedroom"}},
         operators=[move_op],
@@ -493,7 +495,7 @@ def test_symbolic_environment_no_action_name_filtering():
 def test_symbolic_environment_seeded_probabilistic_sampling():
     """Probabilistic branches sample from the env's seeded RNG, reproducibly."""
     def make_env(seed):
-        return SymbolicEnvironment(
+        return env_with_operators(SymbolicEnvironment,
             state=State(0.0, set(), []),
             objects_by_type={},
             operators=[],
@@ -530,7 +532,7 @@ def test_grounding_cache_regrounds_on_universe_change():
     from railroad import operators
 
     pick_op = operators.construct_pick_operator_blocking(pick_time=2.0)
-    env = ObjectSearchEnvironment(
+    env = env_with_operators(ObjectSearchEnvironment,
         state=State(0.0, {F("at r1 kitchen"), F("free r1")}, []),
         objects_by_type={"robot": {"r1"}, "location": {"kitchen"}, "object": set()},
         operators=[pick_op],
@@ -574,7 +576,7 @@ def test_action_filter_sees_live_state_on_a_grounding_cache_hit():
                 return False
             return action.name.split()[-1] not in self.blocked
 
-    env = BlockingEnvironment(
+    env = env_with_operators(BlockingEnvironment,
         state=State(0.0, {F("at r1 kitchen"), F("free r1")}, []),
         objects_by_type={"robot": {"r1"}, "location": {"kitchen", "hall", "office"}},
         operators=[move_op],
@@ -615,7 +617,7 @@ def test_environment_static_preconditions_end_to_end():
             Effect(time=2.0, resulting_fluents={F("free ?r"), F("at ?r ?to")}),
         ],
     )
-    env = SymbolicEnvironment(
+    env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, {
             F("at r1 kitchen"), F("free r1"),
             F("connected kitchen hall"), F("connected hall office"),
@@ -674,7 +676,7 @@ def test_initial_upcoming_effects_keep_their_branches():
         name="disarm", parameters=[], preconditions=[F("armed")],
         effects=[Effect(time=1.0, resulting_fluents={~F("armed")})],
     )
-    env = SymbolicEnvironment(
+    env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, {F("free r1"), F("armed")}, [(2.0, effect)]),
         objects_by_type={"robot": {"r1"}},
         operators=[wait, disarm],
@@ -713,7 +715,7 @@ def test_grounding_keeps_facts_read_by_queued_effect_conditions():
             Effect(time=3.0, resulting_fluents={F("free ?r")}),
         ],
     )
-    env = SymbolicEnvironment(
+    env = env_with_operators(SymbolicEnvironment,
         state=State(0.0, {F("free r1"), F("armed")}, [(2.0, effect)]),
         objects_by_type={"robot": {"r1"}},
         operators=[wait],
