@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from railroad.core import Fluent as F
@@ -9,7 +11,7 @@ def positions(*names):
 
 
 def select(**changes):
-    arguments = {
+    arguments: dict[str, Any] = {
         "goal_fluents": [],
         "actions_taken": [],
         "history": [],
