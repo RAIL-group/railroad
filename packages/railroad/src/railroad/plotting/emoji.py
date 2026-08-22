@@ -41,6 +41,14 @@ un-timed `urlopen` behind a captive portal hangs that import forever.
 """
 FALLBACK_CODEPOINT = 0x1F4E6
 MIN_SIMILARITY = 0.45
+HALO_FRACTION = 0.07
+"""White outline around a glyph, as a fraction of the glyph's own width.
+
+Sprites land on occupancy grids, scene photographs and the trail, and a dark
+glyph on a dark backdrop is invisible. Emoji are transparent in places and
+irregular everywhere, so the outline is the silhouette of the opaque pixels
+grown outwards, not anything drawn around a box.
+"""
 
 OVERRIDES = {
     "baseballbat": 0x26BE,
@@ -298,6 +306,46 @@ def probe_strikes(font_path: Path) -> tuple[int, ...]:
     return _STRIKES[key]
 
 
+def _dilate(alpha: Any, radius: int) -> Any:
+    """*alpha*'s coverage grown outwards by *radius* pixels, in a disc."""
+    import numpy as np
+
+    height, width = alpha.shape
+    padded = np.pad(alpha, radius)
+    grown = np.zeros_like(alpha)
+    for dy in range(-radius, radius + 1):
+        for dx in range(-radius, radius + 1):
+            if dx * dx + dy * dy > radius * radius:
+                continue
+            np.maximum(
+                grown,
+                padded[
+                    radius + dy : radius + dy + height,
+                    radius + dx : radius + dx + width,
+                ],
+                out=grown,
+            )
+    return grown
+
+
+def _outlined(rgba: Any, radius: int) -> Any:
+    """*rgba* composited over an opaque white copy of its dilated silhouette."""
+    import numpy as np
+
+    source = rgba[..., 3].astype(np.float32) / 255.0
+    halo = _dilate(rgba[..., 3], radius).astype(np.float32) / 255.0
+    # Source-over onto white: the halo shows through wherever the glyph is
+    # partly transparent, which is what keeps its antialiased edge smooth.
+    behind = halo * (1.0 - source)
+    alpha = source + behind
+    rgb = (
+        rgba[..., :3].astype(np.float32) * source[..., None] + 255.0 * behind[..., None]
+    ) / np.maximum(alpha[..., None], 1e-6)
+    return (
+        np.dstack([rgb, alpha * 255.0]).round().clip(0.0, 255.0).astype(np.uint8)
+    )
+
+
 def _ink_square(box: tuple[int, int, int, int]) -> tuple[int, int, int, int]:
     """The smallest square around *box*, centred on it.
 
@@ -349,10 +397,22 @@ def rasterize(
     if box is None:
         _RASTERS[key] = None
         return None
-    image = image.crop(_ink_square(box))
-    if image.size != (target_px, target_px):
-        image = image.resize((target_px, target_px), Image.Resampling.LANCZOS)
-    _RASTERS[key] = np.asarray(image, dtype=np.uint8)
+    left, top, right, bottom = _ink_square(box)
+    # Cropped wide enough for the outline to fit, since the ink square by
+    # definition leaves the glyph touching every edge it reaches.
+    outline = max(1, round((right - left) * HALO_FRACTION))
+    image = image.crop(
+        (left - outline, top - outline, right + outline, bottom + outline)
+    )
+    glyph = _outlined(np.asarray(image, dtype=np.uint8), outline)
+    if glyph.shape[0] != target_px:
+        glyph = np.asarray(
+            Image.fromarray(glyph).resize(
+                (target_px, target_px), Image.Resampling.LANCZOS
+            ),
+            dtype=np.uint8,
+        )
+    _RASTERS[key] = glyph
     return _RASTERS[key]
 
 
