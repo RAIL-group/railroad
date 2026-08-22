@@ -32,10 +32,10 @@ def robot_track():
     return track
 
 
-def timeline(history, positions=()):
+def timeline(history, positions: list | None = None):
     return build_timelines(
         history=history,
-        entity_positions={"mug": positions},
+        entity_positions={"mug": positions or []},
         selected=["mug"],
         env_coords=COORDS,
     )["mug"]
