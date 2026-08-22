@@ -12,8 +12,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import weakref
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, TextIO
 
 import numpy as np
 
@@ -99,7 +100,26 @@ class TrainingDataWriter:
         self.num_written = 0
         with open(self.out_dir / "meta.json", "w") as f:
             json.dump(run_metadata or {}, f, indent=2)
-        self._index_file = open(self.out_dir / "index.jsonl", "a")
+        self._index_file: TextIO | None = None
+        self._finalizer: weakref.finalize | None = None
+
+    def _index(self) -> TextIO:
+        """Open ``index.jsonl`` on first write.
+
+        Opening in ``__init__`` leaked a descriptor whenever the caller was
+        abandoned between construction and the ``try`` that closes it --
+        ``run_point_goal_rollout`` builds the writer at rollout.py:233 but only
+        enters its ``try``/``finally`` at :243, and ``bulk.py`` swallows the
+        exception and moves to the next seed. A sweep over failing seeds leaked
+        one descriptor per failure, up to ``EMFILE``.
+
+        A writer that never writes now never opens the file, and one that does
+        is closed by the finalizer even if nobody calls ``close()``.
+        """
+        if self._index_file is None:
+            self._index_file = open(self.out_dir / "index.jsonl", "a")
+            self._finalizer = weakref.finalize(self, self._index_file.close)
+        return self._index_file
 
     def write(self, datum: TrainingDatum) -> Path:
         path = self.out_dir / f"datum_{self.num_written:06d}.npz"
@@ -118,13 +138,19 @@ class TrainingDataWriter:
             k: v for k, v in datum.metadata.items()
             if isinstance(v, (str, int, float, bool)) or v is None
         })
-        self._index_file.write(json.dumps(index_entry) + "\n")
-        self._index_file.flush()
+        index_file = self._index()
+        index_file.write(json.dumps(index_entry) + "\n")
+        index_file.flush()
         self.num_written += 1
         return path
 
     def close(self) -> None:
-        self._index_file.close()
+        # Idempotent, and a no-op for a writer that never opened the index:
+        # a finalize object runs at most once and detaches itself.
+        if self._finalizer is not None:
+            self._finalizer()
+            self._finalizer = None
+        self._index_file = None
 
     def __enter__(self) -> "TrainingDataWriter":
         return self

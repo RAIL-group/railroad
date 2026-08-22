@@ -5,6 +5,10 @@ import pytest
 
 from railroad.plotting import emoji
 
+# This module repoints SYSTEM_FONT_PATHS / DEFAULT_RESOURCES_BASE, so it needs
+# the cache reset around every test. The fixture is not autouse -- see conftest.
+pytestmark = pytest.mark.usefixtures("reset_emoji_caches")
+
 TEDDY_BEAR = 0x1F9F8
 
 

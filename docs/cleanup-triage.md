@@ -24,7 +24,10 @@ Baseline (this machine, `-n auto`, 12 workers): **765 collected / 763 pass, 1 sk
   far more predictable. Cause: the 25.6 s ProcTHOR test gets dealt to a worker late under
   `load`'s up-front slicing, leaving workers idle. Re-verified after the edit: 763 passed, 50.3 s.
 
-- [ ] **X-02 Rich terminal reporter — do not use `pytest-richer`; use `pytest-pretty`.** **[V]**
+- [x] **X-02 Rich terminal reporter — do not use `pytest-richer`; use `pytest-pretty`.** **[V]**
+  **DONE.** `pytest-pretty` added to root `pyproject.toml`. Full suite: 763 passed with all
+  **112 warnings retained** and surfaced in the Results panel. No flag needed — it activates on
+  install; `--html` and `-n auto --dist worksteal` are unaffected.
   `pytest-richer` drops warnings **by design**, not by misconfiguration. From its own source,
   `pytest_richer/terminal.py:759`:
   ```python
@@ -47,7 +50,7 @@ Baseline (this machine, `-n auto`, 12 workers): **765 collected / 763 pass, 1 sk
   **`pytest-pretty` 1.3.0** is the substitute — it *subclasses* `TerminalReporter` rather than
   replacing it, so warning handling is inherited. Verified in this repo under
   `-n 4 --dist worksteal`: 58 passed, all 39 warnings printed **and** promoted to the summary
-  (`24 warnings` / `39 warnings` lines). Adds a dependency, so it needs your yes.
+  (`24 warnings` / `39 warnings` lines).
 
 - [ ] **X-03 Two competing pytest configs.** **[V]**
   Root `pyproject.toml:38` and `packages/railroad/pyproject.toml:71` both define
@@ -62,26 +65,39 @@ Baseline (this machine, `-n auto`, 12 workers): **765 collected / 763 pass, 1 sk
 
 **Two are genuine source bugs surfaced by test warnings. Fix these regardless of the rest.**
 
-- [ ] **A-01 `stacklevel` misattribution — source bug.** **[V]** (~2 lines)
+- [x] **A-01 `stacklevel` misattribution — source bug.** **[V]** (~2 lines)
+  **DONE.** Fixed with a `_caller_stacklevel()` helper in `environment/environment.py` that walks
+  out to the first frame outside the package, rather than a fixed number. A fixed bump could not
+  work: probing confirmed `SymbolicEnvironment` is 3 frames from the caller and
+  `ObjectSearchEnvironment` 4, yet both reported `symbolic.py:216`. Keyed on `__init__` frames rather than package path, so in-package callers (the examples) are named too. Portable to 3.11, so the
+  `requires-python` mismatch below did not need resolving. **Result: the 105 warnings that all
+  named one library line now name 63 distinct real call sites — that is the A-04 worklist.**
+  <details><summary>Original finding</summary>
+
   `environment/environment.py:75` warns with `stacklevel=2`. The call chain is
   user code → `SymbolicEnvironment.__init__` (`symbolic.py:216`) → `Environment.__init__`, so
-  level 2 lands on the *subclass*, not the caller. **All 105 warnings name the same library
-  line**, which is why the report is useless for locating real callers.
-  Note a fixed bump to 3 is not robust either — `ObjectSearchEnvironment` → `SymbolicEnvironment`
-  → `Environment` is one frame deeper. Prefer `skip_file_prefixes=` (3.12+) or warn in the
-  public constructor. **Caveat:** root requires-python is `>=3.12` but
-  `packages/railroad/pyproject.toml:9` is `>=3.11`, so `skip_file_prefixes` needs that floor
-  raised first. **Do this item first** — it turns the other 105 into actionable locations.
+  level 2 lands on the *subclass*, not the caller. All 105 warnings named the same library line,
+  which is why the report was useless for locating real callers.
+  </details>
 
-- [ ] **A-02 File-descriptor leak — source bug.** **[V]** (~5 lines)
-  `lsp/data.py:102` — `TrainingDataWriter.__init__` does
+- [x] **A-02 File-descriptor leak — source bug.** **[V]** (~5 lines)
+  **DONE.** Root cause located precisely: `run_point_goal_rollout` builds the writer at
+  `rollout.py:233` but only enters the `try`/`finally` that closes it at `:243` — anything
+  raising in that gap (including inside `build_point_goal_setup` after `:156`) leaks, and
+  `bulk.py` swallows it and moves to the next seed. Fixed in the writer so *every* caller
+  benefits: `index.jsonl` now opens lazily on first `write()`, with a `weakref.finalize` closing
+  it if the writer is abandoned. Verified under `-W error::ResourceWarning` across four cases
+  (never-wrote / abandoned-after-write / double-close / context manager).
+  **Suite ResourceWarning count: 1 → 0.**
+  <details><summary>Original finding</summary>
+
+  `lsp/data.py:102` — `TrainingDataWriter.__init__` did
   `self._index_file = open(self.out_dir / "index.jsonl", "a")`, released only in
-  `close()`/`__exit__` (`:126-133`). When a rollout raises, `lsp/bulk.py:213` returns a failure
-  `SeedResult` and abandons the writer. A bulk sweep over failing seeds leaks one fd per failure
-  and can reach `EMFILE`. Surfaced as the lone `ResourceWarning` from
+  `close()`/`__exit__`. When a rollout raises, `lsp/bulk.py:213` returns a failure `SeedResult`
+  and abandons the writer, so a bulk sweep over failing seeds leaked one fd per failure and could
+  reach `EMFILE`. Surfaced as the lone `ResourceWarning` from
   `lsp/test_bulk.py:187::test_failed_seed_leaves_no_final_dir_and_retries_cleanly`.
-  Fix: open lazily on first `write()`, or have the rollout path own the writer via `with`.
-  **Do not silence this warning.**
+  </details>
 
 - [ ] **A-03 Dead deprecation branch.** **[V]** (~9 lines)
   `environment/environment.py:115-121` — the `if not _from_init:` warning in
@@ -119,7 +135,17 @@ Baseline (this machine, `-n auto`, 12 workers): **765 collected / 763 pass, 1 sk
 Target: `not slow` 12.9 s → ~4–6 s. Note B-01/B-02/B-03 are pure accidents of test setup — they
 buy their time back with **zero** coverage loss, so they are the best value in the document.
 
-- [ ] **B-01 Emoji SBERT reload — fix the cause, do not mark `slow`.** **[V]** (3.4 s → ~0.05 s)
+- [x] **B-01 Emoji SBERT reload — fix the cause, do not mark `slow`.** **[V]**
+  **DONE, but the estimate below was wrong — correcting it.** I predicted 3.4 s → ~0.05 s. Actual:
+  the `plotting/` directory went **5.30 s → 3.28 s** serial, and the second matching test went
+  **0.60 s → 0.03 s** (20×). But `test_unknown_name_uses_fallback` still costs **3.27 s**, and
+  running that file alone confirms this is a genuine one-time `SentenceTransformer` load paid by
+  whichever matching test runs first — **not** an artifact of the fixture. Only the *repeated*
+  reloads were removable. Cutting the remaining 3.27 s would mean mocking the model, which
+  weakens the test; not recommended. Fixture is now non-autouse, with
+  `pytestmark = pytest.mark.usefixtures("reset_emoji_caches")` scoping it to
+  `test_emoji_glyphs.py` — verified the sole file in that directory that monkeypatches (16
+  occurrences; the other four have zero).
   `plotting/test_emoji_matching.py:40` asserts one string equality but takes 3.4 s, entirely from
   a `SentenceTransformer` load at `plotting/emoji.py:232`. Cause: `plotting/conftest.py:14` is
   **`autouse`**, clearing `_MODELS` before and after *every* test in the directory. Verified by
@@ -282,7 +308,12 @@ real coverage. This is why every **[R]** above is verified before action.
 | | Tests | Lines | Warnings | Full | `not slow` |
 |---|---|---|---|---|---|
 | Baseline | 763 pass | ~18.6k | 112 | 50–69 s | 12.9 s |
+| After X-01/02, A-01/02, B-01 | 763 pass | ~18.6k | 112² | 50–60 s | ~11 s |
 | Target | 763 pass¹ | ~16.3k | 0 | ~35 s | ~5 s |
+
+² Count is unchanged **by design**: A-01 fixed warning *attribution*, not volume — the 105
+`operators=` warnings are retired by A-04, which is still unapproved. The ResourceWarning (A-02)
+is gone, so the residue is 105 `operators=` + 4 `test_environment_base` + 3 `fork()`.
 
 ¹ **Test count is the wrong metric.** Parametrize merges *keep* the passing count while cutting
 lines. Track lines and passing-count separately; any drop in passing-count must map to an
