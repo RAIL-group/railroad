@@ -15,11 +15,6 @@ dependencies = [
     # Testing and formatting (monorepo-level)
     "pytest-html",
     "pytest-xdist>=3.8.0",
-    # Live progress wall for xdist runs. It drops the warnings summary
-    # (pytest_warning_recorded is a no-op: "Currently we are just dropping
-    # warnings"), so conftest.py reinstates one -- warnings stay visible as
-    # warnings. Only activates on a tty; CI keeps the standard reporter.
-    "pytest-richer",
     # ruff has no [tool.ruff] config here, so it runs on defaults; 0.16 widened the
     # default rule set enough to surface ~1400 new findings. Pin until configured.
     "ruff>=0.15.10,<0.16",
@@ -46,10 +41,19 @@ extra-paths = [
 # fixed up-front slice. The default (`load`) can deal the 25s ProcTHOR test to a
 # worker late and leave the rest idle -- measured 50-69s across runs, vs 54+-1s
 # for worksteal. Slightly worse best case, far better worst case.
-# --rich: pytest-richer's progress wall, in place of the per-test scroll that
-# -v produced. Silently inert without a tty (CI), where the standard reporter
-# and its warnings summary take over.
-addopts = "-n auto --dist worksteal --rich --html=data/test_logs/test_report.html --self-contained-html"
+# -v: the per-test scroll, as on main. It was traded away for pytest-richer's
+# progress wall; with that gone, verbose comes back rather than leaving the
+# run reporting nothing but dots.
+#
+# pytest-richer (--rich) was removed, not just disabled: with its progress
+# wall active the run intermittently died during collection with
+# `KeyError: 'conftest'` or pytest's "module is already loaded with path ...
+# not supposed to happen" assertion -- one xdist worker fails and the whole
+# run is interrupted. It unregisters and re-registers reporter plugins at
+# startup, which desyncs pytest's plugin registry from its conftest
+# bookkeeping. Only reproduced on a tty, so CI never saw it while every
+# interactive run hit it. Do not reintroduce it.
+addopts = "-v -n auto --dist worksteal --html=data/test_logs/test_report.html --self-contained-html"
 
 markers = [
     "slow: marks tests as slow to run (deselect with '-m \"not slow\"')",
