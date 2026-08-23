@@ -143,6 +143,11 @@ def _couch_actions():
     Shared by both couch tests. The fixed-plan test below used to hand-write
     six `Action` objects that were exactly these groundings -- two copies of
     one domain in one file, with nothing keeping them in step.
+
+    A list, not a dict keyed by name: two groundings of a symmetric operator
+    can share a name -- `lift-couch-together` is exactly that shape -- and
+    keying by name drops one of them silently, leaving the planner to search a
+    smaller action set while the fixed plan still passes.
     """
     operators = [
         construct_move_operator(
@@ -152,9 +157,18 @@ def _couch_actions():
         construct_move_couch_operator(move_time=3.0),
         construct_put_down_couch_operator(put_down_time=1.0),
     ]
-    return {a.name: a
-            for op in operators
-            for a in op.instantiate(_COUCH_OBJECTS)}
+    return [a for op in operators for a in op.instantiate(_COUCH_OBJECTS)]
+
+
+def _couch_actions_by_name():
+    """Name -> action, for the fixed plan. Loud when a name is ambiguous."""
+    actions = _couch_actions()
+    by_name = {a.name: a for a in actions}
+    assert len(by_name) == len(actions), (
+        "two groundings share a name; the fixed plan below cannot say which "
+        "one it means"
+    )
+    return by_name
 
 
 def _couch_initial_state():
@@ -195,7 +209,7 @@ def test_couch_carry_with_wait():
     planner find it) is that every intermediate *time* is pinned, which is what
     makes the wait and the concurrent execution observable.
     """
-    actions = _couch_actions()
+    actions = _couch_actions_by_name()
     state = _couch_initial_state()
 
     for name, expected_time, present, absent in _COUCH_PLAN:
@@ -365,7 +379,7 @@ def test_couch_carry_with_operators_and_planner():
     """
 
     # Define object types
-    all_actions = list(_couch_actions().values())
+    all_actions = _couch_actions()
 
 
     # Initial state

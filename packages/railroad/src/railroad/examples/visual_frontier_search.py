@@ -149,7 +149,13 @@ def main(
         from railroad.environment.skill import NavigationMoveSkill
         move_skill = NavigationMoveSkill
 
-    env = VisualUnknownSpaceEnvironment(
+    class VisualFrontierSearchEnvironment(VisualUnknownSpaceEnvironment):
+        """Supply this problem's operators the way the API prefers: a subclass."""
+
+        def define_operators(self):
+            return operators
+
+    env = VisualFrontierSearchEnvironment(
         scene=scene,
         state=State(0.0, fluents, []),
         objects_by_type={
@@ -158,7 +164,7 @@ def main(
             "frontier": set(),
             "object": set(),
         },
-        operators=operators,
+        operators=None,  # supplied by define_operators() above
         skill_overrides={'move': move_skill},
         robot_initial_poses=robot_initial_poses,
         location_registry=location_registry,

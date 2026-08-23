@@ -40,6 +40,16 @@ def experiment_dir(tmp_path: Path) -> Path:
     return exp_dir
 
 
+def test_dataset_over_run_that_emitted_nothing(tmp_path: Path) -> None:
+    # A seed that never saw a labeled frontier is a length-0 dataset, not a
+    # "contains neither an index.jsonl nor seed_* directories" error.
+    out_dir = tmp_path / "data"
+    with TrainingDataWriter(out_dir, {"seed": 0}):
+        pass
+
+    assert len(LSPFrontierDataset(out_dir)) == 0
+
+
 def test_dataset_spans_seed_dirs(experiment_dir: Path) -> None:
     dataset = LSPFrontierDataset(experiment_dir)
     assert len(dataset) == 3

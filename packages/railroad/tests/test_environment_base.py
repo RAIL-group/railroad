@@ -1,4 +1,7 @@
 """Tests for base Environment class."""
+import sys
+import warnings
+
 import pytest
 
 from env_helpers import make_move_op
@@ -96,6 +99,53 @@ def test_deprecated_operators_kwarg_still_resolves_and_warns():
     # ...and the warning points at this file, not at environment.py. A fixed
     # stacklevel used to name the library for every caller.
     assert recorded[0].filename == __file__
+
+
+def test_deprecation_blames_a_caller_that_builds_from_its_own_constructor():
+    """The frame walk stops at the caller's ``__init__``, not one frame past it.
+
+    Building an environment inside a constructor is the common wrapper shape.
+    Walking out to "the first frame that is not an ``__init__``" consumes that
+    frame too, blaming whatever called ``Experiment()`` -- so this pins the
+    line number, not just the file: the test above passes either way.
+    """
+    fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
+    move_op = make_move_op()
+
+    class Experiment:
+        def __init__(self):
+            self.expected_lineno = sys._getframe().f_lineno + 1
+            self.env = LegacyKwargEnvironment(
+                state=State(0.0, fluents, []), operators=[move_op], fluents=fluents
+            )
+
+    with pytest.warns(DeprecationWarning, match="Prefer overriding") as recorded:
+        experiment = Experiment()
+
+    assert recorded[0].filename == __file__
+    assert recorded[0].lineno == experiment.expected_lineno
+
+
+def test_resolve_operators_warns_for_direct_callers_but_not_for_init():
+    """The helper is deprecated for downstream callers; ``__init__``'s call is not.
+
+    Kept deliberately: ``define_operators()`` is the intended API, and this
+    warning is how an out-of-tree subclass calling the old helper finds that
+    out. ``_from_init=True`` marks the one call that must stay silent -- no
+    other test here would notice if it started warning.
+    """
+    fluents = {F("at", "robot1", "kitchen"), F("free", "robot1")}
+    move_op = make_move_op()
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        env = MinimalEnvironment(
+            state=State(0.0, fluents, []), operators=[move_op], fluents=fluents
+        )
+    assert [w for w in caught if issubclass(w.category, DeprecationWarning)] == []
+
+    with pytest.warns(DeprecationWarning, match="_resolve_operators"):
+        assert env._resolve_operators(None) == [move_op]
 
 
 def test_environment_state_assembly():

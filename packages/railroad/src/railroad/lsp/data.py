@@ -100,8 +100,15 @@ class TrainingDataWriter:
         self.num_written = 0
         with open(self.out_dir / "meta.json", "w") as f:
             json.dump(run_metadata or {}, f, indent=2)
+        # Created eagerly, opened lazily (see _index): a run that emits no
+        # data must still leave an empty index behind, because that file is
+        # what marks the directory as a finished run -- LSPFrontierDataset
+        # keys on it to tell a data directory from an experiment directory.
+        self._index_path = self.out_dir / "index.jsonl"
+        self._index_path.touch()
         self._index_file: TextIO | None = None
         self._finalizer: weakref.finalize | None = None
+        self._closed = False
 
     def _index(self) -> TextIO:
         """Open ``index.jsonl`` on first write.
@@ -113,15 +120,21 @@ class TrainingDataWriter:
         exception and moves to the next seed. A sweep over failing seeds leaked
         one descriptor per failure, up to ``EMFILE``.
 
-        A writer that never writes now never opens the file, and one that does
-        is closed by the finalizer even if nobody calls ``close()``.
+        Only the *open* is deferred; ``__init__`` creates the file. A writer
+        that never writes never opens it, and one that does is closed by the
+        finalizer even if nobody calls ``close()``.
         """
         if self._index_file is None:
-            self._index_file = open(self.out_dir / "index.jsonl", "a")
+            self._index_file = open(self._index_path, "a")
             self._finalizer = weakref.finalize(self, self._index_file.close)
         return self._index_file
 
     def write(self, datum: TrainingDatum) -> Path:
+        if self._closed:
+            # Without this, _index() would reopen in append mode and extend a
+            # run that was already finalized -- silently, since the caller
+            # asked for a close and got a working writer back.
+            raise ValueError("write() on a closed TrainingDataWriter")
         path = self.out_dir / f"datum_{self.num_written:06d}.npz"
         np.savez_compressed(
             path,
@@ -151,6 +164,7 @@ class TrainingDataWriter:
             self._finalizer()
             self._finalizer = None
         self._index_file = None
+        self._closed = True
 
     def __enter__(self) -> "TrainingDataWriter":
         return self

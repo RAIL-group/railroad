@@ -19,15 +19,41 @@ import pytest
 from railroad.environment.procthor._scene_lock import scene_generation_lock
 
 
-def _hold(lock_str: str, log_str: str, hold_seconds: float) -> None:
+def _log(log_str: str, *fields: object) -> None:
+    with open(log_str, "a") as handle:
+        handle.write(" ".join(str(field) for field in fields) + "\n")
+        handle.flush()
+
+
+def _hold(
+    lock_str: str,
+    log_str: str,
+    tag: str,
+    release_str: str = "",
+    max_hold: float = 10.0,
+) -> None:
+    """Take the lock, then hold it until *release_str* appears on disk.
+
+    Holding until the parent says so -- rather than for a fixed duration --
+    is what keeps these tests honest under ``spawn``: the parent waits for
+    the child to reach the lock instead of guessing how long a fresh
+    interpreter takes to get there. ``max_hold`` is a backstop for a parent
+    that dies, not a timing parameter; no assertion depends on it.
+
+    ``trying`` is logged immediately before the attempt, so the parent can
+    tell "about to contend" from "has not started yet" -- under ``spawn``
+    those are a second or more apart.
+    """
+    release = Path(release_str) if release_str else None
+    _log(log_str, "trying", tag, time.monotonic())
     with scene_generation_lock(path=Path(lock_str)) as held:
-        with open(log_str, "a") as handle:
-            handle.write(f"enter {held} {time.monotonic()}\n")
-            handle.flush()
-        time.sleep(hold_seconds)
-        with open(log_str, "a") as handle:
-            handle.write(f"exit {held} {time.monotonic()}\n")
-            handle.flush()
+        _log(log_str, "enter", tag, held, time.monotonic())
+        deadline = time.monotonic() + max_hold
+        while release is not None and not release.exists():
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.01)
+        _log(log_str, "exit", tag, held, time.monotonic())
 
 
 def _wait_for(log: Path, token: str, timeout: float = 15.0) -> None:
@@ -40,55 +66,79 @@ def _wait_for(log: Path, token: str, timeout: float = 15.0) -> None:
 
 
 def _intervals(log: Path) -> list[tuple[float, float]]:
-    """(enter, exit) pairs in the order they were written."""
-    events = [line.split() for line in log.read_text().splitlines() if line]
-    assert all(held == "True" for _kind, held, _t in events), events
-    stack, spans = [], []
-    for kind, _held, stamp in events:
-        if kind == "enter":
-            stack.append(float(stamp))
-        else:
-            spans.append((stack.pop(), float(stamp)))
-    return spans
+    """(enter, exit) pairs, one per process, earliest first."""
+    enters: dict[str, float] = {}
+    exits: dict[str, float] = {}
+    for fields in (line.split() for line in log.read_text().splitlines() if line):
+        kind, tag = fields[0], fields[1]
+        if kind == "trying":
+            continue
+        held, stamp = fields[2], fields[3]
+        assert held == "True", log.read_text()
+        (enters if kind == "enter" else exits)[tag] = float(stamp)
+    assert enters.keys() == exits.keys(), log.read_text()
+    return sorted((enters[tag], exits[tag]) for tag in enters)
 
 
 @pytest.mark.slow
 def test_lock_is_exclusive_across_processes(tmp_path):
     """The second process must wait for the first, not run alongside it.
 
-    Marked slow rather than shortened: the 1.0s hold has to outlast the second
-    process's spawn, or the first would be done before the second ever reached
-    the lock and ``b_start >= a_end`` would hold vacuously.
+    The first process holds until we release it, and we do not release it
+    until the second has announced it is about to contend -- so the overlap
+    the assertion rules out is one that was actually possible. A fixed hold
+    instead has to outlast the second process's ``spawn`` (measured at over
+    a second on a loaded machine); when it does not, the first is gone
+    before the second reaches the lock and ``b_start >= a_end`` holds
+    vacuously -- a removed lock would still pass.
+
+    Slow because it pays for two interpreter startups, not for a sleep.
     """
     lock, log = tmp_path / "lock", tmp_path / "log"
+    release = tmp_path / "release"
     ctx = mp.get_context("spawn")
 
-    first = ctx.Process(target=_hold, args=(str(lock), str(log), 1.0))
+    first = ctx.Process(
+        target=_hold, args=(str(lock), str(log), "first", str(release)),
+    )
     first.start()
-    _wait_for(log, "enter")
+    _wait_for(log, "enter first")
 
-    second = ctx.Process(target=_hold, args=(str(lock), str(log), 0.0))
+    second = ctx.Process(target=_hold, args=(str(lock), str(log), "second"))
     second.start()
+    _wait_for(log, "trying second")
+    # `trying` is logged on the line before the attempt; give it room to
+    # reach the flock itself while the first is demonstrably still inside.
+    time.sleep(0.2)
+    release.touch()
+
     first.join(timeout=30)
     second.join(timeout=30)
     assert first.exitcode == 0 and second.exitcode == 0
 
     spans = _intervals(log)
     assert len(spans) == 2, log.read_text()
-    (a_start, a_end), (b_start, b_end) = sorted(spans)
+    (a_start, a_end), (b_start, b_end) = spans
     assert b_start >= a_end, (
         f"the two processes overlapped inside the lock: {spans}"
     )
     assert b_end >= b_start
 
 
+@pytest.mark.slow
 def test_timeout_fails_open_rather_than_blocking_a_run(tmp_path, monkeypatch):
-    """A lock we cannot take should slow things down, never stop them."""
+    """A lock we cannot take should slow things down, never stop them.
+
+    Slow for the same reason as the test above: one interpreter startup.
+    """
     lock, log = tmp_path / "lock", tmp_path / "log"
+    release = tmp_path / "release"
     ctx = mp.get_context("spawn")
-    holder = ctx.Process(target=_hold, args=(str(lock), str(log), 0.6))
+    holder = ctx.Process(
+        target=_hold, args=(str(lock), str(log), "holder", str(release)),
+    )
     holder.start()
-    _wait_for(log, "enter")
+    _wait_for(log, "enter holder")
 
     # Without this the retry loop sleeps POLL_SECONDS (1.0) before rechecking
     # the deadline, so *every* timeout below a second still costs a second.
@@ -99,11 +149,16 @@ def test_timeout_fails_open_rather_than_blocking_a_run(tmp_path, monkeypatch):
     with scene_generation_lock(timeout=0.2, path=lock) as held:
         assert held is False
     elapsed = time.monotonic() - began
-    # Upper bound: it gave up rather than waiting the holder out. Lower bound:
-    # it gave up *because of the timeout* -- a lock that failed open instantly
-    # (unwritable path, unsupported filesystem) also returns False, and without
-    # this the test could not tell the two apart.
-    assert 0.2 <= elapsed < 0.6, f"expected a ~0.2s give-up, got {elapsed:.2f}s"
+    release.touch()
+
+    # Lower bound: it gave up *because of the timeout* -- a lock that failed
+    # open instantly (unwritable path, unsupported filesystem) also returns
+    # False, and without this the test could not tell the two apart. Upper
+    # bound: it gave up rather than waiting the holder out. The holder is
+    # still holding at this point -- it waits for `release`, which is only
+    # touched above -- so the bound is not racing a fixed hold, and the slack
+    # between them is all scheduling headroom.
+    assert 0.2 <= elapsed < 5.0, f"expected a ~0.2s give-up, got {elapsed:.2f}s"
     holder.join(timeout=30)
 
 

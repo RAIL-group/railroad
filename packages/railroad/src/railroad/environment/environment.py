@@ -14,7 +14,7 @@ from railroad.core import (
 )
 
 
-def _caller_stacklevel() -> int:
+def _caller_stacklevel(instance: object) -> int:
     """`stacklevel` naming the code that passed the deprecated kwarg.
 
     Deprecated constructor kwargs reach here through a chain of subclass
@@ -22,16 +22,31 @@ def _caller_stacklevel() -> int:
     from the caller, ``ObjectSearchEnvironment`` four -- so any fixed
     ``stacklevel`` names one of our own files instead of the code that needs
     changing. Walk out past the forwarding chain to the first frame that is not
-    a constructor.
+    part of it.
 
-    Keyed on ``__init__`` rather than on "outside the railroad package" so that
+    The chain is exactly the ``__init__`` frames building *this* instance, so
+    that is the test. Stopping at "any frame that is not an ``__init__``"
+    instead walks straight past the caller's own constructor -- and building an
+    environment inside one is the common wrapper shape::
+
+        class Experiment:
+            def __init__(self):
+                self.env = SymbolicEnvironment(state=s, operators=[move_op])
+
+    which would blame whatever called ``Experiment()``.
+
+    Keyed on the instance rather than on "outside the railroad package" so that
     in-package callers are still named: the examples pass ``operators=`` from
     ordinary functions, and a package-path test would skip straight past them
     to the CLI.
     """
     level = 1
     frame = sys._getframe(1)
-    while frame is not None and frame.f_code.co_name == "__init__":
+    while (
+        frame is not None
+        and frame.f_code.co_name == "__init__"
+        and frame.f_locals.get("self") is instance
+    ):
         frame = frame.f_back
         level += 1
     return level
@@ -97,9 +112,9 @@ class Environment(ABC):
                 "will be removed in a future release. Prefer overriding "
                 "define_operators().",
                 DeprecationWarning,
-                stacklevel=_caller_stacklevel(),
+                stacklevel=_caller_stacklevel(self),
             )
-        self._operators = self._resolve_operators(operators)
+        self._operators = self._resolve_operators(operators, _from_init=True)
         self._time: float = state.time
         self._active_skills: List[ActiveSkill] = []
 
@@ -128,8 +143,26 @@ class Environment(ABC):
         """Optional operator factory hook for subclasses."""
         return None
 
-    def _resolve_operators(self, operators: List[Operator] | None) -> List[Operator]:
-        """Resolve operators from explicit input or define_operators hook."""
+    def _resolve_operators(
+        self,
+        operators: List[Operator] | None,
+        *,
+        _from_init: bool = False,
+    ) -> List[Operator]:
+        """Resolve operators from explicit input or define_operators hook.
+
+        Calling this directly is deprecated; override ``define_operators()``
+        instead. ``_from_init`` marks the one call that is not deprecated --
+        ``__init__``'s own -- so the warning reaches downstream callers only.
+        """
+        if not _from_init:
+            warnings.warn(
+                "Environment._resolve_operators() is deprecated and will be "
+                "removed in a future release. Prefer overriding "
+                "define_operators().",
+                DeprecationWarning,
+                stacklevel=2,
+            )
         has_custom_define_operators = type(self).define_operators is not Environment.define_operators
 
         if operators is not None:

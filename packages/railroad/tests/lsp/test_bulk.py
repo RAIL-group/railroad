@@ -202,8 +202,10 @@ def test_failed_seed_leaves_no_final_dir_and_retries_cleanly(
 
     exp_dir = tmp_path / "exp"
     assert not (exp_dir / seed_dir_name(4)).exists()
-    # The partial tmp dir is left behind for diagnosis...
-    assert (exp_dir / ".tmp" / seed_dir_name(4) / "index.jsonl").exists()
+    # The partial tmp dir is left behind for diagnosis, holding the datum the
+    # rollout managed to write before it raised. (Asserting on the index's
+    # *contents*, not its existence: every writer creates the file up front.)
+    assert len(read_index(exp_dir / ".tmp" / seed_dir_name(4))) == 1
 
     # ...and the retry deletes it before writing, so the (append-mode)
     # index has no duplicate lines from the failed attempt.

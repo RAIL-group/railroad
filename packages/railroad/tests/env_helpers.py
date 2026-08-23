@@ -5,10 +5,14 @@ the import: several `conftest.py` files exist in this repo and `ty` binds the
 name to the wrong one.
 """
 
-from typing import Any, List, Sequence, Type, TypeVar, cast
+from typing import TYPE_CHECKING, Any, List, Sequence, Type, TypeVar, cast
 
 from railroad.core import Operator
 from railroad.environment import Environment
+
+if TYPE_CHECKING:
+    from railroad.dashboard import PlannerDashboard
+    from railroad.environment import ObjectSearchEnvironment
 
 E = TypeVar("E", bound=Environment)
 
@@ -59,7 +63,7 @@ def move_env(
     with_no_op: bool = True,
     occupancy_grid: Any = None,
     scene: Any = None,
-) -> Any:
+) -> "ObjectSearchEnvironment":
     """One robot, `locations` to move between, nothing else."""
     from railroad import operators
     from railroad._bindings import State
@@ -86,14 +90,14 @@ def move_env(
 
 
 def move_dashboard(
-    env: Any = None,
+    env: "ObjectSearchEnvironment | None" = None,
     *,
     goal_loc: str = "B",
     trajectory: Any = DEFAULT_TRAJECTORY,
     goal_time: float | None = 10.0,
     actions_taken: Any = None,
     **env_kwargs: Any,
-) -> Any:
+) -> "PlannerDashboard":
     """A non-interactive `PlannerDashboard` over `move_env()`.
 
     `trajectory=None` leaves `_entity_positions` empty, which is the case the

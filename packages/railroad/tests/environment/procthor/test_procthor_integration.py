@@ -67,6 +67,12 @@ def scene():
     Module-scoped: building it costs ~0.8s and all three tests only *read*
     it (location names and object placements) -- each test constructs its own
     environment from `seed=` rather than from this object.
+
+    Worth what it saves, not more: under `--dist worksteal` these three tests
+    can land on three different workers, each of which then builds the scene
+    itself, so the saving is opportunistic rather than guaranteed. Grouping
+    them onto one worker would need `--dist loadfile`, which costs more in
+    whole-suite wall clock than this fixture saves.
     """
     return ProcTHORScene(seed=SEED, resolution=0.05)
 

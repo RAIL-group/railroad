@@ -154,10 +154,16 @@ def main(
 
     # Initialize symbolic environment
     initial_state = State(0.0, initial_fluents, [])
-    env = ObjectSearchEnvironment(
+
+    class HeterogeneousRobotsEnvironment(ObjectSearchEnvironment):
+        """Supply this problem's operators the way the API prefers: a subclass."""
+
+        def define_operators(self):
+            return [no_op, move_op, search_op, pick_op, place_op]
+
+    env = HeterogeneousRobotsEnvironment(
         state=initial_state,
         objects_by_type=objects_by_type,
-        operators=[no_op, move_op, search_op, pick_op, place_op],
         true_object_locations=OBJECTS_AT_LOCATIONS,
         skill_overrides=skill_overrides,
         location_registry=location_registry,

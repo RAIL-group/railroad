@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pytest
 
 from railroad.lsp import (
     FrontierChangeTracker,
@@ -104,6 +105,34 @@ def test_writer_roundtrip(tmp_path) -> None:  # noqa: ANN001
 
     with open(tmp_path / "data" / "meta.json") as f:
         assert json.load(f) == {"seed": 7}
+
+
+def test_write_after_close_raises(tmp_path) -> None:  # noqa: ANN001
+    # A closed writer must not quietly reopen the index in append mode and
+    # extend a run that was already finalized.
+    with TrainingDataWriter(tmp_path / "data", {"seed": 7}) as writer:
+        writer.write(_datum())
+
+    with pytest.raises(ValueError, match="closed"):
+        writer.write(_datum())
+
+    # The rejected write leaves nothing behind -- no orphan npz, no index line.
+    assert writer.num_written == 1
+    assert len(read_index(tmp_path / "data")) == 1
+    assert [p.name for p in sorted((tmp_path / "data").glob("*.npz"))] == [
+        "datum_000000.npz"
+    ]
+
+
+def test_writer_with_no_data_leaves_empty_index(tmp_path) -> None:  # noqa: ANN001
+    # index.jsonl is what marks a finished run, so a rollout that emits no
+    # data must still leave one behind (empty) rather than no file at all.
+    out_dir = tmp_path / "data"
+    with TrainingDataWriter(out_dir, {"seed": 7}):
+        pass
+
+    assert (out_dir / "index.jsonl").exists()
+    assert read_index(out_dir) == []
 
 
 def test_read_index_missing_dir(tmp_path) -> None:  # noqa: ANN001
