@@ -16,6 +16,30 @@ from railroad.core import Fluent as F, get_action_by_name
 from railroad.dashboard import PlannerDashboard
 from railroad.environment import ObjectSearchEnvironment
 
+
+#: Markers this package's tests use, registered here rather than in its own
+#: pyproject. A [tool.pytest.ini_options] table there would make pytest choose
+#: packages/railroad as rootdir for any targeted run -- which drops the
+#: repo-root conftest (and with it the warnings tally) entirely. Registering
+#: from a conftest keeps the markers known when the package is tested
+#: standalone, without touching rootdir either way.
+_MARKERS = {
+    "slow": "marks tests as slow to run (deselect with '-m \"not slow\"')",
+    "stochastic": (
+        "outcome depends on planner sampling "
+        "(deselect with '-m \"not stochastic\"')"
+    ),
+}
+
+
+def pytest_configure(config):
+    """Register the markers the root pyproject declares, if it is not in play."""
+    already = {line.split(":", 1)[0].strip() for line in config.getini("markers")}
+    for name, description in _MARKERS.items():
+        if name not in already:
+            config.addinivalue_line("markers", f"{name}: {description}")
+
+
 PLAN = (
     "search r1 shelf mug",
     "pick r1 shelf mug",

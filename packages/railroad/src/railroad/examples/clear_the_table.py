@@ -91,10 +91,16 @@ def main(
 
     # Initialize symbolic environment with initial state
     initial_state = State(0.0, initial_fluents, [])
-    env = ObjectSearchEnvironment(
+
+    class ClearTheTableEnvironment(ObjectSearchEnvironment):
+        """Supply this problem's operators the way the API prefers: a subclass."""
+
+        def define_operators(self):
+            return [pick_op, place_op, move_op]
+
+    env = ClearTheTableEnvironment(
         state=initial_state,
         objects_by_type=objects_by_type,
-        operators=[pick_op, place_op, move_op],
         true_object_locations=OBJECTS_AT_LOCATIONS,
     )
 

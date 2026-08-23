@@ -8,12 +8,14 @@ degrades to a plain grid when a scene cannot place its image.
 
 import matplotlib
 
-from env_helpers import move_dashboard, move_env
 matplotlib.use("Agg")
 
 import numpy as np
 import pytest
 
+# Below `matplotlib.use` on purpose: env_helpers pulls in railroad.environment,
+# and the backend has to be pinned before anything can reach pyplot.
+from env_helpers import move_dashboard, move_env
 from railroad.environment.types import TopDownView
 from railroad.navigation.constants import UNOBSERVED_VAL
 
