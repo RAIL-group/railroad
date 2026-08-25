@@ -42,6 +42,7 @@ from railroad.environment.procthor.scenegraph import SceneGraph
 NUM_DATUM = 1000
 DATA_GENERATION_SEED = 37
 PROCTHOR_SEED = 201
+REMOVE_DUPLICATES = True
 
 # Concurrent AI2-THOR Controller instances this machine sustains without
 # throughput degrading (see benchmark_thor_concurrency.py: 8 is the
@@ -67,7 +68,9 @@ def main():
     targets = [base + (1 if i < remainder else 0) for i in range(num_workers)]
 
     # get task distribution from alfred tasks
-    env = construct_procthor_kitchen_environment(PROCTHOR_SEED)
+    env = construct_procthor_kitchen_environment(PROCTHOR_SEED, remove_duplicates=REMOVE_DUPLICATES)
+
+    # TODO - add support for task augmentation support
     task_distribution = get_alfred_task_distribution(
         env.scene.objects,
         set(env.scene.locations),
@@ -130,7 +133,6 @@ def _generate_worker_share(
         while True:
             sampled_task_idx = random.randint(0, len(task_distribution[0]))
             # sample with replacement
-            # TODO - verify this works how I think it does
             if sampled_task_idx > 0:
                 temp = data.search_problem.interrupting_task_dist[0][sampled_task_idx-1]
                 data.search_problem.interrupting_task_dist[0][sampled_task_idx-1] = (
@@ -273,7 +275,8 @@ def get_randomized_procthor_data(
                 procthor_seed,
                 start_seed
             ),
-            ExperimentMode.MYOPIC
+            ExperimentMode.MYOPIC,
+            REMOVE_DUPLICATES
         )
 
         if (

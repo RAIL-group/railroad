@@ -158,7 +158,7 @@ def astar_search(
     search_params: PlannerConfig,
     num_steps: int = 20000,
     print_trace: bool = False
-) -> tuple[list[Action], float, bool, SceneGraph | None]:
+) -> tuple[list[Action], float, bool, SceneGraph | None]:#, State]:
     """
     Astar algorithm implementation.
     """
@@ -199,7 +199,7 @@ def astar_search(
 
             # check for goal condition being met
             if interruption_problem.goal.evaluate(curr_state.fluents):
-                return expand.plan, expand.cost, True, expand.scene_graph
+                return expand.plan, expand.cost, True, expand.scene_graph#, curr_state
 
             # check if we've already expanded this state
             if curr_state.fluents in expanded:
@@ -238,9 +238,9 @@ def astar_search(
 
     # goal not reached, get best trajectory found
     best_found, _, _ = heapq.heappop(frontier)
-    return best_found.plan, best_found.cost, False, best_found.scene_graph
+    return best_found.plan, best_found.cost, False, best_found.scene_graph#, best_found.state_history[-1]
 
-
+# TODO - modify to handle the augmentation case
 def compute_interruption_value(
     state: State,
     actions: list[Action],
@@ -271,6 +271,7 @@ def compute_interruption_value(
             search_problem,
             search_params
         )
+
         if not success:
             return -1
         expected_cost += (prob * cost)

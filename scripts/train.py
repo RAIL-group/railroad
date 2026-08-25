@@ -26,7 +26,7 @@ HYPERPARAMETERS = {
 }
 
 # output directories specifications
-EXPERIMENT_NAME = "experiment8_val"
+EXPERIMENT_NAME = "experiment10_val"
 LOG_DIRECTORY = DEFAULT_RESOURCES_BASE / f"run_logs/{EXPERIMENT_NAME}"
 OUTPUT_MODEL_DIRECTORY = DEFAULT_RESOURCES_BASE / "models"
 
@@ -119,9 +119,6 @@ def training_loop(
 
         print(f"Epoch {epoch:05d} | avg train loss {train_loss:.4f}| avg val loss {val_loss:.4f}")
 
-        # TODO - later on it might be better to only evaluate on the validation loss
-        # for right now, overfitting is chill
-        # if train_loss < lowest_training_loss:
         if val_loss < lowest_validation_loss:
             lowest_training_loss = train_loss
             lowest_validation_loss = val_loss

@@ -23,7 +23,10 @@ class ProcTHORScene:
         print(scene.objects)    # All objects in scene
     """
 
-    def __init__(self, seed: int, object_seed: int | None = None, resolution: float = 0.05) -> None:
+    def __init__(
+        self, seed: int, object_seed: int | None = None,
+        resolution: float = 0.05, remove_duplicates: bool = False
+    ) -> None:
         """Initialize ProcTHOR scene.
 
         Args:
@@ -31,7 +34,9 @@ class ProcTHORScene:
             object_seed: Random seed for randomizing the locations of the objects within the scene
             resolution: Grid resolution in meters
         """
-        self._thor = ThorInterface(seed=seed, object_seed=object_seed, resolution=resolution)
+        self._thor = ThorInterface(
+            seed=seed, object_seed=object_seed, resolution=resolution, remove_duplicates=remove_duplicates
+        )
 
         # Build location registry
         self._locations = self._build_locations()

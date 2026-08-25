@@ -51,3 +51,68 @@ def test_thor_interface_target_objects(thor_interface):
     assert 'idxs' in info
     assert 'type' in info
     assert 'container_idxs' in info
+
+
+def _bare_thor_interface() -> ThorInterface:
+    """Construct a ThorInterface without running __init__, so
+    _deduplicate_containers can be tested on synthetic containers without
+    loading real scene data or spinning up a Controller."""
+    return ThorInterface.__new__(ThorInterface)
+
+
+def test_deduplicate_containers_keeps_most_populated_and_dedupes_children():
+    """Duplicate containers of the same type should collapse to the instance
+    with the most children; child objects of a type already kept by an
+    earlier-processed container should be dropped, not just deduped within
+    their own container."""
+    ti = _bare_thor_interface()
+    ti.containers = [
+        {"id": "CounterTop|1", "children": [{"id": "Knife|1"}]},
+        {"id": "Fridge|1", "children": [{"id": "Knife|2"}, {"id": "Pan|1"}]},
+        {"id": "CounterTop|2", "children": [
+            {"id": "Knife|3"}, {"id": "Pan|2"}, {"id": "Egg|1"},
+        ]},
+    ]
+
+    ti._deduplicate_containers()
+
+    container_types = [c["id"].split("|")[0].lower() for c in ti.containers]
+    assert sorted(container_types) == ["countertop", "fridge"]
+
+    countertop = next(c for c in ti.containers if c["id"] == "CounterTop|2")
+    assert [child["id"] for child in countertop["children"]] == ["Knife|3", "Pan|2", "Egg|1"]
+
+    # Both of fridge's children ("knife", "pan") were already claimed by the
+    # countertop, which is processed first (its type appeared first in the
+    # original list) -- so fridge is left with no children of its own.
+    fridge = next(c for c in ti.containers if c["id"] == "Fridge|1")
+    assert fridge["children"] == []
+
+
+def test_deduplicate_containers_tie_keeps_first_seen():
+    """Equal child counts should keep the first-seen instance of a type."""
+    ti = _bare_thor_interface()
+    ti.containers = [
+        {"id": "Fridge|1", "children": [{"id": "Knife|1"}]},
+        {"id": "Fridge|2", "children": [{"id": "Pan|1"}]},
+    ]
+
+    ti._deduplicate_containers()
+
+    assert len(ti.containers) == 1
+    assert ti.containers[0]["id"] == "Fridge|1"
+
+
+def test_deduplicate_containers_leaves_childless_containers_untouched():
+    """Containers with no 'children' key (e.g. non-receptacle objects)
+    should survive dedup without gaining a spurious empty children list."""
+    ti = _bare_thor_interface()
+    ti.containers = [
+        {"id": "Painting|1"},
+        {"id": "Fridge|1", "children": [{"id": "Knife|1"}]},
+    ]
+
+    ti._deduplicate_containers()
+
+    painting = next(c for c in ti.containers if c["id"] == "Painting|1")
+    assert "children" not in painting

@@ -7,13 +7,14 @@ from itertools import product
 import numpy as np
 from shapely import geometry
 from railroad.core import (
-    Action, State, LiteralGoal, Goal, Fluent as F, convert_goal_to_positive_preconditions
+    Action, State, LiteralGoal, Goal, Fluent as F, convert_goal_to_positive_preconditions,
+    convert_state_to_positive_preconditions
 )
 from railroad.environment.procthor.scene import ProcTHORScene
 from railroad.environment.procthor.scenegraph import SceneGraph
 from railroad.navigation.pathing import get_cost_and_path
 
-from .planner import InterruptionSearchProblem, PlannerConfig, astar_search
+from .planner import InterruptionSearchProblem, PlannerConfig, astar_search, compute_interruption_value
 
 
 # discount functions
@@ -57,14 +58,29 @@ def anticipatory_planner(
     best_plan, best_value_sg, _, scene_graph_sg = astar_search(
         initial_state, interruption_problem, search_params
     )
-    
+
+    # # for testing
+    # best_plan, best_value_sg, _, scene_graph_sg, state_sg = astar_search(
+    #     initial_state, interruption_problem, search_params
+    # )
+
     assert scene_graph_sg is not None
     best_value_total = best_value_sg + ev_model(scene_graph_sg)
+    # # for testing
+    # assert interruption_problem.interrupting_task_dist is not None
+    # best_value_ap = compute_interruption_value(
+    #     convert_state_to_positive_preconditions(state_sg, neg_to_pos_mapping),
+    #     interruption_problem.actions,
+    #     interruption_problem.interrupting_task_dist,
+    #     search_params.heuristic_fn
+    # )
+    # best_value_total = best_value_sg + best_value_ap
 
-    # for debugging
-    print(f"Total costs to reach augmented goal state: {best_value_sg:.4f}")
-    print(f"V_AP of augmented goal state: {ev_model(scene_graph_sg):.4f}")
-    print(f"V_s_g + V_AP = {best_value_total:.4f}")
+
+    # # for debugging
+    # print(f"Total costs to reach augmented goal state: {best_value_sg:.4f}")
+    # print(f"V_AP of augmented goal state: {best_value_ap:.4f}")
+    # print(f"V_s_g + V_AP = {best_value_total:.4f}")
 
     # focused sampling; NOTE - right now only supports literal goals
     assert isinstance(interruption_problem.goal, LiteralGoal)
@@ -81,6 +97,9 @@ def anticipatory_planner(
         interruption_problem.goal, selected_locations, selected_objects, neg_to_pos_mapping
     )
 
+    # # for testing
+    # sampled_augmented_tasks = [F("at apple_8 fridge_4") & F("at pan_10 fridge_4")]
+
     for task in sampled_augmented_tasks:
         interruption_problem.goal = task
         # run myopic planner to get initial plan/value of s_g
@@ -88,18 +107,35 @@ def anticipatory_planner(
             initial_state, interruption_problem, search_params
         )
 
+        # # for testing
+        # plan, value_sg, _, scene_graph_sg, state_sg = astar_search(
+        #     initial_state, interruption_problem, search_params
+        # )
+
         assert scene_graph_sg is not None
         value_total = value_sg + ev_model(scene_graph_sg)
+        # # for testing
+        # assert interruption_problem.interrupting_task_dist is not None
+        # value_ap = compute_interruption_value(
+        #     convert_state_to_positive_preconditions(state_sg, neg_to_pos_mapping),
+        #     interruption_problem.actions,
+        #     interruption_problem.interrupting_task_dist,
+        #     search_params.heuristic_fn
+        # )
+        # value_total = value_sg + value_ap
 
-        # for debugging
-        print(f"Total costs to reach augmented goal state: {value_sg:.4f}")
-        print(f"V_AP of augmented goal state: {ev_model(scene_graph_sg):.4f}")
-        print(f"V_s_g + V_AP = {value_total:.4f}")
+        # # for debugging
+        # print(f"Total costs to reach augmented goal state: {value_sg:.4f}")
+        # print(f"V_AP of augmented goal state: {value_ap:.4f}")
+        # print(f"V_s_g + V_AP = {value_total:.4f}")
 
         if value_total < best_value_total:
             best_value_total = value_total
             best_value_sg = value_sg
             best_plan = plan
+
+    # restore the interruption_value_fn attribute for future tasks
+    search_params.interruption_value_fn = ev_model
 
     return best_plan, best_value_sg, True
 
@@ -158,7 +194,7 @@ def _get_occupany_grid_paths(
                 soft_cost_scale=12.0,
             )
             path = geometry.LineString(points_on_path.T)
-            # TODO - might want to tune the distance, but fine for now
+            # might want to tune the distance, but fine for now
             paths.append(path.buffer(25))
     return paths
 

@@ -23,8 +23,8 @@ class KitchenProcTHOREnvironment(ProcTHOREnvironment):
     """
     def define_operators(self) -> list[Operator]:
         move_op = operators.construct_move_operator(self.estimate_move_time)
-        pick_op = construct_gripper_pick_operator(20.0)
-        place_op = construct_gripper_place_operator(20.0)
+        pick_op = construct_gripper_pick_operator(10.0)
+        place_op = construct_gripper_place_operator(10.0)
         # previously extra_cost was set to 100.0
         # no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=0)
         return [pick_op, place_op, move_op]
@@ -125,7 +125,7 @@ def get_simple_goal() -> F | Goal:
 
 
 def construct_procthor_kitchen_environment(
-    seed: int, object_seed: int | None = None
+    seed: int, object_seed: int | None = None, remove_duplicates: bool = False
 ) -> KitchenProcTHOREnvironment:
     """
     Constructs a KitchenProcTHOREnvironment representing the scene 
@@ -146,7 +146,8 @@ def construct_procthor_kitchen_environment(
             "gripper": {"r1-left", "r1-right"},
             "location": {"start_loc"},
         },
-        object_seed
+        object_seed,
+        remove_duplicates
     )
 
     # Fully populate symbolic environment now that scene is available internally.

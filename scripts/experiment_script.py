@@ -1,3 +1,4 @@
+import random
 from interruption.environments import (
     construct_procthor_kitchen_environment,
     get_alfred_task_distribution,
@@ -22,17 +23,17 @@ MODEL_PATH = DEFAULT_RESOURCES_BASE / "models"
 RANDOMIZE_TASK_SEQUENCE = True
 
 def main(randomize_order: bool = False):
-    model_name = "best_model_experiment8.pt"
+    model_name = "best_model_experiment10_val.pt"
 
     seeds = ExperimentSeeds(
-        procthor_seed=201, experiment_seed=20, object_placement_seed=None, task_sample_seed=91
+        procthor_seed=201, experiment_seed=20, object_placement_seed=21, task_sample_seed=75
     )
     task_arrival_model = TaskArrivalProb(
-        0, RandomVariableType.CONTINUOUS,
+        0.8, RandomVariableType.CONTINUOUS,
         DistributionType.EXPONENTIAL
     )
     # get task distribution from alfred dataset used during training
-    env = construct_procthor_kitchen_environment(seeds.procthor_seed)
+    env = construct_procthor_kitchen_environment(seeds.procthor_seed, remove_duplicates=True)
     task_distribution = get_alfred_task_distribution(
         env.scene.objects,
         set(env.scene.locations),
@@ -43,7 +44,12 @@ def main(randomize_order: bool = False):
             task_distribution, seeds.task_sample_seed
         )
     else:
-        current_goal = get_example_procthor_goal()
+        # both apple and pan are located at countertop3
+        current_goal = task_distribution[0][0] # apple at fridge
+        task_distribution = (list(task_distribution[0]), task_distribution[1])
+        tmp_goal = task_distribution[0][0]
+        task_distribution[0][0] = task_distribution[0][3] # pan at fridge
+        task_distribution[0][3] = tmp_goal
 
 
     config = ExperimentConfig(
@@ -53,11 +59,12 @@ def main(randomize_order: bool = False):
         task_arrival_model,
         ff_heuristic,
         MODEL_PATH / model_name,
-        num_task_sequence=2
+        num_task_sequence=5,
+        augment_task=False
     )
 
     run_experiment(
-        config, ExperimentMode.ANTICIPATORY_PLANNING, show_plot=True
+        config, ExperimentMode.INTERRUPTION, show_plot=True, remove_duplicates=True
     )
 
 if __name__ == "__main__":

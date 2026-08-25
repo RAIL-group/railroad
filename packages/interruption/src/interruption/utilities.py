@@ -177,7 +177,7 @@ def print_plan(actions: list[str]) -> None:
     for i, action in enumerate(actions):
         print(f"{i}. {action}")
 
-
+# TODO - use for task augmentation case. also add fluent checking
 def get_augmented_task_dist(
     current_task: F | LiteralGoal,
     interrupting_task_dist: tuple[list[Goal], list[float]]
@@ -209,9 +209,8 @@ def randomize_task_distribution_order(
     """
     tasks, probs = task_distribution
     rng = random.Random(seed)
-    random_current_goal = rng.choice(tasks)
     idxes = rng.sample(range(len(tasks)), k=len(tasks))
-    return random_current_goal, ([tasks[i] for i in idxes], [probs[i] for i in idxes])
+    return tasks[idxes[-1]], ([tasks[i] for i in idxes[:-1]], [probs[i] for i in idxes[:-1]])
 
 
 # helper functions for ProcTHOR-10k dataset experiments

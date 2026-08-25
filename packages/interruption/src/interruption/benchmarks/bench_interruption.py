@@ -5,7 +5,7 @@ Wraps `run_experiment` (experiments.py) as a railroad.bench benchmark so
 interruption-planning sweeps can be run in parallel and tracked in
 MLflow / viewed via `railroad benchmarks dashboard`.
 """
-
+import random
 import itertools
 from typing import Any
 
@@ -20,11 +20,13 @@ from ..environments import (
     # get_example_procthor_task_distribution,
 )
 from ..experiments import ExperimentConfig, ExperimentSeeds, run_experiment, ExperimentMode
-from ..utilities import DistributionType, RandomVariableType, TaskArrivalProb, randomize_task_distribution_order
+from ..utilities import (
+    DistributionType, RandomVariableType, TaskArrivalProb, randomize_task_distribution_order
+)
 
 # CONSTANTS
-MODEL_NAME = "best_model_experiment8.pt"
-EXPERIMENT_REPEATS = 100
+MODEL_NAME = "best_model_experiment10_val.pt"
+EXPERIMENT_REPEATS = 32
 
 
 def _get_cases() -> list[dict[str, Any]]:
@@ -43,10 +45,10 @@ def _get_cases() -> list[dict[str, Any]]:
         }
         for (interruption_prob, seed), num_task_sequence in itertools.product(
             zip(
-                [0.0, 0.05, 0.1, 0.15, 0.2, 0.3],
-                [140, 42, 240, 57, 630, 175]
+                [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+                [140, 42, 240, 57, 1096, 4065, 720, 391, 875]
             ),
-            [2]
+            [5]
         )
     ]
 
@@ -62,15 +64,17 @@ def _setup_experiment_config(
     seeds = ExperimentSeeds(
         case.params["procthor_seed"],
         case.params["interruption_seed"] + case.repeat_idx,
-        case.repeat_idx,
-        object_placement_seed=None
+        75, # keep fixed for right now
+        object_placement_seed=19
     )
     task_arrival_model = TaskArrivalProb(
         case.params["interruption_prob"], RandomVariableType.CONTINUOUS,
         DistributionType.EXPONENTIAL
     )
     # get task distribution from alfred dataset used during training
-    env = construct_procthor_kitchen_environment(seeds.procthor_seed)
+    env = construct_procthor_kitchen_environment(
+        seeds.procthor_seed, remove_duplicates=True
+    )
     task_distribution = get_alfred_task_distribution(
         env.scene.objects,
         set(env.scene.locations),
@@ -81,6 +85,15 @@ def _setup_experiment_config(
         current_goal, task_distribution = randomize_task_distribution_order(
             task_distribution, seeds.task_sample_seed
         )
+        # for smaller scale experiments, just reorder the task sequence
+        task_distribution = (
+            list(task_distribution[0][:case.params["num_task_sequence"]-1]),
+            list(task_distribution[1][:case.params["num_task_sequence"]-1])
+        )
+        rng = random.Random(case.repeat_idx)
+        tasks, probs = task_distribution
+        idxes = rng.sample(range(len(tasks)), k=len(tasks))
+        task_distribution = ([tasks[i] for i in idxes], [probs[i] for i in idxes])
 
     model_path = (
         DEFAULT_RESOURCES_BASE / f"models/{MODEL_NAME}"
@@ -116,7 +129,7 @@ def bench_interruption_kitchen(case: BenchmarkCase):
     environments. 
     """
     config = _setup_experiment_config(case, ExperimentMode.INTERRUPTION)
-    return run_experiment(config, ExperimentMode.INTERRUPTION, True)
+    return run_experiment(config, ExperimentMode.INTERRUPTION, True, True)
 
 bench_interruption_kitchen.add_cases(_get_cases())
 
@@ -137,7 +150,7 @@ def bench_myopic_interruption_kitchen(case: BenchmarkCase):
     environments. 
     """
     config = _setup_experiment_config(case, ExperimentMode.MYOPIC)
-    return run_experiment(config, ExperimentMode.MYOPIC, True)
+    return run_experiment(config, ExperimentMode.MYOPIC, True, True)
 
 bench_myopic_interruption_kitchen.add_cases(_get_cases())
 
@@ -158,6 +171,6 @@ def bench_ap_interruption_kitchen(case: BenchmarkCase):
     environments. 
     """
     config = _setup_experiment_config(case, ExperimentMode.ANTICIPATORY_PLANNING)
-    return run_experiment(config, ExperimentMode.ANTICIPATORY_PLANNING, True)
+    return run_experiment(config, ExperimentMode.ANTICIPATORY_PLANNING, True, True)
 
 bench_ap_interruption_kitchen.add_cases(_get_cases())

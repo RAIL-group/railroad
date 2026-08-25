@@ -40,6 +40,8 @@ from .utilities import (
 )
 
 # global constants/enums
+DEBUG = False
+
 class ExperimentMode(Enum):
     """
     Enumeration for interruption-based and baseline planners A*
@@ -79,6 +81,7 @@ class ExperimentConfig:
     heuristic_fn: float | Callable[[State, Goal, list[Action]], float]
     ev_model_path: Path | str = ""
     num_task_sequence: int = 2
+    augment_task: bool = False
 
 
 @dataclass
@@ -109,6 +112,7 @@ class DashboardData:
 def run_experiment(
     config: ExperimentConfig,
     experiment_mode: ExperimentMode,
+    remove_duplicates: bool,
     benchmark_flag: bool = False,
     show_plot: bool = False,
     save_plot: str | None = None,
@@ -119,7 +123,11 @@ def run_experiment(
     Returns the total cost of the execution sequence, the initial plan, and a trace of 
     the execution sequence.
     """
-    experiment_data = initialize_experiment_data(config, experiment_mode)
+    experiment_data = initialize_experiment_data(config, experiment_mode, remove_duplicates)
+
+    # print out the actual action probabilities
+    if DEBUG:
+        _show_action_probabilities(experiment_data)
 
     # set the experiment seed after loading the ProcTHOR scene since it sets the
     # seed to procthor_seed
@@ -131,16 +139,23 @@ def run_experiment(
 
     start_time = time.perf_counter()
 
-    event_trace, _ = _get_task_sequence_event_trace(experiment_data, config, experiment_mode)
+    event_trace, task_sequence = _get_task_sequence_event_trace(
+        experiment_data, config, experiment_mode, config.augment_task
+    )
 
     # setup for deterministic replay for dashboard
     dash_env = construct_procthor_kitchen_environment(
-        config.seeds.procthor_seed, config.seeds.object_placement_seed
+        config.seeds.procthor_seed, config.seeds.object_placement_seed, remove_duplicates
     )
 
+    # keep track of the task_sequence as part of the output
+    task_sequence_goal = task_sequence[0]
+    for goal in task_sequence[1:]:
+        task_sequence_goal &= goal
     pos_goal = convert_goal_to_positive_preconditions(
-        config.goal, experiment_data.neg_to_pos_mapping
+        task_sequence_goal, experiment_data.neg_to_pos_mapping
     )
+
     dashboard = _setup_dashboard(
         pos_goal, dash_env, recording_console,
         partial(AstarDashboardPlanner, heuristic_fn=ff_heuristic), benchmark_flag
@@ -157,7 +172,8 @@ def run_experiment(
 def _get_task_sequence_event_trace(
     data: ExperimentData,
     config: ExperimentConfig,
-    experiment_mode: ExperimentMode
+    experiment_mode: ExperimentMode,
+    augment_task: bool = False
 ) -> tuple[list[str], list[Goal]]:
     """
     Searchs for a plan and executes the plan in the environment for the specificed n length
@@ -192,14 +208,18 @@ def _get_task_sequence_event_trace(
 
         _execution_loop(plan, data, event_trace)
 
-        # setup for next task in the sequence
         task_arrival_sequence.append(config.interrupting_task_dist[0][i])
-        if data.search_problem.interrupting_task_dist is not None:
-            data.search_problem.goal = data.search_problem.interrupting_task_dist[0][i]
-
-        # check if current task was completed successfully
-        if task_arrival_sequence[i].evaluate(data.env.state.fluents):
+         # check if current task was completed successfully
+        goal_completed = task_arrival_sequence[i].evaluate(data.env.state.fluents)
+        if goal_completed:
             event_trace[-1] += " | Goal Complete"
+
+        # setup for next task in the sequence
+        assert data.search_problem.interrupting_task_dist is not None
+        if not augment_task or (augment_task and goal_completed):
+            data.search_problem.goal = data.search_problem.interrupting_task_dist[0][i]
+        else: # augment the current task
+            data.search_problem.goal &= data.search_problem.interrupting_task_dist[0][i]
 
     # complete the last task in the sequence under the assumption that no future tasks will come
     initial_state = (
@@ -257,7 +277,8 @@ def _execution_loop(
 
 def initialize_experiment_data(
     config: ExperimentConfig,
-    planner_mode: ExperimentMode
+    planner_mode: ExperimentMode,
+    remove_duplicates: bool = False
 ) -> ExperimentData:
     """
     Helper function for initializing the ExperimentData struct, which entails
@@ -266,7 +287,9 @@ def initialize_experiment_data(
     preprocessing.
     """
     env = construct_procthor_kitchen_environment(
-        config.seeds.procthor_seed, object_seed=config.seeds.object_placement_seed
+        config.seeds.procthor_seed,
+        object_seed=config.seeds.object_placement_seed,
+        remove_duplicates=remove_duplicates
     )
 
     # convert generic name of objects/containers in goals to actual names of
@@ -487,3 +510,32 @@ def _get_scene_objects_locations(seed: int, objects: set[str]) -> dict[str, str]
         generic_name : rng.choice(scene_objects)
         for generic_name, scene_objects in full_objects_mapping.items()
     }
+
+# debugging helper functions
+def _show_action_probabilities(data: ExperimentData) -> None:
+    actual_probabilities = []
+    pick_flag = False
+    place_flag = False
+
+    for action in data.search_problem.actions:
+        action_type = action.name.split(" ")[0]
+        action_cost = get_action_cost(action)
+        if action_type == "pick":
+            if pick_flag:
+                continue
+            pick_flag = True
+        if action_type == "place":
+            if place_flag:
+                continue
+            place_flag = True
+
+        action_prob_int = (
+            data.search_problem.interruption_prob_fn(action_cost)
+            if not isinstance(data.search_problem.interruption_prob_fn, (int, float))
+            else data.search_problem.interruption_prob_fn
+        )
+        actual_probabilities.append((action.name, action_cost, action_prob_int))
+
+    sorted_probs = sorted(actual_probabilities, key=lambda x: x[-1], reverse=True)
+    for i, (name, cost, prob) in enumerate(sorted_probs, 1):
+        print(f"{i}. Action - {name}: Cost -  {cost:.4f}; P_I(a) - {prob:.4f}")
