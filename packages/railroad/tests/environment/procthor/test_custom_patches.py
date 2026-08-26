@@ -260,13 +260,15 @@ def test_save_randomized_scene_default_path_can_diverge_from_check(monkeypatch, 
 
     assert ti._check_for_randomized_scene() is False
 
+def _fake_render_top_down_from_controller(orthographic: bool):
+    return (np.zeros((2, 2), dtype=np.uint8), (5, 7))
 
 def test_save_and_get_cache_filename_includes_object_seed_when_set(monkeypatch, tmp_path):
     ti = _bare_thor_interface()
     ti.seed = 3
     ti.object_seed = 7
     monkeypatch.setattr(ti, "_get_reachable_positions_from_controller", lambda: [])
-    monkeypatch.setattr(ti, "_get_top_down_image_from_controller", lambda orthographic=True: None)
+    monkeypatch.setattr(ti, "_render_top_down_from_controller", _fake_render_top_down_from_controller)
 
     ti._save_and_get_cache(path=str(tmp_path))
 
@@ -279,7 +281,7 @@ def test_save_and_get_cache_filename_omits_object_seed_when_none(monkeypatch, tm
     ti.seed = 3
     ti.object_seed = None
     monkeypatch.setattr(ti, "_get_reachable_positions_from_controller", lambda: [])
-    monkeypatch.setattr(ti, "_get_top_down_image_from_controller", lambda orthographic=True: None)
+    monkeypatch.setattr(ti, "_render_top_down_from_controller", _fake_render_top_down_from_controller)
 
     ti._save_and_get_cache(path=str(tmp_path))
 

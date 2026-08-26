@@ -424,8 +424,7 @@ def _get_results(
         dash_data.dashboard.show_plots(
             show_plot=dash_data.show_plot,
             save_video=dash_data.save_video,
-            save_plot=dash_data.save_plot,
-            show_ground_truth_objects=True
+            save_plot=dash_data.save_plot
         )
 
     return result

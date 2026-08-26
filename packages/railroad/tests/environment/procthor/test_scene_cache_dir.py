@@ -32,6 +32,8 @@ def _interface(seed: int) -> ThorInterface:
     """A ThorInterface without ``__init__``, which would load a whole scene."""
     thor = object.__new__(ThorInterface)
     thor.seed = seed
+    # NOTE: added to account for my custom modifications to thor_interface
+    thor.object_seed = None
     return thor
 
 

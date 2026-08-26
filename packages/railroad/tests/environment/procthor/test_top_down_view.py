@@ -119,6 +119,9 @@ def test_the_cache_round_trips_or_is_refused(tmp_path, monkeypatch):
     writer = object.__new__(ThorInterface)
     writer.seed = 11
     writer.controller = None
+    # NOTE: added to account for my custom modifications to thor_interface
+    writer.object_seed = None
+
     extent = (-0.4, 3.9, -0.4, 3.9)
     writer._render_top_down_from_controller = (  # ty: ignore[invalid-assignment]
         lambda orthographic=True: (

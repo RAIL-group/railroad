@@ -140,7 +140,10 @@ class ThorInterface:
             # update the scene to not include duplicate containers and children
             self.scene['objects'] = copy.deepcopy(self.containers)
 
-        self.cached_data = self._load_cache(remove_duplicates) if use_cache else None
+        self.cached_data = (
+            self._load_cache(remove_duplicates=remove_duplicates) if use_cache 
+            else None
+        )
         if self.cached_data is None:
             # Generating a scene starts a Unity controller. Several of those at
             # once will take a machine down, and benchmark workers are separate
@@ -150,7 +153,10 @@ class ThorInterface:
             from ._scene_lock import scene_generation_lock
 
             with scene_generation_lock():
-                self.cached_data = self._load_cache(remove_duplicates) if use_cache else None
+                self.cached_data = (
+                    self._load_cache(remove_duplicates=remove_duplicates) if use_cache
+                    else None
+                )
                 if self.cached_data is None:
                     from ai2thor.controller import Controller
                     from ._display import screen_at_least
@@ -356,7 +362,7 @@ class ThorInterface:
         return get_procthor_10k_dir() / 'cache'
 
     def _save_and_get_cache(
-        self, remove_duplicates: bool = False, path: Optional[str] = None
+        self, path: Optional[str] = None, remove_duplicates: bool = False
     ) -> Dict:
         """Cache expensive computations."""
         image_ortho, extent_m = self._render_top_down_from_controller(orthographic=True)
@@ -414,7 +420,7 @@ class ThorInterface:
             raise
 
     def _load_cache(
-        self, remove_duplicates: bool = False, path: Optional[str] = None
+        self, path: Optional[str] = None, remove_duplicates: bool = False
     ) -> Optional[Dict]:
         """Load cached scene data, treating an unreadable file as a miss."""
         base = Path(path) if path is not None else self._cache_dir()
