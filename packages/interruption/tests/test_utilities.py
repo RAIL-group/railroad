@@ -1,6 +1,5 @@
 import pytest
 from interruption.utilities import (
-    DistributionType,
     RandomVariableType,
     _check_num_rooms,
     _check_scene_room_types,
@@ -54,20 +53,18 @@ def test_get_next_state():
 
 
 @pytest.mark.parametrize(
-    argnames="rv_type, arrival_prob, dist_t, time_for_prob, action_time, sol",
+    argnames="rv_type, arrival_prob, time_between_arrivals, action_time, sol",
     argvalues=[
-        (RandomVariableType.DISCRETE, 0.1, None, 100, 1, 0.1),
-        (RandomVariableType.DISCRETE, 0.1, None, 100, 4, 0.1),
-        (RandomVariableType.DISCRETE, 0.1, None, 100, -1, 0.1),
-        (RandomVariableType.CONTINUOUS, 0.1, DistributionType.UNIFORM, 100, 1, 0.1),
-        (RandomVariableType.CONTINUOUS, 0.1, DistributionType.UNIFORM, 100, 4, 0.4),
-        (RandomVariableType.CONTINUOUS, 1, DistributionType.EXPONENTIAL, 100, 1, 1),
-        (RandomVariableType.CONTINUOUS, 0.1, DistributionType.EXPONENTIAL, 4, 4, 0.1),
-        (RandomVariableType.CONTINUOUS, 0.1, DistributionType.EXPONENTIAL, 1, 1, 0.1),
+        (RandomVariableType.DISCRETE, 0.1, 100, 1, 0.1),
+        (RandomVariableType.DISCRETE, 0.1, -1, 4, 0.1),
+        (RandomVariableType.DISCRETE, 0.1, -1, 100, 0.1),
+        (RandomVariableType.CONTINUOUS, -1, 5, 10, 0.86466472),
+        (RandomVariableType.CONTINUOUS, -1, 30, 30, 0.63212056),
+        (RandomVariableType.CONTINUOUS, -1, 60, 30, 0.39346934),
     ]
 )
-def test_get_task_arrival_prob(rv_type, arrival_prob, dist_t, time_for_prob, action_time, sol):
-    arrival_prob = get_task_arrival_prob(rv_type, arrival_prob, dist_t, time_for_prob, action_time)
+def test_get_task_arrival_prob(rv_type, arrival_prob, time_between_arrivals, action_time, sol):
+    arrival_prob = get_task_arrival_prob(rv_type, arrival_prob, time_between_arrivals, action_time)
     assert arrival_prob == pytest.approx(sol)
 
 

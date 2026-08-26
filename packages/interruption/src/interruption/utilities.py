@@ -36,24 +36,6 @@ class RandomVariableType(Enum):
     CONTINUOUS = 2
 
 
-class DistributionType(Enum):
-    """
-    Enumeration for the supported types of distributions for get_task_arrival_prob.
-    """
-    UNIFORM = 1
-    EXPONENTIAL = 2
-
-@dataclass
-class TaskArrivalProb:
-    """
-    Data struct that encapsulates all the user-provided settings
-    for the task arrival model.
-    """
-    interruption_prob: float
-    rv_type: RandomVariableType
-    distribution_type: DistributionType
-
-
 # utility functions for interruption anticipatory planning
 def get_action_cost(action: Action) -> float:
     """
@@ -129,30 +111,26 @@ def negative_fluent_preprocessing(actions: list[Action], state: State, goals: li
 
 def get_task_arrival_prob(
     rv_type: RandomVariableType,
-    arrival_prob: float,
-    distribution_type: DistributionType | None = DistributionType.UNIFORM,
-    time_for_prob: float = 100,
+    arrival_prob: float = -1,
+    time_between_arrivals: float = -1,
     action_time: float = -1,
 ) -> float:
     """
     Helper function that returns the probability of a task arriving after the execution
     of an action. Supports both per-action (treating the random variable as discrete) and
-    per-time-unit (treating the random variable as continuous) probabilities.
+    per-time-unit (treating the random variable as continuous) probabilities. In the later case,
+    the arrival_prob argument is treated as the average time between task arrivals (tau).
     """
-    if rv_type == RandomVariableType.DISCRETE or action_time == -1:
+    # validation checks
+    assert action_time >= 0
+    if rv_type == RandomVariableType.DISCRETE:
+        assert 0 <= arrival_prob <= 1
+    if rv_type == RandomVariableType.CONTINUOUS:
+        assert time_between_arrivals > 0
+
+    if rv_type == RandomVariableType.DISCRETE:
         return arrival_prob
-    if (
-        rv_type == RandomVariableType.CONTINUOUS and
-        (
-            distribution_type == DistributionType.UNIFORM or
-            arrival_prob == 1
-        )
-    ):
-        return min(arrival_prob * action_time, 1.0)
-    # case: exponential distribution and arrival_prob != 1
-    # arrival_prob is now parameter Beta for the exponential distribution
-    beta = _calibrate_beta_parameter(arrival_prob, time_for_prob)
-    return 1 - math.exp(-beta * action_time)
+    return 1 - math.exp(-action_time / time_between_arrivals)
 
 
 def _calibrate_beta_parameter(prob: float, a_t: float) -> float:

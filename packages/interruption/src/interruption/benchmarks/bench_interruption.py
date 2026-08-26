@@ -5,6 +5,7 @@ Wraps `run_experiment` (experiments.py) as a railroad.bench benchmark so
 interruption-planning sweeps can be run in parallel and tracked in
 MLflow / viewed via `railroad benchmarks dashboard`.
 """
+from functools import partial
 import random
 import itertools
 from typing import Any
@@ -21,7 +22,7 @@ from ..environments import (
 )
 from ..experiments import ExperimentConfig, ExperimentSeeds, run_experiment, ExperimentMode
 from ..utilities import (
-    DistributionType, RandomVariableType, TaskArrivalProb, randomize_task_distribution_order
+    RandomVariableType, randomize_task_distribution_order, get_task_arrival_prob
 )
 
 # CONSTANTS
@@ -38,15 +39,15 @@ def _get_cases() -> list[dict[str, Any]]:
         {
             "procthor_seed": 201,
             "task_dist_idx": 0,
-            "interruption_prob": interruption_prob,
+            "time_between_arrivals": time_between_arrivals,
             "interruption_seed": seed,
             "num_task_sequence": num_task_sequence,
             "randomize_task_sequence": True
         }
-        for (interruption_prob, seed), num_task_sequence in itertools.product(
+        for (time_between_arrivals, seed), num_task_sequence in itertools.product(
             zip(
-                [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
-                [140, 42, 240, 57, 1096, 4065, 720, 391, 875]
+                [float("inf"), 600, 300, 240, 180, 120, 60, 30],
+                [140, 42, 240, 57, 1096, 4065, 720, 391]
             ),
             [5]
         )
@@ -67,10 +68,13 @@ def _setup_experiment_config(
         75, # keep fixed for right now
         object_placement_seed=19
     )
-    task_arrival_model = TaskArrivalProb(
-        case.params["interruption_prob"], RandomVariableType.CONTINUOUS,
-        DistributionType.EXPONENTIAL
+    task_arrival_fn = partial(
+        get_task_arrival_prob,
+        RandomVariableType.CONTINUOUS,
+        -1,
+        case.params["time_between_arrivals"]
     )
+
     # get task distribution from alfred dataset used during training
     env = construct_procthor_kitchen_environment(
         seeds.procthor_seed, remove_duplicates=True
@@ -105,7 +109,7 @@ def _setup_experiment_config(
         seeds,
         current_goal,
         task_distribution,
-        task_arrival_model,
+        task_arrival_fn,
         ff_heuristic,
         model_path,
         case.params["num_task_sequence"]

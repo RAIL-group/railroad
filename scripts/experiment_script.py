@@ -1,19 +1,18 @@
-import random
+from functools import partial
 from interruption.environments import (
     construct_procthor_kitchen_environment,
     get_alfred_task_distribution,
-    get_example_procthor_goal,
+    # get_example_procthor_goal,
     # get_example_procthor_task_distribution,
 )
 from interruption.experiments import (
     ExperimentConfig,
     ExperimentMode,
     ExperimentSeeds,
-    TaskArrivalProb,
     run_experiment,
 )
 from interruption.utilities import (
-    DistributionType, RandomVariableType, randomize_task_distribution_order
+    RandomVariableType, randomize_task_distribution_order, get_task_arrival_prob
 )
 from railroad.core import ff_heuristic
 from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
@@ -28,10 +27,10 @@ def main(randomize_order: bool = False):
     seeds = ExperimentSeeds(
         procthor_seed=201, experiment_seed=20, object_placement_seed=21, task_sample_seed=75
     )
-    task_arrival_model = TaskArrivalProb(
-        0.8, RandomVariableType.CONTINUOUS,
-        DistributionType.EXPONENTIAL
+    task_arrival_fn = partial(
+        get_task_arrival_prob, RandomVariableType.CONTINUOUS, -1, 5
     )
+
     # get task distribution from alfred dataset used during training
     env = construct_procthor_kitchen_environment(seeds.procthor_seed, remove_duplicates=True)
     task_distribution = get_alfred_task_distribution(
@@ -56,7 +55,7 @@ def main(randomize_order: bool = False):
         seeds,
         current_goal,
         task_distribution,
-        task_arrival_model,
+        task_arrival_fn,
         ff_heuristic,
         MODEL_PATH / model_name,
         num_task_sequence=5,

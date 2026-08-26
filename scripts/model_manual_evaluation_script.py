@@ -3,6 +3,7 @@ Quick script for manual evaluation of a trained GCN model on specified SceneGrap
 """
 from collections.abc import Callable
 from copy import deepcopy
+from functools import partial
 
 from interruption.environments import (
     construct_procthor_kitchen_environment,
@@ -14,14 +15,12 @@ from interruption.experiments import (
     ExperimentConfig,
     ExperimentMode,
     ExperimentSeeds,
-    TaskArrivalProb,
     initialize_experiment_data, ExperimentData
 )
-from interruption.planner import compute_interruption_value, astar_search
-from interruption.utilities import DistributionType, RandomVariableType
+from interruption.planner import compute_interruption_value
+from interruption.utilities import RandomVariableType, get_task_arrival_prob
 from railroad.core import (
-    ff_heuristic, convert_state_to_positive_preconditions, LiteralGoal, Fluent as F,
-    Action, get_action_by_name
+    ff_heuristic, convert_state_to_positive_preconditions, Action, get_action_by_name
 )
 from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 from railroad.environment.procthor.scenegraph import SceneGraph
@@ -32,23 +31,18 @@ MODEL_PATH = DEFAULT_RESOURCES_BASE / "models"
 
 def main():
     """
-    Small script to manually compare the actual EV of state to the 
-    predicted EV from the trained model.
+    Small script to manually compare the EV of states.
     """
     # user specifications
-    model_name = "best_model_experiment5.pt"
-    desired_goal_states = [
-        LiteralGoal(F("at knife_9 fridge_4")),
-        F("at knife_9 fridge_4") & F("at pan_10 fridge_4")
-    ]
+    model_name = "best_model_experiment10_val.pt"
 
     # setup
-    seeds = ExperimentSeeds(procthor_seed=201, experiment_seed=20, object_placement_seed=13)
-    task_arrival_model = TaskArrivalProb(
-        0, RandomVariableType.CONTINUOUS,
-        DistributionType.EXPONENTIAL
+    seeds = ExperimentSeeds(procthor_seed=201, experiment_seed=20, object_placement_seed=21)
+    task_arrival_fn = partial(
+        get_task_arrival_prob, RandomVariableType.CONTINUOUS, -1, 30
     )
-    env = construct_procthor_kitchen_environment(seeds.procthor_seed)
+    
+    env = construct_procthor_kitchen_environment(seeds.procthor_seed, remove_duplicates=True)
     task_distribution = get_alfred_task_distribution(
         env.scene.objects,
         set(env.scene.locations),
@@ -60,38 +54,35 @@ def main():
             seeds,
             get_example_procthor_goal(),
             task_distribution,
-            task_arrival_model,
+            task_arrival_fn,
             ff_heuristic,
             MODEL_PATH / model_name
         ),
-        ExperimentMode.ANTICIPATORY_PLANNING # using AP to get access to the model
+        ExperimentMode.ANTICIPATORY_PLANNING, # using AP to get access to the model
+        remove_duplicates=True
     )
     assert data.planner_parameters.interruption_value_fn is not None
     model = data.planner_parameters.interruption_value_fn
     data.planner_parameters.interruption_value_fn = None
 
-    actual_ev, pred_ev = _get_actual_pred_expected_values(data, model)
+    setup_plan = [
+        get_action_by_name(data.search_problem.actions, "move robot1 start_loc fridge_4"),
+        get_action_by_name(data.search_problem.actions, "pick robot1 r1-right fridge_4 spoon_15")
+    ]
 
-    print(f"EV over the task dist of s_0: actual - {actual_ev:.4f}; predicted - {pred_ev:.4f}")
+    _update_env_and_scenegraph(setup_plan, data)
 
-    for goal in desired_goal_states:
+    plans = [
+        [get_action_by_name(data.search_problem.actions, "move robot1 fridge_4 countertop_3")],
+        [get_action_by_name(data.search_problem.actions, "move robot1 fridge_4 garbagecan_5")]
+    ]
+
+    print(f"Initial State: {[fluent for fluent in data.env.state.fluents if "robot1" in fluent.args]}")
+    for plan in plans:
         data_copy = deepcopy(data)
-        data_copy.search_problem.goal = goal
-        initial_state = convert_state_to_positive_preconditions(
-            data_copy.env.state, data_copy.neg_to_pos_mapping
-        )
-
-        plan, _, _, _ = astar_search(
-            (initial_state, None),
-            data_copy.search_problem,
-            data_copy.planner_parameters
-        )
-
         _update_env_and_scenegraph(plan, data_copy)
-
-        actual_ev, pred_ev = _get_actual_pred_expected_values(data_copy, model)
-        print(f"Goal: {goal}")
-        print(f"EV over the task dist of s_g: actual - {actual_ev:.4f}; predicted - {pred_ev:.4f}")
+        approx_ev = model(data_copy.env.scene.scene_graph)
+        print(f"{[action.name for action in plan]} : EV over task distribution - {approx_ev}")
 
 
 def _update_env_and_scenegraph(plan: list[Action], data: ExperimentData) -> None:

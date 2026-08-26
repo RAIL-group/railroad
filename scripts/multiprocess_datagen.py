@@ -4,6 +4,7 @@ ProcTHOR environments.
 NOTE: this file contains a fix for the objects_seed misrecording issue that is not currently 
 updated in datagen.py
 """
+from functools import partial
 from typing import Sequence
 import multiprocessing
 import random
@@ -29,7 +30,7 @@ from interruption.experiments import (
 # from railroad.environment.procthor.environment import ProcTHOREnvironment
 from interruption.learning.data import write_compressed_pickle
 from interruption.planner import astar_search, compute_interruption_value
-from interruption.utilities import DistributionType, RandomVariableType, TaskArrivalProb
+from interruption.utilities import RandomVariableType, get_task_arrival_prob
 from railroad.core import (
     Goal,
     convert_state_to_positive_preconditions,
@@ -212,7 +213,7 @@ def write_datum_to_file(
         else f"procthor_data_{scene_seed}_{csv_suffix}.csv"
     )
     csv_filepath = Path(get_procthor_10k_dir()) / csv_name
-    with open(csv_filepath, 'a') as f:
+    with open(csv_filepath, 'a', encoding="utf-8") as f:
         f.write(f'{data_filepath}\n')
 
 
@@ -223,7 +224,7 @@ def _merge_csv_shards(scene_seed: int, num_workers: int) -> None:
     """
     data_dir = Path(get_procthor_10k_dir())
     combined_path = data_dir / f"procthor_data_{scene_seed}.csv"
-    with open(combined_path, 'a') as combined:
+    with open(combined_path, 'a', encoding="utf-8") as combined:
         for worker_id in range(num_workers):
             shard_path = data_dir / f"procthor_data_{scene_seed}_{worker_id}.csv"
             if shard_path.exists():
@@ -242,15 +243,14 @@ def initialize_experiment_config(
     """
     # in this case, the task_arrival_model won't be used in any meaningful way, because from
     # each state a single task will be solved without considering any possible interruption events.
-    task_arrival_model = TaskArrivalProb(
-        0, RandomVariableType.CONTINUOUS,
-        DistributionType.EXPONENTIAL
+    task_arrival_fn = partial(
+        get_task_arrival_prob, RandomVariableType.CONTINUOUS, -1, float("inf")
     )
     return ExperimentConfig(
         ExperimentSeeds(procthor_seed, object_placement_seed=objects_seed),
         goal,
         task_distribution,
-        task_arrival_model,
+        task_arrival_fn,
         ff_heuristic
     )
 

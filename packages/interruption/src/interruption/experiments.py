@@ -24,7 +24,6 @@ from railroad.dashboard import PlannerDashboard
 from railroad.dashboard._protocols import DashboardPlanner
 from railroad.environment import SymbolicEnvironment
 from railroad.environment.procthor.environment import ProcTHOREnvironment
-from railroad.environment.procthor.scenegraph import SceneGraph
 
 from .dashboard_adapters import AstarDashboardPlanner
 from .environments import construct_procthor_kitchen_environment, KitchenProcTHOREnvironment
@@ -33,9 +32,7 @@ from .learning.utils import get_torch_device
 from .planner import astar_search, PlannerConfig, InterruptionSearchProblem
 from .planning_framework import get_no_int_prob, get_no_int_discount, anticipatory_planner
 from .utilities import (
-    TaskArrivalProb,
     get_action_cost,
-    get_task_arrival_prob,
     negative_fluent_preprocessing,
 )
 
@@ -77,7 +74,7 @@ class ExperimentConfig:
     seeds: ExperimentSeeds
     goal: Goal
     interrupting_task_dist: tuple[Sequence[Goal], list[float]]
-    task_arrival_model: TaskArrivalProb
+    task_arrival_fn: Callable[[float], float]
     heuristic_fn: float | Callable[[State, Goal, list[Action]], float]
     ev_model_path: Path | str = ""
     num_task_sequence: int = 2
@@ -320,13 +317,6 @@ def initialize_experiment_data(
     converted_goal = converted_goals[0]
     converted_interrupting_task_dist = (list(converted_goals[1:]), config.interrupting_task_dist[1])
 
-    interruption_prob_fn = partial(
-        get_task_arrival_prob, config.task_arrival_model.rv_type,
-        config.task_arrival_model.interruption_prob,
-        config.task_arrival_model.distribution_type,
-        max(get_action_cost(act) for act in converted_actions)
-    )
-
     # setup planner config based on experiment_mode
     return ExperimentData(
         env,
@@ -334,9 +324,9 @@ def initialize_experiment_data(
             converted_goal,
             converted_actions,
             converted_interrupting_task_dist,
-            interruption_prob_fn
+            config.task_arrival_fn
         ),
-        _get_planner_config(config, planner_mode, interruption_prob_fn),
+        _get_planner_config(config, planner_mode, config.task_arrival_fn),
         mapping
     )
 

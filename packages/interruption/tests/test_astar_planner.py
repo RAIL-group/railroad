@@ -373,8 +373,8 @@ def test_compute_interruption_value(task_distribution):
     "interruption_prob_fn",
     [
         0.0,
-        partial(get_task_arrival_prob, RandomVariableType.DISCRETE, 0.0),
-        partial(get_task_arrival_prob, RandomVariableType.CONTINUOUS, 0.0)
+        partial(get_task_arrival_prob, RandomVariableType.DISCRETE, 0.0, -1),
+        partial(get_task_arrival_prob, RandomVariableType.CONTINUOUS, -1, float("inf"))
     ]
 )
 def test_optimal_make_sandwhich_noint(heuristic_fn, interruption_prob_fn):
