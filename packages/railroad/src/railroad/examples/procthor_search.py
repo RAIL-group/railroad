@@ -39,6 +39,7 @@ def main(
     nn_model_path: str | None = None,
     video_fps: int = 60,
     video_dpi: int = 150,
+    video_time: float | str | None = None,
 ) -> None:
     """Run ProcTHOR multi-robot search example."""
     from railroad.environment.procthor import ProcTHOREnvironment
@@ -165,7 +166,7 @@ def main(
 
     dashboard.show_plots(
         save_plot=save_plot, show_plot=show_plot, save_video=save_video,
-        video_fps=video_fps, video_dpi=video_dpi,
+        video_fps=video_fps, video_dpi=video_dpi, video_time=video_time,
     )
 
 
