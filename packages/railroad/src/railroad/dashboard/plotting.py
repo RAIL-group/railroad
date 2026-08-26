@@ -67,6 +67,13 @@ class _PlottingMixin:
     _SPRITE_FADE_FRACTION = 0.02
     _MAX_SPRITES = 12
 
+    _PULSE_ZORDER = 6.0
+    """Search rings: over the trail and the location markers, under the robot.
+
+    The ring comes out of the robot, so the robot has to stay on top of it;
+    under the object glyphs for the same reason.
+    """
+
     _sprite_warned = False
     _sprite_cap_warned = False
     """Set per dashboard, so a two-render call says each of these once."""
@@ -1117,6 +1124,7 @@ class _PlottingMixin:
         dpi: int = 150,
         object_sprites: bool = True,
         glyph_objects: Iterable[str] | None = None,
+        search_pulses: bool = True,
     ) -> None:
         """Save an animated trajectory video/GIF.
 
@@ -1132,6 +1140,8 @@ class _PlottingMixin:
                 about. Defaults to animating them when a glyph source exists.
             glyph_objects: Objects to draw glyphs for, overriding the derived
                 plan-relevant set.
+            search_pulses: Ring an expanding pulse out of a robot while it is
+                searching, so the pause reads as sensing rather than waiting.
         """
         import numpy as np
         import matplotlib as mpl
@@ -1367,6 +1377,35 @@ class _PlottingMixin:
             for x, y in track
         ]
 
+        # Search rings. Sized here, beside the sprites, because the fallback
+        # radius is derived from the axes the same way theirs is, and this is
+        # where the axes have a scale to derive it from.
+        pulse_radii: dict[str, Any] = {}
+        pulse_alpha: dict[str, Any] = {}
+        if search_pulses:
+            from railroad.plotting import pulses as _pulses
+
+            windows = _pulses.search_windows(
+                actions_taken=self.actions_taken,
+                history=self.history,
+                known_robots=self.known_robots,
+                horizon=t_end,
+            )
+            if windows:
+                radius = _pulses.pulse_radius(
+                    ax, getattr(getattr(self._env, "scene", None), "resolution", None),
+                )
+                for robot, robot_windows in _pulses.by_robot(windows).items():
+                    # No interpolated track means no centre to ring; a robot
+                    # that never moved has no trajectory to sample.
+                    if robot not in marker_positions:
+                        continue
+                    radii, alpha = _pulses.sample(
+                        robot_windows, frame_times, radius=radius,
+                    )
+                    if alpha.any():
+                        pulse_radii[robot], pulse_alpha[robot] = radii, alpha
+
         if occupancy_grid is not None:
             # Before label_offset below, which reads ax.get_ylim(). Pinning the
             # limits turns autoscale off, so everything drawn in data
@@ -1458,6 +1497,7 @@ class _PlottingMixin:
         # Above the trail so they read over it, below the robot marker so a
         # carried object never hides its carrier. Animated, and composited by
         # hand each frame along with the markers.
+        from railroad.plotting.pulses import make_ring, update_ring
         from railroad.plotting.sprites import make_sprite, update_sprite
 
         sprite_artists: dict[str, tuple[Any, Any]] = {}
@@ -1467,6 +1507,16 @@ class _PlottingMixin:
                 ax, rgba, (float(first[0]), float(first[1])),
                 zorder=self._SPRITE_ZORDER, animated=True,
             )
+
+        # One ring per searching robot: it can only be busy with one search at
+        # a time, so the artist is reused across that robot's whole plan.
+        pulse_artists: dict[str, Any] = {
+            robot: make_ring(
+                ax, marker_positions[robot][0],
+                zorder=self._PULSE_ZORDER, animated=True,
+            )
+            for robot in sorted(pulse_radii)
+        }
 
         legend_artist = ax.legend(fontsize=7, loc="upper right")
         # Fixed-width title so it doesn't jump during animation
@@ -1562,6 +1612,16 @@ class _PlottingMixin:
                     box, offset_image, sprite_rgba[name],
                     sprite_xy[name][frame], alpha,
                 )
+            for robot, ring in pulse_artists.items():
+                alpha = float(pulse_alpha[robot][frame])
+                # Hidden rather than transparent, as for the sprites: a robot
+                # that is not searching costs nothing to skip.
+                ring.set_visible(alpha > 0.0)
+                if alpha > 0.0:
+                    update_ring(
+                        ring, marker_positions[robot][frame],
+                        float(pulse_radii[robot][frame]), alpha,
+                    )
             # Trail points up to the current time. combined_times is sorted,
             # so the visible set is always a prefix.
             n_trail = int(np.searchsorted(combined_times, current_time, side="right"))
@@ -1610,7 +1670,8 @@ class _PlottingMixin:
         # skips them and leaves them to be composited in the right order.
         sprite_boxes = [box for box, _image in sprite_artists.values()]
         hot_artists: list[Any] = [
-            *markers, *labels, *sprite_boxes, title_artist, legend_artist,
+            *markers, *labels, *sprite_boxes, *pulse_artists.values(),
+            title_artist, legend_artist,
         ]
         # Draw them in the same order a full figure draw would, so anything
         # that overlaps still stacks the way it does in the static plot.
@@ -1875,6 +1936,7 @@ class _PlottingMixin:
         location_coords: dict[str, tuple[float, float]] | None = None,
         object_sprites: bool = True,
         glyph_objects: Iterable[str] | None = None,
+        search_pulses: bool = True,
     ) -> None:
         """Convenience method that handles plot/video output based on CLI flags.
 
@@ -1889,6 +1951,9 @@ class _PlottingMixin:
                 Defaults to drawing them when a glyph source is available.
             glyph_objects: Objects to draw glyphs for, overriding the derived
                 plan-relevant set.
+            search_pulses: Ring a pulse out of a searching robot in the video.
+                The static plot has no instant at which a search is running,
+                so it is unaffected.
         """
         if not save_plot and not show_plot and not save_video:
             return
@@ -1914,5 +1979,6 @@ class _PlottingMixin:
                 save_video, location_coords=location_coords,
                 fps=video_fps, dpi=video_dpi,
                 object_sprites=object_sprites, glyph_objects=glyph_objects,
+                search_pulses=search_pulses,
             )
             self.console.print(f"Saved video to [yellow]{save_video}[/yellow]")

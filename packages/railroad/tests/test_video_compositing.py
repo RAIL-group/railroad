@@ -389,3 +389,125 @@ class TestObjectSpritesSurviveCompositing:
         assert xs == sorted(xs), "the carried sprite should travel with the robot"
         assert xs[-1] - xs[0] > 50, "it barely moved"
         assert max(areas) < 1.5 * min(areas), f"sprite area grew: {areas}"
+
+
+@pytest.mark.skipif(not _have_ffmpeg(), reason="ffmpeg not installed")
+class TestSearchPulseSurvivesCompositing:
+    """The search ring, end to end through the compositing loop.
+
+    The ring is a hot artist over a cached raster, like the markers and the
+    glyphs, so it fails the same way they do: composited in the wrong order it
+    is either invisible or smeared over the frames that follow. It is
+    recoloured for the test because white is a design choice and unfindable on
+    the plot's own white ground -- what is asserted is that it reaches the
+    buffer, in the frames it should and no others.
+    """
+
+    #: r1 searches the shelf for 10s, then walks 10s to the counter.
+    PLAN = ("search r1 shelf mug", "move r1 shelf counter")
+    FPS, DURATION, T_END = 8, 2.0, 20.0
+
+    #: Frame 0 repeats the finished plan; 1-15 sample it evenly. The search
+    #: covers 1-8, but by 7 the ring has faded to nothing a codec can carry,
+    #: so the tail is left untested rather than pinned to a fading threshold.
+    SEARCHING = slice(1, 7)
+    AFTERWARDS = slice(9, None)
+
+    #: Chroma the ring has to beat. H.264 tints flat white by up to ~25.
+    CHROMA = 40
+
+    @pytest.fixture
+    def green_ring(self, monkeypatch):
+        from railroad.plotting import pulses
+
+        make_ring = pulses.make_ring
+
+        def coloured(*args, **kwargs):
+            ring = make_ring(*args, **kwargs)
+            ring.set_edgecolor("#00ff00")
+            return ring
+
+        monkeypatch.setattr(pulses, "make_ring", coloured)
+
+    @pytest.fixture
+    def dashboard(self):
+        from railroad import operators
+        from railroad._bindings import State
+        from railroad.core import Fluent as F, get_action_by_name
+        from railroad.dashboard import PlannerDashboard
+        from railroad.environment import ObjectSearchEnvironment
+        from railroad.plotting.pulses import PULSE_RADIUS_M
+
+        class Scene:
+            #: Metres per cell, sized so the full ring is 10 cells across this
+            #: 40x30 map -- clear of the frame, which would clip its growth.
+            resolution = PULSE_RADIUS_M / 10.0
+
+        class SearchEnvironment(ObjectSearchEnvironment):
+            def define_operators(self):
+                return [
+                    operators.construct_search_operator(1.0, 10.0),
+                    operators.construct_move_operator_blocking(
+                        lambda r, a, b: 10.0
+                    ),
+                ]
+
+        env = SearchEnvironment(
+            state=State(0.0, {F("at r1 shelf"), F("free r1")}, []),
+            objects_by_type={
+                "robot": {"r1"},
+                "location": {"shelf", "counter"},
+                "object": {"mug"},
+            },
+            true_object_locations={"shelf": set(), "counter": {"mug"}},
+        )
+        env.occupancy_grid = np.zeros((40, 30))  # ty: ignore[unresolved-attribute]
+        env.scene = Scene()  # ty: ignore[unresolved-attribute]
+
+        dashboard = PlannerDashboard(
+            F("found mug"), env, force_interactive=False, print_on_exit=False,
+        )
+        with dashboard:
+            for name in self.PLAN:
+                env.act(get_action_by_name(env.get_actions(), name))
+                dashboard._do_update(env.state, last_action_name=name)
+        return dashboard
+
+    @pytest.fixture
+    def spans(self, dashboard, tmp_path, green_ring):
+        """The ring's width in pixels for each frame, 0.0 where undrawn."""
+        import subprocess
+
+        out = tmp_path / "pulses.mp4"
+        dashboard.save_video(
+            str(out),
+            location_coords={"shelf": (10.0, 15.0), "counter": (32.0, 8.0)},
+            fps=self.FPS, duration=self.DURATION, figsize=(6.0, 4.0), dpi=100,
+        )
+        subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", str(out), str(tmp_path / "f%02d.png")],
+            check=True, capture_output=True,
+        )
+        return [self._span(frame) for frame in sorted(tmp_path.glob("f*.png"))]
+
+    @classmethod
+    def _span(cls, path) -> float:
+        from PIL import Image
+
+        pixels = np.asarray(Image.open(path).convert("RGB")).astype(int)
+        green = pixels[..., 1] - np.maximum(pixels[..., 0], pixels[..., 2])
+        drawn = green > cls.CHROMA
+        if not drawn.any():
+            return 0.0
+        cols = np.nonzero(drawn)[1]
+        return float(cols.max() - cols.min())
+
+    def test_the_ring_radiates_while_the_robot_searches(self, spans):
+        searching = spans[self.SEARCHING]
+        assert all(searching), f"no ring drawn during the search: {spans}"
+        assert searching == sorted(searching), f"the ring did not grow: {spans}"
+        assert searching[-1] > 3 * searching[0], f"it barely grew: {spans}"
+
+    def test_the_ring_is_absent_before_the_search_and_after_it(self, spans):
+        assert not spans[0], f"the poster frame has no search running: {spans}"
+        assert not any(spans[self.AFTERWARDS]), f"the ring outlived it: {spans}"
