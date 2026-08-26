@@ -578,6 +578,26 @@ def pddl_check(collection: str, n_instances: int, ground: bool,
                f"{n_instances} instance(s) each)")
 
 
+def _check_video_time(
+    ctx: click.Context, param: click.Parameter, value: str | None,
+) -> str | None:
+    """Reject a malformed ``--video-time`` before the example runs.
+
+    The spec cannot be turned into a duration until the plan has a cost, and
+    by then the run it would be thrown away with is already paid for.
+    """
+    del ctx, param
+    if value is None:
+        return None
+    from railroad.dashboard.plotting import parse_video_time
+
+    try:
+        parse_video_time(value)
+    except ValueError as exc:
+        raise click.BadParameter(str(exc)) from None
+    return value
+
+
 def _make_example_command(name: str, info: ExampleInfo) -> None:
     """Create and register a click command for an example."""
     description = info["description"]
@@ -609,12 +629,13 @@ def _make_example_command(name: str, info: ExampleInfo) -> None:
     # Global plot/video options for every example command
     _run = click.option("--video-dpi", "video_dpi", type=int, default=150, show_default=True, help="Video resolution in dots per inch")(_run)
     _run = click.option("--video-fps", "video_fps", type=int, default=60, show_default=True, help="Video frames per second")(_run)
+    _run = click.option("--video-time", "video_time", default=None, callback=_check_video_time, help="Video length in seconds (e.g. 15 or 15s), or a speed to play the plan at (e.g. 100x). Default: 10s")(_run)
     _run = click.option("--save-video", "save_video", default=None, help="Save trajectory animation to file (e.g. out.mp4)")(_run)
     _run = click.option("--show-plot", "show_plot", is_flag=True, default=False, help="Show trajectory plot interactively")(_run)
     _run = click.option("--save-plot", "save_plot", default=None, help="Save trajectory plot to file (e.g. out.png)")(_run)
     # Option group panels (last applied = displayed first)
     _run = click.option_panel("Options", options=[opt["name"] for opt in options] + ["--help"])(_run)
-    _run = click.option_panel("Plot/video options", options=["--save-plot", "--show-plot", "--save-video", "--video-fps", "--video-dpi"])(_run)
+    _run = click.option_panel("Plot/video options", options=["--save-plot", "--show-plot", "--save-video", "--video-time", "--video-fps", "--video-dpi"])(_run)
 
 
 # Register each example as a direct subcommand

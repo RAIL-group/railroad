@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import subprocess
 from typing import Any, Iterable, TYPE_CHECKING
 
@@ -8,6 +9,72 @@ from ._tui import _generate_coordinates, _is_ci_environment
 
 if TYPE_CHECKING:
     from .dashboard import PlannerDashboard
+
+DEFAULT_VIDEO_DURATION = 10.0
+"""Seconds of video when the caller asks for no particular length."""
+
+
+def parse_video_time(spec: float | str) -> tuple[float, bool]:
+    """Split a video-time spec into its number and whether it is a speed.
+
+    ``"15"`` and ``"15s"`` are the same fifteen seconds; the unit is optional
+    because a bare number next to a ``100x`` in the same help text invites the
+    question of what it is. ``"100x"`` is a speed.
+
+    Separate from `resolve_video_duration` so a caller taking the spec from a
+    user -- the CLI -- can reject a typo at the point it was typed, rather
+    than after a planning run it would then throw away.
+
+    Raises:
+        ValueError: on anything that is not a positive number of seconds or a
+            positive ``<number>x`` speed.
+    """
+    text = str(spec).strip()
+    suffix = text[-1:].lower()
+    is_speed = suffix == "x"
+    try:
+        value = float(text[:-1] if is_speed or suffix == "s" else text)
+    except ValueError:
+        raise ValueError(
+            f"cannot read {text!r} as a video time: give seconds ('15' or "
+            f"'15s') or a speed ('100x')"
+        ) from None
+    if not math.isfinite(value):
+        # `float` takes 'inf' and 'nan' happily; the frame count made from
+        # either blows up somewhere much further from what was typed.
+        raise ValueError(f"video time must be a real length, not {text!r}")
+    if value <= 0:
+        noun = "speed" if is_speed else "length"
+        raise ValueError(f"video {noun} must be positive, not {text!r}")
+    return value, is_speed
+
+
+def resolve_video_duration(spec: float | str | None, plan_time: float) -> float:
+    """Seconds of video for *spec*, which is either a length or a speed.
+
+    A number, bare or with an ``s`` on it (``15``, ``"15"``, ``"15s"``), is the
+    length of the finished video in seconds, whatever the plan cost. A string
+    ending in ``x`` -- ``"100x"`` -- is a speed instead: the plan is played
+    that many times faster than it ran, so a plan costing 1500 comes out 15
+    seconds long. Speed is the more useful
+    of the two whenever plans of different sizes have to stay comparable on
+    screen, which a fixed length quietly destroys.
+
+    Raises:
+        ValueError: on a spec `parse_video_time` rejects, and on a speed over
+            a plan that cost nothing, which has no length to scale.
+    """
+    if spec is None:
+        return DEFAULT_VIDEO_DURATION
+    value, is_speed = parse_video_time(spec)
+    if not is_speed:
+        return value
+    duration = float(plan_time) / value
+    if duration <= 0:
+        raise ValueError(
+            f"a plan costing {plan_time:g} has nothing to play at {value:g}x"
+        )
+    return duration
 
 
 def _canvas_buffer_writer_cls() -> Any:
@@ -1119,7 +1186,7 @@ class _PlottingMixin:
         *,
         location_coords: dict[str, tuple[float, float]] | None = None,
         fps: int = 60,
-        duration: float = 10.0,
+        duration: float | str | None = None,
         figsize: tuple[float, float] = (12.8, 7.2),
         dpi: int = 150,
         object_sprites: bool = True,
@@ -1133,7 +1200,11 @@ class _PlottingMixin:
                 ``.mp4``/``.avi`` uses FFMpegWriter.
             location_coords: Optional explicit location->(x,y) mapping.
             fps: Frames per second.
-            duration: Total animation duration in seconds.
+            duration: How long the finished video runs. A number is seconds,
+                with or without an ``s`` on it (``15``, ``"15s"``); a string
+                ending in ``x`` (``"100x"``) is a speed, playing the plan that
+                many times faster than it ran. Defaults to
+                ``DEFAULT_VIDEO_DURATION`` seconds.
             figsize: Figure size in inches.
             dpi: Resolution in dots per inch.
             object_sprites: Animate emoji glyphs for the objects the plan is
@@ -1163,6 +1234,15 @@ class _PlottingMixin:
         if result is None:
             return
         fig, ax, sidebar_ax, trajectories, env_coords, t_end, onboard_axes = result
+
+        # A speed only means something against the plan's own cost, so this is
+        # the first point it can be resolved -- and the last point before the
+        # figure is worth anything, hence closing it rather than leaking one.
+        try:
+            duration = resolve_video_duration(duration, t_end)
+        except ValueError:
+            plt.close(fig)
+            raise
 
         # Render at the output resolution from the start. The frame loop
         # composites straight out of the canvas buffer, so the figure's dpi
@@ -1826,6 +1906,17 @@ class _PlottingMixin:
                     yield frame
                     progress.update(task, completed=frame + 1)
 
+        # Announced before the first frame, because the cost of a video is
+        # not obvious from the flag that asked for it: a speed over a long plan
+        # can quietly run to thousands of frames. Ctrl-C is honoured below and
+        # keeps what has been written, so this is a decision the user can still
+        # act on.
+        self.console.print(
+            f"Writing [bold]{duration:.1f}s[/bold] of video at {fps} fps "
+            f"— {n_frames} frames, {t_end / duration:.3g}x plan speed. "
+            f"Ctrl-C keeps what is written."
+        )
+
         writer = _canvas_buffer_writer_cls()(fps=fps)
 
         interrupted = False
@@ -1933,6 +2024,7 @@ class _PlottingMixin:
         save_video: str | None = None,
         video_fps: int = 60,
         video_dpi: int = 150,
+        video_time: float | str | None = None,
         location_coords: dict[str, tuple[float, float]] | None = None,
         object_sprites: bool = True,
         glyph_objects: Iterable[str] | None = None,
@@ -1946,6 +2038,10 @@ class _PlottingMixin:
             save_video: If set, save a trajectory animation to this file path.
             video_fps: Frames per second for video (default: 60).
             video_dpi: Resolution in dots per inch for video (default: 150).
+            video_time: How long the video runs -- seconds (``15`` or
+                ``"15s"``), or a speed as a string ending in ``x`` (``"100x"``
+                plays the plan a hundred times faster than it ran). Defaults
+                to ``DEFAULT_VIDEO_DURATION`` seconds.
             location_coords: Optional explicit location->(x,y) mapping.
             object_sprites: Draw emoji glyphs for the objects the plan is about.
                 Defaults to drawing them when a glyph source is available.
@@ -1977,7 +2073,7 @@ class _PlottingMixin:
         if save_video:
             self.save_video(
                 save_video, location_coords=location_coords,
-                fps=video_fps, dpi=video_dpi,
+                fps=video_fps, dpi=video_dpi, duration=video_time,
                 object_sprites=object_sprites, glyph_objects=glyph_objects,
                 search_pulses=search_pulses,
             )

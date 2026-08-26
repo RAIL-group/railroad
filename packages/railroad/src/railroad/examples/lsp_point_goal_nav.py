@@ -55,6 +55,7 @@ def main(
     save_video: str | None = None,
     video_fps: int = 60,
     video_dpi: int = 150,
+    video_time: float | str | None = None,
 ) -> None:
     """Run point-goal navigation with LSP frontier actions."""
     from railroad.core import get_action_by_name
@@ -168,6 +169,7 @@ def main(
         save_video=save_video,
         video_fps=video_fps,
         video_dpi=video_dpi,
+        video_time=video_time,
     )
 
     scene.release()
