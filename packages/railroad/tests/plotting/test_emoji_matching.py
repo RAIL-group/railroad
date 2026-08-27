@@ -37,6 +37,10 @@ def test_representative_names(name, expected, font_path):
     assert emoji.match(name, font_path) == expected
 
 
+# A name with no exact match falls through to the embedding path, so this test
+# pays for building the similarity matrix and loading the sentence-transformers
+# model -- the only test in the module that does.
+@pytest.mark.slow
 def test_unknown_name_uses_fallback(font_path):
     assert emoji.match("zzqqxx_1", font_path) == emoji.FALLBACK_CODEPOINT
 
