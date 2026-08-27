@@ -15,11 +15,11 @@ dependencies = [
     # Testing and formatting (monorepo-level)
     "pytest-html",
     "pytest-xdist>=3.8.0",
-    # ruff has no [tool.ruff] config here, so it runs on defaults; 0.16 widened the
-    # default rule set enough to surface ~1400 new findings. Pin until configured.
+    # Ruff runs on defaults (there is no [tool.ruff] config); 0.16's wider
+    # default rule set surfaces ~1400 findings. Lift once rules are configured.
     "ruff>=0.15.10,<0.16",
-    # uv.lock is gitignored, so CI re-resolves every run; without a ceiling a new
-    # ty release can break main on an unrelated commit. Bump deliberately.
+    # uv.lock is gitignored, so CI re-resolves every run. The ceiling stops a
+    # new ty release from breaking main on an unrelated commit; bump deliberately.
     "ty>=0.0.64,<0.0.65",
 ]
 
@@ -37,29 +37,15 @@ extra-paths = [
 ]
 
 [tool.pytest.ini_options]
-# --dist worksteal: idle workers steal queued tests instead of being handed a
-# fixed up-front slice. The default (`load`) can deal the 25s ProcTHOR test to a
-# worker late and leave the rest idle -- measured 50-69s across runs, vs 54+-1s
-# for worksteal. Slightly worse best case, far better worst case.
-# -v: the per-test scroll, as on main. It was traded away for pytest-richer's
-# progress wall; with that gone, verbose comes back rather than leaving the
-# run reporting nothing but dots.
-#
-# pytest-richer (--rich) was removed, not just disabled: with its progress
-# wall active the run intermittently died during collection with
-# `KeyError: 'conftest'` or pytest's "module is already loaded with path ...
-# not supposed to happen" assertion -- one xdist worker fails and the whole
-# run is interrupted. It unregisters and re-registers reporter plugins at
-# startup, which desyncs pytest's plugin registry from its conftest
-# bookkeeping. Only reproduced on a tty, so CI never saw it while every
-# interactive run hit it. Do not reintroduce it.
+# worksteal: workers pull from a shared queue rather than a fixed up-front
+# slice, so a long test scheduled late (the ProcTHOR integration tests take
+# ~25s each) cannot leave the other workers idle waiting on it.
 addopts = "-v -n auto --dist worksteal --html=data/test_logs/test_report.html --self-contained-html"
 
 markers = [
     "slow: marks tests as slow to run (deselect with '-m \"not slow\"')",
-    # Distinct from `slow`: these are planner-driven, so their outcome is
-    # sampled rather than fixed. They are cheap, and were previously marked
-    # `slow` -- which kept real coverage off the fast path for no time saved.
+    # Distinct from `slow`: these are cheap, but planner-driven, so the outcome
+    # is sampled rather than fixed.
     "stochastic: outcome depends on planner sampling (deselect with '-m \"not stochastic\"')",
 ]
 testpaths = ["packages"]
