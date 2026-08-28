@@ -14,21 +14,20 @@ from interruption.experiments import (
 from interruption.utilities import (
     RandomVariableType, randomize_task_distribution_order, get_task_arrival_prob
 )
-from railroad.core import ff_heuristic
 from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 
 # constants
 MODEL_PATH = DEFAULT_RESOURCES_BASE / "models"
-RANDOMIZE_TASK_SEQUENCE = True
+RANDOMIZE_TASK_SEQUENCE = False
 
 def main(randomize_order: bool = False):
     model_name = "best_model_experiment10_val.pt"
 
     seeds = ExperimentSeeds(
-        procthor_seed=201, experiment_seed=20, object_placement_seed=21, task_sample_seed=75
+        procthor_seed=201, experiment_seed=20, object_placement_seed=19, task_sample_seed=75
     )
     task_arrival_fn = partial(
-        get_task_arrival_prob, RandomVariableType.CONTINUOUS, -1, 5
+        get_task_arrival_prob, RandomVariableType.CONTINUOUS, -1, 180
     )
 
     # get task distribution from alfred dataset used during training
@@ -56,14 +55,13 @@ def main(randomize_order: bool = False):
         current_goal,
         task_distribution,
         task_arrival_fn,
-        ff_heuristic,
         MODEL_PATH / model_name,
-        num_task_sequence=5,
+        num_task_sequence=2,
         augment_task=False
     )
 
     run_experiment(
-        config, ExperimentMode.INTERRUPTION, show_plot=True, remove_duplicates=True
+        config, ExperimentMode.INTERRUPTION_AP, show_plot=True, remove_duplicates=True
     )
 
 if __name__ == "__main__":

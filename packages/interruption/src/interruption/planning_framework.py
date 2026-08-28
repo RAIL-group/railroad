@@ -7,14 +7,31 @@ from itertools import product
 import numpy as np
 from shapely import geometry
 from railroad.core import (
-    Action, State, LiteralGoal, Goal, Fluent as F, convert_goal_to_positive_preconditions,
-    convert_state_to_positive_preconditions
+    Action, State, LiteralGoal, Goal, Fluent as F, convert_goal_to_positive_preconditions
+    , ff_heuristic
 )
 from railroad.environment.procthor.scene import ProcTHORScene
 from railroad.environment.procthor.scenegraph import SceneGraph
 from railroad.navigation.pathing import get_cost_and_path
 
-from .planner import InterruptionSearchProblem, PlannerConfig, astar_search, compute_interruption_value
+from .planner import InterruptionSearchProblem, PlannerConfig, astar_search
+
+# wrapper heuristic functions
+def ap_heuristic_fn(
+    include_v_ap: bool,
+    state: State,
+    goal: Goal,
+    actions: list[Action],
+    v_ap: float,
+) -> float:
+    """
+    A wrapper of the ff_heuristic function for incorporating the expected
+    value over a task distribution resulting from a learned function into
+    the heuristic.
+    """
+    if not include_v_ap:
+        return ff_heuristic(state, goal, actions)
+    return 0.85 * ff_heuristic(state, goal, actions) + 1 * v_ap
 
 
 # discount functions

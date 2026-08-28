@@ -14,6 +14,9 @@ from .utilities import (
     get_updated_scene_graph
 )
 
+# constants
+DEBUG = False
+
 # data structures for astar search
 @dataclass
 class InterruptionSearchProblem:
@@ -35,7 +38,7 @@ class PlannerConfig:
     A* Search.
     """
     discount_fn: Callable[[list[float]], float]
-    heuristic_fn: Callable[[State, Goal, list[Action]], float] | float
+    heuristic_fn: Callable[[State, Goal, list[Action], float], float] | float
     planner_interruption_prob_fn: float | Callable[[float], float] | None = None
     interruption_value_fn: Callable[[SceneGraph], float] | None = None
     current_task_reward: float = 0
@@ -90,14 +93,28 @@ class InterruptionTrajectory:
         if isinstance(planner_params.heuristic_fn, (int, float)):
             undiscounted_future_cost = planner_params.heuristic_fn
         else:
+            v_ap = 0 if planner_params.interruption_value_fn is None else interrupting_task_ev
             undiscounted_future_cost = planner_params.heuristic_fn(
-                next_state, search_problem.goal, search_problem.actions
+                next_state, search_problem.goal, search_problem.actions, v_ap
             )
         estimated_future_cost = get_discounted_value(
             undiscounted_future_cost,
             planner_params.discount_fn(self.interruption_probs) * (1 - interruption_prob),
             planner_params.current_task_reward
         )
+
+        # for debugging
+        if DEBUG:
+            interested_plan = [
+                'move robot1 start_loc countertop_3',
+                'pick robot1 r1-right countertop_3 apple_8',
+                'pick robot1 r1-left countertop_3 tomato_12'
+            ]
+            traj_plan_names = [act.name for act in self.plan + [action]]
+            if all(act in traj_plan_names for act in interested_plan):
+                print(v_ap)
+                print(undiscounted_future_cost)
+
 
         return InterruptionTrajectory(
             cost=accumulated_cost,
@@ -157,7 +174,6 @@ def astar_search(
     interruption_problem: InterruptionSearchProblem,
     search_params: PlannerConfig,
     num_steps: int = 20000,
-    print_trace: bool = False
 ) -> tuple[list[Action], float, bool, SceneGraph | None]:#, State]:
     """
     Astar algorithm implementation.
@@ -190,7 +206,7 @@ def astar_search(
     with tqdm(total=num_steps) as pbar:
         while num_expanded_nodes < num_steps:
             # some logging functionality for debugging
-            if print_trace:
+            if DEBUG:
                 print_frontier_trace(num_expanded_nodes, frontier)
 
             # find expansion node
@@ -207,6 +223,7 @@ def astar_search(
             # otherwise add it
             expanded.add(frozenset(curr_state.fluents))
             # expand search tree
+            num_expanded_nodes+=1
             for action in get_next_actions(curr_state, interruption_problem.actions):
                 # probability of interruption after taking action from current state
                 next_state, interruption_prob = get_next_state(
@@ -238,14 +255,14 @@ def astar_search(
 
     # goal not reached, get best trajectory found
     best_found, _, _ = heapq.heappop(frontier)
-    return best_found.plan, best_found.cost, False, best_found.scene_graph#, best_found.state_history[-1]
+    return best_found.plan, best_found.cost, False, best_found.scene_graph
 
-# TODO - modify to handle the augmentation case
+
 def compute_interruption_value(
     state: State,
     actions: list[Action],
     interrupting_task_dist: tuple[list[Goal], list[float]],
-    heuristic_fn: float | Callable[[State, Goal, list[Action]], float] = 0,
+    heuristic_fn: float | Callable[[State, Goal, list[Action], float], float] = 0,
 ) -> float:
     """
     Computes the expected value of a state for a task distribution.

@@ -34,7 +34,6 @@ from interruption.utilities import RandomVariableType, get_task_arrival_prob
 from railroad.core import (
     Goal,
     convert_state_to_positive_preconditions,
-    ff_heuristic,
     get_action_by_name,
 )
 from railroad.environment.procthor.resources import get_procthor_10k_dir
@@ -71,7 +70,6 @@ def main():
     # get task distribution from alfred tasks
     env = construct_procthor_kitchen_environment(PROCTHOR_SEED, remove_duplicates=REMOVE_DUPLICATES)
 
-    # TODO - add support for task augmentation support
     task_distribution = get_alfred_task_distribution(
         env.scene.objects,
         set(env.scene.locations),
@@ -250,8 +248,7 @@ def initialize_experiment_config(
         ExperimentSeeds(procthor_seed, object_placement_seed=objects_seed),
         goal,
         task_distribution,
-        task_arrival_fn,
-        ff_heuristic
+        task_arrival_fn
     )
 
 

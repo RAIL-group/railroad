@@ -11,7 +11,6 @@ import itertools
 from typing import Any
 
 from railroad.bench import BenchmarkCase, benchmark
-from railroad.core import ff_heuristic
 from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 
 from ..environments import (
@@ -46,7 +45,7 @@ def _get_cases() -> list[dict[str, Any]]:
         }
         for (time_between_arrivals, seed), num_task_sequence in itertools.product(
             zip(
-                [float("inf"), 600, 300, 240, 180, 120, 60, 30],
+                [float("inf"), 1500, 720, 420, 300, 180, 120, 60],
                 [140, 42, 240, 57, 1096, 4065, 720, 391]
             ),
             [5]
@@ -110,7 +109,6 @@ def _setup_experiment_config(
         current_goal,
         task_distribution,
         task_arrival_fn,
-        ff_heuristic,
         model_path,
         case.params["num_task_sequence"]
     )
@@ -120,7 +118,7 @@ def _setup_experiment_config(
 @benchmark(
     name="procthor_interruption",
     description=(
-        "Evaluates the interruption-based planner across "
+        "Evaluates the interruption planner across "
         "task-arrival probabilities in specified procthor environments."
     ),
     tags=["interruption", "procthor"],
@@ -139,7 +137,28 @@ bench_interruption_kitchen.add_cases(_get_cases())
 
 
 @benchmark(
-    name="myopic_procthor_interruption",
+    name="procthor_interruption_ap",
+    description=(
+        "Evaluates the interruption-ap planner across "
+        "task-arrival probabilities in specified procthor environments."
+    ),
+    tags=["interruption", "procthor", "ap"],
+    timeout=600.0,
+    repeat=EXPERIMENT_REPEATS,
+)
+def bench_interruption_ap_kitchen(case: BenchmarkCase):
+    """
+    Wrapper function to evaluate the interruption-based planner on procthor kitchen
+    environments. 
+    """
+    config = _setup_experiment_config(case, ExperimentMode.INTERRUPTION_AP)
+    return run_experiment(config, ExperimentMode.INTERRUPTION_AP, True, True)
+
+bench_interruption_ap_kitchen.add_cases(_get_cases())
+
+
+@benchmark(
+    name="procthor_myopic",
     description=(
         "Evaluates the myopic planner across "
         "task-arrival probabilities in specified procthor environments."
@@ -160,7 +179,7 @@ bench_myopic_interruption_kitchen.add_cases(_get_cases())
 
 
 @benchmark(
-    name="ap_procthor_interruption",
+    name="procthor_ap",
     description=(
         "Evaluates the anticipatory planning planner across "
         "task-arrival probabilities in specified procthor environments."
@@ -169,7 +188,7 @@ bench_myopic_interruption_kitchen.add_cases(_get_cases())
     timeout=600.0,
     repeat=EXPERIMENT_REPEATS,
 )
-def bench_ap_interruption_kitchen(case: BenchmarkCase):
+def bench_ap_kitchen(case: BenchmarkCase):
     """
     Wrapper function to evaluate the interruption-based planner on procthor kitchen
     environments. 
@@ -177,4 +196,4 @@ def bench_ap_interruption_kitchen(case: BenchmarkCase):
     config = _setup_experiment_config(case, ExperimentMode.ANTICIPATORY_PLANNING)
     return run_experiment(config, ExperimentMode.ANTICIPATORY_PLANNING, True, True)
 
-bench_ap_interruption_kitchen.add_cases(_get_cases())
+bench_ap_kitchen.add_cases(_get_cases())

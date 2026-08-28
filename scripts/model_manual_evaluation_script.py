@@ -20,7 +20,7 @@ from interruption.experiments import (
 from interruption.planner import compute_interruption_value
 from interruption.utilities import RandomVariableType, get_task_arrival_prob
 from railroad.core import (
-    ff_heuristic, convert_state_to_positive_preconditions, Action, get_action_by_name
+    convert_state_to_positive_preconditions, Action, get_action_by_name
 )
 from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 from railroad.environment.procthor.scenegraph import SceneGraph
@@ -41,7 +41,7 @@ def main():
     task_arrival_fn = partial(
         get_task_arrival_prob, RandomVariableType.CONTINUOUS, -1, 30
     )
-    
+
     env = construct_procthor_kitchen_environment(seeds.procthor_seed, remove_duplicates=True)
     task_distribution = get_alfred_task_distribution(
         env.scene.objects,
@@ -55,7 +55,6 @@ def main():
             get_example_procthor_goal(),
             task_distribution,
             task_arrival_fn,
-            ff_heuristic,
             MODEL_PATH / model_name
         ),
         ExperimentMode.ANTICIPATORY_PLANNING, # using AP to get access to the model

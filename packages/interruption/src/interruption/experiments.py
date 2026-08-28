@@ -14,7 +14,6 @@ from railroad.core import (
     Fluent,
     Goal,
     LiteralGoal,
-    State,
     convert_goal_to_positive_preconditions,
     convert_state_to_positive_preconditions,
     ff_heuristic,
@@ -30,7 +29,9 @@ from .environments import construct_procthor_kitchen_environment, KitchenProcTHO
 from .learning.models.gcn import AnticipateGCN
 from .learning.utils import get_torch_device
 from .planner import astar_search, PlannerConfig, InterruptionSearchProblem
-from .planning_framework import get_no_int_prob, get_no_int_discount, anticipatory_planner
+from .planning_framework import (
+    get_no_int_prob, get_no_int_discount, anticipatory_planner, ap_heuristic_fn
+)
 from .utilities import (
     get_action_cost,
     negative_fluent_preprocessing,
@@ -47,6 +48,7 @@ class ExperimentMode(Enum):
     MYOPIC = 1
     ANTICIPATORY_PLANNING = 2
     INTERRUPTION = 3
+    INTERRUPTION_AP = 4
 
 
 @dataclass
@@ -75,7 +77,6 @@ class ExperimentConfig:
     goal: Goal
     interrupting_task_dist: tuple[Sequence[Goal], list[float]]
     task_arrival_fn: Callable[[float], float]
-    heuristic_fn: float | Callable[[State, Goal, list[Action]], float]
     ev_model_path: Path | str = ""
     num_task_sequence: int = 2
     augment_task: bool = False
@@ -336,6 +337,7 @@ def _get_planner_config(
     planner_mode: ExperimentMode,
     interruption_prob_fn: float | Callable[[float], float]
 ) -> PlannerConfig:
+    heuristic_fn = partial(ap_heuristic_fn, False)
     if planner_mode in [ExperimentMode.MYOPIC, ExperimentMode.ANTICIPATORY_PLANNING]:
         discount_fn=get_no_int_discount
         planner_interruption_prob_fn=None
@@ -345,16 +347,18 @@ def _get_planner_config(
             else AnticipateGCN.get_net_eval_fn(config.ev_model_path, get_torch_device())
         )
         current_task_reward=0
-    else: # ExperimentMode.INTERRUPTION
+    else: # ExperimentMode.INTERRUPTION or ExperimentMode.INTERRUPTION_AP
         discount_fn=get_no_int_prob
         planner_interruption_prob_fn=interruption_prob_fn
         interruption_value_fn=AnticipateGCN.get_net_eval_fn(
             config.ev_model_path, get_torch_device()
         )
         current_task_reward=0
+        if planner_mode == ExperimentMode.INTERRUPTION_AP:
+            heuristic_fn = partial(ap_heuristic_fn, True)
     return PlannerConfig(
         discount_fn,
-        config.heuristic_fn,
+        heuristic_fn,
         planner_interruption_prob_fn,
         interruption_value_fn,
         current_task_reward

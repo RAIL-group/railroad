@@ -141,7 +141,7 @@ class ThorInterface:
             self.scene['objects'] = copy.deepcopy(self.containers)
 
         self.cached_data = (
-            self._load_cache(remove_duplicates=remove_duplicates) if use_cache 
+            self._load_cache(remove_duplicates=remove_duplicates) if use_cache
             else None
         )
         if self.cached_data is None:
@@ -169,7 +169,9 @@ class ThorInterface:
                             width=render_px,
                             height=render_px,
                         )
-                        self.cached_data = self._save_and_get_cache()
+                        self.cached_data = self._save_and_get_cache(
+                            remove_duplicates=remove_duplicates
+                        )
                         # Inside the lock: otherwise every worker that generates
                         # a scene keeps its Unity alive for the rest of the run,
                         # and they accumulate exactly as the lock exists to
