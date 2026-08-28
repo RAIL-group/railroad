@@ -3,6 +3,7 @@ Implementations of the interruption-based, myopic, and anticipatory planning pla
 for ProcTHOR environments. These planner implementations all utilize the astar_search
 function from planner.py
 """
+from typing import Optional
 from itertools import product
 import numpy as np
 from shapely import geometry
@@ -18,20 +19,23 @@ from .planner import InterruptionSearchProblem, PlannerConfig, astar_search
 
 # wrapper heuristic functions
 def ap_heuristic_fn(
-    include_v_ap: bool,
     state: State,
     goal: Goal,
     actions: list[Action],
-    v_ap: float,
+    v_ap: float = 0,
+    weights: Optional[tuple[float, float]] = None
 ) -> float:
     """
     A wrapper of the ff_heuristic function for incorporating the expected
     value over a task distribution resulting from a learned function into
-    the heuristic.
+    the heuristic. When the weights argument is provided, the first element
+    of the tuple is the weight of the ff-heuristic value and the second elemnt
+    is the weight of the v_ap term. Additionally, when a value for weights is not
+    provided, the wrapper simply returns the value of the ff-heuristic.
     """
-    if not include_v_ap:
+    if weights is None:
         return ff_heuristic(state, goal, actions)
-    return 0.85 * ff_heuristic(state, goal, actions) + 1 * v_ap
+    return weights[0] * ff_heuristic(state, goal, actions) + weights[1] * v_ap
 
 
 # discount functions

@@ -27,7 +27,7 @@ def main(randomize_order: bool = False):
         procthor_seed=201, experiment_seed=20, object_placement_seed=19, task_sample_seed=75
     )
     task_arrival_fn = partial(
-        get_task_arrival_prob, RandomVariableType.CONTINUOUS, -1, 180
+        get_task_arrival_prob, RandomVariableType.CONTINUOUS, -1, float("inf")
     )
 
     # get task distribution from alfred dataset used during training

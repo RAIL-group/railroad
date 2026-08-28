@@ -29,13 +29,13 @@ def test_ap_heuristic_fn_without_v_ap_matches_ff_heuristic():
     """include_v_ap=False must ignore v_ap entirely, not just default it to 0."""
     state, goal, actions = _build_move_and_pick_fixture()
 
-    assert ap_heuristic_fn(False, state, goal, actions, v_ap=1000.0) == 7.0
+    assert ap_heuristic_fn(state, goal, actions, v_ap=1000.0) == 7.0
 
 
 def test_ap_heuristic_fn_with_v_ap_adds_expected_value():
     state, goal, actions = _build_move_and_pick_fixture()
 
-    assert ap_heuristic_fn(True, state, goal, actions, v_ap=3.5) == pytest.approx(10.5)
+    assert ap_heuristic_fn(state, goal, actions, v_ap=3.5, weights=(1, 1)) == pytest.approx(10.5)
 
 
 @pytest.mark.parametrize("v_ap", [0.0, -2.0, 100.0])
@@ -46,15 +46,15 @@ def test_ap_heuristic_fn_with_v_ap_is_additive(v_ap):
     prevents the result from going negative when v_ap is negative enough.
     """
     state, goal, actions = _build_move_and_pick_fixture()
-    base = ap_heuristic_fn(False, state, goal, actions, v_ap=0.0)
+    base = ap_heuristic_fn(state, goal, actions)
 
-    assert ap_heuristic_fn(True, state, goal, actions, v_ap=v_ap) == pytest.approx(base + v_ap)
+    assert ap_heuristic_fn(state, goal, actions, v_ap=v_ap, weights=(1, 1)) == pytest.approx(base + v_ap)
 
 
 def test_ap_heuristic_fn_with_v_ap_true_and_zero_matches_without_v_ap():
     state, goal, actions = _build_move_and_pick_fixture()
 
-    without = ap_heuristic_fn(False, state, goal, actions, v_ap=0.0)
-    with_zero = ap_heuristic_fn(True, state, goal, actions, v_ap=0.0)
+    without = ap_heuristic_fn(state, goal, actions)
+    with_zero = ap_heuristic_fn(state, goal, actions, v_ap=0.0, weights=(1, 1))
 
     assert with_zero == without

@@ -39,6 +39,7 @@ from .utilities import (
 
 # global constants/enums
 DEBUG = False
+WEIGHTS = (0.85, 1)
 
 class ExperimentMode(Enum):
     """
@@ -337,7 +338,7 @@ def _get_planner_config(
     planner_mode: ExperimentMode,
     interruption_prob_fn: float | Callable[[float], float]
 ) -> PlannerConfig:
-    heuristic_fn = partial(ap_heuristic_fn, False)
+    heuristic_fn = partial(ap_heuristic_fn)
     if planner_mode in [ExperimentMode.MYOPIC, ExperimentMode.ANTICIPATORY_PLANNING]:
         discount_fn=get_no_int_discount
         planner_interruption_prob_fn=None
@@ -355,7 +356,7 @@ def _get_planner_config(
         )
         current_task_reward=0
         if planner_mode == ExperimentMode.INTERRUPTION_AP:
-            heuristic_fn = partial(ap_heuristic_fn, True)
+            heuristic_fn = partial(ap_heuristic_fn, weights=WEIGHTS)
     return PlannerConfig(
         discount_fn,
         heuristic_fn,
