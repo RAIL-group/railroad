@@ -101,7 +101,7 @@ class AnticipateGCN(nn.Module):
         """
         # load trained gcn
         model = AnticipateGCN()
-        model.load_state_dict(torch.load(network_file))
+        model.load_state_dict(torch.load(network_file, map_location="cpu"))
         model.to(device)
         model.eval()
 

@@ -63,6 +63,8 @@ def explore_seeds(seeds: set[int]) -> None:
             print(f"Seed {seed}:")
             print(f"Number of Locations: {len(scene.locations)}")
             print(f"Number of Objects: {len(scene.objects)}")
+            print(f"Number of Unique Locations: {len({loc.split("_")[0] for loc in scene.locations})}")
+            print(f"Number of Unique Objects: {len({obj.split("_")[0] for obj in scene.objects})}")
             print(f"Locations: {scene.locations}")
             print(f"Objects: {scene.objects}")
             print(f"Object Locations: {scene.object_locations}")
@@ -80,9 +82,9 @@ def get_generic_name(obj: str) -> str:
 
 def main():
     # dataset filtering parameters
-    num_rooms = {1}
+    num_rooms = {2}
     room_types = {"Kitchen"}
-    locations = {"shelvingunit"}
+    locations = None
     objects = None
     k = 10
 

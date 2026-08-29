@@ -75,6 +75,7 @@ def main():
         set(env.scene.locations),
         one_object_per_taskdist=True
     )
+
     num_objects = len(env.scene.objects)
     num_locations = len(env.scene.locations)
 
@@ -130,14 +131,8 @@ def _generate_worker_share(
 
         random.seed(DATA_GENERATION_SEED + worker_id * SEED_STRIDE + count)
         while True:
-            sampled_task_idx = random.randint(0, len(task_distribution[0]))
-            # sample with replacement
-            if sampled_task_idx > 0:
-                temp = data.search_problem.interrupting_task_dist[0][sampled_task_idx-1]
-                data.search_problem.interrupting_task_dist[0][sampled_task_idx-1] = (
-                    data.search_problem.goal
-                )
-                data.search_problem.goal = temp
+            # NOTE: this assumes that future tasks are uniformly distributed
+            data.search_problem.goal = random.choice(data.search_problem.interrupting_task_dist[0])
 
             initial_state = convert_state_to_positive_preconditions(
                 data.env.state, data.neg_to_pos_mapping

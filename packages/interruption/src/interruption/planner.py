@@ -59,6 +59,9 @@ class InterruptionTrajectory:
     value: float = 0.0
     h_value: float = 0.0
     discounted_h_value: float = 0.0
+    # # for debugging
+    # v_ap: float = 0.0
+    # ff_value: float = 0.0
 
 
     def create_child(
@@ -103,17 +106,17 @@ class InterruptionTrajectory:
             planner_params.current_task_reward
         )
 
-        # for debugging
-        if DEBUG:
-            interested_plan = [
-                'move robot1 start_loc countertop_3',
-                'pick robot1 r1-right countertop_3 apple_8',
-                'pick robot1 r1-left countertop_3 tomato_12'
-            ]
-            traj_plan_names = [act.name for act in self.plan + [action]]
-            if all(act in traj_plan_names for act in interested_plan):
-                print(v_ap)
-                print(undiscounted_future_cost)
+        # # for debugging
+        # if DEBUG:
+        #     interested_plan = [
+        #         'move robot1 start_loc countertop_3',
+        #         'pick robot1 r1-right countertop_3 apple_8',
+        #         'pick robot1 r1-left countertop_3 tomato_12'
+        #     ]
+        #     traj_plan_names = [act.name for act in self.plan + [action]]
+        #     if all(act in traj_plan_names for act in interested_plan):
+        #         print(v_ap)
+        #         print(undiscounted_future_cost)
 
 
         return InterruptionTrajectory(
@@ -125,7 +128,10 @@ class InterruptionTrajectory:
             interruption_probs=self.interruption_probs + [interruption_prob],
             h_value=undiscounted_future_cost,
             discounted_h_value=estimated_future_cost,
-            scene_graph=scene_graph
+            scene_graph=scene_graph,
+            # # for debugging
+            # v_ap=v_ap,
+            # ff_value=undiscounted_future_cost - v_ap
         )
 
 
@@ -318,4 +324,6 @@ def print_frontier_trace(step: int, frontier: list[tuple[InterruptionTrajectory,
         print(f"Value: {traj.value}")
         print(f"Discounted Cost: {traj.cost}; Plan Cost: {traj.get_plan_cost()}")
         print(f"Discounted h-value: {traj.discounted_h_value}; h-value: {traj.h_value}")
-        print(f"Last 5 actions in trajectory: {[a.name for a in traj.plan]}\n")
+        # # added for debugging across machines
+        # print(f"v_ap: {traj.v_ap}; ff-value: {traj.ff_value}")
+        # print(f"Last 5 actions in trajectory: {[a.name for a in traj.plan]}\n")

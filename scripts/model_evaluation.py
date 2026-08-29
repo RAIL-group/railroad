@@ -22,7 +22,7 @@ def main():
     the learned model ev costs and the actual ev costs for the training data.
     """
     # user specifications
-    model_name = "best_model_experiment9_val.pt"
+    model_name = "best_model_experiment10_val.pt"
 
     # load dataset
     dataset = CSVPickleDataset(

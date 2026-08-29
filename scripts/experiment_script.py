@@ -21,7 +21,7 @@ MODEL_PATH = DEFAULT_RESOURCES_BASE / "models"
 RANDOMIZE_TASK_SEQUENCE = False
 
 def main(randomize_order: bool = False):
-    model_name = "best_model_experiment10_val.pt"
+    model_name = "best_model_linux_experiment10_val.pt"
 
     seeds = ExperimentSeeds(
         procthor_seed=201, experiment_seed=20, object_placement_seed=19, task_sample_seed=75
@@ -61,7 +61,7 @@ def main(randomize_order: bool = False):
     )
 
     run_experiment(
-        config, ExperimentMode.INTERRUPTION_AP, show_plot=True, remove_duplicates=True
+        config, ExperimentMode.INTERRUPTION_AP, show_plot=False, remove_duplicates=True
     )
 
 if __name__ == "__main__":
