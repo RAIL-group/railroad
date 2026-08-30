@@ -20,7 +20,7 @@ dependencies = [
     "ruff>=0.15.10,<0.16",
     # uv.lock is gitignored, so CI re-resolves every run. The ceiling stops a
     # new ty release from breaking main on an unrelated commit; bump deliberately.
-    "ty>=0.0.64,<0.0.65",
+    "ty>=0.0.75,<0.0.76",
 ]
 
 [tool.uv.sources]
