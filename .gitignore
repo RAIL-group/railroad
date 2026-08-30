@@ -33,3 +33,8 @@ mlruns
 mlflow.db
 .worktrees/
 .benchmark_cache/
+
+# Local scratch trees, tracked on no branch. Anchored, like /data/ above.
+# This also keeps `ty check` clean: ty respects .gitignore, and this tree calls
+# a tutorial API that is not in the source, so unignored it reports 261 errors.
+/railroad-tutorial/
