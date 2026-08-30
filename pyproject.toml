@@ -37,9 +37,13 @@ extra-paths = [
 ]
 
 [tool.pytest.ini_options]
-# worksteal: workers pull from a shared queue rather than a fixed up-front
-# slice, so a long test scheduled late (the ProcTHOR integration tests take
-# ~25s each) cannot leave the other workers idle waiting on it.
+# worksteal: workers draw from a shared queue, but it is drained in a single
+# pass at startup -- each worker takes an even slice up front, and from then on
+# rebalancing is stealing from the tail of another worker's queue. So collection
+# order decides which slow tests share a worker, which is why conftest.py deals
+# the `slow` ones one to the head of each slice: the long poles (the ProcTHOR
+# integration tests, ~25s each) start immediately and in parallel, instead of
+# stacking up on one worker and leaving the rest idle at the end.
 addopts = "-v -n auto --dist worksteal --html=data/test_logs/test_report.html --self-contained-html"
 
 markers = [

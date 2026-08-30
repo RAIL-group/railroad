@@ -20,9 +20,9 @@ from railroad.environment import ObjectSearchEnvironment
 #: Markers this package's tests use, registered here rather than in its own
 #: pyproject. A [tool.pytest.ini_options] table there would make pytest choose
 #: packages/railroad as rootdir for any targeted run -- which drops the
-#: repo-root conftest (and with it the warnings tally) entirely. Registering
-#: from a conftest keeps the markers known when the package is tested
-#: standalone, without touching rootdir either way.
+#: repo-root conftest entirely. Registering from a conftest keeps the markers
+#: known when the package is tested standalone, without touching rootdir
+#: either way.
 _MARKERS = {
     "slow": "marks tests as slow to run (deselect with '-m \"not slow\"')",
     "stochastic": (
