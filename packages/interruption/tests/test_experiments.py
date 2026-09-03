@@ -254,7 +254,7 @@ def _dummy_config() -> ExperimentConfig:
         (ExperimentMode.MYOPIC, get_no_int_discount, False, False, None),
         (ExperimentMode.ANTICIPATORY_PLANNING, get_no_int_discount, False, True, None),
         (ExperimentMode.INTERRUPTION, get_no_int_prob, True, True, None),
-        (ExperimentMode.INTERRUPTION_AP, get_no_int_prob, True, True, (0.85, 1)),
+        (ExperimentMode.INTERRUPTION_AP, get_no_int_prob, True, True, (0.9, 1)),
     ],
 )
 def test_get_planner_config_selects_fields_per_mode(
@@ -277,7 +277,13 @@ def test_get_planner_config_selects_fields_per_mode(
 
     result = _get_planner_config(config, mode, interruption_prob_fn)
 
-    assert result.discount_fn is expected_discount_fn
+    if mode in [ExperimentMode.MYOPIC, ExperimentMode.ANTICIPATORY_PLANNING]:
+        assert isinstance(result.discount_fn, functools.partial)
+        assert result.discount_fn.func is expected_discount_fn
+        assert len(result.discount_fn.keywords) == 1
+        assert result.discount_fn.keywords == {"discount_factor": 1}
+    else:
+        assert result.discount_fn is expected_discount_fn
     assert (
         result.planner_interruption_prob_fn is interruption_prob_fn
     ) == expects_interruption_prob_fn
@@ -288,10 +294,11 @@ def test_get_planner_config_selects_fields_per_mode(
     assert result.heuristic_fn.func is ap_heuristic_fn
     assert len(result.heuristic_fn.args) == 0
     if expects_weights is None:
-        assert len(result.heuristic_fn.keywords) == 0
-    else:
         assert len(result.heuristic_fn.keywords) == 1
-        assert result.heuristic_fn.keywords == {"weights": expects_weights}
+        assert result.heuristic_fn.keywords == {"h_multi": 1}
+    else:
+        assert len(result.heuristic_fn.keywords) == 2
+        assert result.heuristic_fn.keywords == {"h_multi": 1, "weights": expects_weights}
 
 
 def test_get_planner_config_myopic_interruption_prob_fn_is_ignored(mock_gcn):
@@ -346,4 +353,4 @@ def test_get_planner_config_interruption_ap_heuristic_adds_v_ap(mock_gcn):
 
     heuristic_fn = result.heuristic_fn
     assert isinstance(heuristic_fn, functools.partial)
-    assert heuristic_fn(state, goal, actions, 3.0) == pytest.approx(5.0 * 0.85 + 3.0)
+    assert heuristic_fn(state, goal, actions, 3.0) == pytest.approx(5.0 * 0.9 + 3.0)

@@ -41,8 +41,14 @@ from railroad.environment.procthor.scenegraph import SceneGraph
 
 NUM_DATUM = 1000
 DATA_GENERATION_SEED = 37
-PROCTHOR_SEED = 201
+# PROCTHOR_SEED = 201 # 1-room
+PROCTHOR_SEED = 64 # 2-room
 REMOVE_DUPLICATES = True
+# NUM_TASKS = 16 # for 2-room environment
+NUM_TASKS = 11
+H_MULTIPLIER = 2
+# H_MULTIPLIER = 5 # for 2-room environment
+WRITE_OUT_INDIVIDUAL_TASK_COSTS = True
 
 # Concurrent AI2-THOR Controller instances this machine sustains without
 # throughput degrading (see benchmark_thor_concurrency.py: 8 is the
@@ -73,6 +79,7 @@ def main():
     task_distribution = get_alfred_task_distribution(
         env.scene.objects,
         set(env.scene.locations),
+        size=NUM_TASKS,
         one_object_per_taskdist=True
     )
 
@@ -151,22 +158,39 @@ def _generate_worker_share(
             if count >= target_count:
                 break
 
-            # compute expected value of state over the interrupting task distribution
-            expected_value = compute_interruption_value(
-                convert_state_to_positive_preconditions(data.env.state, data.neg_to_pos_mapping),
-                data.search_problem.actions,
-                data.search_problem.interrupting_task_dist,
-                data.planner_parameters.heuristic_fn
-            )
-
-            if expected_value != -1:
-                # write out the training datum
-                write_datum_to_file(
-                    PROCTHOR_SEED, objects_seed,
-                    (data.env.scene.scene_graph, expected_value), count,
-                    csv_suffix=worker_id
-                )
+            if datum_pickle_path(PROCTHOR_SEED, objects_seed, count).exists():
+                # Restart-safe: a previous run already generated this datum.
+                # Skip the expensive expected-value computation, but keep
+                # `count` and the environment progression in lockstep with a
+                # fresh run so later data points still line up. The CSV shard
+                # entry from that previous run is left untouched.
                 count += 1
+            else:
+                # compute expected value of state over the interrupting task distribution
+                expected_value, task_costs = compute_interruption_value(
+                    convert_state_to_positive_preconditions(
+                        data.env.state, data.neg_to_pos_mapping
+                    ),
+                    data.search_problem.actions,
+                    data.search_problem.interrupting_task_dist,
+                    data.planner_parameters.heuristic_fn,
+                )
+
+                if expected_value != -1:
+                    # write out the training datum
+                    write_datum_to_file(
+                        PROCTHOR_SEED, objects_seed,
+                        (data.env.scene.scene_graph, expected_value), count,
+                        csv_suffix=worker_id
+                    )
+                    count += 1
+
+                    if WRITE_OUT_INDIVIDUAL_TASK_COSTS:
+                        assert task_costs is not None
+                        write_out_individual_task_costs(
+                            PROCTHOR_SEED, objects_seed, data.env.scene.scene_graph,
+                            (task_distribution[0], task_costs), count, csv_suffix=worker_id
+                        )
 
             # progress the environment to the next state
             action = get_action_by_name(data.env.get_actions(), converted_action.name)
@@ -179,6 +203,55 @@ def _generate_worker_share(
         objects_seed+=1
 
     return count
+
+
+def write_out_individual_task_costs(
+    scene_seed: int,
+    object_randomization_seed: int,
+    scene_graph: SceneGraph,
+    tasks_with_costs: tuple[Sequence[Goal], list[float]],
+    counter: int,
+    csv_suffix: int | None = None
+) -> None:
+    """
+    Helper function for writing out the costs of completing tasks from the task 
+    distribution for a particular procthor scene.
+    """
+    for idx, (task, task_cost) in enumerate(zip(*tasks_with_costs)):
+        datum = (scene_graph, task, task_cost)
+        data_filepath = _task_datum_pickle_path(scene_seed, object_randomization_seed, counter, idx)
+        data_filepath.parent.mkdir(parents=True, exist_ok=True)
+        write_compressed_pickle(data_filepath, datum)
+        csv_name = (
+            f"procthor_individual_task_data_{scene_seed}.csv" if csv_suffix is None
+            else f"procthor_individual_task_data_{scene_seed}_{csv_suffix}.csv"
+        )
+        csv_filepath = Path(get_procthor_10k_dir()) / csv_name
+        with open(csv_filepath, 'a', encoding="utf-8") as f:
+            f.write(f'{data_filepath}\n')
+
+
+def _task_datum_pickle_path(
+    scene_seed: int, object_randomization_seed: int, counter: int, task_idx: int
+) -> Path:
+    return (
+        Path(get_procthor_10k_dir()) / "pickles" / "task_costs"
+        / f"dat_{scene_seed}_{object_randomization_seed}_{counter}_{task_idx}.pgz"
+    )
+
+
+def datum_pickle_path(
+    scene_seed: int, object_randomization_seed: int, counter: int
+) -> Path:
+    """
+    Canonical on-disk location of a single training-datum pickle. Kept as one
+    function so the existence check in `_generate_worker_share` and the write
+    in `write_datum_to_file` can never disagree about the filename.
+    """
+    return (
+        Path(get_procthor_10k_dir()) / "pickles"
+        / f"dat_{scene_seed}_{object_randomization_seed}_{counter}.pgz"
+    )
 
 
 def write_datum_to_file(
@@ -195,11 +268,8 @@ def write_datum_to_file(
     datum files generated. csv_suffix routes concurrent workers to separate
     shard files, avoiding interleaved/corrupted writes to one shared CSV.
     """
-    save_dir = Path(get_procthor_10k_dir()) / "pickles"
-    save_dir.mkdir(parents=True, exist_ok=True)
-    data_filepath = (
-        save_dir / f"dat_{scene_seed}_{object_randomization_seed}_{counter}.pgz"
-    )
+    data_filepath = datum_pickle_path(scene_seed, object_randomization_seed, counter)
+    data_filepath.parent.mkdir(parents=True, exist_ok=True)
     write_compressed_pickle(data_filepath, datum)
     csv_name = (
         f"procthor_data_{scene_seed}.csv" if csv_suffix is None
@@ -268,7 +338,8 @@ def get_randomized_procthor_data(
                 start_seed
             ),
             ExperimentMode.MYOPIC,
-            REMOVE_DUPLICATES
+            REMOVE_DUPLICATES,
+            h_multiplier=H_MULTIPLIER
         )
 
         if (

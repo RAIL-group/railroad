@@ -99,7 +99,7 @@ def _get_actual_pred_expected_values(
 ) -> tuple[float, float]:
     # compute actual expected value
     assert data.search_problem.interrupting_task_dist is not None
-    actual_ev = compute_interruption_value(
+    actual_ev, _ = compute_interruption_value(
         convert_state_to_positive_preconditions(
             data.env.state, data.neg_to_pos_mapping
         ),

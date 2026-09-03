@@ -13,7 +13,7 @@ TRAIN_DATASET_PATH = get_procthor_10k_dir() / "procthor_data_201.csv"
 TEST_DATASET_PATH = None
 
 # if supplying only 1 dataset, specify how it should be split for train and test datasets
-TRAIN_TEST_SPLIT = 0.85
+TRAIN_TEST_SPLIT = 1
 
 # specify learning hyperparameters
 HYPERPARAMETERS = {
@@ -26,7 +26,7 @@ HYPERPARAMETERS = {
 }
 
 # output directories specifications
-EXPERIMENT_NAME = "linux_experiment10_val"
+EXPERIMENT_NAME = "experiment12_val"
 LOG_DIRECTORY = DEFAULT_RESOURCES_BASE / f"run_logs/{EXPERIMENT_NAME}"
 OUTPUT_MODEL_DIRECTORY = DEFAULT_RESOURCES_BASE / "models"
 
@@ -119,7 +119,8 @@ def training_loop(
 
         print(f"Epoch {epoch:05d} | avg train loss {train_loss:.4f}| avg val loss {val_loss:.4f}")
 
-        if val_loss < lowest_validation_loss:
+        # if val_loss < lowest_validation_loss:
+        if train_loss < lowest_training_loss:
             lowest_training_loss = train_loss
             lowest_validation_loss = val_loss
             early_stopping_counter = 0

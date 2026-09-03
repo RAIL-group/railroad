@@ -1,6 +1,7 @@
 import heapq
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Optional
 from tqdm import tqdm
 
 from railroad.core import Action, Fluent, Goal, State, get_next_actions
@@ -29,6 +30,7 @@ class InterruptionSearchProblem:
     interrupting_task_dist: tuple[list[Goal], list[float]] | None = None
     # environment side interruption probability function
     interruption_prob_fn: float | Callable[[float], float] = 0
+    # augment_task: bool = False
 
 
 @dataclass
@@ -100,9 +102,19 @@ class InterruptionTrajectory:
             undiscounted_future_cost = planner_params.heuristic_fn(
                 next_state, search_problem.goal, search_problem.actions, v_ap
             )
+
+        # if search_problem.augment_task:
+        #     discount_factor = planner_params.discount_fn(self.interruption_probs)
+        # else:
+        #     discount_factor = (
+        #         planner_params.discount_fn(self.interruption_probs) * (1 - interruption_prob)
+        #     )
+
+        discount_factor = planner_params.discount_fn(self.interruption_probs + [interruption_prob])
+
         estimated_future_cost = get_discounted_value(
             undiscounted_future_cost,
-            planner_params.discount_fn(self.interruption_probs) * (1 - interruption_prob),
+            discount_factor,
             planner_params.current_task_reward
         )
 
@@ -269,12 +281,13 @@ def compute_interruption_value(
     actions: list[Action],
     interrupting_task_dist: tuple[list[Goal], list[float]],
     heuristic_fn: float | Callable[[State, Goal, list[Action], float], float] = 0,
-) -> float:
+) -> tuple[float, Optional[list[float]]]:
     """
     Computes the expected value of a state for a task distribution.
     Returns -1 if a successful plan for one of the tasks in the task distribution
     was unable to be found. Otherwise returns the expected cost.
     """
+    task_costs = []
     expected_cost = 0.0
     # setup for myopic planning approach
     search_params = PlannerConfig(
@@ -296,9 +309,10 @@ def compute_interruption_value(
         )
 
         if not success:
-            return -1
+            return -1, None
+        task_costs.append(cost)
         expected_cost += (prob * cost)
-    return expected_cost
+    return expected_cost, task_costs
 
 
 def check_value_cache(
@@ -317,13 +331,12 @@ def print_frontier_trace(step: int, frontier: list[tuple[InterruptionTrajectory,
     """
     print(f"Planning Step: {step}")
     print(f"Frontier: # of trajectories in frontier = {len(frontier)}\n")
-    # sorted_frontier = sorted(frontier, key=lambda x: x[0])
     for j, traj_tuple in enumerate(frontier[:5]):
         traj = traj_tuple[0]
         print(f"Trajectory {j}: length - {traj.level}")
         print(f"Value: {traj.value}")
         print(f"Discounted Cost: {traj.cost}; Plan Cost: {traj.get_plan_cost()}")
         print(f"Discounted h-value: {traj.discounted_h_value}; h-value: {traj.h_value}")
-        # # added for debugging across machines
+        # # added for debugging
         # print(f"v_ap: {traj.v_ap}; ff-value: {traj.ff_value}")
-        # print(f"Last 5 actions in trajectory: {[a.name for a in traj.plan]}\n")
+        print(f"Last 5 actions in trajectory: {[a.name for a in traj.plan]}\n")

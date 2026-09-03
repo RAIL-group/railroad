@@ -17,13 +17,21 @@ from railroad.navigation.pathing import get_cost_and_path
 
 from .planner import InterruptionSearchProblem, PlannerConfig, astar_search
 
+# constants
+DEBUG = False
+# heuristic constants
+LAMBDA_ADD = 0
+LAMBDA_MAX = 0
+LAMBDA_FF = 1
+
 # wrapper heuristic functions
 def ap_heuristic_fn(
     state: State,
     goal: Goal,
     actions: list[Action],
     v_ap: float = 0,
-    weights: Optional[tuple[float, float]] = None
+    weights: Optional[tuple[float, float]] = None,
+    h_multi: float = 1
 ) -> float:
     """
     A wrapper of the ff_heuristic function for incorporating the expected
@@ -34,8 +42,13 @@ def ap_heuristic_fn(
     provided, the wrapper simply returns the value of the ff-heuristic.
     """
     if weights is None:
-        return ff_heuristic(state, goal, actions)
-    return weights[0] * ff_heuristic(state, goal, actions) + weights[1] * v_ap
+        h_val = ff_heuristic(state, goal, actions, LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF)
+    else:
+        ff_weight, v_ap_weight = weights
+        h_val = ff_weight * ff_heuristic(
+            state, goal, actions, LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF
+        ) + v_ap_weight * v_ap
+    return h_multi * h_val
 
 
 # discount functions
@@ -50,13 +63,13 @@ def get_no_int_prob(interruption_probs: list[float]) -> float:
     return no_int_prob
 
 
-def get_no_int_discount(interruption_probs: list[float]) -> float:
+def get_no_int_discount(interruption_probs: list[float], discount_factor: float = 1) -> float:
     """
     Helper function for the case where action costs/heuristic values
     are not discounted by the probility a task arriving during the
     execution of an action.
     """
-    return 1
+    return discount_factor ** len(interruption_probs)
 
 
 def anticipatory_planner(
@@ -80,31 +93,17 @@ def anticipatory_planner(
         initial_state, interruption_problem, search_params
     )
 
-    # # for testing
-    # best_plan, best_value_sg, _, scene_graph_sg, state_sg = astar_search(
-    #     initial_state, interruption_problem, search_params
-    # )
-
     assert scene_graph_sg is not None
     best_value_total = best_value_sg + ev_model(scene_graph_sg)
-    # # for testing
-    # assert interruption_problem.interrupting_task_dist is not None
-    # best_value_ap = compute_interruption_value(
-    #     convert_state_to_positive_preconditions(state_sg, neg_to_pos_mapping),
-    #     interruption_problem.actions,
-    #     interruption_problem.interrupting_task_dist,
-    #     search_params.heuristic_fn
-    # )
-    # best_value_total = best_value_sg + best_value_ap
 
+    # for debugging
+    if DEBUG:
+        print(f"Total costs to reach augmented goal state: {best_value_sg:.4f}")
+        print(f"V_AP of augmented goal state: {ev_model(scene_graph_sg):.4f}")
+        print(f"V_s_g + V_AP = {best_value_total:.4f}")
 
-    # # for debugging
-    # print(f"Total costs to reach augmented goal state: {best_value_sg:.4f}")
-    # print(f"V_AP of augmented goal state: {best_value_ap:.4f}")
-    # print(f"V_s_g + V_AP = {best_value_total:.4f}")
-
-    # focused sampling; NOTE - right now only supports literal goals
-    assert isinstance(interruption_problem.goal, LiteralGoal)
+    # assert isinstance(interruption_problem.goal, LiteralGoal)
+    assert isinstance(interruption_problem.goal, Goal)
     selected_locations, selected_objects = focused_sampling(
         interruption_problem.goal,
         best_plan,
@@ -118,9 +117,6 @@ def anticipatory_planner(
         interruption_problem.goal, selected_locations, selected_objects, neg_to_pos_mapping
     )
 
-    # # for testing
-    # sampled_augmented_tasks = [F("at apple_8 fridge_4") & F("at pan_10 fridge_4")]
-
     for task in sampled_augmented_tasks:
         interruption_problem.goal = task
         # run myopic planner to get initial plan/value of s_g
@@ -128,27 +124,13 @@ def anticipatory_planner(
             initial_state, interruption_problem, search_params
         )
 
-        # # for testing
-        # plan, value_sg, _, scene_graph_sg, state_sg = astar_search(
-        #     initial_state, interruption_problem, search_params
-        # )
-
         assert scene_graph_sg is not None
         value_total = value_sg + ev_model(scene_graph_sg)
-        # # for testing
-        # assert interruption_problem.interrupting_task_dist is not None
-        # value_ap = compute_interruption_value(
-        #     convert_state_to_positive_preconditions(state_sg, neg_to_pos_mapping),
-        #     interruption_problem.actions,
-        #     interruption_problem.interrupting_task_dist,
-        #     search_params.heuristic_fn
-        # )
-        # value_total = value_sg + value_ap
 
-        # # for debugging
-        # print(f"Total costs to reach augmented goal state: {value_sg:.4f}")
-        # print(f"V_AP of augmented goal state: {value_ap:.4f}")
-        # print(f"V_s_g + V_AP = {value_total:.4f}")
+        if DEBUG:
+            print(f"Total costs to reach augmented goal state: {value_sg:.4f}")
+            print(f"V_AP of augmented goal state: {ev_model(scene_graph_sg):.4f}")
+            print(f"V_s_g + V_AP = {value_total:.4f}")
 
         if value_total < best_value_total:
             best_value_total = value_total
@@ -162,7 +144,7 @@ def anticipatory_planner(
 
 
 def focused_sampling(
-    task: LiteralGoal,
+    task: Goal,
     symbolic_plan: list[Action],
     occupancy_grid: np.ndarray,
     locations: dict[str, tuple[int, int]],
@@ -173,6 +155,8 @@ def focused_sampling(
     using railroad instead of antplan package.
     Returns the selected containers and selected objects
     """
+    task_relevant_objects = _get_task_relevant_objects(task)
+
     # get paths through the occupancy grid for src and dest locations in the symbolic plan
     paths = _get_occupany_grid_paths(symbolic_plan, occupancy_grid, locations)
 
@@ -185,7 +169,8 @@ def focused_sampling(
             locations_close_to_path.add(name)
             location_objects = objects_by_location.get(name, set())
             # exclude object that is already part of the current task
-            location_objects.discard(task.fluent().args[0])
+            # location_objects.discard(task.fluent().args[0])
+            location_objects.difference_update(task_relevant_objects)
             objects_close_to_path |= location_objects
 
     return locations_close_to_path, objects_close_to_path
@@ -244,3 +229,15 @@ def _get_sampled_augmented_tasks(
             convert_goal_to_positive_preconditions(current_task & F(f"at {obj} {loc}"), mapping)
         )
     return augmented_tasks
+
+
+def _get_task_relevant_objects(task: Goal) -> set[str]:
+    # get objects that are relevant to the current task
+    task_relevant_objects = set()
+    if isinstance(task, LiteralGoal):
+        task_relevant_objects.add(task.fluent().args[0])
+    else: # NOTE: written for AndGoals in mind
+        for child_goal in task.children():
+            assert isinstance(child_goal, LiteralGoal)
+            task_relevant_objects.add(child_goal.fluent().args[0])
+    return task_relevant_objects

@@ -360,7 +360,7 @@ def test_compute_interruption_value(task_distribution):
             ~F("hand-full robot1")
         }
     )
-    expected_value = compute_interruption_value(initial_state, all_actions, task_distribution)
+    expected_value, _ = compute_interruption_value(initial_state, all_actions, task_distribution)
 
     if len(task_distribution[0]) == 1:
         assert expected_value == 4

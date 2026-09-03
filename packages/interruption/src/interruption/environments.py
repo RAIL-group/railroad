@@ -228,6 +228,7 @@ def get_alfred_task_distribution(
             LiteralGoal(F(f"at {object_key} {rng.choice(possible_locations)}"))
             for object_key, possible_locations in task_dict.items()
         ]
+        goals = goals[:size]
     else:
         goals = [LiteralGoal(F(f"at {obj} {loc}")) for obj, loc in rng.sample(task_list, size)]
     probs = [1/len(goals)] * len(goals)

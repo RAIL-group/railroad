@@ -158,26 +158,7 @@ class ThorInterface:
                     else None
                 )
                 if self.cached_data is None:
-                    from ai2thor.controller import Controller
-                    from ._display import screen_at_least
-
-                    with screen_at_least(TOP_DOWN_RENDER_PX, TOP_DOWN_RENDER_PX):
-                        render_px = self._render_px()
-                        self.controller = Controller(
-                            scene=self.scene,
-                            gridSize=self.grid_resolution,
-                            width=render_px,
-                            height=render_px,
-                        )
-                        self.cached_data = self._save_and_get_cache(
-                            remove_duplicates=remove_duplicates
-                        )
-                        # Inside the lock: otherwise every worker that generates
-                        # a scene keeps its Unity alive for the rest of the run,
-                        # and they accumulate exactly as the lock exists to
-                        # prevent.
-                        self.controller.stop()
-                        self.controller = None
+                    self.cached_data = self._generate_scene_cache(remove_duplicates)
                 else:
                     print("-----------Using cached procthor data-----------")
                     self.controller = None
@@ -189,6 +170,59 @@ class ThorInterface:
         self.robot_pose = self._get_robot_pose()
         self.scene_graph = self._get_scene_graph()
         self.known_cost = self._get_known_costs()
+
+    def _generate_scene_cache(self, remove_duplicates: bool) -> Dict:
+        """Build this scene's cache, retrying a soft Unity failure.
+
+        ``_save_and_get_cache`` starts a Controller and asks it for the
+        top-down renders and reachable positions. Under the load of several
+        datagen workers launching Unity at once, ``GetReachablePositions`` (and
+        occasionally a render) comes back failed-but-not-raised; the guard in
+        ``_get_reachable_positions_from_controller`` turns that into a
+        ``RuntimeError``. A fresh Controller almost always succeeds, so retry a
+        few times rather than aborting the run or -- worse, before the guard
+        existed -- caching the ``None`` and poisoning the scene permanently.
+
+        Must be called holding ``scene_generation_lock`` (it keeps a Controller
+        alive) and stops the Controller before returning, for the same reason.
+        """
+        from ai2thor.controller import Controller
+        from ._display import screen_at_least
+
+        attempts = max(1, int(os.environ.get("PROCTHOR_SCENE_GEN_ATTEMPTS", "3")))
+        scene_id = (
+            f"{self.seed}" if self.object_seed is None
+            else f"{self.seed}_{self.object_seed}"
+        )
+
+        with screen_at_least(TOP_DOWN_RENDER_PX, TOP_DOWN_RENDER_PX):
+            render_px = self._render_px()
+            for attempt in range(1, attempts + 1):
+                self.controller = Controller(
+                    scene=self.scene,
+                    gridSize=self.grid_resolution,
+                    width=render_px,
+                    height=render_px,
+                )
+                try:
+                    return self._save_and_get_cache(remove_duplicates=remove_duplicates)
+                except RuntimeError as error:
+                    if attempt == attempts:
+                        raise
+                    warnings.warn(
+                        f"scene {scene_id} generation attempt {attempt}/{attempts} "
+                        f"failed ({error}); retrying with a fresh controller.",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
+                finally:
+                    # A live controller inside the lock is exactly what the lock
+                    # exists to prevent, and a retry needs a fresh one anyway.
+                    if self.controller is not None:
+                        self.controller.stop()
+                        self.controller = None
+
+        raise AssertionError("unreachable: loop returns or raises")  # pragma: no cover
 
     def _render_px(self) -> int:
         """The square render size to ask the controller for.
@@ -451,10 +485,29 @@ class ThorInterface:
             return None
 
     def _get_reachable_positions_from_controller(self) -> List[Dict[str, float]]:
-        """Get reachable positions from controller."""
+        """Get reachable positions from controller.
+
+        ``GetReachablePositions`` can fail *softly* -- ``lastActionSuccess``
+        False and ``actionReturn`` None, no exception -- under Unity launch
+        contention when several datagen workers spin up at once. Left
+        unchecked, the None is cached as if valid and only surfaces later as a
+        ``TypeError`` deep in occupancy-grid construction, permanently poisoning
+        that scene's cache. Raise here instead so the worker just fails and
+        retries the scene.
+        """
         assert self.controller is not None
         event = self.controller.step(action="GetReachablePositions")
-        return event.metadata["actionReturn"]
+        positions = event.metadata["actionReturn"]
+        if not event.metadata.get("lastActionSuccess") or positions is None:
+            scene_id = (
+                f"{self.seed}" if self.object_seed is None
+                else f"{self.seed}_{self.object_seed}"
+            )
+            raise RuntimeError(
+                f"GetReachablePositions failed for scene {scene_id}: "
+                f"{event.metadata.get('errorMessage')!r}"
+            )
+        return positions
 
     def get_reachable_positions(self) -> List[Dict[str, float]]:
         """Get reachable positions (from cache or controller)."""

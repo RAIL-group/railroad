@@ -39,7 +39,9 @@ from .utilities import (
 
 # global constants/enums
 DEBUG = False
-WEIGHTS = (0.85, 1)
+WEIGHTS = (0.9, 1)
+AUGMENT_DISCOUNT_FACTOR = 0.99
+H_MULTIPLIER = 2
 
 class ExperimentMode(Enum):
     """
@@ -122,7 +124,9 @@ def run_experiment(
     Returns the total cost of the execution sequence, the initial plan, and a trace of 
     the execution sequence.
     """
-    experiment_data = initialize_experiment_data(config, experiment_mode, remove_duplicates)
+    experiment_data = initialize_experiment_data(
+        config, experiment_mode, remove_duplicates, H_MULTIPLIER
+    )
 
     # print out the actual action probabilities
     if DEBUG:
@@ -277,7 +281,8 @@ def _execution_loop(
 def initialize_experiment_data(
     config: ExperimentConfig,
     planner_mode: ExperimentMode,
-    remove_duplicates: bool = False
+    remove_duplicates: bool = False,
+    h_multiplier: float = 1
 ) -> ExperimentData:
     """
     Helper function for initializing the ExperimentData struct, which entails
@@ -326,21 +331,23 @@ def initialize_experiment_data(
             converted_goal,
             converted_actions,
             converted_interrupting_task_dist,
-            config.task_arrival_fn
+            config.task_arrival_fn,
+            # config.augment_task
         ),
-        _get_planner_config(config, planner_mode, config.task_arrival_fn),
+        _get_planner_config(config, planner_mode, config.task_arrival_fn, h_multiplier),
         mapping
     )
 
-
+# TODO - planner objective function should be different for task augmentation case
 def _get_planner_config(
     config: ExperimentConfig,
     planner_mode: ExperimentMode,
-    interruption_prob_fn: float | Callable[[float], float]
+    interruption_prob_fn: float | Callable[[float], float],
+    h_multiplier: float = 1
 ) -> PlannerConfig:
-    heuristic_fn = partial(ap_heuristic_fn)
+    heuristic_fn = partial(ap_heuristic_fn, h_multi=h_multiplier)
     if planner_mode in [ExperimentMode.MYOPIC, ExperimentMode.ANTICIPATORY_PLANNING]:
-        discount_fn=get_no_int_discount
+        discount_fn=partial(get_no_int_discount, discount_factor=1)
         planner_interruption_prob_fn=None
         interruption_value_fn=(
             None
@@ -349,14 +356,17 @@ def _get_planner_config(
         )
         current_task_reward=0
     else: # ExperimentMode.INTERRUPTION or ExperimentMode.INTERRUPTION_AP
-        discount_fn=get_no_int_prob
+        discount_fn=(
+            get_no_int_prob if not config.augment_task
+            else partial(get_no_int_discount, discount_factor=AUGMENT_DISCOUNT_FACTOR)
+        )
         planner_interruption_prob_fn=interruption_prob_fn
         interruption_value_fn=AnticipateGCN.get_net_eval_fn(
             config.ev_model_path, get_torch_device()
         )
         current_task_reward=0
         if planner_mode == ExperimentMode.INTERRUPTION_AP:
-            heuristic_fn = partial(ap_heuristic_fn, weights=WEIGHTS)
+            heuristic_fn = partial(ap_heuristic_fn, h_multi=h_multiplier, weights=WEIGHTS)
     return PlannerConfig(
         discount_fn,
         heuristic_fn,

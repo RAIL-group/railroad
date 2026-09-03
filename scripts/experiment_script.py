@@ -19,15 +19,16 @@ from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 # constants
 MODEL_PATH = DEFAULT_RESOURCES_BASE / "models"
 RANDOMIZE_TASK_SEQUENCE = False
+NUM_TASKS = 11
 
 def main(randomize_order: bool = False):
-    model_name = "best_model_linux_experiment10_val.pt"
+    model_name = "best_model_experiment12_val.pt"
 
     seeds = ExperimentSeeds(
         procthor_seed=201, experiment_seed=20, object_placement_seed=19, task_sample_seed=75
     )
     task_arrival_fn = partial(
-        get_task_arrival_prob, RandomVariableType.CONTINUOUS, -1, float("inf")
+        get_task_arrival_prob, RandomVariableType.CONTINUOUS, -1, 60
     )
 
     # get task distribution from alfred dataset used during training
@@ -35,6 +36,7 @@ def main(randomize_order: bool = False):
     task_distribution = get_alfred_task_distribution(
         env.scene.objects,
         set(env.scene.locations),
+        size=NUM_TASKS,
         one_object_per_taskdist=True
     )
     if randomize_order:
@@ -56,12 +58,12 @@ def main(randomize_order: bool = False):
         task_distribution,
         task_arrival_fn,
         MODEL_PATH / model_name,
-        num_task_sequence=2,
-        augment_task=False
+        num_task_sequence=5,
+        augment_task=True
     )
 
     run_experiment(
-        config, ExperimentMode.INTERRUPTION_AP, show_plot=False, remove_duplicates=True
+        config, ExperimentMode.ANTICIPATORY_PLANNING, show_plot=True, remove_duplicates=True
     )
 
 if __name__ == "__main__":

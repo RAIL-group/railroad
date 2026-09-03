@@ -25,8 +25,9 @@ from ..utilities import (
 )
 
 # CONSTANTS
-MODEL_NAME = "best_model_experiment10_val.pt"
-EXPERIMENT_REPEATS = 32
+MODEL_NAME = "best_model_experiment12_val.pt"
+EXPERIMENT_REPEATS = 1
+AUGMENT_TASK = True
 
 
 def _get_cases() -> list[dict[str, Any]]:
@@ -41,7 +42,8 @@ def _get_cases() -> list[dict[str, Any]]:
             "time_between_arrivals": time_between_arrivals,
             "interruption_seed": seed,
             "num_task_sequence": num_task_sequence,
-            "randomize_task_sequence": True
+            "randomize_task_sequence": True,
+            "augment_task": AUGMENT_TASK
         }
         for (time_between_arrivals, seed), num_task_sequence in itertools.product(
             zip(
@@ -65,6 +67,7 @@ def _setup_experiment_config(
         case.params["procthor_seed"],
         case.params["interruption_seed"] + case.repeat_idx,
         75, # keep fixed for right now
+        # case.repeat_idx,
         object_placement_seed=19
     )
     task_arrival_fn = partial(
@@ -85,9 +88,14 @@ def _setup_experiment_config(
     )
     current_goal = get_example_procthor_goal()
     if case.params["randomize_task_sequence"]:
-        current_goal, task_distribution = randomize_task_distribution_order(
-            task_distribution, seeds.task_sample_seed
-        )
+        # current_goal, task_distribution = randomize_task_distribution_order(
+        #     task_distribution, seeds.task_sample_seed
+        # )
+        # task_distribution = (
+        #     list(task_distribution[0][:case.params["num_task_sequence"]-1]),
+        #     list(task_distribution[1][:case.params["num_task_sequence"]-1])
+        # )
+
         # for smaller scale experiments, just reorder the task sequence
         task_distribution = (
             list(task_distribution[0][:case.params["num_task_sequence"]-1]),
@@ -100,7 +108,11 @@ def _setup_experiment_config(
 
     model_path = (
         DEFAULT_RESOURCES_BASE / f"models/{MODEL_NAME}"
-        if experiment_mode in [ExperimentMode.INTERRUPTION, ExperimentMode.ANTICIPATORY_PLANNING]
+        if experiment_mode in [
+            ExperimentMode.INTERRUPTION,
+            ExperimentMode.ANTICIPATORY_PLANNING,
+            ExperimentMode.INTERRUPTION_AP
+        ]
         else ""
     )
 
@@ -110,7 +122,8 @@ def _setup_experiment_config(
         task_distribution,
         task_arrival_fn,
         model_path,
-        case.params["num_task_sequence"]
+        case.params["num_task_sequence"],
+        case.params["augment_task"]
     )
     return config
 
@@ -122,7 +135,7 @@ def _setup_experiment_config(
         "task-arrival probabilities in specified procthor environments."
     ),
     tags=["interruption", "procthor"],
-    timeout=600.0,
+    timeout=1200.0,
     repeat=EXPERIMENT_REPEATS,
 )
 def bench_interruption_kitchen(case: BenchmarkCase):
@@ -143,7 +156,7 @@ bench_interruption_kitchen.add_cases(_get_cases())
         "task-arrival probabilities in specified procthor environments."
     ),
     tags=["interruption", "procthor", "ap"],
-    timeout=600.0,
+    timeout=1200.0,
     repeat=EXPERIMENT_REPEATS,
 )
 def bench_interruption_ap_kitchen(case: BenchmarkCase):
@@ -164,7 +177,7 @@ bench_interruption_ap_kitchen.add_cases(_get_cases())
         "task-arrival probabilities in specified procthor environments."
     ),
     tags=["interruption", "procthor", "myopic"],
-    timeout=600.0,
+    timeout=1200.0,
     repeat=EXPERIMENT_REPEATS,
 )
 def bench_myopic_interruption_kitchen(case: BenchmarkCase):
@@ -185,7 +198,7 @@ bench_myopic_interruption_kitchen.add_cases(_get_cases())
         "task-arrival probabilities in specified procthor environments."
     ),
     tags=["interruption", "procthor", "ap"],
-    timeout=600.0,
+    timeout=1200.0,
     repeat=EXPERIMENT_REPEATS,
 )
 def bench_ap_kitchen(case: BenchmarkCase):
