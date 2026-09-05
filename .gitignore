@@ -18,6 +18,7 @@ wheels/
 
 # Resources
 resources/
+assets/
 # Anchored: this is the repo-root output directory (test_logs, replay,
 # *_episodes). Unanchored it also matched any nested directory named `data`,
 # which silently swallowed packages/railroad/tests/pddl_converter/data --
@@ -33,3 +34,6 @@ mlruns
 mlflow.db
 .worktrees/
 .benchmark_cache/
+
+# Personal files
+useful_commands.txt

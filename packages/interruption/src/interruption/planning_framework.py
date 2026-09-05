@@ -15,14 +15,8 @@ from railroad.environment.procthor.scene import ProcTHORScene
 from railroad.environment.procthor.scenegraph import SceneGraph
 from railroad.navigation.pathing import get_cost_and_path
 
+from .constants import LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF, AP_DEBUG
 from .planner import InterruptionSearchProblem, PlannerConfig, astar_search
-
-# constants
-DEBUG = False
-# heuristic constants
-LAMBDA_ADD = 0
-LAMBDA_MAX = 0
-LAMBDA_FF = 1
 
 # wrapper heuristic functions
 def ap_heuristic_fn(
@@ -97,7 +91,7 @@ def anticipatory_planner(
     best_value_total = best_value_sg + ev_model(scene_graph_sg)
 
     # for debugging
-    if DEBUG:
+    if AP_DEBUG:
         print(f"Total costs to reach augmented goal state: {best_value_sg:.4f}")
         print(f"V_AP of augmented goal state: {ev_model(scene_graph_sg):.4f}")
         print(f"V_s_g + V_AP = {best_value_total:.4f}")
@@ -127,7 +121,7 @@ def anticipatory_planner(
         assert scene_graph_sg is not None
         value_total = value_sg + ev_model(scene_graph_sg)
 
-        if DEBUG:
+        if AP_DEBUG:
             print(f"Total costs to reach augmented goal state: {value_sg:.4f}")
             print(f"V_AP of augmented goal state: {ev_model(scene_graph_sg):.4f}")
             print(f"V_s_g + V_AP = {value_total:.4f}")

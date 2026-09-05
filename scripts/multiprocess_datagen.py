@@ -41,8 +41,8 @@ from railroad.environment.procthor.scenegraph import SceneGraph
 
 NUM_DATUM = 1000
 DATA_GENERATION_SEED = 37
-# PROCTHOR_SEED = 201 # 1-room
-PROCTHOR_SEED = 64 # 2-room
+PROCTHOR_SEED = 201 # 1-room
+# PROCTHOR_SEED = 64 # 2-room
 REMOVE_DUPLICATES = True
 # NUM_TASKS = 16 # for 2-room environment
 NUM_TASKS = 11
@@ -103,6 +103,8 @@ def main():
         total_written = sum(future.result() for future in futures if future.result() != -1)
 
     _merge_csv_shards(PROCTHOR_SEED, num_workers)
+    if WRITE_OUT_INDIVIDUAL_TASK_COSTS:
+        _merge_csv_shards(PROCTHOR_SEED, num_workers, True)
 
     print(f"Data Generation took: {time.perf_counter() - start: .4f} seconds")
     print(f"Wrote {total_written} data points across {num_workers} worker(s)")
@@ -280,16 +282,20 @@ def write_datum_to_file(
         f.write(f'{data_filepath}\n')
 
 
-def _merge_csv_shards(scene_seed: int, num_workers: int) -> None:
+def _merge_csv_shards(scene_seed: int, num_workers: int, individual_tasks: bool = False) -> None:
     """
     Concatenates each worker's CSV shard into the combined output file that
     downstream consumers of procthor_data_{scene_seed}.csv already expect.
     """
+    filename_wo_ext = (
+        f"procthor_individual_task_data_{scene_seed}" if individual_tasks
+        else f"procthor_data_{scene_seed}"
+    )
     data_dir = Path(get_procthor_10k_dir())
-    combined_path = data_dir / f"procthor_data_{scene_seed}.csv"
+    combined_path = data_dir / f"{filename_wo_ext}.csv"
     with open(combined_path, 'a', encoding="utf-8") as combined:
         for worker_id in range(num_workers):
-            shard_path = data_dir / f"procthor_data_{scene_seed}_{worker_id}.csv"
+            shard_path = data_dir / f"{filename_wo_ext}_{worker_id}.csv"
             if shard_path.exists():
                 combined.write(shard_path.read_text())
                 shard_path.unlink()

@@ -1,4 +1,5 @@
 from functools import partial
+from interruption.constants import MODEL_NAME
 from interruption.environments import (
     construct_procthor_kitchen_environment,
     get_alfred_task_distribution,
@@ -12,7 +13,8 @@ from interruption.experiments import (
     run_experiment,
 )
 from interruption.utilities import (
-    RandomVariableType, randomize_task_distribution_order, get_task_arrival_prob
+    RandomVariableType, randomize_task_distribution_order, get_task_arrival_prob, 
+    calibrate_beta_parameter
 )
 from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 
@@ -22,13 +24,13 @@ RANDOMIZE_TASK_SEQUENCE = False
 NUM_TASKS = 11
 
 def main(randomize_order: bool = False):
-    model_name = "best_model_experiment12_val.pt"
 
     seeds = ExperimentSeeds(
         procthor_seed=201, experiment_seed=20, object_placement_seed=19, task_sample_seed=75
     )
     task_arrival_fn = partial(
-        get_task_arrival_prob, RandomVariableType.CONTINUOUS, -1, 60
+        get_task_arrival_prob, RandomVariableType.CONTINUOUS,
+        -1, calibrate_beta_parameter(0.5, 76.998)
     )
 
     # get task distribution from alfred dataset used during training
@@ -57,7 +59,7 @@ def main(randomize_order: bool = False):
         current_goal,
         task_distribution,
         task_arrival_fn,
-        MODEL_PATH / model_name,
+        MODEL_PATH / MODEL_NAME,
         num_task_sequence=5,
         augment_task=True
     )

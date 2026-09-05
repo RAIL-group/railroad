@@ -133,17 +133,21 @@ def get_task_arrival_prob(
     return 1 - math.exp(-action_time / time_between_arrivals)
 
 
-def _calibrate_beta_parameter(prob: float, a_t: float) -> float:
+def calibrate_beta_parameter(prob: float, a_t: float) -> float:
     """
-    Helper function for computing the value of the beta parameter for the
+    Helper function for computing the value of the tau parameter for the
     CDF of the exponential distribution such the provided time to complete
     an action will have the specified probability.
-    Returns the computed Beta parameter when valid inputs provided
+    Reference: Equation for the CDF of the exponential distribution - 
+    P(t <= X) = 1 - e^(-X/tau)
+    Returns the computed tau parameter when valid inputs provided
     (Prob: [0, 1) and a_t >= 0). Otherwise returns -1 on invalid inputs.
     """
     if prob < 0 or prob >= 1 or a_t < 0:
         return -1
-    return -math.log(1 - prob) / a_t
+    if prob == 0:
+        return float('inf')
+    return -a_t / math.log(1 - prob)
 
 
 def print_plan(actions: list[str]) -> None:

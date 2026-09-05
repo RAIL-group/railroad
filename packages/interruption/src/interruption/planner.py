@@ -7,6 +7,7 @@ from tqdm import tqdm
 from railroad.core import Action, Fluent, Goal, State, get_next_actions
 from railroad.environment.procthor.scenegraph import SceneGraph
 
+from .constants import SEARCH_DEBUG
 from .utilities import (
     get_action_cost,
     get_next_state,
@@ -14,9 +15,6 @@ from .utilities import (
     get_discounted_value,
     get_updated_scene_graph
 )
-
-# constants
-DEBUG = False
 
 # data structures for astar search
 @dataclass
@@ -224,7 +222,7 @@ def astar_search(
     with tqdm(total=num_steps) as pbar:
         while num_expanded_nodes < num_steps:
             # some logging functionality for debugging
-            if DEBUG:
+            if SEARCH_DEBUG:
                 print_frontier_trace(num_expanded_nodes, frontier)
 
             # find expansion node

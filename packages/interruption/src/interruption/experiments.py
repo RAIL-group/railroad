@@ -24,6 +24,7 @@ from railroad.dashboard._protocols import DashboardPlanner
 from railroad.environment import SymbolicEnvironment
 from railroad.environment.procthor.environment import ProcTHOREnvironment
 
+from .constants import ACTION_PROB_DEBUG, INT_H_WEIGHTS, AUGMENT_DISCOUNT_FACTOR, H_MULTIPLIER
 from .dashboard_adapters import AstarDashboardPlanner
 from .environments import construct_procthor_kitchen_environment, KitchenProcTHOREnvironment
 from .learning.models.gcn import AnticipateGCN
@@ -36,12 +37,6 @@ from .utilities import (
     get_action_cost,
     negative_fluent_preprocessing,
 )
-
-# global constants/enums
-DEBUG = False
-WEIGHTS = (0.9, 1)
-AUGMENT_DISCOUNT_FACTOR = 0.99
-H_MULTIPLIER = 2
 
 class ExperimentMode(Enum):
     """
@@ -129,7 +124,7 @@ def run_experiment(
     )
 
     # print out the actual action probabilities
-    if DEBUG:
+    if ACTION_PROB_DEBUG:
         _show_action_probabilities(experiment_data)
 
     # set the experiment seed after loading the ProcTHOR scene since it sets the
@@ -366,7 +361,7 @@ def _get_planner_config(
         )
         current_task_reward=0
         if planner_mode == ExperimentMode.INTERRUPTION_AP:
-            heuristic_fn = partial(ap_heuristic_fn, h_multi=h_multiplier, weights=WEIGHTS)
+            heuristic_fn = partial(ap_heuristic_fn, h_multi=h_multiplier, weights=INT_H_WEIGHTS)
     return PlannerConfig(
         discount_fn,
         heuristic_fn,

@@ -13,6 +13,7 @@ from typing import Any
 from railroad.bench import BenchmarkCase, benchmark
 from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 
+from ..constants import MODEL_NAME, EXPERIMENT_REPEATS, AUGMENT_TASK, EXPECTED_TIME_NEXT_ARRIVAL
 from ..environments import (
     construct_procthor_kitchen_environment,
     get_alfred_task_distribution,
@@ -23,11 +24,6 @@ from ..experiments import ExperimentConfig, ExperimentSeeds, run_experiment, Exp
 from ..utilities import (
     RandomVariableType, randomize_task_distribution_order, get_task_arrival_prob
 )
-
-# CONSTANTS
-MODEL_NAME = "best_model_experiment12_val.pt"
-EXPERIMENT_REPEATS = 1
-AUGMENT_TASK = True
 
 
 def _get_cases() -> list[dict[str, Any]]:
@@ -46,10 +42,7 @@ def _get_cases() -> list[dict[str, Any]]:
             "augment_task": AUGMENT_TASK
         }
         for (time_between_arrivals, seed), num_task_sequence in itertools.product(
-            zip(
-                [float("inf"), 1500, 720, 420, 300, 180, 120, 60],
-                [140, 42, 240, 57, 1096, 4065, 720, 391]
-            ),
+            zip(EXPECTED_TIME_NEXT_ARRIVAL, [140, 42, 240, 57, 1096, 4065, 720]),
             [5]
         )
     ]
@@ -135,7 +128,7 @@ def _setup_experiment_config(
         "task-arrival probabilities in specified procthor environments."
     ),
     tags=["interruption", "procthor"],
-    timeout=1200.0,
+    timeout=900.0,
     repeat=EXPERIMENT_REPEATS,
 )
 def bench_interruption_kitchen(case: BenchmarkCase):
@@ -156,7 +149,7 @@ bench_interruption_kitchen.add_cases(_get_cases())
         "task-arrival probabilities in specified procthor environments."
     ),
     tags=["interruption", "procthor", "ap"],
-    timeout=1200.0,
+    timeout=900.0,
     repeat=EXPERIMENT_REPEATS,
 )
 def bench_interruption_ap_kitchen(case: BenchmarkCase):
@@ -177,7 +170,7 @@ bench_interruption_ap_kitchen.add_cases(_get_cases())
         "task-arrival probabilities in specified procthor environments."
     ),
     tags=["interruption", "procthor", "myopic"],
-    timeout=1200.0,
+    timeout=900.0,
     repeat=EXPERIMENT_REPEATS,
 )
 def bench_myopic_interruption_kitchen(case: BenchmarkCase):
@@ -198,7 +191,7 @@ bench_myopic_interruption_kitchen.add_cases(_get_cases())
         "task-arrival probabilities in specified procthor environments."
     ),
     tags=["interruption", "procthor", "ap"],
-    timeout=1200.0,
+    timeout=900.0,
     repeat=EXPERIMENT_REPEATS,
 )
 def bench_ap_kitchen(case: BenchmarkCase):

@@ -1,6 +1,9 @@
+import math
+
 import pytest
 from interruption.utilities import (
     RandomVariableType,
+    calibrate_beta_parameter,
     _check_num_rooms,
     _check_scene_room_types,
     filter_procthor_scenes,
@@ -66,6 +69,26 @@ def test_get_next_state():
 def test_get_task_arrival_prob(rv_type, arrival_prob, time_between_arrivals, action_time, sol):
     arrival_prob = get_task_arrival_prob(rv_type, arrival_prob, time_between_arrivals, action_time)
     assert arrival_prob == pytest.approx(sol)
+
+
+@pytest.mark.parametrize(
+    argnames="prob, a_t, sol",
+    argvalues=[
+        (0.5, 10, 14.426950408889635),
+        (0.9, 30, 13.028834457097554),
+        (0.1, 4, 37.96488632411962),
+        (0.99999, 5, 0.4342944819030801),
+        (0.5, 0, -0.0),
+        (-0.1, 5, -1),
+        (1, 5, -1),
+        (1.5, 5, -1),
+        (0.5, -1, -1),
+        (0, 5, math.inf),
+        (0, 0, math.inf),
+    ]
+)
+def test_calibrate_beta_parameter(prob, a_t, sol):
+    assert calibrate_beta_parameter(prob, a_t) == pytest.approx(sol)
 
 
 @pytest.mark.parametrize(
