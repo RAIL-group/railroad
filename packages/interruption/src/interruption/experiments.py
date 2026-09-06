@@ -186,7 +186,7 @@ def _get_task_sequence_event_trace(
             data.env.state, data.neg_to_pos_mapping
         )
         if experiment_mode == ExperimentMode.ANTICIPATORY_PLANNING:
-            plan, _, _ = anticipatory_planner(
+            plan, _, success = anticipatory_planner(
                 (initial_state, data.env.scene.scene_graph),
                 data.search_problem,
                 data.planner_parameters,
@@ -194,7 +194,7 @@ def _get_task_sequence_event_trace(
                 data.neg_to_pos_mapping
             )
         else:
-            plan, _, _, _ = astar_search(
+            plan, _, success, _ = astar_search(
                 (
                     initial_state,
                     None if experiment_mode == ExperimentMode.MYOPIC

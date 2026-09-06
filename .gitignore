@@ -26,7 +26,7 @@ assets/
 /data/
 # Every uv.lock, not just the root one: running uv from inside a package
 # directory leaves a stray lockfile there, and we don't track any of them.
-uv.lock
+# uv.lock
 
 
 # Logging

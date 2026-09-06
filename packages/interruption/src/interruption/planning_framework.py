@@ -77,18 +77,26 @@ def anticipatory_planner(
     Implementation of the anticipatory planning framework for large-scale environments from
     Talukder et al.
     """
+    best_plan = []
+    best_value_sg = float("inf")
+    best_value_total = float("inf")
+
     # set search_params to match a myopic planner
     assert search_params.interruption_value_fn is not None
     ev_model = search_params.interruption_value_fn
     search_params.interruption_value_fn = None
 
     # run myopic planner to get initial plan/value of s_g
-    best_plan, best_value_sg, _, scene_graph_sg = astar_search(
+    plan, value_sg, success, scene_graph_sg = astar_search(
         initial_state, interruption_problem, search_params
     )
-
     assert scene_graph_sg is not None
-    best_value_total = best_value_sg + ev_model(scene_graph_sg)
+
+    # task was able to be solved
+    if success:
+        best_plan = plan
+        best_value_sg = value_sg
+        best_value_total = value_sg + ev_model(scene_graph_sg)
 
     # for debugging
     if AP_DEBUG:
@@ -96,8 +104,9 @@ def anticipatory_planner(
         print(f"V_AP of augmented goal state: {ev_model(scene_graph_sg):.4f}")
         print(f"V_s_g + V_AP = {best_value_total:.4f}")
 
-    # assert isinstance(interruption_problem.goal, LiteralGoal)
     assert isinstance(interruption_problem.goal, Goal)
+    non_augmented_goal = interruption_problem.goal
+
     selected_locations, selected_objects = focused_sampling(
         interruption_problem.goal,
         best_plan,
@@ -114,7 +123,7 @@ def anticipatory_planner(
     for task in sampled_augmented_tasks:
         interruption_problem.goal = task
         # run myopic planner to get initial plan/value of s_g
-        plan, value_sg, _, scene_graph_sg = astar_search(
+        plan, value_sg, success, scene_graph_sg = astar_search(
             initial_state, interruption_problem, search_params
         )
 
@@ -126,15 +135,16 @@ def anticipatory_planner(
             print(f"V_AP of augmented goal state: {ev_model(scene_graph_sg):.4f}")
             print(f"V_s_g + V_AP = {value_total:.4f}")
 
-        if value_total < best_value_total:
+        if success and value_total < best_value_total:
             best_value_total = value_total
             best_value_sg = value_sg
             best_plan = plan
 
-    # restore the interruption_value_fn attribute for future tasks
+    # restore the interruption_value_fn and non_augmented goal attributes for future tasks
     search_params.interruption_value_fn = ev_model
+    interruption_problem.goal = non_augmented_goal
 
-    return best_plan, best_value_sg, True
+    return best_plan, best_value_sg, best_value_total != float("inf")
 
 
 def focused_sampling(
