@@ -39,6 +39,15 @@ class KitchenProcTHOREnvironment(ProcTHOREnvironment):
         get_updated_scene_graph(self.scene.scene_graph, self.state, action)
 
 
+    def apply_time_penalty(self, time: float) -> None:
+        """
+        Method for moving the environment's time forward due to incurring
+        a penalty cost. (Ex. If the planner failed to find a solution to a task,
+        a failure penalty is applied.)
+        """
+        self._time += time
+
+
 # helper functions
 def construct_simple_kitchen_environment() -> SymbolicEnvironment:
     """

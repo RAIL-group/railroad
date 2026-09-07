@@ -30,8 +30,10 @@ def main(randomize_order: bool = False):
     )
     task_arrival_fn = partial(
         get_task_arrival_prob, RandomVariableType.CONTINUOUS,
-        -1, calibrate_beta_parameter(0.5, 76.998)
+        -1, calibrate_beta_parameter(0.5, 10)
     )
+
+    # 76.998
 
     # get task distribution from alfred dataset used during training
     env = construct_procthor_kitchen_environment(seeds.procthor_seed, remove_duplicates=True)

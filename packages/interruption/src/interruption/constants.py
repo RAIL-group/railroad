@@ -43,4 +43,7 @@ INT_H_WEIGHTS = (0.9, 1)
 AUGMENT_DISCOUNT_FACTOR = 0.99
 
 # heuristic multiplier (larger -> more greedy search)
-H_MULTIPLIER = 2
+H_MULTIPLIER = 1
+
+## task failure cost
+PLANNER_FAILURE_COST = 400

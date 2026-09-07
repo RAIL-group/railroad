@@ -24,7 +24,10 @@ from railroad.dashboard._protocols import DashboardPlanner
 from railroad.environment import SymbolicEnvironment
 from railroad.environment.procthor.environment import ProcTHOREnvironment
 
-from .constants import ACTION_PROB_DEBUG, INT_H_WEIGHTS, AUGMENT_DISCOUNT_FACTOR, H_MULTIPLIER
+from .constants import (
+    ACTION_PROB_DEBUG, INT_H_WEIGHTS, AUGMENT_DISCOUNT_FACTOR, H_MULTIPLIER,
+    PLANNER_FAILURE_COST
+)
 from .dashboard_adapters import AstarDashboardPlanner
 from .environments import construct_procthor_kitchen_environment, KitchenProcTHOREnvironment
 from .learning.models.gcn import AnticipateGCN
@@ -163,7 +166,7 @@ def run_experiment(
         dashboard, dash_env, recording_console,
         start_time, show_plot, save_plot, save_video
     )
-    return _get_results(event_trace, dash_data)
+    return _get_results(config.augment_task, task_sequence_goal, event_trace, dash_data)
 
 
 # helper functions
@@ -204,13 +207,17 @@ def _get_task_sequence_event_trace(
                 data.planner_parameters
             )
 
-        _execution_loop(plan, data, event_trace)
+        # execute the plan in the environment
+        goal_completed = _execution_loop(
+            (task_arrival_sequence[i], success),
+            plan,
+            data,
+            event_trace,
+            False
+        )
 
+        # new task has arrived
         task_arrival_sequence.append(config.interrupting_task_dist[0][i])
-         # check if current task was completed successfully
-        goal_completed = task_arrival_sequence[i].evaluate(data.env.state.fluents)
-        if goal_completed:
-            event_trace[-1] += " | Goal Complete"
 
         # setup for next task in the sequence
         assert data.search_problem.interrupting_task_dist is not None
@@ -225,7 +232,7 @@ def _get_task_sequence_event_trace(
         None if data.planner_parameters.interruption_value_fn is None
         else data.env.scene.scene_graph
     )
-    plan, _, _, _ = astar_search(
+    plan, _, success, _ = astar_search(
         initial_state,
         data.search_problem,
         _get_planner_config(
@@ -235,24 +242,36 @@ def _get_task_sequence_event_trace(
         )
     )
 
-    _execution_loop(plan, data, event_trace, True)
-
-    # check if last task was completed successfully
-    if task_arrival_sequence[-1].evaluate(data.env.state.fluents):
-        event_trace[-1] += " | Goal Complete"
+    _execution_loop(
+        (task_arrival_sequence[-1], success),
+        plan,
+        data,
+        event_trace,
+        True
+    )
 
     return event_trace, task_arrival_sequence
 
 
 def _execution_loop(
+    goal_success: tuple[Goal, bool],
     plan: list[Action],
     data: ExperimentData,
     event_trace: list[str],
     last_task_flag: bool = False
-) -> None:
+) -> bool:
     """
     Helper function for the execution loop of task interruption experiments.
+    Returns True if the current task was successfully completed. Otherwise, False.
     """
+    goal, success = goal_success
+
+    if not success:
+        event_trace.append("Failed Task")
+        # update the state's time to reflect the failed task
+        data.env.apply_time_penalty(PLANNER_FAILURE_COST)
+        return False
+
     # execution loop
     for converted_action in plan:
         action = get_action_by_name(data.env.get_actions(), converted_action.name)
@@ -271,6 +290,13 @@ def _execution_loop(
         if not last_task_flag and random.random() < task_arrival_prob:
             event_trace[-1] += " | Interrupt"
             break
+
+    # check if current task was completed successfully
+    # NOTE: only append to an action's name if the task wasn't already complete
+    goal_completed = goal.evaluate(data.env.state.fluents)
+    if goal_completed and len(event_trace) > 0:
+        event_trace[-1] += " | Goal Complete"
+    return goal_completed
 
 
 def initialize_experiment_data(
@@ -396,6 +422,8 @@ def _setup_dashboard(
 
 
 def _get_results(
+    augment: bool,
+    all_goals: Goal,
     event_trace: list[str],
     dash_data: DashboardData
 ) -> dict:
@@ -403,8 +431,15 @@ def _get_results(
     Helper function for obtaining the conditional necessary results based on if the 
     run_experiment function is used for a standalone experiment or as part of a benchmark.
     """
+    success = (
+        "Goal Complete" in event_trace[-1] 
+        if not augment
+        else all_goals.evaluate(dash_data.dash_env.state.fluents)
+    )
+
+    # NOTE: reflected in the benchmark dashboard
     result = {
-        "success": "Goal Complete" in event_trace[-1],
+        "success": success,
         "wall_time": time.perf_counter() - dash_data.start_time,
         "plan_cost": float(dash_data.dash_env.state.time),
         "actions_count": len(event_trace),
@@ -443,21 +478,25 @@ def _get_results(
 def execute_deterministic_replay(
     event_trace: list[str],
     dashboard: PlannerDashboard,
-    dash_env: SymbolicEnvironment
+    dash_env: KitchenProcTHOREnvironment
 ) -> None:
     """
     Executes the deterministic replay of an interruption task sequence for viewing in 
     the railroad dashboard.
     """
     adapter = AstarDashboardPlanner(dash_env.get_actions(), ff_heuristic)
+
     for converted_action_name in event_trace:
         action_name = (
             converted_action_name.split(" |")[0]
             if any(sub in converted_action_name for sub in ["Interrupt", "Goal Complete"])
             else converted_action_name
         )
-        action = get_action_by_name(dash_env.get_actions(), action_name)
-        dash_env.act(action)
+        if action_name != "Failed Task":
+            action = get_action_by_name(dash_env.get_actions(), action_name)
+            dash_env.act(action)
+        else:
+            dash_env.apply_time_penalty(PLANNER_FAILURE_COST)
         dashboard.update(adapter, converted_action_name)
 
 
@@ -510,7 +549,8 @@ def _get_scene_objects_locations(seed: int, objects: set[str]) -> dict[str, str]
         for generic_name, scene_objects in full_objects_mapping.items()
     }
 
-# debugging helper functions
+
+## debugging helper functions
 def _show_action_probabilities(data: ExperimentData) -> None:
     actual_probabilities = []
     pick_flag = False
