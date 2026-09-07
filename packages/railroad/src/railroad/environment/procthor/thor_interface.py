@@ -126,8 +126,10 @@ class ThorInterface:
             if self._check_for_randomized_scene():
                 self.scene = self._load_randomized_objects_scene()
             else:
-                self._randomize_object_locations(preprocess)
-                self._save_randomized_scene()
+                from ._scene_lock import scene_generation_lock
+                with scene_generation_lock():
+                    self._randomize_object_locations(preprocess)
+                    self._save_randomized_scene()
         else:
             self.scene = self._load_scene()
         self.rooms = self.scene['rooms']
@@ -256,6 +258,11 @@ class ThorInterface:
         that will be removed from the resulting SymbolicEnvironment.
         """
         self.scene = self._load_scene()
+        attempts = max(1, int(os.environ.get("PROCTHOR_SCENE_GEN_ATTEMPTS", "3")))
+        scene_id = (
+            f"{self.seed}" if self.object_seed is None
+            else f"{self.seed}_{self.object_seed}"
+        )
 
         if preprocess:
             self.containers = self.scene['objects']
@@ -263,16 +270,35 @@ class ThorInterface:
             self.scene['objects'] = copy.deepcopy(self.containers)
 
         from ai2thor.controller import Controller
-        with Controller(scene=self.scene, gridSize=self.grid_resolution, width=480, height=480) as controller:
-            event = controller.step(
-                action="InitialRandomSpawn",
-                randomSeed=self.object_seed,
-                forceVisible=False,
-                placeStationary=True,
-                numPlacementAttempts=1000,
-                raise_for_failure=True,
-            )
-            self._update_object_locations(event)
+        for attempt in range(1, attempts+1):
+            controller = Controller(scene=self.scene, gridSize=self.grid_resolution, width=480, height=480)
+
+            try:
+                event = controller.step(
+                    action="InitialRandomSpawn",
+                    randomSeed=self.object_seed,
+                    forceVisible=False,
+                    placeStationary=True,
+                    numPlacementAttempts=1000,
+                    raise_for_failure=True,
+                )
+            except (RuntimeError, TimeoutError) as error:
+                if attempt == attempts:
+                    raise
+                warnings.warn(
+                    f"scene {scene_id} generation attempt {attempt}/{attempts} "
+                    f"failed ({error}); retrying with a fresh controller.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            finally:
+                # A live controller inside the lock is exactly what the lock
+                # exists to prevent, and a retry needs a fresh one anyway.
+                if self.controller is not None:
+                    self.controller.stop()
+                    self.controller = None
+
+        self._update_object_locations(event)
 
     def _update_object_locations(self, event) -> None:
         """

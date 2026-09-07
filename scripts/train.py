@@ -26,7 +26,7 @@ HYPERPARAMETERS = {
 }
 
 # output directories specifications
-EXPERIMENT_NAME = "experiment12_val"
+EXPERIMENT_NAME = "one_room_model_linux"
 LOG_DIRECTORY = DEFAULT_RESOURCES_BASE / f"run_logs/{EXPERIMENT_NAME}"
 OUTPUT_MODEL_DIRECTORY = DEFAULT_RESOURCES_BASE / "models"
 

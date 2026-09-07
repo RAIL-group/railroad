@@ -41,13 +41,13 @@ from railroad.environment.procthor.scenegraph import SceneGraph
 
 NUM_DATUM = 1000
 DATA_GENERATION_SEED = 37
-PROCTHOR_SEED = 201 # 1-room
-# PROCTHOR_SEED = 64 # 2-room
+# PROCTHOR_SEED = 201 # 1-room
+PROCTHOR_SEED = 64 # 2-room
 REMOVE_DUPLICATES = True
-# NUM_TASKS = 16 # for 2-room environment
-NUM_TASKS = 11
-H_MULTIPLIER = 2
-# H_MULTIPLIER = 5 # for 2-room environment
+NUM_TASKS = 16 # for 2-room environment
+# NUM_TASKS = 11
+# H_MULTIPLIER = 1
+H_MULTIPLIER = 5 # for 2-room environment
 WRITE_OUT_INDIVIDUAL_TASK_COSTS = True
 
 # Concurrent AI2-THOR Controller instances this machine sustains without
