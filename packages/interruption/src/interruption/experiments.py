@@ -1,4 +1,4 @@
-from typing import Sequence
+from typing import Sequence, Optional
 import random
 import time
 from collections import defaultdict
@@ -113,6 +113,7 @@ def run_experiment(
     experiment_mode: ExperimentMode,
     remove_duplicates: bool,
     benchmark_flag: bool = False,
+    relevant_objects: Optional[list[str]] = None,
     show_plot: bool = False,
     save_plot: str | None = None,
     save_video: str | None = None
@@ -123,7 +124,7 @@ def run_experiment(
     the execution sequence.
     """
     experiment_data = initialize_experiment_data(
-        config, experiment_mode, remove_duplicates, H_MULTIPLIER
+        config, experiment_mode, relevant_objects, remove_duplicates, H_MULTIPLIER
     )
 
     # print out the actual action probabilities
@@ -146,7 +147,7 @@ def run_experiment(
 
     # setup for deterministic replay for dashboard
     dash_env = construct_procthor_kitchen_environment(
-        config.seeds.procthor_seed, config.seeds.object_placement_seed, remove_duplicates
+        config.seeds.procthor_seed, config.seeds.object_placement_seed, relevant_objects, remove_duplicates
     )
 
     # keep track of the task_sequence as part of the output
@@ -302,6 +303,7 @@ def _execution_loop(
 def initialize_experiment_data(
     config: ExperimentConfig,
     planner_mode: ExperimentMode,
+    relevant_objects: Optional[list[str]] = None,
     remove_duplicates: bool = False,
     h_multiplier: float = 1
 ) -> ExperimentData:
@@ -314,6 +316,7 @@ def initialize_experiment_data(
     env = construct_procthor_kitchen_environment(
         config.seeds.procthor_seed,
         object_seed=config.seeds.object_placement_seed,
+        relevant_objects=relevant_objects,
         remove_duplicates=remove_duplicates
     )
 

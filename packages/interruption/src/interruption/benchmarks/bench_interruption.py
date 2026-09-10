@@ -13,7 +13,10 @@ from typing import Any
 from railroad.bench import BenchmarkCase, benchmark
 from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 
-from ..constants import MODEL_NAME, EXPERIMENT_REPEATS, AUGMENT_TASK, EXPECTED_TIME_NEXT_ARRIVAL
+from ..constants import (
+    MODEL_NAME, EXPERIMENT_REPEATS, AUGMENT_TASK, EXPECTED_TIME_NEXT_ARRIVAL, NUM_TASKS,
+    PROCTHOR_SEED, OBJ_PLACEMENT_SEED
+)
 from ..environments import (
     construct_procthor_kitchen_environment,
     get_alfred_task_distribution,
@@ -33,7 +36,7 @@ def _get_cases() -> list[dict[str, Any]]:
     """
     return [
         {
-            "procthor_seed": 201,
+            "procthor_seed": PROCTHOR_SEED,
             "task_dist_idx": 0,
             "time_between_arrivals": time_between_arrivals,
             "interruption_seed": seed,
@@ -61,7 +64,7 @@ def _setup_experiment_config(
         case.params["interruption_seed"] + case.repeat_idx,
         75, # keep fixed for right now
         # case.repeat_idx,
-        object_placement_seed=19
+        object_placement_seed=OBJ_PLACEMENT_SEED
     )
     task_arrival_fn = partial(
         get_task_arrival_prob,
@@ -77,13 +80,15 @@ def _setup_experiment_config(
     task_distribution = get_alfred_task_distribution(
         env.scene.objects,
         set(env.scene.locations),
+        size=NUM_TASKS,
         one_object_per_taskdist=True
     )
     current_goal = get_example_procthor_goal()
     if case.params["randomize_task_sequence"]:
-        # current_goal, task_distribution = randomize_task_distribution_order(
-        #     task_distribution, seeds.task_sample_seed
-        # )
+        current_goal, task_distribution = randomize_task_distribution_order(
+            task_distribution, seeds.task_sample_seed
+        )
+        
         # task_distribution = (
         #     list(task_distribution[0][:case.params["num_task_sequence"]-1]),
         #     list(task_distribution[1][:case.params["num_task_sequence"]-1])
@@ -121,25 +126,25 @@ def _setup_experiment_config(
     return config
 
 
-@benchmark(
-    name="procthor_interruption",
-    description=(
-        "Evaluates the interruption planner across "
-        "task-arrival probabilities in specified procthor environments."
-    ),
-    tags=["interruption", "procthor"],
-    timeout=900.0,
-    repeat=EXPERIMENT_REPEATS,
-)
-def bench_interruption_kitchen(case: BenchmarkCase):
-    """
-    Wrapper function to evaluate the interruption-based planner on procthor kitchen
-    environments. 
-    """
-    config = _setup_experiment_config(case, ExperimentMode.INTERRUPTION)
-    return run_experiment(config, ExperimentMode.INTERRUPTION, True, True)
+# @benchmark(
+#     name="procthor_interruption",
+#     description=(
+#         "Evaluates the interruption planner across "
+#         "task-arrival probabilities in specified procthor environments."
+#     ),
+#     tags=["interruption", "procthor"],
+#     timeout=900.0,
+#     repeat=EXPERIMENT_REPEATS,
+# )
+# def bench_interruption_kitchen(case: BenchmarkCase):
+#     """
+#     Wrapper function to evaluate the interruption-based planner on procthor kitchen
+#     environments. 
+#     """
+#     config = _setup_experiment_config(case, ExperimentMode.INTERRUPTION)
+#     return run_experiment(config, ExperimentMode.INTERRUPTION, True, True)
 
-bench_interruption_kitchen.add_cases(_get_cases())
+# bench_interruption_kitchen.add_cases(_get_cases())
 
 
 @benchmark(

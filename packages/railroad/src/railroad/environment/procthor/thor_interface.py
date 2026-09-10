@@ -108,11 +108,13 @@ class ThorInterface:
         use_cache: Whether to use cached data
     """
 
+    # TODO - update (need to pass in relevant objects)
     def __init__(
         self,
         seed: int,
         object_seed: int | None = None,
         resolution: float = 0.05,
+        relevant_objects: list[str] | None = None,
         remove_duplicates: bool = False,
         preprocess: bool = True,
         use_cache: bool = True,
@@ -136,7 +138,7 @@ class ThorInterface:
         self.agent = self.scene['metadata']['agent']
         self.containers = self.scene['objects']
         if preprocess:
-            self._preprocess_containers()
+            self._preprocess_containers(relevant_objects)
         if remove_duplicates:
             self._deduplicate_containers()
             # update the scene to not include duplicate containers and children
@@ -329,16 +331,24 @@ class ThorInterface:
             if container["id"] in containers:
                 container["children"] = containers[container["id"]]
 
-    def _preprocess_containers(self) -> None:
+    # TODO - update for filtering out of non-relevant children with respect to the task distribution
+    def _preprocess_containers(self, relevant_objects: list[str] | None = None) -> None:
         """Filter containers and their children."""
         container_types = {c['id'].split('|')[0].lower() for c in self.containers}
 
         for container in self.containers:
             if 'children' in container:
-                container['children'] = [
-                    child for child in container['children']
-                    if child['id'].split('|')[0].lower() not in container_types
-                ]
+                children = []
+                for child in container['children']:
+                    generic_name = child['id'].split('|')[0].lower()
+                    preprocess_cond = (
+                        generic_name not in container_types
+                        if relevant_objects is None
+                        else generic_name not in container_types and generic_name in relevant_objects
+                    )
+                    if preprocess_cond:
+                        children.append(child)
+                container["children"] = children
 
         self.containers = [
             c for c in self.containers

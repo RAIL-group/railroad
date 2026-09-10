@@ -28,6 +28,7 @@ from interruption.experiments import (
 )
 
 # from railroad.environment.procthor.environment import ProcTHOREnvironment
+from interruption.constants import NUM_TASKS
 from interruption.learning.data import write_compressed_pickle
 from interruption.planner import astar_search, compute_interruption_value
 from interruption.utilities import RandomVariableType, get_task_arrival_prob
@@ -44,8 +45,6 @@ DATA_GENERATION_SEED = 37
 # PROCTHOR_SEED = 201 # 1-room
 PROCTHOR_SEED = 64 # 2-room
 REMOVE_DUPLICATES = True
-NUM_TASKS = 16 # for 2-room environment
-# NUM_TASKS = 11
 # H_MULTIPLIER = 1
 H_MULTIPLIER = 5 # for 2-room environment
 WRITE_OUT_INDIVIDUAL_TASK_COSTS = True

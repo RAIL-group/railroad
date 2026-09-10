@@ -1,5 +1,8 @@
 from functools import partial
-from interruption.constants import MODEL_NAME
+from interruption.constants import (
+    MODEL_NAME, NUM_TASKS, EXPECTED_TIME_NEXT_ARRIVAL,
+    PROCTHOR_SEED, OBJ_PLACEMENT_SEED, FILTER_OBJECTS
+)
 from interruption.environments import (
     construct_procthor_kitchen_environment,
     get_alfred_task_distribution,
@@ -13,27 +16,27 @@ from interruption.experiments import (
     run_experiment,
 )
 from interruption.utilities import (
-    RandomVariableType, randomize_task_distribution_order, get_task_arrival_prob, 
-    calibrate_beta_parameter
+    RandomVariableType, randomize_task_distribution_order, get_task_arrival_prob,
+    extract_relevant_objects
 )
 from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 
 # constants
 MODEL_PATH = DEFAULT_RESOURCES_BASE / "models"
 RANDOMIZE_TASK_SEQUENCE = False
-NUM_TASKS = 11
 
-def main(randomize_order: bool = False):
+def main(randomize_order: bool = False, filter_objects: bool = False):
 
     seeds = ExperimentSeeds(
-        procthor_seed=201, experiment_seed=20, object_placement_seed=19, task_sample_seed=75
+        procthor_seed=PROCTHOR_SEED,
+        experiment_seed=20,
+        object_placement_seed=OBJ_PLACEMENT_SEED,
+        task_sample_seed=75
     )
     task_arrival_fn = partial(
         get_task_arrival_prob, RandomVariableType.CONTINUOUS,
-        -1, calibrate_beta_parameter(0.5, 10)
+        -1, EXPECTED_TIME_NEXT_ARRIVAL[0]
     )
-
-    # 76.998
 
     # get task distribution from alfred dataset used during training
     env = construct_procthor_kitchen_environment(seeds.procthor_seed, remove_duplicates=True)
@@ -55,7 +58,6 @@ def main(randomize_order: bool = False):
         task_distribution[0][0] = task_distribution[0][3] # pan at fridge
         task_distribution[0][3] = tmp_goal
 
-
     config = ExperimentConfig(
         seeds,
         current_goal,
@@ -67,8 +69,11 @@ def main(randomize_order: bool = False):
     )
 
     run_experiment(
-        config, ExperimentMode.ANTICIPATORY_PLANNING, show_plot=True, remove_duplicates=True
+        config, ExperimentMode.INTERRUPTION_AP, show_plot=False, remove_duplicates=True,
+        relevant_objects= extract_relevant_objects(task_distribution[0]) if FILTER_OBJECTS else None
     )
 
+    extract_relevant_objects(task_distribution[0])
+
 if __name__ == "__main__":
-    main(RANDOMIZE_TASK_SEQUENCE)
+    main(RANDOMIZE_TASK_SEQUENCE, FILTER_OBJECTS)

@@ -337,4 +337,4 @@ def print_frontier_trace(step: int, frontier: list[tuple[InterruptionTrajectory,
         print(f"Discounted h-value: {traj.discounted_h_value}; h-value: {traj.h_value}")
         # # added for debugging
         # print(f"v_ap: {traj.v_ap}; ff-value: {traj.ff_value}")
-        print(f"Last 5 actions in trajectory: {[a.name for a in traj.plan]}\n")
+        # print(f"Last 5 actions in trajectory: {[a.name for a in traj.plan]}\n")

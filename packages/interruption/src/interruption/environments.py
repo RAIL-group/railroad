@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import Sequence
+from typing import Sequence, Optional
 import random
 import numpy as np
 from railroad import operators
@@ -134,7 +134,10 @@ def get_simple_goal() -> F | Goal:
 
 
 def construct_procthor_kitchen_environment(
-    seed: int, object_seed: int | None = None, remove_duplicates: bool = False
+    seed: int,
+    object_seed: int | None = None,
+    relevant_objects: Optional[list[str]] = None,
+    remove_duplicates: bool = False
 ) -> KitchenProcTHOREnvironment:
     """
     Constructs a KitchenProcTHOREnvironment representing the scene 
@@ -146,7 +149,7 @@ def construct_procthor_kitchen_environment(
         ~F("hand-full r1-left"), ~F("hand-full r1-right")
     }
     initial_state = State(0.0, initial_fluents)
-
+    # TODO - updaste need to pass in relevant objects from task distribution
     env = KitchenProcTHOREnvironment(
         seed,
         initial_state,
@@ -156,6 +159,7 @@ def construct_procthor_kitchen_environment(
             "location": {"start_loc"},
         },
         object_seed,
+        relevant_objects,
         remove_duplicates
     )
 

@@ -37,12 +37,19 @@ def ap_heuristic_fn(
     """
     if weights is None:
         h_val = ff_heuristic(state, goal, actions, LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF)
+        return h_multi * h_val
     else:
         ff_weight, v_ap_weight = weights
-        h_val = ff_weight * ff_heuristic(
+        # NOTE: old implementation
+        # h_val = ff_weight * ff_heuristic(
+        #     state, goal, actions, LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF
+        # ) + v_ap_weight * v_ap
+
+        # NOTE: temporary fix
+        assert ff_weight == 1 and v_ap_weight == 1
+        return h_multi * ff_heuristic(
             state, goal, actions, LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF
-        ) + v_ap_weight * v_ap
-    return h_multi * h_val
+        ) + v_ap
 
 
 # discount functions

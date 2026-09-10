@@ -14,11 +14,26 @@ ACTION_PROB_DEBUG = False
 SEARCH_DEBUG = False
 
 ## learned function for expected value of interrupting task distribution
-MODEL_NAME = "best_model_experiment12_val.pt"
+MODEL_NAME = "best_model_two_room_model_linux.pt"
 
-## benchmark settings
-EXPERIMENT_REPEATS = 3
+## benchmark/experiment settings
+# benchmark run settings
+EXPERIMENT_REPEATS = 5
+
+# number of tasks in the task distribution
+# current: 2-room -> 16; 1-room -> 11
+NUM_TASKS = 16
+
+# seeds
+# current: 2-room -> 64; 1-room -> 201
+PROCTHOR_SEED = 64
+# current: 2-room -> 2; 1-room -> 19
+OBJ_PLACEMENT_SEED = 2
+# filter out non-task-relevant objects
+FILTER_OBJECTS = True
+
 AUGMENT_TASK = True
+
 EXPECTED_TIME_NEXT_ARRIVAL = [
     calibrate_beta_parameter(0, 5), # No interruptions
     # 5% of tasks from the training dataset take longer to complete
@@ -37,13 +52,17 @@ EXPECTED_TIME_NEXT_ARRIVAL = [
 
 ## interuption heuristic related constants
 # interruption heuristic weights (ff-heuristic_weight, EV_weight)
-INT_H_WEIGHTS = (0.9, 1)
+# NOTE: keep EV_weight fixed at 1
+# INT_H_WEIGHTS = (0.35, 1)
+INT_H_WEIGHTS = (1, 1)
 
 # discount factor for augment experiment heuristic function
+# AUGMENT_DISCOUNT_FACTOR = 0.99
 AUGMENT_DISCOUNT_FACTOR = 0.99
 
 # heuristic multiplier (larger -> more greedy search)
-H_MULTIPLIER = 1
+H_MULTIPLIER = 5
 
 ## task failure cost
-PLANNER_FAILURE_COST = 400
+# current: 2-room (seed = 64) -> 375; 1-room (seed = 201) -> 500
+PLANNER_FAILURE_COST = 500

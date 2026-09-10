@@ -9,6 +9,7 @@ import sys
 import time
 import signal
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from multiprocessing import get_context
 from typing import Optional
 
 from .plan import ExecutionPlan, Task, TaskStatus
@@ -198,7 +199,7 @@ class ParallelExecutor:
         include_files: list[str] | None = plan.metadata.get("include_files")
 
         try:
-            with ProcessPoolExecutor(max_workers=self.num_workers) as executor:
+            with ProcessPoolExecutor(max_workers=self.num_workers, mp_context=get_context("spawn")) as executor:
                 # Submit all tasks at once
                 futures = {}
                 for task in plan.tasks:

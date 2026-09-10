@@ -14,7 +14,7 @@ from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE, get_
 # constants
 MODEL_PATH = DEFAULT_RESOURCES_BASE / "models"
 # dataset specifications
-TRAIN_DATASET_PATH = get_procthor_10k_dir() / "procthor_data_201.csv"
+TRAIN_DATASET_PATH = get_procthor_10k_dir() / "procthor_data_64.csv"
 
 def main():
     """
@@ -22,7 +22,7 @@ def main():
     the learned model ev costs and the actual ev costs for the training data.
     """
     # user specifications
-    model_name = "best_model_one_room_model_linux.pt"
+    model_name = "best_model_two_room_model_linux.pt"
 
     # load dataset
     dataset = CSVPickleDataset(

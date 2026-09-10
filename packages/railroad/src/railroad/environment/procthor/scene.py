@@ -22,10 +22,14 @@ class ProcTHORScene:
         print(scene.locations)  # All container locations
         print(scene.objects)    # All objects in scene
     """
-
+    # TODO - update, need to pass in relevant objects
     def __init__(
-        self, seed: int, object_seed: int | None = None,
-        resolution: float = 0.05, remove_duplicates: bool = False
+        self,
+        seed: int,
+        object_seed: int | None = None,
+        resolution: float = 0.05,
+        relevant_objects: list[str] | None = None,
+        remove_duplicates: bool = False
     ) -> None:
         """Initialize ProcTHOR scene.
 
@@ -35,7 +39,8 @@ class ProcTHORScene:
             resolution: Grid resolution in meters
         """
         self._thor = ThorInterface(
-            seed=seed, object_seed=object_seed, resolution=resolution, remove_duplicates=remove_duplicates
+            seed=seed, object_seed=object_seed, resolution=resolution,
+            relevant_objects=relevant_objects, remove_duplicates=remove_duplicates
         )
 
         # Build location registry

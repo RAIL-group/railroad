@@ -43,13 +43,14 @@ class ProcTHOREnvironment(OccupancyGridPathingMixin, ObjectSearchEnvironment, AB
             },
         )
     """
-
+    # TODO - need to pass in relevant objects
     def __init__(
         self,
         seed: int,
         state: State,
         objects_by_type: Dict[str, Set[str]],
         object_seed: int | None = None,
+        relevant_objects: list[str] | None = None,
         remove_duplicates: bool = False,
         operators: List[Operator] | None = None,
         resolution: float = 0.05,

@@ -293,6 +293,20 @@ def _check_scene_objects(containers: list[dict[str, Any]], objects: set[str] | N
     return objects.issubset(scene_objects)
 
 
+def extract_relevant_objects(task_distribution: list[Goal]) -> list[str]:
+    """
+    Helper function for extracting the objects of tasks within the task distribution.
+    Supports the filtering of objects within large ProcTHOR scenes to reduce the
+    branching factor of search.
+    """
+    task_relevant_objects = []
+    for task in task_distribution:
+        # currently only supports LiteralGoals
+        assert isinstance(task, LiteralGoal)
+        task_relevant_objects.append(task.fluent().args[0])
+    return task_relevant_objects
+
+
 # helper functions for debugging/testing behavior in ProcTHOR environments
 def handcrafted_interruption_value(prob_int: float, state_fluents: frozenset[F]) -> float:
     """
