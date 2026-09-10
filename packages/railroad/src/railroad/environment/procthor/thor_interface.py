@@ -107,8 +107,6 @@ class ThorInterface:
         preprocess: Whether to filter containers
         use_cache: Whether to use cached data
     """
-
-    # TODO - update (need to pass in relevant objects)
     def __init__(
         self,
         seed: int,
@@ -340,11 +338,11 @@ class ThorInterface:
             if 'children' in container:
                 children = []
                 for child in container['children']:
-                    generic_name = child['id'].split('|')[0].lower()
+                    generic_n = child['id'].split('|')[0].lower()
                     preprocess_cond = (
-                        generic_name not in container_types
+                        generic_n not in container_types
                         if relevant_objects is None
-                        else generic_name not in container_types and generic_name in relevant_objects
+                        else generic_n not in container_types and generic_n in relevant_objects
                     )
                     if preprocess_cond:
                         children.append(child)

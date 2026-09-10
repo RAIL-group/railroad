@@ -28,10 +28,10 @@ from interruption.experiments import (
 )
 
 # from railroad.environment.procthor.environment import ProcTHOREnvironment
-from interruption.constants import NUM_TASKS
+from interruption.constants import NUM_TASKS, PROCTHOR_SEED, FILTER_OBJECTS
 from interruption.learning.data import write_compressed_pickle
 from interruption.planner import astar_search, compute_interruption_value
-from interruption.utilities import RandomVariableType, get_task_arrival_prob
+from interruption.utilities import RandomVariableType, get_task_arrival_prob, extract_relevant_objects
 from railroad.core import (
     Goal,
     convert_state_to_positive_preconditions,
@@ -42,8 +42,6 @@ from railroad.environment.procthor.scenegraph import SceneGraph
 
 NUM_DATUM = 1000
 DATA_GENERATION_SEED = 37
-# PROCTHOR_SEED = 201 # 1-room
-PROCTHOR_SEED = 64 # 2-room
 REMOVE_DUPLICATES = True
 # H_MULTIPLIER = 1
 H_MULTIPLIER = 5 # for 2-room environment
@@ -343,6 +341,7 @@ def get_randomized_procthor_data(
                 start_seed
             ),
             ExperimentMode.MYOPIC,
+            extract_relevant_objects(task_distribution[0])if FILTER_OBJECTS else None,
             REMOVE_DUPLICATES,
             h_multiplier=H_MULTIPLIER
         )

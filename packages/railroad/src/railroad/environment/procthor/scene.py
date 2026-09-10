@@ -22,7 +22,6 @@ class ProcTHORScene:
         print(scene.locations)  # All container locations
         print(scene.objects)    # All objects in scene
     """
-    # TODO - update, need to pass in relevant objects
     def __init__(
         self,
         seed: int,

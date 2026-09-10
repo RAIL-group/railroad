@@ -293,7 +293,7 @@ def _check_scene_objects(containers: list[dict[str, Any]], objects: set[str] | N
     return objects.issubset(scene_objects)
 
 
-def extract_relevant_objects(task_distribution: list[Goal]) -> list[str]:
+def extract_relevant_objects(task_distribution: Sequence[Goal]) -> list[str]:
     """
     Helper function for extracting the objects of tasks within the task distribution.
     Supports the filtering of objects within large ProcTHOR scenes to reduce the

@@ -1,9 +1,9 @@
 from collections import Counter
 from contextlib import nullcontext
+from tqdm import tqdm
 
 from interruption.utilities import filter_procthor_scenes
 from railroad.environment.procthor.scene import ProcTHORScene
-from tqdm import tqdm
 
 
 def procthor10k_exploration(

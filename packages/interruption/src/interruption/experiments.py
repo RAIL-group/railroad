@@ -147,7 +147,8 @@ def run_experiment(
 
     # setup for deterministic replay for dashboard
     dash_env = construct_procthor_kitchen_environment(
-        config.seeds.procthor_seed, config.seeds.object_placement_seed, relevant_objects, remove_duplicates
+        config.seeds.procthor_seed, config.seeds.object_placement_seed,
+        relevant_objects, remove_duplicates
     )
 
     # keep track of the task_sequence as part of the output

@@ -43,7 +43,6 @@ class ProcTHOREnvironment(OccupancyGridPathingMixin, ObjectSearchEnvironment, AB
             },
         )
     """
-    # TODO - need to pass in relevant objects
     def __init__(
         self,
         seed: int,
@@ -69,7 +68,7 @@ class ProcTHOREnvironment(OccupancyGridPathingMixin, ObjectSearchEnvironment, AB
         """
         self.scene = ProcTHORScene(
             seed=seed, object_seed=object_seed, resolution=resolution,
-            remove_duplicates=remove_duplicates
+            relevant_objects=relevant_objects, remove_duplicates=remove_duplicates
         )
 
         location_registry = LocationRegistry(
