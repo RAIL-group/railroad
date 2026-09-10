@@ -390,17 +390,32 @@ def create_sweep_figure(
     if is_numeric_param:
         # Sort numerically
         sorted_params = sorted(data_by_param.keys())
-        # Check if log scale should be used
-        use_log = should_use_log_scale(sorted_params)
-        # Use actual values for x-axis
-        param_to_x = {p: p for p in sorted_params}
-        # Compute dx for jitter on failed/timeout runs
-        if len(sorted_params) > 1:
-            if use_log:
-                dx = np.log10(sorted_params[-1]) - np.log10(sorted_params[0])
+        # A non-finite sweep value (e.g. a `time_between_arrivals = inf`
+        # "no interruptions" baseline) can't live on a numeric/log x-axis:
+        # np.log10(inf) makes the jitter range non-finite and crashes
+        # np.random.uniform below. If every value is finite, position points at
+        # their real values (with optional log scale); otherwise fall back to
+        # evenly-spaced index positions -- sorted order still puts inf at the
+        # right edge -- on a linear axis.
+        if all(np.isfinite(p) for p in sorted_params):
+            # Check if log scale should be used
+            use_log = should_use_log_scale(sorted_params)
+            # Use actual values for x-axis
+            param_to_x = {p: p for p in sorted_params}
+            # Compute dx for jitter on failed/timeout runs
+            if len(sorted_params) > 1:
+                if use_log:
+                    # use_log implies >=2 positive values; log10 of a
+                    # zero/negative smallest value would be -inf/nan.
+                    positive = [p for p in sorted_params if p > 0]
+                    dx = np.log10(positive[-1]) - np.log10(positive[0])
+                else:
+                    dx = sorted_params[-1] - sorted_params[0]
             else:
-                dx = sorted_params[-1] - sorted_params[0]
+                dx = 1.0
         else:
+            use_log = False
+            param_to_x = {p: i for i, p in enumerate(sorted_params)}
             dx = 1.0
     else:
         # Categorical parameter - sort by string representation
@@ -409,6 +424,12 @@ def create_sweep_figure(
         # Use index-based positioning for x-axis
         param_to_x = {p: i for i, p in enumerate(sorted_params)}
         dx = 1.0  # Fixed spacing for categorical
+
+    # Defensive: log scale with a zero/negative smallest value yields
+    # np.log10(0) == -inf (or nan for negatives), which would make the jitter
+    # range below non-finite and crash np.random.uniform. Keep dx positive.
+    if not np.isfinite(dx) or dx <= 0:
+        dx = 1.0
 
     # Create violin plot for each parameter value
     mean_x = []
