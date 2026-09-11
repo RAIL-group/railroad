@@ -192,7 +192,7 @@ def randomize_task_distribution_order(
     tasks, probs = task_distribution
     rng = random.Random(seed)
     idxes = rng.sample(range(len(tasks)), k=len(tasks))
-    return tasks[idxes[-1]], ([tasks[i] for i in idxes[:-1]], [probs[i] for i in idxes[:-1]])
+    return tasks[idxes[-1]], ([tasks[i] for i in idxes], [probs[i] for i in idxes])
 
 
 # helper functions for ProcTHOR-10k dataset experiments

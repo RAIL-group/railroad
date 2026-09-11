@@ -151,6 +151,12 @@ def run_experiment(
         relevant_objects, remove_duplicates
     )
 
+    # for debugging
+    assert relevant_objects is not None
+    print(sorted(relevant_objects))
+    print(sorted(experiment_data.env.scene.objects))
+    print(sorted(dash_env.scene.objects))
+
     # keep track of the task_sequence as part of the output
     task_sequence_goal = task_sequence[0]
     for goal in task_sequence[1:]:

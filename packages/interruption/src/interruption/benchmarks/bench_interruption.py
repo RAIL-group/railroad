@@ -15,7 +15,7 @@ from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 
 from ..constants import (
     MODEL_NAME, EXPERIMENT_REPEATS, AUGMENT_TASK, EXPECTED_TIME_NEXT_ARRIVAL, NUM_TASKS,
-    PROCTHOR_SEED, OBJ_PLACEMENT_SEED
+    PROCTHOR_SEED, OBJ_PLACEMENT_SEED, FILTER_OBJECTS
 )
 from ..environments import (
     construct_procthor_kitchen_environment,
@@ -25,7 +25,8 @@ from ..environments import (
 )
 from ..experiments import ExperimentConfig, ExperimentSeeds, run_experiment, ExperimentMode
 from ..utilities import (
-    RandomVariableType, randomize_task_distribution_order, get_task_arrival_prob
+    RandomVariableType, randomize_task_distribution_order, get_task_arrival_prob,
+    extract_relevant_objects
 )
 
 
@@ -88,21 +89,16 @@ def _setup_experiment_config(
         current_goal, task_distribution = randomize_task_distribution_order(
             task_distribution, seeds.task_sample_seed
         )
-        
-        # task_distribution = (
-        #     list(task_distribution[0][:case.params["num_task_sequence"]-1]),
-        #     list(task_distribution[1][:case.params["num_task_sequence"]-1])
-        # )
 
         # for smaller scale experiments, just reorder the task sequence
-        task_distribution = (
-            list(task_distribution[0][:case.params["num_task_sequence"]-1]),
-            list(task_distribution[1][:case.params["num_task_sequence"]-1])
+        task_sequence = (
+            task_distribution[0][:case.params["num_task_sequence"]-1],
+            task_distribution[1][:case.params["num_task_sequence"]-1]
         )
-        rng = random.Random(case.repeat_idx)
-        tasks, probs = task_distribution
-        idxes = rng.sample(range(len(tasks)), k=len(tasks))
-        task_distribution = ([tasks[i] for i in idxes], [probs[i] for i in idxes])
+        _, task_sequence = randomize_task_distribution_order(task_sequence, case.repeat_idx)
+
+        task_distribution[0][:case.params["num_task_sequence"]-1] = task_sequence[0]
+        task_distribution[1][:case.params["num_task_sequence"]-1] = task_sequence[1]
 
     model_path = (
         DEFAULT_RESOURCES_BASE / f"models/{MODEL_NAME}"
@@ -126,25 +122,25 @@ def _setup_experiment_config(
     return config
 
 
-# @benchmark(
-#     name="procthor_interruption",
-#     description=(
-#         "Evaluates the interruption planner across "
-#         "task-arrival probabilities in specified procthor environments."
-#     ),
-#     tags=["interruption", "procthor"],
-#     timeout=900.0,
-#     repeat=EXPERIMENT_REPEATS,
-# )
-# def bench_interruption_kitchen(case: BenchmarkCase):
-#     """
-#     Wrapper function to evaluate the interruption-based planner on procthor kitchen
-#     environments. 
-#     """
-#     config = _setup_experiment_config(case, ExperimentMode.INTERRUPTION)
-#     return run_experiment(config, ExperimentMode.INTERRUPTION, True, True)
+@benchmark(
+    name="procthor_interruption",
+    description=(
+        "Evaluates the interruption planner across "
+        "task-arrival probabilities in specified procthor environments."
+    ),
+    tags=["interruption", "procthor"],
+    timeout=900.0,
+    repeat=EXPERIMENT_REPEATS,
+)
+def bench_interruption_kitchen(case: BenchmarkCase):
+    """
+    Wrapper function to evaluate the interruption-based planner on procthor kitchen
+    environments. 
+    """
+    config = _setup_experiment_config(case, ExperimentMode.INTERRUPTION)
+    return run_experiment(config, ExperimentMode.INTERRUPTION, True, True)
 
-# bench_interruption_kitchen.add_cases(_get_cases())
+bench_interruption_kitchen.add_cases(_get_cases())
 
 
 @benchmark(
@@ -153,7 +149,7 @@ def _setup_experiment_config(
         "Evaluates the interruption-ap planner across "
         "task-arrival probabilities in specified procthor environments."
     ),
-    tags=["interruption", "procthor", "ap"],
+    tags=["interruption", "procthor", "ap", "interruption_experiments"],
     timeout=900.0,
     repeat=EXPERIMENT_REPEATS,
 )
@@ -163,7 +159,13 @@ def bench_interruption_ap_kitchen(case: BenchmarkCase):
     environments. 
     """
     config = _setup_experiment_config(case, ExperimentMode.INTERRUPTION_AP)
-    return run_experiment(config, ExperimentMode.INTERRUPTION_AP, True, True)
+    return run_experiment(
+        config,
+        ExperimentMode.INTERRUPTION_AP,
+        True,
+        True,
+        extract_relevant_objects(config.interrupting_task_dist[0]) if FILTER_OBJECTS else None
+    )
 
 bench_interruption_ap_kitchen.add_cases(_get_cases())
 
@@ -174,7 +176,7 @@ bench_interruption_ap_kitchen.add_cases(_get_cases())
         "Evaluates the myopic planner across "
         "task-arrival probabilities in specified procthor environments."
     ),
-    tags=["interruption", "procthor", "myopic"],
+    tags=["interruption", "procthor", "myopic", "interruption_experiments"],
     timeout=900.0,
     repeat=EXPERIMENT_REPEATS,
 )
@@ -184,7 +186,13 @@ def bench_myopic_interruption_kitchen(case: BenchmarkCase):
     environments. 
     """
     config = _setup_experiment_config(case, ExperimentMode.MYOPIC)
-    return run_experiment(config, ExperimentMode.MYOPIC, True, True)
+    return run_experiment(
+        config,
+        ExperimentMode.MYOPIC,
+        True,
+        True,
+        extract_relevant_objects(config.interrupting_task_dist[0]) if FILTER_OBJECTS else None
+    )
 
 bench_myopic_interruption_kitchen.add_cases(_get_cases())
 
@@ -195,7 +203,7 @@ bench_myopic_interruption_kitchen.add_cases(_get_cases())
         "Evaluates the anticipatory planning planner across "
         "task-arrival probabilities in specified procthor environments."
     ),
-    tags=["interruption", "procthor", "ap"],
+    tags=["interruption", "procthor", "ap", "interruption_experiments"],
     timeout=900.0,
     repeat=EXPERIMENT_REPEATS,
 )
@@ -205,6 +213,12 @@ def bench_ap_kitchen(case: BenchmarkCase):
     environments. 
     """
     config = _setup_experiment_config(case, ExperimentMode.ANTICIPATORY_PLANNING)
-    return run_experiment(config, ExperimentMode.ANTICIPATORY_PLANNING, True, True)
+    return run_experiment(
+        config,
+        ExperimentMode.ANTICIPATORY_PLANNING,
+        True,
+        True,
+        extract_relevant_objects(config.interrupting_task_dist[0]) if FILTER_OBJECTS else None
+    )
 
 bench_ap_kitchen.add_cases(_get_cases())

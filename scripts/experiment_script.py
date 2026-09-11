@@ -23,7 +23,7 @@ from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 
 # constants
 MODEL_PATH = DEFAULT_RESOURCES_BASE / "models"
-RANDOMIZE_TASK_SEQUENCE = False
+RANDOMIZE_TASK_SEQUENCE = True
 
 def main(randomize_order: bool = False, filter_objects: bool = False):
 
@@ -69,11 +69,9 @@ def main(randomize_order: bool = False, filter_objects: bool = False):
     )
 
     run_experiment(
-        config, ExperimentMode.INTERRUPTION_AP, show_plot=False, remove_duplicates=True,
-        relevant_objects= extract_relevant_objects(task_distribution[0]) if FILTER_OBJECTS else None
+        config, ExperimentMode.MYOPIC, show_plot=False, remove_duplicates=True, benchmark_flag=False,
+        relevant_objects= extract_relevant_objects(task_distribution[0]) if filter_objects else None
     )
-
-    extract_relevant_objects(task_distribution[0])
 
 if __name__ == "__main__":
     main(RANDOMIZE_TASK_SEQUENCE, FILTER_OBJECTS)

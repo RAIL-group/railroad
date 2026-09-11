@@ -9,7 +9,7 @@ from interruption.learning.models.gcn import AnticipateGCN
 from railroad.environment.procthor.resources import get_procthor_10k_dir, DEFAULT_RESOURCES_BASE
 
 # dataset specifications
-TRAIN_DATASET_PATH = get_procthor_10k_dir() / "procthor_data_201.csv"
+TRAIN_DATASET_PATH = get_procthor_10k_dir() / "procthor_data_64.csv"
 TEST_DATASET_PATH = None
 
 # if supplying only 1 dataset, specify how it should be split for train and test datasets
@@ -26,7 +26,7 @@ HYPERPARAMETERS = {
 }
 
 # output directories specifications
-EXPERIMENT_NAME = "one_room_model_linux"
+EXPERIMENT_NAME = "two_room_model_linux"
 LOG_DIRECTORY = DEFAULT_RESOURCES_BASE / f"run_logs/{EXPERIMENT_NAME}"
 OUTPUT_MODEL_DIRECTORY = DEFAULT_RESOURCES_BASE / "models"
 
