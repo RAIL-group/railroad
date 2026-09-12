@@ -82,8 +82,8 @@ def get_generic_name(obj: str) -> str:
 
 def main():
     # dataset filtering parameters
-    num_rooms = {1}
-    room_types = {"Kitchen"}
+    num_rooms = {1, 2, 3}
+    room_types = None
     locations = None
     objects = None
     k = 10

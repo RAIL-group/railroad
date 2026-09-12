@@ -228,10 +228,14 @@ def _get_task_sequence_event_trace(
 
         # new task has arrived
         task_arrival_sequence.append(config.interrupting_task_dist[0][i])
-        incomplete_goals = _get_incomplete_tasks(config.augment_task, current_task, task_arrival_sequence[-1], completed_goals)
+        incomplete_goals = _get_incomplete_tasks(
+            config.augment_task, current_task, task_arrival_sequence[-1], completed_goals
+        )
         if len(incomplete_goals) > 0:
             current_task = _get_task(incomplete_goals)
-            data.search_problem.goal = convert_goal_to_positive_preconditions(current_task, data.neg_to_pos_mapping)
+            data.search_problem.goal = convert_goal_to_positive_preconditions(
+                current_task, data.neg_to_pos_mapping
+            )
 
     # complete the last task in the sequence under the assumption that no future tasks will come
     initial_state = (
@@ -309,7 +313,7 @@ def _execution_loop(
         ]
 
         completed_goals.extend(completed_by_action)
-        
+
         if len(completed_by_action) > 0 and len(event_trace) > 0:
             event_trace[-1] += " | Goal Complete"
             incomplete_goals = _get_incomplete_tasks(True, goal, None, completed_goals)
@@ -318,7 +322,9 @@ def _execution_loop(
     return completed_goals
 
 
-def _get_incomplete_tasks(augment: bool, current_task: Goal, new_task: Optional[Goal], completed_goals: list[Goal]) -> list[Goal]:
+def _get_incomplete_tasks(
+    augment: bool, current_task: Goal, new_task: Optional[Goal], completed_goals: list[Goal]
+) -> list[Goal]:
     """
     Helper function for updating the current task. Its primary function is to 
     remove goal that have already been completed and add the newly arrived goal to
