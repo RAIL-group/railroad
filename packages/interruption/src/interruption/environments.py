@@ -145,17 +145,17 @@ def construct_procthor_kitchen_environment(
     """
     initial_fluents = {
         F("at robot1 start_loc"), F("free robot1"),
-        F("gripper-of r1-left robot1"), F("gripper-of r1-right robot1"),
-        ~F("hand-full r1-left"), ~F("hand-full r1-right")
+        F("gripper-of r1-left robot1"),# F("gripper-of r1-right robot1"),
+        ~F("hand-full r1-left"), #~F("hand-full r1-right")
     }
     initial_state = State(0.0, initial_fluents)
-    # TODO - updaste need to pass in relevant objects from task distribution
+
     env = KitchenProcTHOREnvironment(
         seed,
         initial_state,
         {
             "robot": {"robot1"},
-            "gripper": {"r1-left", "r1-right"},
+            "gripper": {"r1-left"},#, "r1-right"},
             "location": {"start_loc"},
         },
         object_seed,

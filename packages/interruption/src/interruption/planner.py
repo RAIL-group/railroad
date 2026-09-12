@@ -28,7 +28,6 @@ class InterruptionSearchProblem:
     interrupting_task_dist: tuple[list[Goal], list[float]] | None = None
     # environment side interruption probability function
     interruption_prob_fn: float | Callable[[float], float] = 0
-    # augment_task: bool = False
 
 
 @dataclass

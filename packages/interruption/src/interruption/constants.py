@@ -61,7 +61,7 @@ INT_H_WEIGHTS = (1, 1)
 AUGMENT_DISCOUNT_FACTOR = 0.99
 
 # heuristic multiplier (larger -> more greedy search)
-H_MULTIPLIER = 5
+H_MULTIPLIER = 1
 
 ## task failure cost
 # current: 2-room (seed = 64) -> 375; 1-room (seed = 201) -> 500

@@ -47,7 +47,7 @@ def _get_cases() -> list[dict[str, Any]]:
         }
         for (time_between_arrivals, seed), num_task_sequence in itertools.product(
             zip(EXPECTED_TIME_NEXT_ARRIVAL, [140, 42, 240, 57, 1096, 4065, 720]),
-            [5]
+            [3]
         )
     ]
 

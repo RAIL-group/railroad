@@ -14,6 +14,7 @@ from railroad.core import (
     Fluent,
     Goal,
     LiteralGoal,
+    AndGoal,
     convert_goal_to_positive_preconditions,
     convert_state_to_positive_preconditions,
     ff_heuristic,
@@ -191,6 +192,7 @@ def _get_task_sequence_event_trace(
     """
     event_trace = []
     task_arrival_sequence = [config.goal]
+    current_task = config.goal
 
     for i in range(config.num_task_sequence - 1):
         initial_state = convert_state_to_positive_preconditions(
@@ -216,8 +218,8 @@ def _get_task_sequence_event_trace(
             )
 
         # execute the plan in the environment
-        goal_completed = _execution_loop(
-            (task_arrival_sequence[i], success),
+        completed_goals = _execution_loop(
+            (current_task, success),
             plan,
             data,
             event_trace,
@@ -226,13 +228,10 @@ def _get_task_sequence_event_trace(
 
         # new task has arrived
         task_arrival_sequence.append(config.interrupting_task_dist[0][i])
-
-        # setup for next task in the sequence
-        assert data.search_problem.interrupting_task_dist is not None
-        if not augment_task or (augment_task and goal_completed):
-            data.search_problem.goal = data.search_problem.interrupting_task_dist[0][i]
-        else: # augment the current task
-            data.search_problem.goal &= data.search_problem.interrupting_task_dist[0][i]
+        incomplete_goals = _get_incomplete_tasks(config.augment_task, current_task, task_arrival_sequence[-1], completed_goals)
+        if len(incomplete_goals) > 0:
+            current_task = _get_task(incomplete_goals)
+            data.search_problem.goal = convert_goal_to_positive_preconditions(current_task, data.neg_to_pos_mapping)
 
     # complete the last task in the sequence under the assumption that no future tasks will come
     initial_state = (
@@ -246,12 +245,13 @@ def _get_task_sequence_event_trace(
         _get_planner_config(
             config,
             ExperimentMode.MYOPIC,
-            0
+            0,
+            H_MULTIPLIER
         )
     )
 
     _execution_loop(
-        (task_arrival_sequence[-1], success),
+        (current_task, success),
         plan,
         data,
         event_trace,
@@ -267,18 +267,19 @@ def _execution_loop(
     data: ExperimentData,
     event_trace: list[str],
     last_task_flag: bool = False
-) -> bool:
+) -> list[Goal]:
     """
     Helper function for the execution loop of task interruption experiments.
-    Returns True if the current task was successfully completed. Otherwise, False.
+    Returns a list of all successfully completed goals.
     """
     goal, success = goal_success
+    completed_goals = []
 
     if not success:
         event_trace.append("Failed Task")
         # update the state's time to reflect the failed task
         data.env.apply_time_penalty(PLANNER_FAILURE_COST)
-        return False
+        return completed_goals
 
     # execution loop
     for converted_action in plan:
@@ -299,12 +300,44 @@ def _execution_loop(
             event_trace[-1] += " | Interrupt"
             break
 
-    # check if current task was completed successfully
-    # NOTE: only append to an action's name if the task wasn't already complete
-    goal_completed = goal.evaluate(data.env.state.fluents)
-    if goal_completed and len(event_trace) > 0:
-        event_trace[-1] += " | Goal Complete"
-    return goal_completed
+        # check if current task was completed successfully
+        # NOTE: only append to an action's name if the task wasn't already complete
+        sub_goals = [goal] if isinstance(goal, LiteralGoal) else goal.children()
+
+        completed_by_action = [
+            sub_goal for sub_goal in sub_goals if sub_goal.evaluate(data.env.state.fluents)
+        ]
+
+        completed_goals.extend(completed_by_action)
+        
+        if len(completed_by_action) > 0 and len(event_trace) > 0:
+            event_trace[-1] += " | Goal Complete"
+            incomplete_goals = _get_incomplete_tasks(True, goal, None, completed_goals)
+            if len(incomplete_goals) > 0:
+                goal = _get_task(incomplete_goals)
+    return completed_goals
+
+
+def _get_incomplete_tasks(augment: bool, current_task: Goal, new_task: Optional[Goal], completed_goals: list[Goal]) -> list[Goal]:
+    """
+    Helper function for updating the current task. Its primary function is to 
+    remove goal that have already been completed and add the newly arrived goal to
+    the task.
+    Returns a list of incomplete goals.
+    """
+    if not augment:
+        assert new_task is not None
+        return [new_task]
+    # task augmentation experiments
+    goals = [current_task] if isinstance(current_task, LiteralGoal) else current_task.children()
+    incomplete_goals = [goal for goal in goals if goal not in completed_goals]
+    if new_task is not None:
+        incomplete_goals.append(new_task)
+    return incomplete_goals
+
+
+def _get_task(goals: list[Goal]) -> Goal:
+    return AndGoal(goals) if len(goals) > 1 else goals[0]
 
 
 def initialize_experiment_data(
@@ -369,7 +402,7 @@ def initialize_experiment_data(
         mapping
     )
 
-# TODO - planner objective function should be different for task augmentation case
+
 def _get_planner_config(
     config: ExperimentConfig,
     planner_mode: ExperimentMode,
