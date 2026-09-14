@@ -4,7 +4,6 @@ import time
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from enum import Enum
 from functools import partial
 from pathlib import Path
 from rich.console import Console
@@ -16,7 +15,7 @@ from railroad.core import (
     LiteralGoal,
     AndGoal,
     convert_goal_to_positive_preconditions,
-    convert_state_to_positive_preconditions,
+    # convert_state_to_positive_preconditions,
     ff_heuristic,
     get_action_by_name,
 )
@@ -33,9 +32,14 @@ from .dashboard_adapters import AstarDashboardPlanner
 from .environments import construct_procthor_kitchen_environment, KitchenProcTHOREnvironment
 from .learning.models.gcn import AnticipateGCN
 from .learning.utils import get_torch_device
-from .planner import astar_search, PlannerConfig, InterruptionSearchProblem
+# from .planner import astar_search, PlannerConfig, InterruptionSearchProblem
+from .planner import PlannerConfig, InterruptionSearchProblem
+# from .planning_framework import (
+#     get_no_int_prob, get_no_int_discount, anticipatory_planner, ap_heuristic_fn,
+#     PlannerMode, search_with_retry, search_without_retry
+# )
 from .planning_framework import (
-    get_no_int_prob, get_no_int_discount, anticipatory_planner, ap_heuristic_fn,
+    get_no_int_prob, get_no_int_discount, ap_heuristic_fn,
     PlannerMode, search_with_retry, search_without_retry
 )
 from .utilities import (
@@ -189,8 +193,8 @@ def _get_task_sequence_event_trace(
 
     # the termination condition of the loop depends on how solver failure's are handled:
     # if the solver is allowed to retry, then continue until all goals are complete.
-    # if the solver is not allowed to retry, then the solver should only be called num_task_sequence+1
-    # times.
+    # if the solver is not allowed to retry, then the solver should only be called
+    # num_task_sequence+1 times
     termination_condition = (
         num_incomplete_goals > 0 if config.retry_with_subgoals
         else iteration_count < config.num_task_sequence

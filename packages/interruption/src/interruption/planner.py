@@ -301,7 +301,7 @@ def compute_interruption_value(
             task,
             actions
         )
-        plan, cost, success, _ = astar_search(
+        _, cost, success, _ = astar_search(
             (state, None),
             search_problem,
             search_params

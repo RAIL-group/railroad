@@ -27,7 +27,6 @@ MODEL_PATH = DEFAULT_RESOURCES_BASE / "models"
 RANDOMIZE_TASK_SEQUENCE = True
 
 def main(randomize_order: bool = False, filter_objects: bool = False):
-
     seeds = ExperimentSeeds(
         procthor_seed=PROCTHOR_SEED,
         experiment_seed=20,
@@ -61,10 +60,10 @@ def main(randomize_order: bool = False, filter_objects: bool = False):
 
     # for debugging
     task_sequence = [
-        LiteralGoal(F(f"at mug sidetable")),
-        LiteralGoal(F(f"at egg countertop")),
-        LiteralGoal(F(f"at plate fridge")),
-        LiteralGoal(F(f"at dishsponge countertop")),
+        LiteralGoal(F("at mug sidetable")),
+        LiteralGoal(F("at egg countertop")),
+        LiteralGoal(F("at plate fridge")),
+        LiteralGoal(F("at dishsponge countertop")),
     ]
 
     task_distribution[0][:4] = task_sequence

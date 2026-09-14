@@ -212,7 +212,7 @@ bench_myopic_interruption_kitchen.add_cases(_get_cases())
 # def bench_ap_kitchen(case: BenchmarkCase):
 #     """
 #     Wrapper function to evaluate the interruption-based planner on procthor kitchen
-#     environments. 
+#     environments
 #     """
 #     config = _setup_experiment_config(case, PlannerMode.ANTICIPATORY_PLANNING)
 #     return run_experiment(
