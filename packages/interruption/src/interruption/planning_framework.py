@@ -3,20 +3,34 @@ Implementations of the interruption-based, myopic, and anticipatory planning pla
 for ProcTHOR environments. These planner implementations all utilize the astar_search
 function from planner.py
 """
-from typing import Optional
-from itertools import product
+from enum import Enum
+from typing import Optional, Callable
+from itertools import product, combinations
 import numpy as np
 from shapely import geometry
 from railroad.core import (
     Action, State, LiteralGoal, Goal, Fluent as F, convert_goal_to_positive_preconditions
-    , ff_heuristic
+    , ff_heuristic, convert_state_to_positive_preconditions, AndGoal
 )
 from railroad.environment.procthor.scene import ProcTHORScene
 from railroad.environment.procthor.scenegraph import SceneGraph
 from railroad.navigation.pathing import get_cost_and_path
 
 from .constants import LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF, AP_DEBUG
+from .environments import KitchenProcTHOREnvironment
 from .planner import InterruptionSearchProblem, PlannerConfig, astar_search
+
+
+class PlannerMode(Enum):
+    """
+    Enumeration for interruption-based and baseline planners A*
+    Search settings.
+    """
+    MYOPIC = 1
+    ANTICIPATORY_PLANNING = 2
+    INTERRUPTION = 3
+    INTERRUPTION_AP = 4
+
 
 # wrapper heuristic functions
 def ap_heuristic_fn(
@@ -38,18 +52,12 @@ def ap_heuristic_fn(
     if weights is None:
         h_val = ff_heuristic(state, goal, actions, LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF)
         return h_multi * h_val
-    else:
-        ff_weight, v_ap_weight = weights
-        # NOTE: old implementation
-        # h_val = ff_weight * ff_heuristic(
-        #     state, goal, actions, LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF
-        # ) + v_ap_weight * v_ap
-
-        # NOTE: temporary fix
-        assert ff_weight == 1 and v_ap_weight == 1
-        return h_multi * ff_heuristic(
-            state, goal, actions, LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF
-        ) + v_ap
+    ff_weight, v_ap_weight = weights
+    # NOTE: temporary fix
+    assert ff_weight == 1 and v_ap_weight == 1
+    return h_multi * ff_heuristic(
+        state, goal, actions, LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF
+    ) + v_ap
 
 
 # discount functions
@@ -252,3 +260,127 @@ def _get_task_relevant_objects(task: Goal) -> set[str]:
             assert isinstance(child_goal, LiteralGoal)
             task_relevant_objects.add(child_goal.fluent().args[0])
     return task_relevant_objects
+
+
+# wrapper search functions
+def search_without_retry(
+    planner_mode: PlannerMode,
+    environment: KitchenProcTHOREnvironment,
+    search_problem: InterruptionSearchProblem,
+    planner_parameters: PlannerConfig,
+    neg_to_pos_mapping: dict[F, F]
+) -> tuple[list[Action], bool]:
+    """
+    Wrapper function of the planning algorithms used in the task sequence
+    with continous task arrival experiments.
+    """
+    initial_state = convert_state_to_positive_preconditions(
+        environment.state, neg_to_pos_mapping
+    )
+
+    if planner_mode == PlannerMode.ANTICIPATORY_PLANNING:
+        plan, _, success = anticipatory_planner(
+            (initial_state, environment.scene.scene_graph),
+            search_problem,
+            planner_parameters,
+            environment.scene,
+            neg_to_pos_mapping
+        )
+    else:
+        state_scene_graph = (
+            initial_state,
+            None if planner_mode == PlannerMode.MYOPIC
+            else environment.scene.scene_graph
+        )
+
+        plan, _, success, _ = astar_search(
+            state_scene_graph, search_problem, planner_parameters
+        )
+    return plan, success
+
+
+def search_with_retry(
+    planner_mode: PlannerMode,
+    environment: KitchenProcTHOREnvironment,
+    search_problem: InterruptionSearchProblem,
+    planner_parameters: PlannerConfig,
+    neg_to_pos_mapping: dict[F, F]
+) -> tuple[list[Action], bool]:
+    """
+    A wrapper function for planning algorithms utilized as part of interruption
+    experiments. If a task is too complex to be solved within the alotted search
+    budget, then the complex task is decomposed into a smaller sub-task to be solved.
+    Returns a tuple containing the plan, success_flag, and the number of goals in the task
+    that the solver failed to find a plan for.
+    """
+    initial_state = convert_state_to_positive_preconditions(
+        environment.state, neg_to_pos_mapping
+    )
+    num_goals = (
+        _get_task_goal_count(search_problem.goal)
+        if planner_parameters.max_task_complexity == -1
+        else planner_parameters.max_task_complexity
+    )
+    task = search_problem.goal
+    failure_count = 0
+
+    while True:
+        # find easiest to accomplish sub-task
+        ranked_sub_goals = _decompose_task(
+            initial_state, task,
+            search_problem.actions,
+            planner_parameters.heuristic_fn,
+            min(num_goals, _get_task_goal_count(search_problem.goal))
+        )
+        search_problem.goal = ranked_sub_goals[0]
+
+        plan, success = search_without_retry(
+            planner_mode, environment, search_problem,
+            planner_parameters, neg_to_pos_mapping
+        )
+
+        if success:
+            break
+
+        # solver didn't successfully find a plan
+        num_goals-=1
+        failure_count+=1
+
+    # restore the original task
+    search_problem.goal = task
+
+    # keep track of the maximum number of goals within a task the planner can solve
+    if failure_count > 0:
+        planner_parameters.max_task_complexity = num_goals
+
+    return plan, success
+
+
+def _decompose_task(
+    state: State,
+    goal: Goal,
+    actions: list[Action],
+    heuristic_fn: Callable[[State, Goal, list[Action], float], float] | float,
+    num_goals_in_subtask: int
+) -> list[Goal]:
+    """
+    Helper function for decomposing a complex task into a list of sub-tasks,
+    in order of estimated cost to-go. 
+    """
+    assert num_goals_in_subtask > 0
+    # NOTE: no support for raw scalar heuristic functions
+    assert not isinstance(heuristic_fn, (float, int))
+    sub_tasks = combinations(
+        [goal] if isinstance(goal, LiteralGoal) else goal.children(),
+        num_goals_in_subtask
+    )
+    return sorted(
+        [
+            sub_task[0] if len(sub_task) == 1 else AndGoal(sub_task)
+            for sub_task in sub_tasks
+        ], key=lambda x: heuristic_fn(state, x, actions, 0)
+    )
+
+
+def _get_task_goal_count(goal: Goal):
+    return 1 if isinstance(goal, LiteralGoal) else len(goal.children())

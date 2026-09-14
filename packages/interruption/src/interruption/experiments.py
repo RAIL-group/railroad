@@ -35,22 +35,13 @@ from .learning.models.gcn import AnticipateGCN
 from .learning.utils import get_torch_device
 from .planner import astar_search, PlannerConfig, InterruptionSearchProblem
 from .planning_framework import (
-    get_no_int_prob, get_no_int_discount, anticipatory_planner, ap_heuristic_fn
+    get_no_int_prob, get_no_int_discount, anticipatory_planner, ap_heuristic_fn,
+    PlannerMode, search_with_retry, search_without_retry
 )
 from .utilities import (
     get_action_cost,
     negative_fluent_preprocessing,
 )
-
-class ExperimentMode(Enum):
-    """
-    Enumeration for interruption-based and baseline planners A*
-    Search settings.
-    """
-    MYOPIC = 1
-    ANTICIPATORY_PLANNING = 2
-    INTERRUPTION = 3
-    INTERRUPTION_AP = 4
 
 
 @dataclass
@@ -82,6 +73,7 @@ class ExperimentConfig:
     ev_model_path: Path | str = ""
     num_task_sequence: int = 2
     augment_task: bool = False
+    retry_with_subgoals: bool = False
 
 
 @dataclass
@@ -111,7 +103,7 @@ class DashboardData:
 
 def run_experiment(
     config: ExperimentConfig,
-    experiment_mode: ExperimentMode,
+    experiment_mode: PlannerMode,
     remove_duplicates: bool,
     benchmark_flag: bool = False,
     relevant_objects: Optional[list[str]] = None,
@@ -143,7 +135,7 @@ def run_experiment(
     start_time = time.perf_counter()
 
     event_trace, task_sequence = _get_task_sequence_event_trace(
-        experiment_data, config, experiment_mode, config.augment_task
+        experiment_data, config, experiment_mode
     )
 
     # setup for deterministic replay for dashboard
@@ -152,11 +144,11 @@ def run_experiment(
         relevant_objects, remove_duplicates
     )
 
-    # for debugging
-    assert relevant_objects is not None
-    print(sorted(relevant_objects))
-    print(sorted(experiment_data.env.scene.objects))
-    print(sorted(dash_env.scene.objects))
+    # # for debugging
+    # assert relevant_objects is not None
+    # print(sorted(relevant_objects))
+    # print(sorted(experiment_data.env.scene.objects))
+    # print(sorted(dash_env.scene.objects))
 
     # keep track of the task_sequence as part of the output
     task_sequence_goal = task_sequence[0]
@@ -182,8 +174,7 @@ def run_experiment(
 def _get_task_sequence_event_trace(
     data: ExperimentData,
     config: ExperimentConfig,
-    experiment_mode: ExperimentMode,
-    augment_task: bool = False
+    experiment_mode: PlannerMode,
 ) -> tuple[list[str], list[Goal]]:
     """
     Searchs for a plan and executes the plan in the environment for the specificed n length
@@ -193,29 +184,37 @@ def _get_task_sequence_event_trace(
     event_trace = []
     task_arrival_sequence = [config.goal]
     current_task = config.goal
+    num_incomplete_goals = config.num_task_sequence
+    iteration_count = 0
 
-    for i in range(config.num_task_sequence - 1):
-        initial_state = convert_state_to_positive_preconditions(
-            data.env.state, data.neg_to_pos_mapping
+    # the termination condition of the loop depends on how solver failure's are handled:
+    # if the solver is allowed to retry, then continue until all goals are complete.
+    # if the solver is not allowed to retry, then the solver should only be called num_task_sequence+1
+    # times.
+    termination_condition = (
+        num_incomplete_goals > 0 if config.retry_with_subgoals
+        else iteration_count < config.num_task_sequence
+    )
+    while termination_condition:
+        # use the appropriate solver to plan
+        all_tasks_arrived = len(task_arrival_sequence) == config.num_task_sequence
+
+        planner_mode = experiment_mode
+        planner_config = data.planner_parameters
+        # if all the tasks have arrived, just solve the goals in the task as quick as possible
+        if all_tasks_arrived:
+            planner_mode = PlannerMode.MYOPIC
+            planner_config = _get_planner_config(config, PlannerMode.MYOPIC, 0, H_MULTIPLIER)
+            planner_config.max_task_complexity = data.planner_parameters.max_task_complexity
+
+        search_fn = search_with_retry if config.retry_with_subgoals else search_without_retry
+        plan, success = search_fn(
+            planner_mode,
+            data.env,
+            data.search_problem,
+            planner_config,
+            data.neg_to_pos_mapping
         )
-        if experiment_mode == ExperimentMode.ANTICIPATORY_PLANNING:
-            plan, _, success = anticipatory_planner(
-                (initial_state, data.env.scene.scene_graph),
-                data.search_problem,
-                data.planner_parameters,
-                data.env.scene,
-                data.neg_to_pos_mapping
-            )
-        else:
-            plan, _, success, _ = astar_search(
-                (
-                    initial_state,
-                    None if experiment_mode == ExperimentMode.MYOPIC
-                    else data.env.scene.scene_graph
-                ),
-                data.search_problem,
-                data.planner_parameters
-            )
 
         # execute the plan in the environment
         completed_goals = _execution_loop(
@@ -223,44 +222,35 @@ def _get_task_sequence_event_trace(
             plan,
             data,
             event_trace,
-            False
+            all_tasks_arrived
+        )
+        # update the number of incomplete goals in the task sequence
+        num_incomplete_goals-=len(completed_goals)
+
+        # task arrival
+        newly_arrived_goal = None
+        if not all_tasks_arrived:
+            next_task_idx = len(task_arrival_sequence)-1
+            newly_arrived_goal = config.interrupting_task_dist[0][next_task_idx]
+            task_arrival_sequence.append(newly_arrived_goal)
+
+        # update the task
+        incomplete_goals = _get_incomplete_tasks(
+            config.augment_task, current_task, newly_arrived_goal, completed_goals
         )
 
-        # new task has arrived
-        task_arrival_sequence.append(config.interrupting_task_dist[0][i])
-        incomplete_goals = _get_incomplete_tasks(
-            config.augment_task, current_task, task_arrival_sequence[-1], completed_goals
-        )
         if len(incomplete_goals) > 0:
             current_task = _get_task(incomplete_goals)
             data.search_problem.goal = convert_goal_to_positive_preconditions(
                 current_task, data.neg_to_pos_mapping
             )
 
-    # complete the last task in the sequence under the assumption that no future tasks will come
-    initial_state = (
-        convert_state_to_positive_preconditions(data.env.state, data.neg_to_pos_mapping),
-        None if data.planner_parameters.interruption_value_fn is None
-        else data.env.scene.scene_graph
-    )
-    plan, _, success, _ = astar_search(
-        initial_state,
-        data.search_problem,
-        _get_planner_config(
-            config,
-            ExperimentMode.MYOPIC,
-            0,
-            H_MULTIPLIER
+        iteration_count+=1
+        # check if another call to the solver should be made
+        termination_condition = (
+            num_incomplete_goals > 0 if config.retry_with_subgoals
+            else iteration_count < config.num_task_sequence
         )
-    )
-
-    _execution_loop(
-        (current_task, success),
-        plan,
-        data,
-        event_trace,
-        True
-    )
 
     return event_trace, task_arrival_sequence
 
@@ -348,7 +338,7 @@ def _get_task(goals: list[Goal]) -> Goal:
 
 def initialize_experiment_data(
     config: ExperimentConfig,
-    planner_mode: ExperimentMode,
+    planner_mode: PlannerMode,
     relevant_objects: Optional[list[str]] = None,
     remove_duplicates: bool = False,
     h_multiplier: float = 1
@@ -411,21 +401,21 @@ def initialize_experiment_data(
 
 def _get_planner_config(
     config: ExperimentConfig,
-    planner_mode: ExperimentMode,
+    planner_mode: PlannerMode,
     interruption_prob_fn: float | Callable[[float], float],
     h_multiplier: float = 1
 ) -> PlannerConfig:
     heuristic_fn = partial(ap_heuristic_fn, h_multi=h_multiplier)
-    if planner_mode in [ExperimentMode.MYOPIC, ExperimentMode.ANTICIPATORY_PLANNING]:
+    if planner_mode in [PlannerMode.MYOPIC, PlannerMode.ANTICIPATORY_PLANNING]:
         discount_fn=partial(get_no_int_discount, discount_factor=1)
         planner_interruption_prob_fn=None
         interruption_value_fn=(
             None
-            if planner_mode == ExperimentMode.MYOPIC
+            if planner_mode == PlannerMode.MYOPIC
             else AnticipateGCN.get_net_eval_fn(config.ev_model_path, get_torch_device())
         )
         current_task_reward=0
-    else: # ExperimentMode.INTERRUPTION or ExperimentMode.INTERRUPTION_AP
+    else: # PlannerMode.INTERRUPTION or PlannerMode.INTERRUPTION_AP
         discount_fn=(
             get_no_int_prob if not config.augment_task
             else partial(get_no_int_discount, discount_factor=AUGMENT_DISCOUNT_FACTOR)
@@ -435,7 +425,7 @@ def _get_planner_config(
             config.ev_model_path, get_torch_device()
         )
         current_task_reward=0
-        if planner_mode == ExperimentMode.INTERRUPTION_AP:
+        if planner_mode == PlannerMode.INTERRUPTION_AP:
             heuristic_fn = partial(ap_heuristic_fn, h_multi=h_multiplier, weights=INT_H_WEIGHTS)
     return PlannerConfig(
         discount_fn,

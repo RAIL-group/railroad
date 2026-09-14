@@ -5,13 +5,15 @@ import pytest
 import interruption.experiments as experiments_module
 from interruption.experiments import (
     ExperimentConfig,
-    ExperimentMode,
     ExperimentSeeds,
     _get_planner_config,
     _get_scene_objects_locations,
     _map_goal_to_scene,
 )
-from interruption.planning_framework import ap_heuristic_fn, get_no_int_discount, get_no_int_prob
+from interruption.planning_framework import (
+    ap_heuristic_fn, get_no_int_discount, get_no_int_prob,
+    PlannerMode
+)
 from railroad.core import Fluent, LiteralGoal
 
 
@@ -251,10 +253,10 @@ def _dummy_config() -> ExperimentConfig:
     "mode, expected_discount_fn, expects_interruption_prob_fn, "
     "expects_interruption_value_fn, expects_weights",
     [
-        (ExperimentMode.MYOPIC, get_no_int_discount, False, False, None),
-        (ExperimentMode.ANTICIPATORY_PLANNING, get_no_int_discount, False, True, None),
-        (ExperimentMode.INTERRUPTION, get_no_int_prob, True, True, None),
-        (ExperimentMode.INTERRUPTION_AP, get_no_int_prob, True, True, (0.9, 1)),
+        (PlannerMode.MYOPIC, get_no_int_discount, False, False, None),
+        (PlannerMode.ANTICIPATORY_PLANNING, get_no_int_discount, False, True, None),
+        (PlannerMode.INTERRUPTION, get_no_int_prob, True, True, None),
+        (PlannerMode.INTERRUPTION_AP, get_no_int_prob, True, True, (0.9, 1)),
     ],
 )
 def test_get_planner_config_selects_fields_per_mode(
@@ -266,7 +268,7 @@ def test_get_planner_config_selects_fields_per_mode(
     expects_weights,
 ):
     """
-    Each ExperimentMode must produce the matching PlannerConfig: the right
+    Each PlannerMode must produce the matching PlannerConfig: the right
     discount function, whether the caller's interruption_prob_fn is actually
     threaded through, whether a (mocked) AnticipateGCN eval fn is attached,
     and -- the behavior this diff introduces -- whether the heuristic is
@@ -277,7 +279,7 @@ def test_get_planner_config_selects_fields_per_mode(
 
     result = _get_planner_config(config, mode, interruption_prob_fn)
 
-    if mode in [ExperimentMode.MYOPIC, ExperimentMode.ANTICIPATORY_PLANNING]:
+    if mode in [PlannerMode.MYOPIC, PlannerMode.ANTICIPATORY_PLANNING]:
         assert isinstance(result.discount_fn, functools.partial)
         assert result.discount_fn.func is expected_discount_fn
         assert len(result.discount_fn.keywords) == 1
@@ -309,7 +311,7 @@ def test_get_planner_config_myopic_interruption_prob_fn_is_ignored(mock_gcn):
     """
     config = _dummy_config()
 
-    result = _get_planner_config(config, ExperimentMode.MYOPIC, interruption_prob_fn=0.5)
+    result = _get_planner_config(config, PlannerMode.MYOPIC, interruption_prob_fn=0.5)
 
     assert result.planner_interruption_prob_fn is None
 
@@ -324,7 +326,7 @@ def test_get_planner_config_interruption_heuristic_behaves_without_v_ap(mock_gcn
     from railroad.operators.core import construct_move_operator
 
     config = _dummy_config()
-    result = _get_planner_config(config, ExperimentMode.INTERRUPTION, interruption_prob_fn=0.1)
+    result = _get_planner_config(config, PlannerMode.INTERRUPTION, interruption_prob_fn=0.1)
 
     move_op = construct_move_operator(5.0)
     actions = move_op.instantiate({"robot": ["r1"], "location": ["start", "target"]})
@@ -343,7 +345,7 @@ def test_get_planner_config_interruption_ap_heuristic_adds_v_ap(mock_gcn):
 
     config = _dummy_config()
     result = _get_planner_config(
-        config, ExperimentMode.INTERRUPTION_AP, interruption_prob_fn=0.1
+        config, PlannerMode.INTERRUPTION_AP, interruption_prob_fn=0.1
     )
 
     move_op = construct_move_operator(5.0)

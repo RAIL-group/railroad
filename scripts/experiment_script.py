@@ -11,15 +11,16 @@ from interruption.environments import (
 )
 from interruption.experiments import (
     ExperimentConfig,
-    ExperimentMode,
     ExperimentSeeds,
     run_experiment,
 )
+from interruption.planning_framework import PlannerMode
 from interruption.utilities import (
     RandomVariableType, randomize_task_distribution_order, get_task_arrival_prob,
     extract_relevant_objects
 )
 from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
+from railroad.core import LiteralGoal, Fluent as F
 
 # constants
 MODEL_PATH = DEFAULT_RESOURCES_BASE / "models"
@@ -35,7 +36,7 @@ def main(randomize_order: bool = False, filter_objects: bool = False):
     )
     task_arrival_fn = partial(
         get_task_arrival_prob, RandomVariableType.CONTINUOUS,
-        -1, EXPECTED_TIME_NEXT_ARRIVAL[0]
+        -1, EXPECTED_TIME_NEXT_ARRIVAL[-1]
     )
 
     # get task distribution from alfred dataset used during training
@@ -58,6 +59,17 @@ def main(randomize_order: bool = False, filter_objects: bool = False):
         task_distribution[0][0] = task_distribution[0][3] # pan at fridge
         task_distribution[0][3] = tmp_goal
 
+    # for debugging
+    task_sequence = [
+        LiteralGoal(F(f"at mug sidetable")),
+        LiteralGoal(F(f"at egg countertop")),
+        LiteralGoal(F(f"at plate fridge")),
+        LiteralGoal(F(f"at dishsponge countertop")),
+    ]
+
+    task_distribution[0][:4] = task_sequence
+
+
     config = ExperimentConfig(
         seeds,
         current_goal,
@@ -65,11 +77,12 @@ def main(randomize_order: bool = False, filter_objects: bool = False):
         task_arrival_fn,
         MODEL_PATH / MODEL_NAME,
         num_task_sequence=5,
-        augment_task=True
+        augment_task=True,
+        retry_with_subgoals=True
     )
 
     run_experiment(
-        config, ExperimentMode.MYOPIC, show_plot=False, remove_duplicates=True, benchmark_flag=False,
+        config, PlannerMode.MYOPIC, show_plot=False, remove_duplicates=True, benchmark_flag=False,
         relevant_objects= extract_relevant_objects(task_distribution[0]) if filter_objects else None
     )
 

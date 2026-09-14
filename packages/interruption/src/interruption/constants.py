@@ -19,6 +19,7 @@ MODEL_NAME = "best_model_two_room_model_linux.pt"
 ## benchmark/experiment settings
 # benchmark run settings
 EXPERIMENT_REPEATS = 5
+TIMEOUT = 1200
 
 # number of tasks in the task distribution
 # current: 2-room -> 16; 1-room -> 11
@@ -33,6 +34,7 @@ OBJ_PLACEMENT_SEED = 2
 FILTER_OBJECTS = True
 
 AUGMENT_TASK = True
+RETRY_WITH_SUBGOALS = True
 
 EXPECTED_TIME_NEXT_ARRIVAL = [
     calibrate_beta_parameter(0, 5), # No interruptions
@@ -61,7 +63,7 @@ INT_H_WEIGHTS = (1, 1)
 AUGMENT_DISCOUNT_FACTOR = 0.99
 
 # heuristic multiplier (larger -> more greedy search)
-H_MULTIPLIER = 1
+H_MULTIPLIER = 2
 
 ## task failure cost
 # current: 2-room (seed = 64) -> 375; 1-room (seed = 201) -> 500

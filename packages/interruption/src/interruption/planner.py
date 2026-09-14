@@ -41,6 +41,8 @@ class PlannerConfig:
     planner_interruption_prob_fn: float | Callable[[float], float] | None = None
     interruption_value_fn: Callable[[SceneGraph], float] | None = None
     current_task_reward: float = 0
+    # maximum number of goals in a task that can be solved within the planner's budget
+    max_task_complexity: int = -1
 
 
 @dataclass
@@ -188,7 +190,7 @@ def astar_search(
     initial_state: tuple[State, SceneGraph | None],
     interruption_problem: InterruptionSearchProblem,
     search_params: PlannerConfig,
-    num_steps: int = 20000,
+    num_steps: int = 5000,
 ) -> tuple[list[Action], float, bool, SceneGraph | None]:
     """
     Astar algorithm implementation.
