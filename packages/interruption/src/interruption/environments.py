@@ -10,8 +10,12 @@ from railroad.environment.procthor.environment import ProcTHOREnvironment
 
 from .operators import (
     construct_assemble_operator,
-    construct_gripper_pick_operator,
-    construct_gripper_place_operator,
+    # construct_gripper_pick_operator,
+    # construct_gripper_place_operator,
+    construct_pick_with_left_hand_operator,
+    construct_pick_with_right_hand_operator,
+    construct_place_with_left_hand_operator,
+    construct_place_with_right_hand_operator,
 )
 from .alfred_task_generator import get_task_list
 from .utilities import get_updated_scene_graph
@@ -23,11 +27,11 @@ class KitchenProcTHOREnvironment(ProcTHOREnvironment):
     """
     def define_operators(self) -> list[Operator]:
         move_op = operators.construct_move_operator(self.estimate_move_time)
-        pick_op = construct_gripper_pick_operator(10.0)
-        place_op = construct_gripper_place_operator(10.0)
-        # previously extra_cost was set to 100.0
-        # no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=0)
-        return [pick_op, place_op, move_op]
+        left_pick_op = construct_pick_with_left_hand_operator(10.0)
+        right_pick_op = construct_pick_with_right_hand_operator(10.0)
+        left_place_op = construct_place_with_left_hand_operator(10.0)
+        right_place_op = construct_place_with_right_hand_operator(10.0)
+        return [move_op, left_pick_op, right_pick_op, left_place_op, right_place_op]
 
 
     def update_scene_graph(self, action: Action) -> None:
@@ -145,8 +149,7 @@ def construct_procthor_kitchen_environment(
     """
     initial_fluents = {
         F("at robot1 start_loc"), F("free robot1"),
-        F("gripper-of r1-left robot1"), F("gripper-of r1-right robot1"),
-        ~F("hand-full r1-left"), ~F("hand-full r1-right")
+        ~F("left-hand-full robot1"), ~F("right-hand-full robot1")
     }
     initial_state = State(0.0, initial_fluents)
 
@@ -155,7 +158,6 @@ def construct_procthor_kitchen_environment(
         initial_state,
         {
             "robot": {"robot1"},
-            "gripper": {"r1-left", "r1-right"},
             "location": {"start_loc"},
         },
         object_seed,

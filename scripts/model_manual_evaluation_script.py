@@ -13,11 +13,11 @@ from interruption.environments import (
 )
 from interruption.experiments import (
     ExperimentConfig,
-    ExperimentMode,
     ExperimentSeeds,
     initialize_experiment_data, ExperimentData
 )
 from interruption.planner import compute_interruption_value
+from interruption.planning_framework import PlannerMode
 from interruption.utilities import RandomVariableType, get_task_arrival_prob
 from railroad.core import (
     convert_state_to_positive_preconditions, Action, get_action_by_name
@@ -57,7 +57,7 @@ def main():
             task_arrival_fn,
             MODEL_PATH / model_name
         ),
-        ExperimentMode.ANTICIPATORY_PLANNING, # using AP to get access to the model
+        PlannerMode.ANTICIPATORY_PLANNING, # using AP to get access to the model
         remove_duplicates=True
     )
     assert data.planner_parameters.interruption_value_fn is not None

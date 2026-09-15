@@ -25,17 +25,18 @@ from railroad.core import LiteralGoal, Fluent as F
 # constants
 MODEL_PATH = DEFAULT_RESOURCES_BASE / "models"
 RANDOMIZE_TASK_SEQUENCE = True
+RUN_IDX_SEED = 4
 
 def main(randomize_order: bool = False, filter_objects: bool = False):
     seeds = ExperimentSeeds(
         procthor_seed=PROCTHOR_SEED,
-        experiment_seed=20,
+        experiment_seed=140 + RUN_IDX_SEED, 
         object_placement_seed=OBJ_PLACEMENT_SEED,
         task_sample_seed=75
     )
     task_arrival_fn = partial(
         get_task_arrival_prob, RandomVariableType.CONTINUOUS,
-        -1, EXPECTED_TIME_NEXT_ARRIVAL[-1]
+        -1, EXPECTED_TIME_NEXT_ARRIVAL[0]
     )
 
     # get task distribution from alfred dataset used during training
@@ -50,6 +51,16 @@ def main(randomize_order: bool = False, filter_objects: bool = False):
         current_goal, task_distribution = randomize_task_distribution_order(
             task_distribution, seeds.task_sample_seed
         )
+
+        # for smaller scale experiments, just reorder the task sequence
+        task_sequence = (
+            task_distribution[0][:4],
+            task_distribution[1][:4]
+        )
+        _, task_sequence = randomize_task_distribution_order(task_sequence, RUN_IDX_SEED)
+
+        task_distribution[0][:4] = task_sequence[0]
+        task_distribution[1][:4] = task_sequence[1]
     else:
         # both apple and pan are located at countertop3
         current_goal = task_distribution[0][0] # apple at fridge
@@ -57,17 +68,6 @@ def main(randomize_order: bool = False, filter_objects: bool = False):
         tmp_goal = task_distribution[0][0]
         task_distribution[0][0] = task_distribution[0][3] # pan at fridge
         task_distribution[0][3] = tmp_goal
-
-    # for debugging
-    task_sequence = [
-        LiteralGoal(F("at mug sidetable")),
-        LiteralGoal(F("at egg countertop")),
-        LiteralGoal(F("at plate fridge")),
-        LiteralGoal(F("at dishsponge countertop")),
-    ]
-
-    task_distribution[0][:4] = task_sequence
-
 
     config = ExperimentConfig(
         seeds,
@@ -81,7 +81,7 @@ def main(randomize_order: bool = False, filter_objects: bool = False):
     )
 
     run_experiment(
-        config, PlannerMode.MYOPIC, show_plot=False, remove_duplicates=True, benchmark_flag=False,
+        config, PlannerMode.INTERRUPTION_AP, show_plot=False, remove_duplicates=True, benchmark_flag=False,
         relevant_objects= extract_relevant_objects(task_distribution[0]) if filter_objects else None
     )
 

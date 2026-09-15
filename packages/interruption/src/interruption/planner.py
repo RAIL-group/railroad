@@ -190,7 +190,7 @@ def astar_search(
     initial_state: tuple[State, SceneGraph | None],
     interruption_problem: InterruptionSearchProblem,
     search_params: PlannerConfig,
-    num_steps: int = 5000,
+    num_steps: int = 10000,
 ) -> tuple[list[Action], float, bool, SceneGraph | None]:
     """
     Astar algorithm implementation.

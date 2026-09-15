@@ -22,10 +22,10 @@ from interruption.environments import (
 from interruption.experiments import (
     ExperimentConfig,
     ExperimentData,
-    ExperimentMode,
     ExperimentSeeds,
     initialize_experiment_data,
 )
+from interruption.planning_framework import PlannerMode
 
 # from railroad.environment.procthor.environment import ProcTHOREnvironment
 from interruption.constants import NUM_TASKS, PROCTHOR_SEED, FILTER_OBJECTS
@@ -340,7 +340,7 @@ def get_randomized_procthor_data(
                 procthor_seed,
                 start_seed
             ),
-            ExperimentMode.MYOPIC,
+            PlannerMode.MYOPIC,
             extract_relevant_objects(task_distribution[0])if FILTER_OBJECTS else None,
             REMOVE_DUPLICATES,
             h_multiplier=H_MULTIPLIER

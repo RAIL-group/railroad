@@ -293,10 +293,6 @@ def _execution_loop(
             if isinstance(data.search_problem.interruption_prob_fn, (float, int))
             else data.search_problem.interruption_prob_fn(get_action_cost(action))
         )
-        # check if interrupting task arrived
-        if not last_task_flag and random.random() < task_arrival_prob:
-            event_trace[-1] += " | Interrupt"
-            break
 
         # check if current task was completed successfully
         # NOTE: only append to an action's name if the task wasn't already complete
@@ -313,6 +309,12 @@ def _execution_loop(
             incomplete_goals = _get_incomplete_tasks(True, goal, None, completed_goals)
             if len(incomplete_goals) > 0:
                 goal = _get_task(incomplete_goals)
+
+        # check if interrupting task arrived
+        if not last_task_flag and random.random() < task_arrival_prob:
+            event_trace[-1] += " | Interrupt"
+            break
+
     return completed_goals
 
 

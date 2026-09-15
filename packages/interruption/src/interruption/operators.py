@@ -79,3 +79,110 @@ def construct_gripper_place_operator(place_time: OptNumeric) -> Operator:
             ),
         ],
     )
+
+
+def construct_pick_with_left_hand_operator(pick_time: OptNumeric) -> Operator:
+    """Construct a basic pick with left hand operator (non-blocking).
+
+    Args:
+        pick_time: Time or function for pick duration.
+            Function signature: (robot, location, object) -> float
+
+    Returns:
+        Operator for picking up an object with the robot's left hand.
+    """
+    pick_time_fn = _to_numeric(pick_time)
+    return Operator(
+        name="pick-left",
+        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
+        preconditions=[F("at ?r ?loc"), F("free ?r"), F("at ?obj ?loc"), ~F("left-hand-full ?r")],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?obj ?loc")}),
+            Effect(
+                time=(pick_time_fn, ["?r", "?loc", "?obj"]),
+                resulting_fluents={F("free ?r"), F("holding-in-left ?r ?obj"), F("left-hand-full ?r")},
+            ),
+        ],
+    )
+
+
+def construct_pick_with_right_hand_operator(pick_time: OptNumeric) -> Operator:
+    """Construct a basic pick with right hand operator (non-blocking).
+
+    Args:
+        pick_time: Time or function for pick duration.
+            Function signature: (robot, location, object) -> float
+
+    Returns:
+        Operator for picking up an object with the robot's right hand.
+    """
+    pick_time_fn = _to_numeric(pick_time)
+    return Operator(
+        name="pick-right",
+        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
+        preconditions=[
+            F("at ?r ?loc"), F("free ?r"), F("at ?obj ?loc"), F("left-hand-full ?r"),
+            ~F("right-hand-full ?r")
+        ],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?obj ?loc")}),
+            Effect(
+                time=(pick_time_fn, ["?r", "?loc", "?obj"]),
+                resulting_fluents={F("free ?r"), F("holding-in-right ?r ?obj"), F("right-hand-full ?r")},
+            ),
+        ],
+    )
+
+
+def construct_place_with_left_hand_operator(place_time: OptNumeric) -> Operator:
+    """Construct a basic place with left hand operator (non-blocking).
+
+    Args:
+        place_time: Time or function for place duration.
+            Function signature: (robot, location, object) -> float
+
+    Returns:
+        Operator for placing an object that was in the robot's left hand.
+    """
+    place_time_fn = _to_numeric(place_time)
+    return Operator(
+        name="place-left",
+        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
+        preconditions=[
+            F("at ?r ?loc"), F("free ?r"), F("holding-in-left ?r ?obj"), F("left-hand-full ?r")
+        ],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free ?r"), F("not holding-in-left ?r ?obj")}),
+            Effect(
+                time=(place_time_fn, ["?r", "?loc", "?obj"]),
+                resulting_fluents={F("free ?r"), F("at ?obj ?loc"), ~F("left-hand-full ?r")},
+            ),
+        ],
+    )
+
+
+def construct_place_with_right_hand_operator(place_time: OptNumeric) -> Operator:
+    """Construct a basic place with right hand operator (non-blocking).
+
+    Args:
+        place_time: Time or function for place duration.
+            Function signature: (robot, location, object) -> float
+
+    Returns:
+        Operator for placing an object that was in the robot's right hand.
+    """
+    place_time_fn = _to_numeric(place_time)
+    return Operator(
+        name="place-right",
+        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
+        preconditions=[
+            F("at ?r ?loc"), F("free ?r"), F("holding-in-right ?r ?obj"), F("right-hand-full ?r")
+        ],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free ?r"), F("not holding-in-right ?r ?obj")}),
+            Effect(
+                time=(place_time_fn, ["?r", "?loc", "?obj"]),
+                resulting_fluents={F("free ?r"), F("at ?obj ?loc"), ~F("right-hand-full ?r")},
+            ),
+        ],
+    )

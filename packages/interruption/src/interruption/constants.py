@@ -60,10 +60,10 @@ INT_H_WEIGHTS = (1, 1)
 
 # discount factor for augment experiment heuristic function
 # AUGMENT_DISCOUNT_FACTOR = 0.99
-AUGMENT_DISCOUNT_FACTOR = 0.99
+AUGMENT_DISCOUNT_FACTOR = 1
 
 # heuristic multiplier (larger -> more greedy search)
-H_MULTIPLIER = 2
+H_MULTIPLIER = 1
 
 ## task failure cost
 # current: 2-room (seed = 64) -> 375; 1-room (seed = 201) -> 500
