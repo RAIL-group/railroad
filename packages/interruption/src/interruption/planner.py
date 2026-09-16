@@ -44,6 +44,12 @@ class PlannerConfig:
     current_task_reward: float = 0
     # maximum number of goals in a task that can be solved within the planner's budget
     max_task_complexity: int = -1
+    # optional batched form of interruption_value_fn: takes every one of an expanded
+    # node's candidate children's scene graphs and returns one value per graph, in
+    # order, via a single model call instead of one call per child. astar_search uses
+    # this (when provided) to pre-warm ev_cache before create_child runs; falls back
+    # to calling interruption_value_fn once per child when left as None.
+    interruption_value_batch_fn: Callable[[list[SceneGraph]], list[float]] | None = None
 
 
 @dataclass
@@ -253,6 +259,10 @@ def astar_search(
             expanded.add(frozenset(expand.state.fluents))
             # expand search tree
             num_expanded_nodes+=1
+
+            # resolve each candidate action's next_state/interruption_prob once,
+            # filtering out any that would re-expand an already-closed state
+            candidates = []
             for action in get_next_actions(expand.state, interruption_problem.actions):
                 # probability of interruption after taking action from current state
                 next_state, interruption_prob = get_next_state(
@@ -269,7 +279,36 @@ def astar_search(
                 # check if this state has already been expanded
                 if next_state_key in expanded:
                     continue
+                candidates.append((action, next_state, next_state_key, interruption_prob))
 
+            # batch-evaluate interruption_value_fn once across all of this node's
+            # candidate children instead of once per child inside create_child -- the
+            # GCN forward pass dominates create_child's cost, and torch_geometric
+            # batches naturally. create_child still does its own (uncached) call when
+            # this isn't provided, so this is purely an optimization, not a behavior
+            # change to what gets computed.
+            if (
+                search_params.interruption_value_batch_fn is not None
+                and expand.scene_graph is not None
+            ):
+                batch_keys: list[frozenset[Fluent]] = []
+                batch_graphs: list[SceneGraph] = []
+                seen_keys: set[frozenset[Fluent]] = set()
+                for action, next_state, next_state_key, _ in candidates:
+                    if next_state_key in ev_cache or next_state_key in seen_keys:
+                        continue
+                    seen_keys.add(next_state_key)
+                    scene_graph = expand.scene_graph.shallow_copy()
+                    get_updated_scene_graph(scene_graph, next_state, action)
+                    batch_keys.append(next_state_key)
+                    batch_graphs.append(scene_graph)
+                if batch_graphs:
+                    for key, ev in zip(
+                        batch_keys, search_params.interruption_value_batch_fn(batch_graphs)
+                    ):
+                        ev_cache[key] = ev
+
+            for action, next_state, next_state_key, interruption_prob in candidates:
                 # construct new trajectory
                 child_traj = expand.create_child(
                     interruption_problem,

@@ -428,12 +428,16 @@ def _get_planner_config(
         if planner_mode == PlannerMode.INTERRUPTION_AP:
             heuristic_fn = partial(ap_heuristic_fn, h_multi=h_multiplier, weights=INT_H_WEIGHTS)
     return PlannerConfig(
-        discount_by_no_int_prob,
-        heuristic_fn,
-        discount,
-        planner_interruption_prob_fn,
-        interruption_value_fn,
-        current_task_reward
+        discount_by_no_int_prob=discount_by_no_int_prob,
+        heuristic_fn=heuristic_fn,
+        discount=discount,
+        planner_interruption_prob_fn=planner_interruption_prob_fn,
+        interruption_value_fn=interruption_value_fn,
+        current_task_reward=current_task_reward,
+        # AnticipateGCN.get_net_eval_fn attaches a batched sibling to the eval fn it
+        # returns; getattr(..., None) so a mocked/stubbed eval fn (or a None one, for
+        # MYOPIC) without a .batch attribute just disables batching, not an error.
+        interruption_value_batch_fn=getattr(interruption_value_fn, "batch", None),
     )
 
 

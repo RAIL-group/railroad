@@ -6,6 +6,7 @@ from pathlib import Path
 import torch
 from torch import nn
 import torch.nn.functional as F
+from torch_geometric.data import Batch
 from torch_geometric.nn import (
     global_add_pool,
     global_mean_pool,
@@ -94,26 +95,64 @@ class AnticipateGCN(nn.Module):
     #     axs.set_title(f"true cost: {true_cost} | predicted cost: {pred_cost}")
 
     @classmethod
-    def get_net_eval_fn(cls, network_file: Path | str, device: torch.device):
+    def get_net_eval_fn(cls, network_file: Path | str, device: torch.device) -> "GCNEvalFn":
         """
-        Returns a learned function that maps a SceneGraph representation of 
+        Returns a learned function that maps a SceneGraph representation of
         the environment state to the expected value over the task distribution.
+        Callable directly on a single SceneGraph; its `.batch` method evaluates a
+        list of SceneGraphs with one model call instead of one call per graph.
         """
         # load trained gcn
         model = AnticipateGCN()
         model.load_state_dict(torch.load(network_file, map_location="cpu"))
         model.to(device)
         model.eval()
+        return GCNEvalFn(model, device)
 
-        def prepare_net(datum: SceneGraph):
-            gcn_data = prepare_gcn_input((datum, -1))
-            if gcn_data.x is not None:
-                gcn_data.batch = torch.zeros(gcn_data.x.size(0), dtype=torch.long)
 
-                with torch.no_grad():
-                    out = model.forward(convert_batch_format(gcn_data), device)
-                    out = out[:, 0].detach().cpu().numpy()
-                    return out[0]
-            # if an invalid graph nodes features vector was passed in
-            return -1
-        return prepare_net
+class GCNEvalFn:
+    """
+    Callable wrapper around a loaded AnticipateGCN: evaluates one SceneGraph via
+    __call__, or a list of them in a single batched model call via .batch. Only
+    a plain function is otherwise interchangeable with the single-graph form
+    (Callable[[SceneGraph], float]), so this exists mainly to carry .batch alongside
+    __call__ in a way static type checking understands.
+    """
+
+    def __init__(self, model: AnticipateGCN, device: torch.device):
+        self._model = model
+        self._device = device
+
+    def __call__(self, datum: SceneGraph) -> float:
+        gcn_data = prepare_gcn_input((datum, -1))
+        if gcn_data.x is not None:
+            gcn_data.batch = torch.zeros(gcn_data.x.size(0), dtype=torch.long)
+
+            with torch.no_grad():
+                out = self._model.forward(convert_batch_format(gcn_data), self._device)
+                out = out[:, 0].detach().cpu().numpy()
+                return out[0]
+        # if an invalid graph nodes features vector was passed in
+        return -1
+
+    def batch(self, data: list[SceneGraph]) -> list[float]:
+        """
+        Batched form of __call__: evaluates every scene graph in `data` with a
+        single model call instead of one call per graph. Returns one value per
+        input graph, in the same order (-1 for an invalid graph, same as
+        __call__'s single-graph case).
+        """
+        items = [prepare_gcn_input((datum, -1)) for datum in data]
+        valid = [(idx, item) for idx, item in enumerate(items) if item.x is not None]
+        results: list[float] = [-1] * len(data)
+        if not valid:
+            return results
+
+        indices, valid_items = zip(*valid)
+        batch = Batch.from_data_list(list(valid_items))
+        with torch.no_grad():
+            out = self._model.forward(convert_batch_format(batch), self._device)
+            out = out[:, 0].detach().cpu().numpy()
+        for idx, value in zip(indices, out):
+            results[idx] = value
+        return results
