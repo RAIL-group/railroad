@@ -6,7 +6,6 @@ interruption-planning sweeps can be run in parallel and tracked in
 MLflow / viewed via `railroad benchmarks dashboard`.
 """
 from functools import partial
-import random
 import itertools
 from typing import Any
 

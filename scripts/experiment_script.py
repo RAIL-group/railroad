@@ -81,7 +81,11 @@ def main(randomize_order: bool = False, filter_objects: bool = False):
     )
 
     run_experiment(
-        config, PlannerMode.INTERRUPTION_AP, show_plot=False, remove_duplicates=True, benchmark_flag=False,
+        config,
+        PlannerMode.INTERRUPTION_AP,
+        show_plot=False,
+        remove_duplicates=True,
+        benchmark_flag=False,
         relevant_objects= extract_relevant_objects(task_distribution[0]) if filter_objects else None
     )
 

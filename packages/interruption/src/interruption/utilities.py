@@ -2,7 +2,6 @@ import json
 import math
 import random
 from collections.abc import Callable
-from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Sequence
 
@@ -343,14 +342,14 @@ def get_updated_scene_graph(
     action_type = action_split[0]
     robot_idx = scene_graph.robot_indices[0]
 
-    if action_type.startswith(("pick", "place")):
+    if action_type.startswith(("pick-", "place-")):
         obj_idx = int(action_split[-1].split("_")[-1])
         loc_idx = int(action_split[-2].split("_")[-1])
-        if action_type.startswith("pick"):
+        if action_type.startswith("pick-"):
             scene_graph.delete_edge(loc_idx, obj_idx)
             scene_graph.add_edge(robot_idx, obj_idx)
             scene_graph.nodes[obj_idx]["position"] = scene_graph.nodes[robot_idx]["position"]
-        else: # action_type == "place-left or pick-left"
+        else: # action_type == "place-left" or "place-right"
             scene_graph.delete_edge(robot_idx, obj_idx)
             scene_graph.add_edge(loc_idx, obj_idx)
             scene_graph.nodes[obj_idx]["position"] = scene_graph.nodes[loc_idx]["position"]

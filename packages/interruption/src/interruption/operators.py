@@ -100,7 +100,9 @@ def construct_pick_with_left_hand_operator(pick_time: OptNumeric) -> Operator:
             Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?obj ?loc")}),
             Effect(
                 time=(pick_time_fn, ["?r", "?loc", "?obj"]),
-                resulting_fluents={F("free ?r"), F("holding-in-left ?r ?obj"), F("left-hand-full ?r")},
+                resulting_fluents={
+                    F("free ?r"), F("holding-in-left ?r ?obj"), F("left-hand-full ?r")
+                },
             ),
         ],
     )
@@ -128,7 +130,9 @@ def construct_pick_with_right_hand_operator(pick_time: OptNumeric) -> Operator:
             Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?obj ?loc")}),
             Effect(
                 time=(pick_time_fn, ["?r", "?loc", "?obj"]),
-                resulting_fluents={F("free ?r"), F("holding-in-right ?r ?obj"), F("right-hand-full ?r")},
+                resulting_fluents={
+                    F("free ?r"), F("holding-in-right ?r ?obj"), F("right-hand-full ?r")
+                },
             ),
         ],
     )
