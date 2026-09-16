@@ -47,17 +47,12 @@ def test_check_value_cache():
 
 
 def test_get_no_int_prob():
-    traj = InterruptionTrajectory(
-        state_history=[],
-        plan=[],
-        interruption_probs=[],
-        scene_graph=None
-    )
-    assert get_no_int_prob(traj.interruption_probs) == 1
-    traj.interruption_probs.append(0.1)
-    assert get_no_int_prob(traj.interruption_probs) == 0.9
-    traj.interruption_probs.append(0.1)
-    assert get_no_int_prob(traj.interruption_probs) == 0.81
+    interruption_probs = []
+    assert get_no_int_prob(interruption_probs) == 1
+    interruption_probs.append(0.1)
+    assert get_no_int_prob(interruption_probs) == 0.9
+    interruption_probs.append(0.1)
+    assert get_no_int_prob(interruption_probs) == 0.81
 
 
 @pytest.mark.parametrize(
@@ -82,9 +77,9 @@ def test_discounted_accumulated_cost(interruption_value, solution):
     )
 
     traj = InterruptionTrajectory(
-        state_history=[initial_state],
-        plan=[],
-        interruption_probs=[],
+        state=initial_state,
+        action=None,
+        no_interruption_prob=1,
         scene_graph=None
     )
 
@@ -92,22 +87,25 @@ def test_discounted_accumulated_cost(interruption_value, solution):
     # from the current state of the trajectory
     for discounted_acc_cost in solution:
         applicable_actions = get_next_actions(
-            traj.state_history[-1], move_actions
+            traj.state, move_actions
         )
         assert len(applicable_actions) == 1
         reward = get_reward(
             applicable_actions[0],
-            get_no_int_prob(traj.interruption_probs),
+            traj.no_interruption_prob,
             interruption_value * 0.1
         )
         assert reward + traj.cost == pytest.approx(discounted_acc_cost)
 
         # update the trajectory
-        next_state, _ = get_next_state(traj.state_history[-1], applicable_actions[0])
+        
+
+
+        next_state, _ = get_next_state(traj.state, applicable_actions[0])
         traj.level+=1
-        traj.state_history.append(next_state)
-        traj.plan.append(applicable_actions[0])
-        traj.interruption_probs.append(0.1)
+        traj.state = next_state
+        traj.action = applicable_actions[0]
+        traj.no_interruption_prob *= (1-0.1)
         traj.value += reward
         traj.cost += reward
 
@@ -130,23 +128,23 @@ def test_h():
     )
 
     traj = InterruptionTrajectory(
-        state_history=[initial_state],
-        plan=[],
-        interruption_probs=[],
+        state=initial_state,
+        action=None,
+        no_interruption_prob=1,
         scene_graph=None
     )
 
     # tests for when passed in hueristic_fn is an int
     assert get_discounted_value(
-        5, get_no_int_prob(traj.interruption_probs) * (1 - 0.1), 0
+        5, traj.no_interruption_prob * (1 - 0.1), 0
     ) == pytest.approx(0.9 * 5)
-    traj.interruption_probs.append(0.1)
+    traj.no_interruption_prob*=(1-0.1)
     assert get_discounted_value(
-        5, get_no_int_prob(traj.interruption_probs) * (1 - 0.1), 0
+        5, traj.no_interruption_prob * (1 - 0.1), 0
     ) == pytest.approx(0.81 * 5)
-    traj.interruption_probs.append(0.1)
+    traj.no_interruption_prob*=(1-0.1)
     assert get_discounted_value(
-        5, get_no_int_prob(traj.interruption_probs) * (1 - 0.1), 0
+        5, traj.no_interruption_prob * (1 - 0.1), 0
     ) == pytest.approx(0.729 * 5)
 
 
@@ -169,23 +167,23 @@ def test_h_user_reward():
     )
 
     traj = InterruptionTrajectory(
-        state_history=[initial_state],
-        plan=[],
-        interruption_probs=[],
+        state=initial_state,
+        action=None,
+        no_interruption_prob=1,
         scene_graph=None
     )
 
     # tests for when passed in hueristic_fn is an int
     assert get_discounted_value(
-        5, get_no_int_prob(traj.interruption_probs) * (1 - 0.1), reward
+        5, traj.no_interruption_prob * (1 - 0.1), reward
     ) == pytest.approx(0.9 * 6)
-    traj.interruption_probs.append(0.1)
+    traj.no_interruption_prob*=(1-0.1)
     assert get_discounted_value(
-        5, get_no_int_prob(traj.interruption_probs) * (1 - 0.1), reward
+        5, traj.no_interruption_prob * (1 - 0.1), reward
     ) == pytest.approx(0.81 * 6)
-    traj.interruption_probs.append(0.1)
+    traj.no_interruption_prob*=(1-0.1)
     assert get_discounted_value(
-        5, get_no_int_prob(traj.interruption_probs) * (1 - 0.1), reward
+        5, traj.no_interruption_prob * (1 - 0.1), reward
     ) == pytest.approx(0.729 * 6)
 
 
@@ -215,9 +213,9 @@ def test_construct_trajectory(heuristic_fn):
     new_state, next_interruption_prob = get_next_state(initial_state, action, 0.1)
 
     traj = InterruptionTrajectory(
-        state_history=[initial_state],
-        plan=[],
-        interruption_probs=[],
+        state=initial_state,
+        action=None,
+        no_interruption_prob=1,
         scene_graph=None
     )
     search_problem = InterruptionSearchProblem(goal, applicable_actions)
@@ -232,16 +230,13 @@ def test_construct_trajectory(heuristic_fn):
     assert new_traj.level == 1
     assert new_traj.cost == 4
     assert new_traj.value == new_traj.cost + heuristic_fn * 0.9
-    assert len(new_traj.state_history) == 2
-    assert new_traj.state_history == [initial_state, new_state]
-    assert len(new_traj.plan) == 1
-    assert new_traj.plan == [action]
-    assert len(new_traj.interruption_probs) == 1
-    assert new_traj.interruption_probs == [0.1]
+    assert new_traj.state == new_state
+    assert new_traj.action == action
+    assert new_traj.no_interruption_prob == 0.9
 
 
 @pytest.mark.parametrize("heuristic_fn", [0, 5, ff_heuristic])
-def test_astart_search_nointdist(heuristic_fn):
+def test_astar_search_nointdist(heuristic_fn):
     # setup
     move_op = construct_move_operator(4)
 

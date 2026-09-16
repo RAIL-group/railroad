@@ -140,7 +140,11 @@ def anticipatory_planner(
     sampled_augmented_tasks = _get_sampled_augmented_tasks(
         interruption_problem.goal, selected_locations, selected_objects, neg_to_pos_mapping
     )
-    random_sampled_augmented_tasks = rng.sample(sampled_augmented_tasks, k=NUM_AUGMENTED_TASK_SAMPLES)
+    random_sampled_augmented_tasks = (
+        rng.sample(sampled_augmented_tasks, k=NUM_AUGMENTED_TASK_SAMPLES)
+        if len(sampled_augmented_tasks) > NUM_AUGMENTED_TASK_SAMPLES
+        else sampled_augmented_tasks
+    )
 
     for task in random_sampled_augmented_tasks:
         interruption_problem.goal = task

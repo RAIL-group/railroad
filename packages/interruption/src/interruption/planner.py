@@ -53,8 +53,6 @@ class InterruptionTrajectory:
     state: State
     # action that was executed from the parent state that resulted in the current state
     action: Optional[Action]
-    # used to avoid having to recompute the prob of no interruption for each child
-    # interruption_probs: list[float]
     no_interruption_prob: float
     scene_graph: SceneGraph | None
     level: int = 0
@@ -138,8 +136,10 @@ class InterruptionTrajectory:
         plan = []
         current_node = self
         while current_node.parent is not None:
+            assert current_node.action is not None
             plan.append(current_node.action)
             current_node = current_node.parent
+        plan.reverse()
         return plan
 
     def get_plan_cost(self):
