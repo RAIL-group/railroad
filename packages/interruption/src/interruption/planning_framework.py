@@ -3,6 +3,7 @@ Implementations of the interruption-based, myopic, and anticipatory planning pla
 for ProcTHOR environments. These planner implementations all utilize the astar_search
 function from planner.py
 """
+import random
 from enum import Enum
 from typing import Optional, Callable
 from itertools import product, combinations
@@ -16,7 +17,10 @@ from railroad.environment.procthor.scene import ProcTHORScene
 from railroad.environment.procthor.scenegraph import SceneGraph
 from railroad.navigation.pathing import get_cost_and_path
 
-from .constants import LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF, AP_DEBUG
+from .constants import (
+    LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF, AP_DEBUG, NUM_AUGMENTED_TASK_SAMPLES,
+    AP_SEED
+)
 from .environments import KitchenProcTHOREnvironment
 from .planner import InterruptionSearchProblem, PlannerConfig, astar_search
 
@@ -92,6 +96,8 @@ def anticipatory_planner(
     Implementation of the anticipatory planning framework for large-scale environments from
     Talukder et al.
     """
+    rng = random.Random(AP_SEED)
+
     best_plan = []
     best_value_sg = float("inf")
     best_value_total = float("inf")
@@ -134,8 +140,9 @@ def anticipatory_planner(
     sampled_augmented_tasks = _get_sampled_augmented_tasks(
         interruption_problem.goal, selected_locations, selected_objects, neg_to_pos_mapping
     )
+    random_sampled_augmented_tasks = rng.sample(sampled_augmented_tasks, k=NUM_AUGMENTED_TASK_SAMPLES)
 
-    for task in sampled_augmented_tasks:
+    for task in random_sampled_augmented_tasks:
         interruption_problem.goal = task
         # run myopic planner to get initial plan/value of s_g
         plan, value_sg, success, scene_graph_sg = astar_search(

@@ -68,3 +68,7 @@ H_MULTIPLIER = 2
 ## task failure cost
 # current: 2-room (seed = 64) -> 375; 1-room (seed = 201) -> 500
 PLANNER_FAILURE_COST = 500
+
+# A.P. related constants
+NUM_AUGMENTED_TASK_SAMPLES = 10
+AP_SEED = 12

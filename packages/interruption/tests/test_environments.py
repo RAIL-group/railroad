@@ -246,7 +246,7 @@ def test_update_scene_graph_pick_move_place_full_sequence():
     move_action = Action(
         set(),
         [],
-        name=f"move robot1 start_loc shelvingunit_{idx.shelvingunit}"
+        name=f"move robot0 start_loc shelvingunit_{idx.shelvingunit}"
     )
 
 

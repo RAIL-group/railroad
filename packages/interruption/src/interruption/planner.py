@@ -81,7 +81,7 @@ class InterruptionTrajectory:
         interrupting_task_ev = 0
         scene_graph = None
         if self.scene_graph is not None:
-            scene_graph = self.scene_graph.copy()
+            scene_graph = self.scene_graph.shallow_copy()
             get_updated_scene_graph(scene_graph, next_state, action)
         if planner_params.interruption_value_fn is not None:
             assert scene_graph is not None

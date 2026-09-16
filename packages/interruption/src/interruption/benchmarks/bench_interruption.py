@@ -198,28 +198,28 @@ def bench_myopic_interruption_kitchen(case: BenchmarkCase):
 bench_myopic_interruption_kitchen.add_cases(_get_cases())
 
 
-# @benchmark(
-#     name="procthor_ap",
-#     description=(
-#         "Evaluates the anticipatory planning planner across "
-#         "task-arrival probabilities in specified procthor environments."
-#     ),
-#     tags=["interruption", "procthor", "ap", "interruption_experiments"],
-#     timeout=TIMEOUT,
-#     repeat=EXPERIMENT_REPEATS,
-# )
-# def bench_ap_kitchen(case: BenchmarkCase):
-#     """
-#     Wrapper function to evaluate the interruption-based planner on procthor kitchen
-#     environments
-#     """
-#     config = _setup_experiment_config(case, PlannerMode.ANTICIPATORY_PLANNING)
-#     return run_experiment(
-#         config,
-#         PlannerMode.ANTICIPATORY_PLANNING,
-#         True,
-#         True,
-#         extract_relevant_objects(config.interrupting_task_dist[0]) if FILTER_OBJECTS else None
-#     )
+@benchmark(
+    name="procthor_ap",
+    description=(
+        "Evaluates the anticipatory planning planner across "
+        "task-arrival probabilities in specified procthor environments."
+    ),
+    tags=["interruption", "procthor", "ap", "interruption_experiments"],
+    timeout=TIMEOUT,
+    repeat=EXPERIMENT_REPEATS,
+)
+def bench_ap_kitchen(case: BenchmarkCase):
+    """
+    Wrapper function to evaluate the interruption-based planner on procthor kitchen
+    environments
+    """
+    config = _setup_experiment_config(case, PlannerMode.ANTICIPATORY_PLANNING)
+    return run_experiment(
+        config,
+        PlannerMode.ANTICIPATORY_PLANNING,
+        True,
+        True,
+        extract_relevant_objects(config.interrupting_task_dist[0]) if FILTER_OBJECTS else None
+    )
 
-# bench_ap_kitchen.add_cases(_get_cases())
+bench_ap_kitchen.add_cases(_get_cases())
