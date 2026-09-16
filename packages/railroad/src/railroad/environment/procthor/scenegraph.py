@@ -105,6 +105,19 @@ class SceneGraph:
         graph_copy.asset_id_to_node_idx_map = copy.deepcopy(self.asset_id_to_node_idx_map)
         return graph_copy
 
+    def shallow_copy(self) -> "SceneGraph":
+        """
+        Create a shallow copy of the scene graph. A cheaper alternative to computing
+        a deep copy of the scene graph.
+        NOTE: When using a shallow copy be careful not to modify a mutable element
+        of the graph in-place, as this will corrupt other scene graphs.
+        """
+        graph_copy = SceneGraph()
+        graph_copy.nodes = {idx: dict(node) for idx, node in self.nodes.items()}
+        graph_copy.edges = list(self.edges)
+        graph_copy.asset_id_to_node_idx_map = dict(self.asset_id_to_node_idx_map)
+        return graph_copy
+
     @property
     def robot_indices(self) -> List[int]:
         """Get indices of all room nodes."""

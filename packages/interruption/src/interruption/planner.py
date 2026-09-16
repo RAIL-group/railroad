@@ -50,16 +50,19 @@ class InterruptionTrajectory:
     """
     Data structure used to represent search tree trajectories (paths).
     """
-    state_history: list[State]
-    plan: list[Action]
+    state: State
+    # action that was executed from the parent state that resulted in the current state
+    action: Optional[Action]
     # used to avoid having to recompute the prob of no interruption for each child
-    interruption_probs: list[float]
+    # interruption_probs: list[float]
+    no_interruption_prob: float
     scene_graph: SceneGraph | None
     level: int = 0
     cost: float = 0.0
     value: float = 0.0
     h_value: float = 0.0
     discounted_h_value: float = 0.0
+    parent: Optional["InterruptionTrajectory"] = None
     # # for debugging
     # v_ap: float = 0.0
     # ff_value: float = 0.0
@@ -75,7 +78,7 @@ class InterruptionTrajectory:
         """
         Helper function for creation of trajectories to add to the frontier.
         """
-        next_state, _ = get_next_state(self.state_history[-1], action)
+        next_state, _ = get_next_state(self.state, action)
 
         # compute accumulated cost (g(traj))
         interrupting_task_ev = 0
@@ -89,7 +92,7 @@ class InterruptionTrajectory:
 
         accumulated_cost = self.cost + get_reward(
             action,
-            planner_params.discount_fn(self.interruption_probs),
+            self.no_interruption_prob,
             interrupting_task_ev * interruption_prob
         )
 
@@ -102,14 +105,8 @@ class InterruptionTrajectory:
                 next_state, search_problem.goal, search_problem.actions, v_ap
             )
 
-        # if search_problem.augment_task:
-        #     discount_factor = planner_params.discount_fn(self.interruption_probs)
-        # else:
-        #     discount_factor = (
-        #         planner_params.discount_fn(self.interruption_probs) * (1 - interruption_prob)
-        #     )
-
-        discount_factor = planner_params.discount_fn(self.interruption_probs + [interruption_prob])
+        # discount_factor = planner_params.discount_fn(self.interruption_probs + [interruption_prob])
+        discount_factor = self.no_interruption_prob * (1-interruption_prob)
 
         estimated_future_cost = get_discounted_value(
             undiscounted_future_cost,
@@ -117,50 +114,47 @@ class InterruptionTrajectory:
             planner_params.current_task_reward
         )
 
-        # # for debugging
-        # if DEBUG:
-        #     interested_plan = [
-        #         'move robot1 start_loc countertop_3',
-        #         'pick robot1 r1-right countertop_3 apple_8',
-        #         'pick robot1 r1-left countertop_3 tomato_12'
-        #     ]
-        #     traj_plan_names = [act.name for act in self.plan + [action]]
-        #     if all(act in traj_plan_names for act in interested_plan):
-        #         print(v_ap)
-        #         print(undiscounted_future_cost)
-
-
         return InterruptionTrajectory(
             cost=accumulated_cost,
             value=accumulated_cost+estimated_future_cost,
             level=self.level+1,
-            state_history=self.state_history + [next_state],
-            plan=self.plan + [action],
-            interruption_probs=self.interruption_probs + [interruption_prob],
+            state=next_state,
+            action=action,
+            no_interruption_prob=discount_factor,
+            # interruption_probs=self.interruption_probs + [interruption_prob],
             h_value=undiscounted_future_cost,
             discounted_h_value=estimated_future_cost,
             scene_graph=scene_graph,
+            parent=self,
             # # for debugging
             # v_ap=v_ap,
             # ff_value=undiscounted_future_cost - v_ap
         )
 
+    def get_plan(self: "InterruptionTrajectory") -> list[Action]:
+        """
+        Recovers the plan that resulted in the trajectory.
+        """
+        plan = []
+        current_node = self
+        while current_node.parent is not None:
+            plan.append(current_node.action)
+            current_node = current_node.parent
+        return plan
 
     def get_plan_cost(self):
         """
         Returns actual cost of a trajectory, without factoring the interruption probabilities.
         """
         plan_cost = 0
-        for act in self.plan:
+        for act in self.get_plan():
             plan_cost+=get_action_cost(act)
         return plan_cost
-
 
     def __eq__(self, other):
         if not isinstance(other, InterruptionTrajectory):
             raise NotImplementedError
         return self.value == other.value
-
 
     def __lt__(self, other):
         if not isinstance(other, InterruptionTrajectory):
@@ -173,12 +167,10 @@ class InterruptionTrajectory:
             raise NotImplementedError
         return self.value <= other.value
 
-
     def __gt__(self, other):
         if not isinstance(other, InterruptionTrajectory):
             raise NotImplementedError
         return self.value > other.value
-
 
     def __ge__(self, other):
         if not isinstance(other, InterruptionTrajectory):
@@ -210,9 +202,10 @@ def astar_search(
         frontier,
         (
             InterruptionTrajectory(
-                state_history=[initial_state[0]],
-                plan=[],
-                interruption_probs=[],
+                state=initial_state[0],
+                action=None,
+                no_interruption_prob=1,
+                # interruption_probs=[],
                 scene_graph=initial_state[1]
             ), -1, 0
         )
@@ -228,23 +221,22 @@ def astar_search(
 
             # find expansion node
             expand, _, _ = heapq.heappop(frontier)
-            curr_state = expand.state_history[-1]
 
             # check for goal condition being met
-            if interruption_problem.goal.evaluate(curr_state.fluents):
-                return expand.plan, expand.cost, True, expand.scene_graph#, curr_state
+            if interruption_problem.goal.evaluate(expand.state.fluents):
+                return expand.get_plan(), expand.cost, True, expand.scene_graph#, curr_state
 
             # check if we've already expanded this state
-            if curr_state.fluents in expanded:
+            if expand.state.fluents in expanded:
                 continue
             # otherwise add it
-            expanded.add(frozenset(curr_state.fluents))
+            expanded.add(frozenset(expand.state.fluents))
             # expand search tree
             num_expanded_nodes+=1
-            for action in get_next_actions(curr_state, interruption_problem.actions):
+            for action in get_next_actions(expand.state, interruption_problem.actions):
                 # probability of interruption after taking action from current state
                 next_state, interruption_prob = get_next_state(
-                    expand.state_history[-1],
+                    expand.state,
                     action,
                     (
                         search_params.planner_interruption_prob_fn
@@ -272,7 +264,7 @@ def astar_search(
 
     # goal not reached, get best trajectory found
     best_found, _, _ = heapq.heappop(frontier)
-    return best_found.plan, best_found.cost, False, best_found.scene_graph
+    return best_found.get_plan(), best_found.cost, False, best_found.scene_graph
 
 
 def compute_interruption_value(
@@ -338,4 +330,4 @@ def print_frontier_trace(step: int, frontier: list[tuple[InterruptionTrajectory,
         print(f"Discounted h-value: {traj.discounted_h_value}; h-value: {traj.h_value}")
         # # added for debugging
         # print(f"v_ap: {traj.v_ap}; ff-value: {traj.ff_value}")
-        # print(f"Last 5 actions in trajectory: {[a.name for a in traj.plan]}\n")
+        # print(f"Last 5 actions in trajectory: {[a.name for a in traj.get_plan()]}\n")
