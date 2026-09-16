@@ -11,7 +11,6 @@ from interruption.planner import (
     check_value_cache,
     compute_interruption_value,
 )
-from interruption.planning_framework import get_no_int_prob
 from interruption.utilities import (
     RandomVariableType,
     get_next_state,
@@ -44,16 +43,6 @@ def test_check_value_cache():
 
     value_cache[initial_fluents] = 2.5
     assert check_value_cache(initial_fluents, value_cache)
-
-
-def test_get_no_int_prob():
-    interruption_probs = []
-    assert get_no_int_prob(interruption_probs) == 1
-    interruption_probs.append(0.1)
-    assert get_no_int_prob(interruption_probs) == 0.9
-    interruption_probs.append(0.1)
-    assert get_no_int_prob(interruption_probs) == 0.81
-
 
 @pytest.mark.parametrize(
     'interruption_value, solution',
@@ -98,11 +87,7 @@ def test_discounted_accumulated_cost(interruption_value, solution):
         assert reward + traj.cost == pytest.approx(discounted_acc_cost)
 
         # update the trajectory
-        
-
-
         next_state, _ = get_next_state(traj.state, applicable_actions[0])
-        traj.level+=1
         traj.state = next_state
         traj.action = applicable_actions[0]
         traj.no_interruption_prob *= (1-0.1)
@@ -219,7 +204,7 @@ def test_construct_trajectory(heuristic_fn):
         scene_graph=None
     )
     search_problem = InterruptionSearchProblem(goal, applicable_actions)
-    planner_params = PlannerConfig(get_no_int_prob, heuristic_fn)
+    planner_params = PlannerConfig(True, heuristic_fn)
     new_traj = traj.create_child(
         search_problem,
         planner_params,
@@ -227,7 +212,6 @@ def test_construct_trajectory(heuristic_fn):
         next_interruption_prob
     )
 
-    assert new_traj.level == 1
     assert new_traj.cost == 4
     assert new_traj.value == new_traj.cost + heuristic_fn * 0.9
     assert new_traj.state == new_state
@@ -257,7 +241,7 @@ def test_astar_search_nointdist(heuristic_fn):
 
     # testing with no interrupting tasks
     search_problem = InterruptionSearchProblem(goal, move_actions)
-    planner_params = PlannerConfig(get_no_int_prob, heuristic_fn, 0.1)
+    planner_params = PlannerConfig(True, heuristic_fn, planner_interruption_prob_fn=0.1)
 
     plan, plan_cost, success, _ = astar_search(
         (initial_state, None),
@@ -300,7 +284,7 @@ def test_astar_search_nointdist(heuristic_fn):
     )
 
     search_problem = InterruptionSearchProblem(goal, all_actions)
-    planner_params = PlannerConfig(get_no_int_prob, heuristic_fn, 0.1)
+    planner_params = PlannerConfig(True, heuristic_fn, planner_interruption_prob_fn=0.1)
 
     plan, plan_cost, success, _ = astar_search(
         (initial_state, None),
@@ -424,7 +408,7 @@ def test_optimal_make_sandwhich_noint(heuristic_fn, interruption_prob_fn):
     goal = converted_goals[0]
 
     search_problem = InterruptionSearchProblem(goal, actions)
-    planner_params = PlannerConfig(get_no_int_prob, heuristic_fn, interruption_prob_fn)
+    planner_params = PlannerConfig(True, heuristic_fn, planner_interruption_prob_fn=interruption_prob_fn)
 
     plan, cost, success, _ = astar_search(
         (initial_state, None),

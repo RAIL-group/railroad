@@ -1,3 +1,4 @@
+from functools import lru_cache
 from typing import Optional, Dict, List
 from pathlib import Path
 import numpy as np
@@ -71,7 +72,12 @@ def load_sentence_embedding(target_file_name: str) -> Optional[np.ndarray]:
     return None
 
 
+@lru_cache(maxsize=None)
 def get_sentence_embedding(sentence: str) -> np.ndarray:
+    # cached in-process: a node name's embedding never changes, and this is called
+    # once per scene-graph node on every GCN evaluation, so an uncached call re-reads
+    # the same .npy file from disk every time. Callers must not mutate the returned
+    # array in place, since the same object is handed back on every cache hit.
     loaded_embedding = load_sentence_embedding(f"{sentence}.npy")
     if loaded_embedding is not None:
         return loaded_embedding

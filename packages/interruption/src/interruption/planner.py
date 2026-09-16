@@ -36,8 +36,9 @@ class PlannerConfig:
     Data stucture used to store user-specified hyperparameters for
     A* Search.
     """
-    discount_fn: Callable[[list[float]], float]
+    discount_by_no_int_prob: bool
     heuristic_fn: Callable[[State, Goal, list[Action], float], float] | float
+    discount: Optional[float] = None
     planner_interruption_prob_fn: float | Callable[[float], float] | None = None
     interruption_value_fn: Callable[[SceneGraph], float] | None = None
     current_task_reward: float = 0
@@ -55,16 +56,11 @@ class InterruptionTrajectory:
     action: Optional[Action]
     no_interruption_prob: float
     scene_graph: SceneGraph | None
-    level: int = 0
     cost: float = 0.0
     value: float = 0.0
-    h_value: float = 0.0
     discounted_h_value: float = 0.0
+    h_value: float = 0.0
     parent: Optional["InterruptionTrajectory"] = None
-    # # for debugging
-    # v_ap: float = 0.0
-    # ff_value: float = 0.0
-
 
     def create_child(
         self,
@@ -103,8 +99,11 @@ class InterruptionTrajectory:
                 next_state, search_problem.goal, search_problem.actions, v_ap
             )
 
-        # discount_factor = planner_params.discount_fn(self.interruption_probs + [interruption_prob])
-        discount_factor = self.no_interruption_prob * (1-interruption_prob)
+        if planner_params.discount_by_no_int_prob:
+            discount_factor = self.no_interruption_prob * (1-interruption_prob)
+        else:
+            assert planner_params.discount is not None
+            discount_factor = self.no_interruption_prob * planner_params.discount
 
         estimated_future_cost = get_discounted_value(
             undiscounted_future_cost,
@@ -115,18 +114,13 @@ class InterruptionTrajectory:
         return InterruptionTrajectory(
             cost=accumulated_cost,
             value=accumulated_cost+estimated_future_cost,
-            level=self.level+1,
             state=next_state,
             action=action,
             no_interruption_prob=discount_factor,
-            # interruption_probs=self.interruption_probs + [interruption_prob],
-            h_value=undiscounted_future_cost,
             discounted_h_value=estimated_future_cost,
+            h_value=undiscounted_future_cost,
             scene_graph=scene_graph,
             parent=self,
-            # # for debugging
-            # v_ap=v_ap,
-            # ff_value=undiscounted_future_cost - v_ap
         )
 
     def get_plan(self: "InterruptionTrajectory") -> list[Action]:
@@ -282,8 +276,9 @@ def compute_interruption_value(
     expected_cost = 0.0
     # setup for myopic planning approach
     search_params = PlannerConfig(
-        discount_fn=lambda x: 1.0,
-        heuristic_fn=heuristic_fn
+        False,
+        heuristic_fn,
+        1
     )
 
     for task, prob in zip(*interrupting_task_dist):
@@ -322,12 +317,8 @@ def print_frontier_trace(step: int, frontier: list[tuple[InterruptionTrajectory,
     """
     print(f"Planning Step: {step}")
     print(f"Frontier: # of trajectories in frontier = {len(frontier)}\n")
-    for j, traj_tuple in enumerate(frontier[:5]):
+    for _, traj_tuple in enumerate(frontier[:5]):
         traj = traj_tuple[0]
-        print(f"Trajectory {j}: length - {traj.level}")
         print(f"Value: {traj.value}")
         print(f"Discounted Cost: {traj.cost}; Plan Cost: {traj.get_plan_cost()}")
         print(f"Discounted h-value: {traj.discounted_h_value}; h-value: {traj.h_value}")
-        # # added for debugging
-        # print(f"v_ap: {traj.v_ap}; ff-value: {traj.ff_value}")
-        # print(f"Last 5 actions in trajectory: {[a.name for a in traj.get_plan()]}\n")

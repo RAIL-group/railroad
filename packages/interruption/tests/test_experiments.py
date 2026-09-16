@@ -12,8 +12,7 @@ from interruption.experiments import (
     _map_goal_to_scene,
 )
 from interruption.planning_framework import (
-    ap_heuristic_fn, get_no_int_discount, get_no_int_prob,
-    PlannerMode
+    ap_heuristic_fn, PlannerMode
 )
 from railroad.core import Fluent, LiteralGoal
 
@@ -251,19 +250,19 @@ def _dummy_config() -> ExperimentConfig:
 
 
 @pytest.mark.parametrize(
-    "mode, expected_discount_fn, expects_interruption_prob_fn, "
+    "mode, discount_by_no_int_prob, expects_interruption_prob_fn, "
     "expects_interruption_value_fn, expects_weights",
     [
-        (PlannerMode.MYOPIC, get_no_int_discount, False, False, None),
-        (PlannerMode.ANTICIPATORY_PLANNING, get_no_int_discount, False, True, None),
-        (PlannerMode.INTERRUPTION, get_no_int_prob, True, True, None),
-        (PlannerMode.INTERRUPTION_AP, get_no_int_prob, True, True, INT_H_WEIGHTS),
+        (PlannerMode.MYOPIC, False, False, False, None),
+        (PlannerMode.ANTICIPATORY_PLANNING, False, False, True, None),
+        (PlannerMode.INTERRUPTION, True, True, True, None),
+        (PlannerMode.INTERRUPTION_AP, True, True, True, INT_H_WEIGHTS),
     ],
 )
 def test_get_planner_config_selects_fields_per_mode(
     mock_gcn,
     mode,
-    expected_discount_fn,
+    discount_by_no_int_prob,
     expects_interruption_prob_fn,
     expects_interruption_value_fn,
     expects_weights,
@@ -281,12 +280,11 @@ def test_get_planner_config_selects_fields_per_mode(
     result = _get_planner_config(config, mode, interruption_prob_fn)
 
     if mode in [PlannerMode.MYOPIC, PlannerMode.ANTICIPATORY_PLANNING]:
-        assert isinstance(result.discount_fn, functools.partial)
-        assert result.discount_fn.func is expected_discount_fn
-        assert len(result.discount_fn.keywords) == 1
-        assert result.discount_fn.keywords == {"discount_factor": 1}
+        assert result.discount_by_no_int_prob == discount_by_no_int_prob
+        assert result.discount == 1
     else:
-        assert result.discount_fn is expected_discount_fn
+        assert result.discount_by_no_int_prob == discount_by_no_int_prob
+        assert result.discount is None
     assert (
         result.planner_interruption_prob_fn is interruption_prob_fn
     ) == expects_interruption_prob_fn

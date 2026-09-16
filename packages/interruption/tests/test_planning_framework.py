@@ -120,9 +120,10 @@ def ap_setup(monkeypatch):
 
     problem = InterruptionSearchProblem(goal=original_goal, actions=[])
     config = PlannerConfig(
-        discount_fn=lambda probs: 1.0,
+        False,
         heuristic_fn=0.0,
-        interruption_value_fn=ev_model,
+        discount=1,
+        interruption_value_fn=ev_model
     )
     scene = MagicMock(spec=ProcTHORScene)
     scene.grid = None

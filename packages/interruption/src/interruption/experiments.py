@@ -39,8 +39,7 @@ from .planner import PlannerConfig, InterruptionSearchProblem
 #     PlannerMode, search_with_retry, search_without_retry
 # )
 from .planning_framework import (
-    get_no_int_prob, get_no_int_discount, ap_heuristic_fn,
-    PlannerMode, search_with_retry, search_without_retry
+    ap_heuristic_fn, PlannerMode, search_with_retry, search_without_retry
 )
 from .utilities import (
     get_action_cost,
@@ -147,12 +146,6 @@ def run_experiment(
         config.seeds.procthor_seed, config.seeds.object_placement_seed,
         relevant_objects, remove_duplicates
     )
-
-    # # for debugging
-    # assert relevant_objects is not None
-    # print(sorted(relevant_objects))
-    # print(sorted(experiment_data.env.scene.objects))
-    # print(sorted(dash_env.scene.objects))
 
     # keep track of the task_sequence as part of the output
     task_sequence_goal = task_sequence[0]
@@ -413,7 +406,9 @@ def _get_planner_config(
 ) -> PlannerConfig:
     heuristic_fn = partial(ap_heuristic_fn, h_multi=h_multiplier)
     if planner_mode in [PlannerMode.MYOPIC, PlannerMode.ANTICIPATORY_PLANNING]:
-        discount_fn=partial(get_no_int_discount, discount_factor=1)
+        discount_by_no_int_prob = False
+        discount=1
+
         planner_interruption_prob_fn=None
         interruption_value_fn=(
             None
@@ -422,10 +417,9 @@ def _get_planner_config(
         )
         current_task_reward=0
     else: # PlannerMode.INTERRUPTION or PlannerMode.INTERRUPTION_AP
-        discount_fn=(
-            get_no_int_prob if not config.augment_task
-            else partial(get_no_int_discount, discount_factor=AUGMENT_DISCOUNT_FACTOR)
-        )
+        discount_by_no_int_prob = not config.augment_task
+        discount = AUGMENT_DISCOUNT_FACTOR if not discount_by_no_int_prob else None
+
         planner_interruption_prob_fn=interruption_prob_fn
         interruption_value_fn=AnticipateGCN.get_net_eval_fn(
             config.ev_model_path, get_torch_device()
@@ -434,8 +428,9 @@ def _get_planner_config(
         if planner_mode == PlannerMode.INTERRUPTION_AP:
             heuristic_fn = partial(ap_heuristic_fn, h_multi=h_multiplier, weights=INT_H_WEIGHTS)
     return PlannerConfig(
-        discount_fn,
+        discount_by_no_int_prob,
         heuristic_fn,
+        discount,
         planner_interruption_prob_fn,
         interruption_value_fn,
         current_task_reward

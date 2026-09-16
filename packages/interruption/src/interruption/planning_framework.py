@@ -63,28 +63,6 @@ def ap_heuristic_fn(
         state, goal, actions, LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF
     ) + v_ap
 
-
-# discount functions
-def get_no_int_prob(interruption_probs: list[float]) -> float:
-    """
-    Returns the probability of an interrupting task not arriving,
-    based on the level of the search tree.
-    """
-    no_int_prob = 1
-    for prob in interruption_probs:
-        no_int_prob*=(1 - prob)
-    return no_int_prob
-
-
-def get_no_int_discount(interruption_probs: list[float], discount_factor: float = 1) -> float:
-    """
-    Helper function for the case where action costs/heuristic values
-    are not discounted by the probility a task arriving during the
-    execution of an action.
-    """
-    return discount_factor ** len(interruption_probs)
-
-
 def anticipatory_planner(
     initial_state: tuple[State, SceneGraph],
     interruption_problem: InterruptionSearchProblem,

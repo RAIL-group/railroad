@@ -15,7 +15,10 @@ def prepare_gcn_input(
     Helper function for converting data of the form (scene_graph, ev)
     into a form that can be passed as input to a GCN.
     """
-    graph = datum[0].copy()
+    # read-only: node/edge features are extracted below, nothing here mutates the
+    # graph, so no copy is needed (unlike create_child's scene_graph, which does
+    # get mutated and must be copied before being passed in).
+    graph = datum[0]
     expected_value = datum[1]
 
     node_features = compute_ap_node_features(graph.nodes)
