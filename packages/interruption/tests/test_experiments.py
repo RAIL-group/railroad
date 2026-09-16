@@ -2,6 +2,7 @@ import functools
 import random
 
 import pytest
+from interruption.constants import INT_H_WEIGHTS
 import interruption.experiments as experiments_module
 from interruption.experiments import (
     ExperimentConfig,
@@ -256,7 +257,7 @@ def _dummy_config() -> ExperimentConfig:
         (PlannerMode.MYOPIC, get_no_int_discount, False, False, None),
         (PlannerMode.ANTICIPATORY_PLANNING, get_no_int_discount, False, True, None),
         (PlannerMode.INTERRUPTION, get_no_int_prob, True, True, None),
-        (PlannerMode.INTERRUPTION_AP, get_no_int_prob, True, True, (0.9, 1)),
+        (PlannerMode.INTERRUPTION_AP, get_no_int_prob, True, True, INT_H_WEIGHTS),
     ],
 )
 def test_get_planner_config_selects_fields_per_mode(
@@ -355,4 +356,4 @@ def test_get_planner_config_interruption_ap_heuristic_adds_v_ap(mock_gcn):
 
     heuristic_fn = result.heuristic_fn
     assert isinstance(heuristic_fn, functools.partial)
-    assert heuristic_fn(state, goal, actions, 3.0) == pytest.approx(5.0 * 0.9 + 3.0)
+    assert heuristic_fn(state, goal, actions, 3.0) == pytest.approx(5.0 * INT_H_WEIGHTS[0] + 3.0)

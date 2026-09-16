@@ -82,7 +82,7 @@ def test_update_scene_graph_move_updates_robot_position():
     action = Action(
         set(),
         [],
-        f"move robot1 start_loc shelvingunit_{idx.shelvingunit}"
+        f"move robot0 start_loc shelvingunit_{idx.shelvingunit}"
     )
 
     env.update_scene_graph(action)
@@ -98,14 +98,13 @@ def test_update_scene_graph_move_also_updates_held_object_position():
 
     env = _bare_kitchen_env(
         sg,
-        fluents={F("hand-full r1-left"), F(f"holding r1-left spoon_{idx.spoon}")},
-        grippers={"r1-left"},
+        fluents={F("left-hand-full robot0"), F(f"holding-in-left robot0 spoon_{idx.spoon}")},
     )
 
     action = Action(
         set(),
         [],
-        f"move robot1 start_loc shelvingunit_{idx.shelvingunit}"
+        f"move robot0 start_loc shelvingunit_{idx.shelvingunit}"
     )
 
     env.update_scene_graph(action)
@@ -121,7 +120,7 @@ def test_update_scene_graph_pick_moves_edge_from_container_to_robot():
     action = Action(
         set(),
         [],
-        f"pick robot1 r1-left countertop_{idx.countertop} spoon_{idx.spoon}"
+        f"pick-left robot0 countertop_{idx.countertop} spoon_{idx.spoon}"
     )
 
     env.update_scene_graph(action)
@@ -138,7 +137,7 @@ def test_update_scene_graph_pick_updates_object_position_to_robot_position():
     action = Action(
         set(),
         [],
-        f"pick robot1 r1-left countertop_{idx.countertop} spoon_{idx.spoon}"
+        f"pick-left robot0 countertop_{idx.countertop} spoon_{idx.spoon}"
     )
 
     env.update_scene_graph(action)
@@ -156,7 +155,7 @@ def test_update_scene_graph_place_moves_edge_from_robot_to_container():
     action = Action(
         set(),
         [],
-        f"place robot1 r1-left shelvingunit_{idx.shelvingunit} spoon_{idx.spoon}"
+        f"place-left robot0 shelvingunit_{idx.shelvingunit} spoon_{idx.spoon}"
     )
 
     env.update_scene_graph(action)
@@ -177,7 +176,7 @@ def test_update_scene_graph_place_updates_object_position_to_container_position(
     action = Action(
         set(),
         [],
-        f"place robot1 r1-left shelvingunit_{idx.shelvingunit} spoon_{idx.spoon}"
+        f"place-left robot0 shelvingunit_{idx.shelvingunit} spoon_{idx.spoon}"
     )
 
     env.update_scene_graph(action)
@@ -192,7 +191,7 @@ def test_update_scene_graph_pick_then_place_round_trip():
     pick_action = Action(
         set(),
         [],
-        name=f"pick robot1 r1-left countertop_{idx.countertop} spoon_{idx.spoon}"
+        name=f"pick-left robot0 countertop_{idx.countertop} spoon_{idx.spoon}"
     )
 
 
@@ -202,7 +201,7 @@ def test_update_scene_graph_pick_then_place_round_trip():
     place_action = Action(
         set(),
         [],
-        name=f"place robot1 r1-left shelvingunit_{idx.shelvingunit} spoon_{idx.spoon}"
+        name=f"place-left robot0 shelvingunit_{idx.shelvingunit} spoon_{idx.spoon}"
     )
 
     env.update_scene_graph(place_action)
@@ -228,15 +227,14 @@ def test_update_scene_graph_pick_move_place_full_sequence():
     sg, idx = _build_scene_graph()
     env = _bare_kitchen_env(
         sg,
-        fluents={F("hand-full r1-left"), F(f"holding r1-left spoon_{idx.spoon}")},
-        grippers={"r1-left"},
+        fluents={F("left-hand-full robot0"), F(f"holding-in-left robot0 spoon_{idx.spoon}")},
     )
 
     # 1. pick the spoon off the countertop
     pick_action = Action(
         set(),
         [],
-        name=f"pick robot1 r1-left countertop_{idx.countertop} spoon_{idx.spoon}"
+        name=f"pick-left robot0 countertop_{idx.countertop} spoon_{idx.spoon}"
     )
 
     env.update_scene_graph(pick_action)
@@ -263,7 +261,7 @@ def test_update_scene_graph_pick_move_place_full_sequence():
     place_action = Action(
         set(),
         [],
-        name=f"place robot1 r1-left shelvingunit_{idx.shelvingunit} spoon_{idx.spoon}"
+        name=f"place-left robot0 shelvingunit_{idx.shelvingunit} spoon_{idx.spoon}"
     )
 
 
@@ -278,15 +276,13 @@ def test_update_held_objects_position_updates_held_object():
     sg, idx = _build_scene_graph()
     env = _bare_kitchen_env(
         sg,
-        fluents={F("hand-full r1-left"), F(f"holding r1-left spoon_{idx.spoon}")},
-        grippers={"r1-left"},
+        fluents={F("left-hand-full robot0"), F(f"holding-in-left robot0 spoon_{idx.spoon}")},
     )
 
     _update_held_objects_position(
         env.state,
         env.scene._thor.scene_graph,
         idx.robot,
-        env._objects_by_type["gripper"]
     )
 
     assert sg.nodes[idx.spoon]["position"] == sg.nodes[idx.robot]["position"]
@@ -294,13 +290,12 @@ def test_update_held_objects_position_updates_held_object():
 
 def test_update_held_objects_position_ignores_gripper_that_is_not_full():
     sg, idx = _build_scene_graph()
-    env = _bare_kitchen_env(sg, fluents=set(), grippers={"r1-left"})  # no hand-full fluent
+    env = _bare_kitchen_env(sg, fluents=set())  # no hand-full fluent
 
     _update_held_objects_position(
         env.state,
         env.scene._thor.scene_graph,
         idx.robot,
-        env._objects_by_type["gripper"]
     )
 
     assert sg.nodes[idx.spoon]["position"] == (1, 1)  # unchanged, still on countertop
@@ -314,18 +309,16 @@ def test_update_held_objects_position_only_updates_the_held_object():
     env = _bare_kitchen_env(
         sg,
         fluents={
-            F("hand-full r1-left"),
-            F(f"holding r1-left spoon_{idx.spoon}"),
+            F("left-hand-full robot0"),
+            F(f"holding-in-left robot0 spoon_{idx.spoon}"),
             # cup is not held
         },
-        grippers={"r1-left"},
     )
 
     _update_held_objects_position(
         env.state,
         env.scene._thor.scene_graph,
         idx.robot,
-        env._objects_by_type["gripper"]
     )
 
     assert sg.nodes[idx.spoon]["position"] == sg.nodes[idx.robot]["position"]
@@ -340,19 +333,17 @@ def test_update_held_objects_position_handles_multiple_grippers():
     env = _bare_kitchen_env(
         sg,
         fluents={
-            F("hand-full r1-left"),
-            F(f"holding r1-left spoon_{idx.spoon}"),
-            F("hand-full r1-right"),
-            F(f"holding r1-right cup_{cup_idx}"),
+            F("left-hand-full robot0"),
+            F(f"holding-in-left robot0 spoon_{idx.spoon}"),
+            F("right-hand-full robot0"),
+            F(f"holding-in-right robot0 cup_{cup_idx}"),
         },
-        grippers={"r1-left", "r1-right"},
     )
 
     _update_held_objects_position(
         env.state,
         env.scene._thor.scene_graph,
         idx.robot,
-        env._objects_by_type["gripper"]
     )
 
     assert sg.nodes[idx.spoon]["position"] == sg.nodes[idx.robot]["position"]

@@ -343,14 +343,14 @@ def get_updated_scene_graph(
     action_type = action_split[0]
     robot_idx = scene_graph.robot_indices[0]
 
-    if action_type in ["pick", "place"]:
+    if action_type.startswith(("pick", "place")):
         obj_idx = int(action_split[-1].split("_")[-1])
         loc_idx = int(action_split[-2].split("_")[-1])
-        if action_type == "pick":
+        if action_type.startswith("pick"):
             scene_graph.delete_edge(loc_idx, obj_idx)
             scene_graph.add_edge(robot_idx, obj_idx)
             scene_graph.nodes[obj_idx]["position"] = scene_graph.nodes[robot_idx]["position"]
-        else: # action_type == "place"
+        else: # action_type == "place-left or pick-left"
             scene_graph.delete_edge(robot_idx, obj_idx)
             scene_graph.add_edge(loc_idx, obj_idx)
             scene_graph.nodes[obj_idx]["position"] = scene_graph.nodes[loc_idx]["position"]
@@ -358,27 +358,28 @@ def get_updated_scene_graph(
         new_loc_idx = int(action_split[-1].split("_")[-1])
         scene_graph.nodes[robot_idx]["position"] = scene_graph.nodes[new_loc_idx]["position"]
         # when the robot is holding one or more objects
-        gripper_names = {fluent.args[0] for fluent in state.fluents if fluent.name == "hand-full"}
-        _update_held_objects_position(state, scene_graph, robot_idx, gripper_names)
+        _update_held_objects_position(state, scene_graph, robot_idx)
 
 
 def _update_held_objects_position(
-    state: State, scene_graph: SceneGraph, robot_idx: int, grippers: set[str]
+    state: State, scene_graph: SceneGraph, robot_idx: int
 ) -> None:
     """
     Helper function for updating the position attribute of object nodes
     that are currently held by the robot.
     """
-    for gripper in grippers:
-        # check if gripper is holding an object
-        if F(f"hand-full {gripper}") in state.fluents:
-            obj_idxs = scene_graph.object_indices
-            for idx in obj_idxs:
-                obj = (
-                    scene_graph.get_node_name_by_idx(idx) +
-                    f"_{idx}"
-                )
-                if F(f"holding {gripper} {obj}") in state.fluents:
-                    scene_graph.nodes[idx]["position"] = (
-                        scene_graph.nodes[robot_idx]["position"]
-                    )
+    robot_name = scene_graph.get_node_name_by_idx(robot_idx)
+    for idx in scene_graph.object_indices:
+        obj = (
+            scene_graph.get_node_name_by_idx(idx) +
+            f"_{idx}"
+        )
+        robot_holding_object = (
+            F(f"holding-in-left {robot_name} {obj}") in state.fluents or
+            F(f"holding-in-right {robot_name} {obj}") in state.fluents
+        )
+
+        if robot_holding_object:
+            scene_graph.nodes[idx]["position"] = (
+                scene_graph.nodes[robot_idx]["position"]
+            )
