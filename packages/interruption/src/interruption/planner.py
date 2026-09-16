@@ -215,6 +215,12 @@ def astar_search(
     # why ev_cache is exact and heuristic_cache is an approximation
     ev_cache: dict[frozenset[Fluent], float] = {}
     heuristic_cache: dict[frozenset[Fluent], float] = {}
+    # best accumulated_cost seen so far per resulting-state fluents, used below to
+    # skip create_child (and so the ff_heuristic/GCN work inside it) for a candidate
+    # that's provably no better than one already pushed for the same state this
+    # search. This is exact, not an approximation like heuristic_cache: it never
+    # discards a candidate whose true accumulated_cost we haven't actually computed.
+    best_cost: dict[frozenset[Fluent], float] = {}
 
     # the heap stores tuple(traj, heuristic_value, insertion_order)
     frontier = []
@@ -308,7 +314,38 @@ def astar_search(
                     ):
                         ev_cache[key] = ev
 
+            # frontier dedup: with ev_cache now warm for every candidate above (when
+            # a batch fn was available), accumulated_cost can be computed exactly
+            # with no GCN/heuristic call at all -- it's the same get_reward call
+            # create_child makes internally, just evaluated early. Skip create_child
+            # entirely for a candidate that isn't strictly better than the best path
+            # already pushed to the same resulting state this search. When ev_cache
+            # can't be trusted to already hold every candidate's value (no batch fn,
+            # or no scene graph), skip this filtering and fall back to today's
+            # behavior of costing every candidate via create_child.
+            can_precompute_ev = (
+                search_params.interruption_value_fn is None
+                or (
+                    search_params.interruption_value_batch_fn is not None
+                    and expand.scene_graph is not None
+                )
+            )
             for action, next_state, next_state_key, interruption_prob in candidates:
+                if can_precompute_ev:
+                    interrupting_task_ev = (
+                        ev_cache.get(next_state_key, 0)
+                        if search_params.interruption_value_fn is not None
+                        else 0
+                    )
+                    tentative_cost = expand.cost + get_reward(
+                        action,
+                        expand.no_interruption_prob,
+                        interrupting_task_ev * interruption_prob
+                    )
+                    if tentative_cost >= best_cost.get(next_state_key, float("inf")):
+                        continue
+                    best_cost[next_state_key] = tentative_cost
+
                 # construct new trajectory
                 child_traj = expand.create_child(
                     interruption_problem,
