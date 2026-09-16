@@ -67,12 +67,26 @@ class InterruptionTrajectory:
         search_problem: InterruptionSearchProblem,
         planner_params: PlannerConfig,
         action: Action,
-        interruption_prob: float
+        interruption_prob: float,
+        ev_cache: Optional[dict[frozenset[Fluent], float]] = None,
+        heuristic_cache: Optional[dict[frozenset[Fluent], float]] = None,
     ) -> 'InterruptionTrajectory':
         """
         Helper function for creation of trajectories to add to the frontier.
+
+        ev_cache/heuristic_cache, when provided, are keyed by the resulting state's
+        fluents -- the same notion of "same state" astar_search's own `expanded` set
+        already uses. interruption_value_fn is a pure function of those fluents (the
+        scene graph it's evaluated on only ever reflects active fluents, never time or
+        pending effects), so ev_cache is exact. heuristic_fn is NOT exact under this
+        key: ff_heuristic also reads state.time and pending timed effects, so two
+        fluent-identical states reached with different timing can get a heuristic
+        value computed for the other one's timing. This can change search order (and
+        so which valid plan is found first) but never corrupts accumulated_cost, since
+        the heuristic value only ever feeds estimated_future_cost/h_value, not cost.
         """
         next_state, _ = get_next_state(self.state, action)
+        next_state_key = frozenset(next_state.fluents)
 
         # compute accumulated cost (g(traj))
         interrupting_task_ev = 0
@@ -82,7 +96,12 @@ class InterruptionTrajectory:
             get_updated_scene_graph(scene_graph, next_state, action)
         if planner_params.interruption_value_fn is not None:
             assert scene_graph is not None
-            interrupting_task_ev = planner_params.interruption_value_fn(scene_graph)
+            if ev_cache is not None and check_value_cache(next_state_key, ev_cache):
+                interrupting_task_ev = ev_cache[next_state_key]
+            else:
+                interrupting_task_ev = planner_params.interruption_value_fn(scene_graph)
+                if ev_cache is not None:
+                    ev_cache[next_state_key] = interrupting_task_ev
 
         accumulated_cost = self.cost + get_reward(
             action,
@@ -95,9 +114,14 @@ class InterruptionTrajectory:
             undiscounted_future_cost = planner_params.heuristic_fn
         else:
             v_ap = 0 if planner_params.interruption_value_fn is None else interrupting_task_ev
-            undiscounted_future_cost = planner_params.heuristic_fn(
-                next_state, search_problem.goal, search_problem.actions, v_ap
-            )
+            if heuristic_cache is not None and check_value_cache(next_state_key, heuristic_cache):
+                undiscounted_future_cost = heuristic_cache[next_state_key]
+            else:
+                undiscounted_future_cost = planner_params.heuristic_fn(
+                    next_state, search_problem.goal, search_problem.actions, v_ap
+                )
+                if heuristic_cache is not None:
+                    heuristic_cache[next_state_key] = undiscounted_future_cost
 
         if planner_params.discount_by_no_int_prob:
             discount_factor = self.no_interruption_prob * (1-interruption_prob)
@@ -181,8 +205,10 @@ def astar_search(
     """
     Astar algorithm implementation.
     """
-    # TODO - may want to bring back ev caching for task distribution eventually
-    # value_cache: dict[frozenset[Fluent], float] = {}
+    # caches keyed by resulting-state fluents; see create_child's docstring for
+    # why ev_cache is exact and heuristic_cache is an approximation
+    ev_cache: dict[frozenset[Fluent], float] = {}
+    heuristic_cache: dict[frozenset[Fluent], float] = {}
 
     # the heap stores tuple(traj, heuristic_value, insertion_order)
     frontier = []
@@ -249,7 +275,9 @@ def astar_search(
                     interruption_problem,
                     search_params,
                     action,
-                    interruption_prob
+                    interruption_prob,
+                    ev_cache,
+                    heuristic_cache
                 )
                 heapq.heappush(frontier, (child_traj, child_traj.h_value, insertion_order))
                 insertion_order+=1
