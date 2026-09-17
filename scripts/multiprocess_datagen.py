@@ -26,16 +26,18 @@ from interruption.experiments import (
     initialize_experiment_data,
 )
 from interruption.planning_framework import PlannerMode
-
-# from railroad.environment.procthor.environment import ProcTHOREnvironment
 from interruption.constants import NUM_TASKS, PROCTHOR_SEED, FILTER_OBJECTS
 from interruption.learning.data import write_compressed_pickle
 from interruption.planner import astar_search, compute_interruption_value
-from interruption.utilities import RandomVariableType, get_task_arrival_prob, extract_relevant_objects
+from interruption.utilities import (
+    RandomVariableType, get_task_arrival_prob, extract_relevant_objects,
+    filter_procthor_scenes
+)
 from railroad.core import (
     Goal,
     convert_state_to_positive_preconditions,
     get_action_by_name,
+    LiteralGoal
 )
 from railroad.environment.procthor.resources import get_procthor_10k_dir
 from railroad.environment.procthor.scenegraph import SceneGraph
@@ -43,9 +45,23 @@ from railroad.environment.procthor.scenegraph import SceneGraph
 NUM_DATUM = 1000
 DATA_GENERATION_SEED = 37
 REMOVE_DUPLICATES = True
-# H_MULTIPLIER = 1
-H_MULTIPLIER = 5 # for 2-room environment
+H_MULTIPLIER = 1
 WRITE_OUT_INDIVIDUAL_TASK_COSTS = True
+NUM_SCENES = 10
+
+# constants used to filter scenes
+FILTERED_LOCATIONS = {
+    "diningtable", "garbagecan", "chair", "dresser", "bed",
+    "toilet", "countertop", "fridge", "sink", "sofa",
+    "tvstand", "armchair", "sidetable", "shelvingunit", "stool"
+}
+DESIRED_OBJECTS = {
+    "pillow", "bowl", "book", "spraybottle", "remotecontrol",
+    "cellphone", "vase", "pencil", "laptop", "statue",
+    "creditcard", "faucet", "soapbottle", "pen", "toiletpaper",
+    "mug", "candle", "houseplant", "egg", "plate"
+}
+NUM_ROOMS_FILTER = {2}
 
 # Concurrent AI2-THOR Controller instances this machine sustains without
 # throughput degrading (see benchmark_thor_concurrency.py: 8 is the
@@ -70,18 +86,42 @@ def main():
     base, remainder = divmod(NUM_DATUM, num_workers)
     targets = [base + (1 if i < remainder else 0) for i in range(num_workers)]
 
-    # get task distribution from alfred tasks
-    env = construct_procthor_kitchen_environment(PROCTHOR_SEED, remove_duplicates=REMOVE_DUPLICATES)
+    # get task distribution from alfred tasks for a "base" procthor scene
+    assert NUM_SCENES > 0
+    if NUM_SCENES == 1:
+        env = construct_procthor_kitchen_environment(PROCTHOR_SEED, remove_duplicates=REMOVE_DUPLICATES)
+        task_objects = env.scene.objects
+        task_locations = set(env.scene.locations)
+        matching_seeds = [PROCTHOR_SEED]
+    else: # NUM_SCENES > 1
+        assert FILTERED_LOCATIONS is not None
+        assert DESIRED_OBJECTS is not None
+
+        matching_seeds = filter_procthor_scenes(
+            NUM_ROOMS_FILTER, locations=FILTERED_LOCATIONS, objects=DESIRED_OBJECTS
+        )
+
+        env = construct_procthor_kitchen_environment(matching_seeds[0], remove_duplicates=REMOVE_DUPLICATES)
+
+        task_objects = {obj for obj in env.scene.objects if obj.split("_")[0] in DESIRED_OBJECTS}
+        task_locations = {loc for loc in set(env.scene.locations) if loc.split("_")[0] in FILTERED_LOCATIONS}
 
     task_distribution = get_alfred_task_distribution(
-        env.scene.objects,
-        set(env.scene.locations),
+        task_objects,
+        task_locations,
         size=NUM_TASKS,
         one_object_per_taskdist=True
     )
 
     num_objects = len(env.scene.objects)
     num_locations = len(env.scene.locations)
+
+    assert len(matching_seeds) > NUM_SCENES
+    scene_seeds = matching_seeds[:NUM_SCENES]
+
+
+
+
 
     ctx = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=num_workers, mp_context=ctx) as executor:
@@ -105,7 +145,6 @@ def main():
 
     print(f"Data Generation took: {time.perf_counter() - start: .4f} seconds")
     print(f"Wrote {total_written} data points across {num_workers} worker(s)")
-
 
 def _generate_worker_share(
     num_objects: int,
@@ -203,7 +242,6 @@ def _generate_worker_share(
 
     return count
 
-
 def write_out_individual_task_costs(
     scene_seed: int,
     object_randomization_seed: int,
@@ -229,7 +267,6 @@ def write_out_individual_task_costs(
         with open(csv_filepath, 'a', encoding="utf-8") as f:
             f.write(f'{data_filepath}\n')
 
-
 def _task_datum_pickle_path(
     scene_seed: int, object_randomization_seed: int, counter: int, task_idx: int
 ) -> Path:
@@ -237,7 +274,6 @@ def _task_datum_pickle_path(
         Path(get_procthor_10k_dir()) / "pickles" / "task_costs"
         / f"dat_{scene_seed}_{object_randomization_seed}_{counter}_{task_idx}.pgz"
     )
-
 
 def datum_pickle_path(
     scene_seed: int, object_randomization_seed: int, counter: int
@@ -251,7 +287,6 @@ def datum_pickle_path(
         Path(get_procthor_10k_dir()) / "pickles"
         / f"dat_{scene_seed}_{object_randomization_seed}_{counter}.pgz"
     )
-
 
 def write_datum_to_file(
     scene_seed: int,
@@ -277,7 +312,6 @@ def write_datum_to_file(
     csv_filepath = Path(get_procthor_10k_dir()) / csv_name
     with open(csv_filepath, 'a', encoding="utf-8") as f:
         f.write(f'{data_filepath}\n')
-
 
 def _merge_csv_shards(scene_seed: int, num_workers: int, individual_tasks: bool = False) -> None:
     """
@@ -318,7 +352,6 @@ def initialize_experiment_config(
         task_distribution,
         task_arrival_fn
     )
-
 
 def get_randomized_procthor_data(
     goal: Goal,

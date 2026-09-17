@@ -82,11 +82,11 @@ def get_generic_name(obj: str) -> str:
 
 def main():
     # dataset filtering parameters
-    num_rooms = {1, 2, 3}
+    num_rooms = {2}
     room_types = None
     locations = None
     objects = None
-    k = 10
+    k = 100
 
     procthor10k_exploration(num_rooms, room_types, locations, objects, k)
 

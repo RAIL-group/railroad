@@ -20,21 +20,22 @@ MODEL_NAME = "best_model_two_room_model_linux.pt"
 # benchmark run settings
 EXPERIMENT_REPEATS = 5
 TIMEOUT = 1200
+# filter out non-task-relevant objects
+FILTER_OBJECTS = True
+# current task gets augmented by arriving task
+AUGMENT_TASK = True
+# retry upon solver failing to find a plan
+RETRY_WITH_SUBGOALS = True
 
 # number of tasks in the task distribution
 # current: 2-room -> 16; 1-room -> 11
-NUM_TASKS = 16
+NUM_TASKS = 20
 
 # seeds
 # current: 2-room -> 64; 1-room -> 201
-PROCTHOR_SEED = 64
+PROCTHOR_SEED = 5
 # current: 2-room -> 2; 1-room -> 19
 OBJ_PLACEMENT_SEED = 2
-# filter out non-task-relevant objects
-FILTER_OBJECTS = True
-
-AUGMENT_TASK = True
-RETRY_WITH_SUBGOALS = True
 
 EXPECTED_TIME_NEXT_ARRIVAL = [
     calibrate_beta_parameter(0, 5), # No interruptions
@@ -70,5 +71,5 @@ H_MULTIPLIER = 2
 PLANNER_FAILURE_COST = 500
 
 # A.P. related constants
-NUM_AUGMENTED_TASK_SAMPLES = 10
+NUM_AUGMENTED_TASK_SAMPLES = 8
 AP_SEED = 12
