@@ -82,16 +82,17 @@ def get_generic_name(obj: str) -> str:
 
 def main():
     # dataset filtering parameters
-    num_rooms = {2}
-    room_types = None
+    num_rooms = {1}
+    room_types = {"LivingRoom"}
     locations = None
     objects = None
-    k = 100
+    k = 20
 
     procthor10k_exploration(num_rooms, room_types, locations, objects, k)
 
-    # # explore the first k 1-room kitchen scenes
+    # explore the first k 1-room kitchen scenes
     # seeds = set(filter_procthor_scenes(num_rooms, room_types, locations, objects)[:k])
+    # print(seeds)
     # explore_seeds(seeds)
 
 

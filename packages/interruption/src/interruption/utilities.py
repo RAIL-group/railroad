@@ -1,9 +1,10 @@
 import json
 import math
 import random
+from collections import Counter
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, Sequence
+from typing import Any, Sequence, Optional
 
 from railroad.core import (
     Action,
@@ -291,6 +292,81 @@ def _check_scene_objects(containers: list[dict[str, Any]], objects: set[str] | N
     }
     return objects.issubset(scene_objects)
 
+def find_shared_obj_loc_scenes(
+    num_scenes: int,
+    num_rooms: Optional[set[int]],
+    num_objects: int,
+    num_locations: int
+) -> Optional[tuple[set[str], set[str]]]:
+    """
+    Helper function for finding a provided number of scenes with
+    a set of overlapping objects and a set of overlapping locations.
+    """
+    # load in scene representations of ProcTHOR-10k
+    data_dir = get_procthor_10k_dir()
+    with open(data_dir / 'data.jsonl', 'r', encoding="utf-8") as f:
+        json_list = list(f)
+
+    # data structures
+    object_counts = Counter()
+    # location_counts = Counter()
+    scene_object_sets = {}
+    # scene_location_sets = {}
+
+    # populate data structures with data from procthor-10k scenes
+    for seed, scene_json in enumerate(json_list):
+        scene = json.loads(scene_json)
+        rooms = scene["rooms"]
+        locations = {get_generic_name(container["id"]) for container in scene["objects"]}
+        objects = {
+            get_generic_name(child["id"])
+            for container in scene["objects"]
+            for child in container.get("children", [])
+        }
+
+        filter_match = (
+            _check_num_rooms(rooms, num_rooms) and
+            len(locations) >= num_locations and 
+            len(objects) >= num_objects
+        )
+
+        if filter_match:
+            scene_object_sets[seed] = objects
+            object_counts.update(objects)
+            # location_counts.update(locations)
+
+    # greedily remove scenes that contain the object
+    for idx, (obj, count) in enumerate(object_counts.most_common()):
+        temp = {
+            seed: object_set
+            for seed, object_set in scene_object_sets.items()
+            if obj not in object_set
+        }
+        removed_scenes = len(scene_object_sets) - len(temp)
+
+        # found n objects in a subset of matching scenes
+        if idx == num_objects-1:
+            break
+
+        # exhausted objects that occur in n matching scenes
+        if count < num_scenes:
+            return None
+
+        if removed_scenes < num_scenes or (
+            num_objects != -1 and idx >= num_objects
+        ):
+            break
+
+    # if you wanted just the objects that are 
+
+    # verify something... maybe???
+
+    
+
+
+
+    
+    return
 
 def extract_relevant_objects(task_distribution: Sequence[Goal]) -> list[str]:
     """
