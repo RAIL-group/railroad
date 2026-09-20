@@ -19,6 +19,12 @@ DEFAULT_RESOURCES_BASE = Path(
     os.environ.get("PROCTHOR_RESOURCES_DIR", Path.cwd() / "resources")
 )
 
+# Opt-in directory of scene-identity remaps (scene_{seed}.json). ThorInterface
+# only consults a remap when this is set, so a leftover file from an earlier
+# run can never silently change what an unrelated caller loads for a seed.
+# Read at call time rather than import time, since callers set it in-process.
+REMAP_DIR_ENV_VAR = "PROCTHOR_REMAP_DIR"
+
 DEFAULT_PROCTHOR_10K_SUBDIR = os.environ.get("PROCTHOR_DATA_SUBDIR", "procthor-10k")
 DEFAULT_SBERT_SUBDIR = os.environ.get("PROCTHOR_SBERT_SUBDIR", "sentence_transformers")
 DEFAULT_AI2THOR_SUBDIR = os.environ.get("PROCTHOR_AI2THOR_SUBDIR", "ai2thor")

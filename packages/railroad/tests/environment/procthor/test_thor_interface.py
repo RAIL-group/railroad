@@ -3,6 +3,7 @@
 import pytest
 import numpy as np
 
+from railroad.environment.procthor.resources import REMAP_DIR_ENV_VAR
 from railroad.environment.procthor.thor_interface import ThorInterface
 
 
@@ -116,3 +117,42 @@ def test_deduplicate_containers_leaves_childless_containers_untouched():
 
     painting = next(c for c in ti.containers if c["id"] == "Painting|1")
     assert "children" not in painting
+
+
+def test_remap_lookup_is_disabled_when_env_var_unset(monkeypatch):
+    """With no opt-in, no remap is ever consulted - so a leftover file from an
+    earlier run can't silently change what an unrelated caller loads."""
+    monkeypatch.delenv(REMAP_DIR_ENV_VAR, raising=False)
+    ti = _bare_thor_interface()
+    ti.seed = 5
+
+    assert ti._remapped_scene_path() is None
+    assert ti._check_for_remapped_scene() is False
+
+
+def test_remap_lookup_only_reads_the_opted_in_directory(monkeypatch, tmp_path):
+    (tmp_path / "scene_5.json").write_text('{"marker": "remapped"}')
+    monkeypatch.setenv(REMAP_DIR_ENV_VAR, str(tmp_path))
+
+    ti = _bare_thor_interface()
+    ti.seed = 5
+    assert ti._check_for_remapped_scene() is True
+    assert ti._load_remapped_scene() == {"marker": "remapped"}
+
+    # keyed by seed within the directory: a different seed has no remap
+    other = _bare_thor_interface()
+    other.seed = 6
+    assert other._check_for_remapped_scene() is False
+
+
+def test_remap_lookup_ignores_a_different_run_directory(monkeypatch, tmp_path):
+    """Two runs use two directories; a run only ever sees its own remaps."""
+    run_a, run_b = tmp_path / "run_a", tmp_path / "run_b"
+    run_a.mkdir()
+    run_b.mkdir()
+    (run_a / "scene_5.json").write_text('{"run": "a"}')
+
+    monkeypatch.setenv(REMAP_DIR_ENV_VAR, str(run_b))
+    ti = _bare_thor_interface()
+    ti.seed = 5
+    assert ti._check_for_remapped_scene() is False

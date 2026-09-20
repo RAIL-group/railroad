@@ -1,5 +1,6 @@
 from collections import defaultdict
 from typing import Sequence, Optional
+import copy
 import random
 import numpy as np
 from railroad import operators
@@ -18,13 +19,45 @@ from .operators import (
     construct_place_with_right_hand_operator,
 )
 from .alfred_task_generator import get_task_list
-from .utilities import get_updated_scene_graph
+from .utilities import (
+    get_object_container_slots,
+    get_updated_scene_graph,
+    permute_object_containers,
+)
 
 
 class KitchenProcTHOREnvironment(ProcTHOREnvironment):
     """
     Kitchen ProcTHOR environment with relevant internal operator construction.
     """
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        # the scene's original container occupancy, before any action has
+        # moved an object - what randomize_object_locations resets to
+        self._original_container_slots = get_object_container_slots(self.scene.scene_graph)
+
+    def fork(self) -> "KitchenProcTHOREnvironment":
+        """
+        An independent copy of this environment in its current state, to be
+        advanced without touching this one. Everything a step mutates
+        (fluents, time, skills, RNG, scene graph, ground-truth maps) is
+        copied. The per-scene data no step touches is shared: the scene's
+        cached data, occupancy grid, path caches and the action grounding
+        (which depends only on the object universe and static facts). That
+        sharing is what makes a fork ~1 ms instead of ~60 ms.
+        """
+        thor = self.scene._thor
+        shared = [
+            thor.cached_data, thor.g2p_map, thor.occupancy_grid, thor.scene,
+            getattr(self, "_cost_grid_cache", None),  # created lazily on first path query
+            self._grounding_cache,
+        ]
+        clone = copy.deepcopy(self, {id(obj): obj for obj in shared})
+        # deepcopy leaves the copied operators bound to *this* environment's
+        # methods; rebind them, or every fork would keep its ancestors alive
+        clone._operators = clone.define_operators()
+        return clone
+
     def define_operators(self) -> list[Operator]:
         move_op = operators.construct_move_operator(self.estimate_move_time)
         left_pick_op = construct_pick_with_left_hand_operator(10.0)
@@ -41,6 +74,57 @@ class KitchenProcTHOREnvironment(ProcTHOREnvironment):
         Note: this method assumes a single-robot scenario.
         """
         get_updated_scene_graph(self.scene.scene_graph, self.state, action)
+
+    def randomize_object_locations(self, rng: random.Random) -> None:
+        """
+        Re-deals the objects over the scene's original container occupancy
+        (see permute_object_containers), so a scene whose tasks have all been
+        completed is reset to a fresh arrangement with the original
+        per-container counts. Keeps every record of placement consistent: the
+        scene graph, the `at obj loc` fluents, and both ground-truth maps (the
+        scene's and this environment's own copy), which are rebuilt from the
+        graph. Objects the robot holds are part of the shuffle (see
+        permute_object_containers). Requires no skill in flight.
+        """
+        if self.state.upcoming_effects:
+            raise RuntimeError("cannot randomize object locations while skills are in flight")
+
+        graph = self.scene.scene_graph
+        moves = permute_object_containers(graph, self._original_container_slots, rng)
+        robot_idx = graph.robot_indices[0]
+        # the environment's name for the robot, which fluents use - not the
+        # graph node's name, which need not match it
+        (robot,) = self.objects_by_type["robot"]
+
+        def name(idx: int) -> str:
+            return f"{graph.get_node_name_by_idx(idx)}_{idx}"
+
+        # The same number of objects stay held, so no hand empties or fills: a
+        # hand that lets go of one object takes the object that was grasped
+        # instead (the two lists are the same length).
+        released = sorted(o for o, (old, _) in moves.items() if old == robot_idx)
+        grasped = sorted(o for o, (_, new) in moves.items() if new == robot_idx)
+        for released_idx, grasped_idx in zip(released, grasped):
+            hand = (
+                "left" if F(f"holding-in-left {robot} {name(released_idx)}") in self.fluents
+                else "right"
+            )
+            self.fluents.remove(F(f"holding-in-{hand} {robot} {name(released_idx)}"))
+            self.fluents.add(F(f"holding-in-{hand} {robot} {name(grasped_idx)}"))
+
+        for obj_idx, (old_idx, new_idx) in moves.items():
+            if old_idx != robot_idx:
+                self.fluents.discard(F(f"at {name(obj_idx)} {name(old_idx)}"))
+            if new_idx != robot_idx:
+                self.fluents.add(F(f"at {name(obj_idx)} {name(new_idx)}"))
+
+        # The ground-truth maps are fixed at construction and never follow
+        # pick/place, so they are stale by now: rebuild them from the graph,
+        # which is the live record, rather than patching them.
+        self.scene.refresh_object_locations()
+        self._objects_at_locations = {
+            loc: set(objs) for loc, objs in self.scene.object_locations.items()
+        }
 
 
     def apply_time_penalty(self, time: float) -> None:

@@ -18,7 +18,7 @@ from railroad.environment.types import TopDownView
 from railroad.navigation import pathing
 from .scenegraph import SceneGraph
 from . import utils
-from .resources import get_procthor_10k_dir
+from .resources import REMAP_DIR_ENV_VAR, get_procthor_10k_dir
 
 IGNORE_CONTAINERS = [
     'baseballbat', 'basketball', 'boots', 'desklamp', 'painting',
@@ -130,6 +130,8 @@ class ThorInterface:
                 with scene_generation_lock():
                     self._randomize_object_locations(preprocess)
                     self._save_randomized_scene()
+        elif self._check_for_remapped_scene():
+            self.scene = self._load_remapped_scene()
         else:
             self.scene = self._load_scene()
         self.rooms = self.scene['rooms']
@@ -413,6 +415,45 @@ class ThorInterface:
         filename = f"scene_{self.seed}_{self.object_seed}.json"
         with open(save_dir / filename, 'w') as f:
             json.dump(self.scene, f)
+
+    def _remapped_scene_path(self) -> Path | None:
+        """
+        Path to a scene-identity remap of this seed, or None when remaps
+        aren't enabled - a deliberate offline replacement of this scene's
+        objects/locations with a caller-chosen vocabulary (e.g. to give a
+        batch of scenes a shared object/location vocabulary for training
+        data generation).
+
+        Remaps are opt-in: they're only looked up inside the directory named
+        by the REMAP_DIR_ENV_VAR environment variable, never at a fixed
+        location. A fixed location made the lookup implicit global state - a
+        file left behind by one run silently changed what every other caller
+        loaded for that seed. Callers that want a remap point the variable at
+        a directory they own (one per generation run), and spawned worker
+        processes inherit it.
+
+        Distinct from the object_seed-keyed randomized_scenes cache above: a
+        remap is a property of the scene itself, independent of any
+        particular object-placement randomization, so it's keyed by seed
+        alone within that directory and only consulted when object_seed is
+        None - it never interacts with the live-simulator randomization path.
+        """
+        remap_dir = os.environ.get(REMAP_DIR_ENV_VAR)
+        if not remap_dir:
+            return None
+        return Path(remap_dir) / f'scene_{self.seed}.json'
+
+    def _check_for_remapped_scene(self) -> bool:
+        """Helper function to check if a scene-identity remap is enabled and exists for this seed."""
+        path = self._remapped_scene_path()
+        return path is not None and path.exists()
+
+    def _load_remapped_scene(self) -> Dict[str, Any]:
+        """Load this seed's scene-identity remap."""
+        path = self._remapped_scene_path()
+        assert path is not None, f"{REMAP_DIR_ENV_VAR} is not set"
+        with open(path, 'r') as f:
+            return json.load(f)
 
     def _load_scene(self) -> Dict[str, Any]:
         """Load scene from ProcTHOR-10k dataset."""

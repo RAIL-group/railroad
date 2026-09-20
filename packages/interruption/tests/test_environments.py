@@ -1,9 +1,15 @@
 import random
 import types
+from collections import Counter
+
 import pytest
 
 from interruption.environments import KitchenProcTHOREnvironment, get_alfred_task_distribution
-from interruption.utilities import _update_held_objects_position
+from interruption.utilities import (
+    _update_held_objects_position,
+    get_object_container_slots,
+    permute_object_containers,
+)
 from railroad.core import Fluent as F, Action
 from railroad.environment.procthor.scene import ProcTHORScene
 from railroad.environment.procthor.scenegraph import SceneGraph
@@ -283,6 +289,7 @@ def test_update_held_objects_position_updates_held_object():
         env.state,
         env.scene._thor.scene_graph,
         idx.robot,
+        "robot0",
     )
 
     assert sg.nodes[idx.spoon]["position"] == sg.nodes[idx.robot]["position"]
@@ -296,6 +303,7 @@ def test_update_held_objects_position_ignores_gripper_that_is_not_full():
         env.state,
         env.scene._thor.scene_graph,
         idx.robot,
+        "robot0",
     )
 
     assert sg.nodes[idx.spoon]["position"] == (1, 1)  # unchanged, still on countertop
@@ -319,6 +327,7 @@ def test_update_held_objects_position_only_updates_the_held_object():
         env.state,
         env.scene._thor.scene_graph,
         idx.robot,
+        "robot0",
     )
 
     assert sg.nodes[idx.spoon]["position"] == sg.nodes[idx.robot]["position"]
@@ -344,10 +353,39 @@ def test_update_held_objects_position_handles_multiple_grippers():
         env.state,
         env.scene._thor.scene_graph,
         idx.robot,
+        "robot0",
     )
 
     assert sg.nodes[idx.spoon]["position"] == sg.nodes[idx.robot]["position"]
     assert sg.nodes[cup_idx]["position"] == sg.nodes[idx.robot]["position"]
+
+
+def test_held_object_follows_the_robot_when_the_graph_names_it_differently_than_the_env():
+    """In the real scene the graph's robot node is "robot" while the environment
+    and its fluents call the robot "robot1"; the held object must follow anyway."""
+    sg, idx = _build_scene_graph()
+    sg.nodes[idx.robot]["name"] = "robot"
+    sg.delete_edge(idx.countertop, idx.spoon)
+    sg.add_edge(idx.robot, idx.spoon)  # held
+    env = _bare_kitchen_env(
+        sg,
+        fluents={F("left-hand-full robot1"), F(f"holding-in-left robot1 spoon_{idx.spoon}")},
+    )
+
+    env.update_scene_graph(Action(set(), [], f"move robot1 start_loc shelvingunit_{idx.shelvingunit}"))
+
+    assert sg.nodes[idx.robot]["position"] == (5, 5)
+    assert sg.nodes[idx.spoon]["position"] == (5, 5)
+
+
+def test_update_held_objects_position_uses_the_given_robot_name_not_the_graph_nodes():
+    sg, idx = _build_scene_graph()
+    sg.nodes[idx.robot]["name"] = "robot"
+    env = _bare_kitchen_env(sg, fluents={F(f"holding-in-right robot1 spoon_{idx.spoon}")})
+
+    _update_held_objects_position(env.state, sg, idx.robot, "robot1")
+
+    assert sg.nodes[idx.spoon]["position"] == sg.nodes[idx.robot]["position"]
 
 
 @pytest.mark.parametrize(
@@ -410,3 +448,253 @@ def test_get_alfred_task_distribution_size_matching(objects, locations):
     )
 
     assert len(baseline) == len(probs)
+
+
+def _multi_object_graph():
+    """
+    Test scene graph: three containers, three objects.
+    countertop: spoon, fork -- shelvingunit: cup -- fridge: (empty)
+    """
+    sg = SceneGraph()
+    apt_idx = sg.add_node(_node("apt", APARTMENT, (0, 0)))
+    robot_idx = sg.add_node(_node("robot0", ROBOT, (0, 0)))
+    sg.add_edge(apt_idx, robot_idx)
+    room_idx = sg.add_node(_node("kitchen", ROOM, (2, 2)))
+    sg.add_edge(apt_idx, room_idx)
+    container = {}
+    for name, position in [("countertop", (1, 1)), ("shelvingunit", (5, 5)), ("fridge", (9, 9))]:
+        container[name] = sg.add_node(_node(name, CONTAINER, position))
+        sg.add_edge(room_idx, container[name])
+    obj = {}
+    for name, in_container in [
+        ("spoon", "countertop"), ("fork", "countertop"), ("cup", "shelvingunit")
+    ]:
+        position = sg.nodes[container[in_container]]["position"]
+        obj[name] = sg.add_node(_node(name, OBJECT, position))
+        sg.add_edge(container[in_container], obj[name])
+    return sg, types.SimpleNamespace(robot=robot_idx, room=room_idx, container=container, obj=obj)
+
+
+def _occupancy(sg: SceneGraph) -> Counter:
+    return Counter(sg.get_parent_node_idx(i) for i in sg.object_indices)
+
+
+def _move_object(sg: SceneGraph, obj_idx: int, new_parent: int) -> None:
+    parent = sg.get_parent_node_idx(obj_idx)
+    assert parent is not None
+    sg.delete_edge(parent, obj_idx)
+    sg.add_edge(new_parent, obj_idx)
+
+
+def test_get_object_container_slots_is_the_sorted_occupancy():
+    sg, idx = _multi_object_graph()
+    c = idx.container
+    assert get_object_container_slots(sg) == sorted(
+        [c["countertop"], c["countertop"], c["shelvingunit"]]
+    )
+
+
+def test_get_object_container_slots_skips_held_objects():
+    sg, idx = _multi_object_graph()
+    _move_object(sg, idx.obj["spoon"], idx.robot)
+    c = idx.container
+    assert get_object_container_slots(sg) == sorted([c["countertop"], c["shelvingunit"]])
+
+
+def test_permute_object_containers_restores_original_counts_after_drift():
+    sg, idx = _multi_object_graph()
+    slots = get_object_container_slots(sg)
+    for obj_idx in idx.obj.values():  # every task done: all objects piled into the fridge
+        _move_object(sg, obj_idx, idx.container["fridge"])
+
+    permute_object_containers(sg, slots, random.Random(0))
+
+    assert _occupancy(sg) == Counter(slots)
+
+
+@pytest.mark.parametrize("seed", range(10))
+def test_permute_object_containers_always_moves_something(seed):
+    sg, _ = _multi_object_graph()
+    slots = get_object_container_slots(sg)
+    before = _occupancy(sg)
+
+    moves = permute_object_containers(sg, slots, random.Random(seed))
+
+    assert moves
+    assert _occupancy(sg) == before  # same slots as the current arrangement: counts unchanged
+
+
+def test_permute_object_containers_reports_exactly_the_moved_objects_and_updates_graph():
+    sg, idx = _multi_object_graph()
+    slots = get_object_container_slots(sg)
+    for obj_idx in idx.obj.values():
+        _move_object(sg, obj_idx, idx.container["fridge"])
+    parents_before = {i: sg.get_parent_node_idx(i) for i in sg.object_indices}
+
+    moves = permute_object_containers(sg, slots, random.Random(3))
+
+    for obj_idx in sg.object_indices:
+        parent = sg.get_parent_node_idx(obj_idx)
+        if obj_idx in moves:
+            assert moves[obj_idx] == (parents_before[obj_idx], parent)
+            assert parent != parents_before[obj_idx]
+        else:
+            assert parent == parents_before[obj_idx]
+        assert sg.nodes[obj_idx]["position"] == sg.nodes[parent]["position"]
+
+
+def test_permute_object_containers_is_deterministic_for_a_seed():
+    sg_a, _ = _multi_object_graph()
+    sg_b, _ = _multi_object_graph()
+    slots = get_object_container_slots(sg_a)
+
+    permute_object_containers(sg_a, slots, random.Random(11))
+    permute_object_containers(sg_b, slots, random.Random(11))
+
+    assert sorted(sg_a.edges) == sorted(sg_b.edges)
+
+
+@pytest.mark.parametrize("case", ["orphan", "too_few_slots", "non_container_slot", "single_slot"])
+def test_permute_object_containers_raises_without_mutating(case):
+    sg, idx = _multi_object_graph()
+    c = idx.container
+    slots = get_object_container_slots(sg)
+    if case == "orphan":  # neither in a container nor held
+        sg.delete_edge(c["countertop"], idx.obj["spoon"])
+    elif case == "too_few_slots":
+        slots = slots[:-1]
+    elif case == "non_container_slot":
+        slots = [idx.room, c["countertop"], c["shelvingunit"]]
+    else:
+        slots = [c["fridge"]] * 3
+    edges, positions = list(sg.edges), {i: n["position"] for i, n in sg.nodes.items()}
+
+    with pytest.raises(ValueError):
+        permute_object_containers(sg, slots, random.Random(0))
+
+    assert sg.edges == edges
+    assert {i: n["position"] for i, n in sg.nodes.items()} == positions
+
+
+def test_randomize_object_locations_keeps_every_placement_record_consistent():
+    sg, idx = _multi_object_graph()
+
+    def name(i: int) -> str:
+        return f"{sg.get_node_name_by_idx(i)}_{i}"
+
+    def by_location() -> dict[str, set[str]]:
+        result: dict[str, set[str]] = {}
+        for obj_idx in sg.object_indices:
+            result.setdefault(name(sg.get_parent_node_idx(obj_idx)), set()).add(name(obj_idx))
+        return result
+
+    def fluents_for(locations: dict[str, set[str]]) -> set[F]:
+        return {
+            F(f"at {obj} {loc}") for loc, objs in locations.items() for obj in objs
+        } | {F("free robot0")}
+
+    slots = get_object_container_slots(sg)
+    env = _bare_kitchen_env(sg, fluents=fluents_for(by_location()))
+    env._objects_by_type["robot"] = {"robot0"}
+    env.scene._object_locations = by_location()
+    env._objects_at_locations = by_location()
+    env._original_container_slots = slots
+    # drift as pick/place would: the graph and the fluents follow, but the
+    # ground-truth maps stay as constructed (so they are stale when we shuffle)
+    for obj_idx in idx.obj.values():
+        _move_object(sg, obj_idx, idx.container["fridge"])
+    env.fluents.clear()
+    env.fluents.update(fluents_for(by_location()))
+    assert env.scene.object_locations != by_location()
+
+    env.randomize_object_locations(random.Random(5))
+
+    expected = by_location()
+    assert env.fluents == fluents_for(expected)
+    assert env.scene.object_locations == expected
+    assert env.objects_at_locations == expected
+    assert _occupancy(sg) == Counter(env._original_container_slots)
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_permute_object_containers_keeps_the_number_of_held_objects(seed):
+    sg, idx = _multi_object_graph()
+    c = idx.container
+    slots = get_object_container_slots(sg)  # countertop x2, shelvingunit
+    _move_object(sg, idx.obj["spoon"], idx.robot)  # robot holds the spoon
+    sg.nodes[idx.obj["spoon"]]["position"] = sg.nodes[idx.robot]["position"]
+
+    moves = permute_object_containers(sg, slots, random.Random(seed))
+
+    held = [i for i in sg.object_indices if sg.get_parent_node_idx(i) == idx.robot]
+    assert len(held) == 1
+    in_containers = _occupancy(sg)
+    in_containers.pop(idx.robot)
+    assert sum(in_containers.values()) == 2
+    assert all(in_containers[k] <= Counter(slots)[k] for k in in_containers)  # a slot was traded for the hand
+    for obj_idx in sg.object_indices:
+        parent = sg.get_parent_node_idx(obj_idx)
+        assert sg.nodes[obj_idx]["position"] == sg.nodes[parent]["position"]
+    assert moves  # always moves something
+
+
+def test_permute_object_containers_can_change_which_object_is_held():
+    held_across_seeds = set()
+    for seed in range(20):
+        sg, idx = _multi_object_graph()
+        slots = get_object_container_slots(sg)
+        _move_object(sg, idx.obj["spoon"], idx.robot)
+        permute_object_containers(sg, slots, random.Random(seed))
+        held_across_seeds |= {i for i in sg.object_indices if sg.get_parent_node_idx(i) == idx.robot}
+    assert len(held_across_seeds) > 1
+
+
+@pytest.mark.parametrize("seed", range(6))
+def test_randomize_object_locations_keeps_hands_and_fluents_consistent_while_holding(seed):
+    sg, idx = _multi_object_graph()
+    slots = get_object_container_slots(sg)
+
+    def name(i: int) -> str:
+        return f"{sg.get_node_name_by_idx(i)}_{i}"
+
+    def by_location() -> dict[str, set[str]]:
+        result: dict[str, set[str]] = {}
+        for obj_idx in sg.object_indices:
+            parent = sg.get_parent_node_idx(obj_idx)
+            if parent != idx.robot:
+                result.setdefault(name(parent), set()).add(name(obj_idx))
+        return result
+
+    spoon, fork, cup = idx.obj["spoon"], idx.obj["fork"], idx.obj["cup"]
+    at_start = {F(f"at {name(cup)} {name(idx.container['shelvingunit'])}")}
+    env = _bare_kitchen_env(sg, fluents={F("free robot0")})
+    env._objects_by_type["robot"] = {"robot0"}
+    env.scene._object_locations = by_location()
+    env._objects_at_locations = by_location()
+    env._original_container_slots = slots
+    # pick both onto the robot, as actions would: edges, and the fluents
+    for held_idx in (spoon, fork):
+        _move_object(sg, held_idx, idx.robot)
+    env.fluents.update(
+        at_start | {
+            F(f"holding-in-left robot0 {name(spoon)}"), F(f"holding-in-right robot0 {name(fork)}"),
+            F("left-hand-full robot0"), F("right-hand-full robot0"),
+        }
+    )
+
+    env.randomize_object_locations(random.Random(seed))
+
+    held = [i for i in sg.object_indices if sg.get_parent_node_idx(i) == idx.robot]
+    assert len(held) == 2
+    a, b = held
+    assert {f for f in env.fluents if f.name.startswith("holding-in")} in (
+        {F(f"holding-in-left robot0 {name(a)}"), F(f"holding-in-right robot0 {name(b)}")},
+        {F(f"holding-in-left robot0 {name(b)}"), F(f"holding-in-right robot0 {name(a)}")},
+    )
+    assert {f for f in env.fluents if f.name == "at"} == {
+        F(f"at {name(o)} {loc}")
+        for loc, objs in by_location().items() for o in sg.object_indices if name(o) in objs
+    }
+    assert {F("free robot0"), F("left-hand-full robot0"), F("right-hand-full robot0")} <= env.fluents
+    assert env.scene.object_locations == by_location()
+    assert env.objects_at_locations == by_location()

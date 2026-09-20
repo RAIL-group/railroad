@@ -100,6 +100,12 @@ class ProcTHORScene:
             objects.add(f"{name}_{idx}")
         return objects
 
+    def refresh_object_locations(self) -> None:
+        """Rebuild the ground-truth object locations from the scene graph's
+        current state. The map is otherwise fixed at construction, so callers
+        that move objects (the graph is the live record) must call this."""
+        self._object_locations = self._build_object_locations()
+
     def _build_object_locations(self) -> Dict[str, Set[str]]:
         """Build mapping of location -> objects at that location."""
         result: Dict[str, Set[str]] = {}

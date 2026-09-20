@@ -120,7 +120,7 @@ def get_task_list(available_locations, available_objects):
     task_list = sorted(task_list)
     final_list = list()
     for task in task_list:
-        if round(get_task_probability(task), 3) >= 0.1:
+        if round(get_task_probability(task), 3) > 0:
             final_list.append(task)
     # print(get_task_probability(task_list[0]))
     # print(get_task_probability(task_list[1]))

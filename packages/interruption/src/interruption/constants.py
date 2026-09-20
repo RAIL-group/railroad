@@ -29,7 +29,7 @@ RETRY_WITH_SUBGOALS = True
 
 # number of tasks in the task distribution
 # current: 2-room -> 16; 1-room -> 11
-NUM_TASKS = 20
+NUM_TASKS = 11
 
 # seeds
 # current: 2-room -> 64; 1-room -> 201
@@ -64,7 +64,7 @@ INT_H_WEIGHTS = (1, 1)
 AUGMENT_DISCOUNT_FACTOR = 1
 
 # heuristic multiplier (larger -> more greedy search)
-H_MULTIPLIER = 2
+H_MULTIPLIER = 1
 
 ## task failure cost
 # current: 2-room (seed = 64) -> 375; 1-room (seed = 201) -> 500
