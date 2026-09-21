@@ -9,16 +9,16 @@ from interruption.learning.models.gcn import AnticipateGCN
 from railroad.environment.procthor.resources import get_procthor_10k_dir, DEFAULT_RESOURCES_BASE
 
 # dataset specifications
-TRAIN_DATASET_PATH = get_procthor_10k_dir() / "procthor_data_64.csv"
-TEST_DATASET_PATH = None
+TRAIN_DATASET_PATH = get_procthor_10k_dir() / "procthor_data_[1-5]*_*.csv"
+TEST_DATASET_PATH = get_procthor_10k_dir() / "procthor_data_[6-7]*_*.csv"
 
 # if supplying only 1 dataset, specify how it should be split for train and test datasets
 TRAIN_TEST_SPLIT = 1
 
 # specify learning hyperparameters
 HYPERPARAMETERS = {
-    "num_epochs": 500,
-    "learning_rate": 0.005,
+    "num_epochs": 1000,
+    "learning_rate": 0.001,
     "batch_size": 8,
     "lr_decay_factor": 0.5,
     "early_stopping_num_epochs": 100,
@@ -26,7 +26,7 @@ HYPERPARAMETERS = {
 }
 
 # output directories specifications
-EXPERIMENT_NAME = "two_room_model_linux"
+EXPERIMENT_NAME = f"one_room_multi_scene_lr={HYPERPARAMETERS["learning_rate"]}"
 LOG_DIRECTORY = DEFAULT_RESOURCES_BASE / f"run_logs/{EXPERIMENT_NAME}"
 OUTPUT_MODEL_DIRECTORY = DEFAULT_RESOURCES_BASE / "models"
 
@@ -119,8 +119,8 @@ def training_loop(
 
         print(f"Epoch {epoch:05d} | avg train loss {train_loss:.4f}| avg val loss {val_loss:.4f}")
 
-        # if val_loss < lowest_validation_loss:
-        if train_loss < lowest_training_loss:
+        if val_loss < lowest_validation_loss:
+        # if train_loss < lowest_training_loss:
             lowest_training_loss = train_loss
             lowest_validation_loss = val_loss
             early_stopping_counter = 0
@@ -226,8 +226,16 @@ def _get_train_test_dataloaders() -> tuple[DataLoader, DataLoader]:
     if TEST_DATASET_PATH is None:
         # split the full dataset
         train_dataset, test_dataset = split_dataset(dataset, TRAIN_TEST_SPLIT)
-        print("Number of training graphs:", len(train_dataset))
-        print("Number of testing graphs:", len(test_dataset))
+    else:
+        train_dataset = dataset
+
+        test_dataset = CSVPickleDataset(
+            os.fspath(TEST_DATASET_PATH),
+            preprocess_function=prepare_gcn_input
+        )
+
+    print("Number of training graphs:", len(train_dataset))
+    print("Number of testing graphs:", len(test_dataset))
 
     train_loader = DataLoader(
         train_dataset, # type: ignore

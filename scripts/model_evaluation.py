@@ -14,7 +14,11 @@ from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE, get_
 # constants
 MODEL_PATH = DEFAULT_RESOURCES_BASE / "models"
 # dataset specifications
-TRAIN_DATASET_PATH = get_procthor_10k_dir() / "procthor_data_64.csv"
+TRAIN_DATASET_PATH = get_procthor_10k_dir() / "procthor_data_[1-5]*_*.csv"
+TEST_DATASET_PATH = get_procthor_10k_dir() / "procthor_data_[6-7]*_*.csv"
+
+DATASET = "train"
+
 
 def main():
     """
@@ -22,11 +26,11 @@ def main():
     the learned model ev costs and the actual ev costs for the training data.
     """
     # user specifications
-    model_name = "best_model_two_room_model_linux.pt"
+    model_name = "best_model_one_room_multi_scene_lr=0.001.pt"
 
     # load dataset
     dataset = CSVPickleDataset(
-        os.fspath(TRAIN_DATASET_PATH),
+        os.fspath(TRAIN_DATASET_PATH if DATASET == "train" else TEST_DATASET_PATH),
         preprocess_function=None
     )
 
@@ -43,13 +47,13 @@ def main():
         actual.append(actual_ev)
         predicted_ev = model(scene_graph)
         assert predicted_ev != -1
-        predicted.append(predicted_ev.item())
+        predicted.append(predicted_ev)
 
     # generate plot
     plot_predicted_vs_actual(actual, predicted)
     plt.tight_layout()
     # plt.show()
-    plt.savefig(f"{model_name.split(".")[0]}_evaluation.jpeg", format="jpeg", dpi=300)
+    plt.savefig(f"{"train"if DATASET == "train" else "val"}_{model_name.split(".")[0]}_evaluation.jpeg", format="jpeg", dpi=300)
     plt.close()
 
 

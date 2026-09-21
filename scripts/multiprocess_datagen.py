@@ -49,7 +49,7 @@ from railroad.core import (
 from railroad.environment.procthor.resources import REMAP_DIR_ENV_VAR, get_procthor_10k_dir
 from railroad.environment.procthor.scenegraph import SceneGraph
 
-NUM_DATUM = 500  # datums to generate for each scene seed
+NUM_DATUM = 800  # datums to generate for each scene seed
 DATA_GENERATION_SEED = 37
 REMOVE_DUPLICATES = True
 H_MULTIPLIER = 1
@@ -58,7 +58,7 @@ WRITE_OUT_INDIVIDUAL_TASK_COSTS = True
 # Concurrent AI2-THOR Controller instances this machine sustains without
 # throughput degrading (see benchmark_thor_concurrency.py: 8 is the
 # peak-throughput point, 16+ regresses, 24 produced an outright hang).
-MAX_WORKERS = 2
+MAX_WORKERS = 8
 
 # Folded into the per-(scene, worker, count) random.seed() used for task
 # sampling, so different scenes/workers don't draw identical task
