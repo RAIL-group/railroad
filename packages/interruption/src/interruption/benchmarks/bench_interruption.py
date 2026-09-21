@@ -13,20 +13,20 @@ from railroad.bench import BenchmarkCase, benchmark
 from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 
 from ..constants import (
-    MODEL_NAME, EXPERIMENT_REPEATS, AUGMENT_TASK, EXPECTED_TIME_NEXT_ARRIVAL, NUM_TASKS,
-    PROCTHOR_SEED, OBJ_PLACEMENT_SEED, FILTER_OBJECTS, TIMEOUT, RETRY_WITH_SUBGOALS
+    MODEL_NAME, EXPERIMENT_REPEATS, AUGMENT_TASK, EXPECTED_TIME_NEXT_ARRIVAL,
+    PROCTHOR_SEED, OBJ_PLACEMENT_SEED, FILTER_OBJECTS, TIMEOUT, RETRY_WITH_SUBGOALS,
+    REMAPPED_SCENES_HASH
 )
 from ..environments import (
-    construct_procthor_kitchen_environment,
-    get_alfred_task_distribution,
     get_example_procthor_goal,
+    get_scene_task_distribution,
     # get_example_procthor_task_distribution,
 )
 from ..experiments import ExperimentConfig, ExperimentSeeds, run_experiment
 from ..planning_framework import PlannerMode
 from ..utilities import (
     RandomVariableType, randomize_task_distribution_order, get_task_arrival_prob,
-    extract_relevant_objects
+    extract_relevant_objects, use_remapped_scenes
 )
 
 
@@ -60,12 +60,20 @@ def _setup_experiment_config(
     Helper function for setting up the experimental config for both the 
     baseline and interruption-based planner benchmark experiments.
     """
+    # evaluate on the scenes and task distribution of a data-generation run.
+    # Set per case, in the worker process, before any environment is built.
+    remap_dir = (
+        use_remapped_scenes(REMAPPED_SCENES_HASH, case.params["procthor_seed"])
+        if REMAPPED_SCENES_HASH else None
+    )
     seeds = ExperimentSeeds(
         case.params["procthor_seed"],
         case.params["interruption_seed"] + case.repeat_idx,
         75, # keep fixed for right now
         # case.repeat_idx,
-        object_placement_seed=OBJ_PLACEMENT_SEED
+        # an object seed makes ThorInterface skip the remap, so a remapped
+        # scene keeps the object placement it was generated with
+        object_placement_seed=None if remap_dir else OBJ_PLACEMENT_SEED
     )
     task_arrival_fn = partial(
         get_task_arrival_prob,
@@ -75,15 +83,7 @@ def _setup_experiment_config(
     )
 
     # get task distribution from alfred dataset used during training
-    env = construct_procthor_kitchen_environment(
-        seeds.procthor_seed, remove_duplicates=True
-    )
-    task_distribution = get_alfred_task_distribution(
-        env.scene.objects,
-        set(env.scene.locations),
-        size=NUM_TASKS,
-        one_object_per_taskdist=True
-    )
+    task_distribution = get_scene_task_distribution(seeds.procthor_seed, remap_dir)
     current_goal = get_example_procthor_goal()
     if case.params["randomize_task_sequence"]:
         current_goal, task_distribution = randomize_task_distribution_order(

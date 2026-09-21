@@ -31,11 +31,28 @@ RETRY_WITH_SUBGOALS = True
 # current: 2-room -> 16; 1-room -> 11
 NUM_TASKS = 11
 
+# scene filters for multi-scene data generation (see filter_procthor_scenes;
+# "num_scenes" only bounds how many matching scenes get remapped, it is not a
+# filter criterion). Shared by data generation and the experiments that must
+# rebuild the same task distribution (get_task_distribution_from_remap_dir).
+NUM_ROOMS_FILTER = {1}
+ONE_ROOM_FILTER = {
+    "num_scenes": 22, "num_pickupable_objects": 11, "num_valid_locations": 6,
+    "room_types": {"Kitchen"},
+}
+TWO_ROOM_FILTER = {"num_scenes": 10, "num_pickupable_objects": 20, "num_valid_locations": 10}
+
+# evaluate on the scenes (and task distribution) of a multi-scene data-generation
+# run: the name of its remapped_scenes/<hash>/ directory, which datagen prints
+# as "Remapped scenes for this run". None -> the plain PROCTHOR_SEED scene.
+# When set, PROCTHOR_SEED must be one of that directory's scenes.
+REMAPPED_SCENES_HASH: str | None = None
+
 # seeds
 # current: 2-room -> 64; 1-room -> 201
 PROCTHOR_SEED = 5
 # current: 2-room -> 2; 1-room -> 19
-OBJ_PLACEMENT_SEED = 2
+OBJ_PLACEMENT_SEED = None
 
 EXPECTED_TIME_NEXT_ARRIVAL = [
     calibrate_beta_parameter(0, 5), # No interruptions

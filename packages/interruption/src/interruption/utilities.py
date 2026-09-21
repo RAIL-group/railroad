@@ -1,11 +1,13 @@
 import copy
 import json
 import math
+import os
 import random
 from collections import Counter, defaultdict
 from collections.abc import Callable
 from enum import Enum
 from functools import partial
+from pathlib import Path
 from typing import Any, Sequence, Optional
 
 from shapely.geometry import Point, Polygon
@@ -25,7 +27,7 @@ from railroad.core import (
     transition,
 )
 from railroad.core import Fluent as F
-from railroad.environment.procthor.resources import get_procthor_10k_dir
+from railroad.environment.procthor.resources import REMAP_DIR_ENV_VAR, get_procthor_10k_dir
 from railroad.environment.procthor.scenegraph import SceneGraph
 from railroad.environment.procthor.thor_interface import IGNORE_CONTAINERS
 from railroad.environment.procthor.utils import get_generic_name
@@ -708,6 +710,124 @@ def _relabel(entity: dict[str, Any], target_category: str) -> None:
     """
     _, *rest = entity["id"].split("|")
     entity["id"] = "|".join([target_category.capitalize(), *rest])
+
+
+def _scene_categories(scene: dict[str, Any]) -> tuple[set[str], set[str]]:
+    """
+    (pickupable object categories, location categories) of a ProcTHOR scene
+    JSON, by the same definitions find_exemplar_scene uses.
+    """
+    obj_categories = {
+        get_generic_name(child["id"])
+        for container in scene["objects"]
+        for child in container.get("children", [])
+        if get_generic_name(child["id"]) in PICKUPABLE_OBJECT_TYPES
+    }
+    loc_categories = {
+        get_generic_name(container["id"]) for container in scene["objects"]
+        if get_generic_name(container["id"]) not in IGNORE_CONTAINERS
+    }
+    return obj_categories, loc_categories
+
+
+def use_remapped_scenes(remap_hash: str, procthor_seed: int) -> Path:
+    """
+    Points REMAP_DIR_ENV_VAR at remapped_scenes/<remap_hash>/ for the rest of
+    this process, so environments built for scenes in it load the remapped
+    scene rather than the raw one. Returns the directory.
+
+    Raises if procthor_seed isn't one of the directory's scenes: it would
+    silently load the raw scene, whose objects and locations the remapped
+    task distribution doesn't match. Environments must also be built with
+    object_seed=None - ThorInterface bypasses remaps for an object seed.
+    """
+    remap_dir = get_procthor_10k_dir() / "remapped_scenes" / remap_hash
+    seeds = sorted(int(path.stem.removeprefix("scene_")) for path in remap_dir.glob("scene_*.json"))
+    if not seeds:
+        raise FileNotFoundError(f"no scene_<seed>.json files in {remap_dir}")
+    if procthor_seed not in seeds:
+        raise ValueError(f"scene {procthor_seed} isn't in {remap_dir}; its scenes are {seeds}")
+    os.environ[REMAP_DIR_ENV_VAR] = str(remap_dir)
+    return remap_dir
+
+
+def get_task_distribution_from_remap_dir(
+    remap_dir: Path | str,
+    scene_filter: dict[str, int | set[str]],
+    num_rooms: set[int] | None,
+    num_tasks: int | None = None,
+) -> tuple[Sequence[Goal], list[float]]:
+    """
+    Rebuilds the task distribution a multi-scene data-generation run used, so
+    experiments evaluate on the same tasks the model was trained on.
+
+    Mirrors multiprocess_datagen._select_scenes: filters the dataset, takes the
+    exemplar's object/location categories from find_exemplar_scene, and feeds
+    them to get_alfred_task_distribution as main does. scene_filter and
+    num_rooms are the run's own (constants.ONE_ROOM_FILTER / NUM_ROOMS_FILTER
+    for the one-room run), including "num_scenes".
+
+    remap_dir (remapped_scenes/<hash>/, holding scene_<seed>.json) is not the
+    source of the categories - it can't be. The exemplar is the lowest seed of
+    the whole filtered pool, which usually lies outside the first num_scenes
+    scenes that get remapped, and remapping only *adds* target categories, so
+    the remapped scenes keep extra ones and no longer expose the exemplar's
+    exact vocabulary. It is instead a check that this filter is the one that
+    produced the directory: the scene seeds must be exactly the first
+    num_scenes of the filtered pool, and every scene must contain every
+    category. A mismatch means the filter (or the directory) is wrong.
+
+    num_tasks defaults to NUM_TASKS.
+    """
+    # deferred: constants and environments both import this module
+    from .constants import NUM_TASKS
+    from .environments import get_alfred_task_distribution
+
+    remap_dir = Path(remap_dir)
+    remapped_scenes = {
+        int(path.stem.removeprefix("scene_")): json.loads(path.read_text(encoding="utf-8"))
+        for path in sorted(remap_dir.glob("scene_*.json"))
+    }
+    if not remapped_scenes:
+        raise FileNotFoundError(f"no scene_<seed>.json files in {remap_dir}")
+
+    num_scenes = scene_filter["num_scenes"]
+    filter_kwargs = {k: v for k, v in scene_filter.items() if k != "num_scenes"}
+    filtered_scenes = filter_procthor_scenes(num_rooms=num_rooms, **filter_kwargs)
+
+    assert (
+        isinstance(scene_filter["num_pickupable_objects"], int) and
+        isinstance(scene_filter["num_valid_locations"], int) and
+        isinstance(num_scenes, int)
+    )
+    _, target_objects, target_locations = find_exemplar_scene(
+        filtered_scenes,
+        num_objects=scene_filter["num_pickupable_objects"],
+        num_locations=scene_filter["num_valid_locations"],
+    )
+
+    expected_seeds = set(list(filtered_scenes)[:num_scenes])
+    if set(remapped_scenes) != expected_seeds:
+        raise ValueError(
+            f"{remap_dir} holds scenes {sorted(remapped_scenes)}, but this filter selects "
+            f"{sorted(expected_seeds)}: it isn't the filter that produced this directory"
+        )
+    for seed, scene in remapped_scenes.items():
+        objects, locations = _scene_categories(scene)
+        if not (target_objects <= objects and target_locations <= locations):
+            raise ValueError(
+                f"scene {seed} in {remap_dir} lacks categories of this filter's exemplar "
+                f"(objects {sorted(target_objects - objects)}, "
+                f"locations {sorted(target_locations - locations)}): "
+                "it isn't the filter that produced this directory"
+            )
+
+    return get_alfred_task_distribution(
+        target_objects,
+        target_locations,
+        size=NUM_TASKS if num_tasks is None else num_tasks,
+        one_object_per_taskdist=True,
+    )
 
 
 def extract_relevant_objects(task_distribution: Sequence[Goal]) -> list[str]:

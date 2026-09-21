@@ -19,7 +19,9 @@ def procthor10k_exploration(
     the counts of the inclusion of locations/objects in those scenes, and the
     top k locations and objects.
     """
-    seeds = filter_procthor_scenes(num_rooms, room_types, locations, objects)
+    seeds = filter_procthor_scenes(
+        num_rooms=num_rooms, room_types=room_types, locations=locations, objects=objects
+    )
 
     # print out the number of seeds that match the filter
     print(f"Number of seeds that matched filter: {len(seeds)}")
@@ -81,19 +83,20 @@ def get_generic_name(obj: str) -> str:
 
 
 def main():
-    # dataset filtering parameters
-    num_rooms = {1}
-    room_types = {"LivingRoom"}
-    locations = None
-    objects = None
-    k = 20
+    filter_procthor_scenes(num_rooms={1})
+    # # dataset filtering parameters
+    # num_rooms = {1}
+    # room_types = {"LivingRoom"}
+    # locations = None
+    # objects = None
+    # k = 20
 
-    procthor10k_exploration(num_rooms, room_types, locations, objects, k)
+    # procthor10k_exploration(num_rooms, room_types, locations, objects, k)
 
-    # explore the first k 1-room kitchen scenes
-    # seeds = set(filter_procthor_scenes(num_rooms, room_types, locations, objects)[:k])
-    # print(seeds)
-    # explore_seeds(seeds)
+    # # explore the first k 1-room kitchen scenes
+    # # seeds = set(filter_procthor_scenes(num_rooms, room_types, locations, objects)[:k])
+    # # print(seeds)
+    # # explore_seeds(seeds)
 
 
 if __name__ == "__main__":

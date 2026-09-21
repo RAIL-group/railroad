@@ -2,6 +2,7 @@ from collections import defaultdict
 from typing import Sequence, Optional
 import copy
 import random
+from pathlib import Path
 import numpy as np
 from railroad import operators
 from railroad.core import Action, Goal, LiteralGoal, Operator, State
@@ -19,8 +20,10 @@ from .operators import (
     construct_place_with_right_hand_operator,
 )
 from .alfred_task_generator import get_task_list
+from .constants import NUM_ROOMS_FILTER, NUM_TASKS, ONE_ROOM_FILTER
 from .utilities import (
     get_object_container_slots,
+    get_task_distribution_from_remap_dir,
     get_updated_scene_graph,
     permute_object_containers,
 )
@@ -333,6 +336,28 @@ def get_alfred_task_distribution(
     probs = [1/len(goals)] * len(goals)
 
     return goals, probs
+
+
+def get_scene_task_distribution(
+    procthor_seed: int,
+    remap_dir: Path | None = None,
+    scene_filter: dict[str, int | set[str]] = ONE_ROOM_FILTER,
+) -> tuple[Sequence[Goal], list[float]]:
+    """
+    The task distribution to evaluate a ProcTHOR scene on. With remap_dir (see
+    use_remapped_scenes), the one the multi-scene data-generation run that made
+    it used, given the scene_filter that run used. Otherwise built from the
+    plain scene's own objects and locations.
+    """
+    if remap_dir is not None:
+        return get_task_distribution_from_remap_dir(remap_dir, scene_filter, NUM_ROOMS_FILTER)
+    env = construct_procthor_kitchen_environment(procthor_seed, remove_duplicates=True)
+    return get_alfred_task_distribution(
+        env.scene.objects,
+        set(env.scene.locations),
+        size=NUM_TASKS,
+        one_object_per_taskdist=True,
+    )
 
 
 def get_example_procthor_goal() -> Goal:

@@ -1,5 +1,6 @@
 import json
 import math
+import os
 
 import pytest
 from interruption.utilities import (
@@ -8,11 +9,15 @@ from interruption.utilities import (
     _check_num_rooms,
     _check_scene_room_types,
     filter_procthor_scenes,
+    find_exemplar_scene,
     find_shared_obj_loc_scenes,
     get_action_cost,
     get_augmented_task_dist,
     get_next_state,
     get_task_arrival_prob,
+    get_task_distribution_from_remap_dir,
+    remap_scene_objects_and_locations,
+    use_remapped_scenes,
 )
 from railroad.core import Fluent, State, get_next_actions
 from railroad.environment.procthor.resources import get_procthor_10k_dir
@@ -277,3 +282,86 @@ def test_remap_is_identical_across_processes_with_different_hash_seeds():
         outputs.add(result.stdout.strip())
 
     assert len(outputs) == 1
+
+
+_DATAGEN_FILTER = {
+    "num_scenes": 5, "num_pickupable_objects": 11, "num_valid_locations": 6,
+    "room_types": {"Kitchen"},
+}
+
+
+@pytest.fixture(scope="module")
+def datagen_remap():
+    """
+    The selection multiprocess_datagen does for a multi-scene run (small
+    ONE_ROOM_FILTER-shaped filter): the exemplar's categories, and the first
+    num_scenes matching scenes remapped onto them.
+    """
+    num_scenes = _DATAGEN_FILTER["num_scenes"]
+    assert isinstance(num_scenes, int)
+    filter_kwargs = {k: v for k, v in _DATAGEN_FILTER.items() if k != "num_scenes"}
+    scenes = filter_procthor_scenes(num_rooms={1}, **filter_kwargs)
+    _, target_objects, target_locations = find_exemplar_scene(scenes, 11, 6)
+    remapped = remap_scene_objects_and_locations(
+        {seed: scenes[seed] for seed in list(scenes)[:num_scenes]},
+        target_objects, target_locations, seed=37,
+    )
+    return target_objects, target_locations, remapped
+
+
+def _write_remap_dir(remap_dir, remapped_scenes):
+    remap_dir.mkdir(parents=True)
+    for seed, scene in remapped_scenes.items():
+        (remap_dir / f"scene_{seed}.json").write_text(json.dumps(scene), encoding="utf-8")
+
+
+def test_task_distribution_from_remap_dir_matches_datagen(datagen_remap, tmp_path):
+    from interruption.constants import NUM_TASKS
+    from interruption.environments import get_alfred_task_distribution
+
+    target_objects, target_locations, remapped = datagen_remap
+    _write_remap_dir(tmp_path / "hash", remapped)
+
+    expected = get_alfred_task_distribution(
+        target_objects, target_locations, size=NUM_TASKS, one_object_per_taskdist=True
+    )
+    goals, probs = get_task_distribution_from_remap_dir(tmp_path / "hash", _DATAGEN_FILTER, {1})
+
+    assert [str(g) for g in goals] == [str(g) for g in expected[0]]
+    assert probs == expected[1]
+
+
+def test_task_distribution_from_remap_dir_rejects_other_filter(datagen_remap, tmp_path):
+    # a different num_scenes selects a different set of seeds than the directory holds
+    _write_remap_dir(tmp_path / "hash", datagen_remap[2])
+    with pytest.raises(ValueError, match="isn't the filter that produced"):
+        get_task_distribution_from_remap_dir(
+            tmp_path / "hash", {**_DATAGEN_FILTER, "num_scenes": 4}, {1}
+        )
+
+
+def test_task_distribution_from_remap_dir_empty_dir(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        get_task_distribution_from_remap_dir(tmp_path, _DATAGEN_FILTER, {1})
+
+
+def test_use_remapped_scenes(tmp_path, monkeypatch):
+    import interruption.utilities as utilities
+    from railroad.environment.procthor.resources import REMAP_DIR_ENV_VAR
+
+    monkeypatch.setattr(utilities, "get_procthor_10k_dir", lambda: tmp_path)
+    monkeypatch.delenv(REMAP_DIR_ENV_VAR, raising=False)
+    remap_dir = tmp_path / "remapped_scenes" / "abc"
+    remap_dir.mkdir(parents=True)
+    for seed in (7, 12):
+        (remap_dir / f"scene_{seed}.json").write_text("{}", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=r"scene 5 isn't in .*\[7, 12\]"):
+        use_remapped_scenes("abc", 5)
+    assert REMAP_DIR_ENV_VAR not in os.environ  # a rejected seed leaves the environment alone
+
+    assert use_remapped_scenes("abc", 12) == remap_dir
+    assert os.environ[REMAP_DIR_ENV_VAR] == str(remap_dir)
+
+    with pytest.raises(FileNotFoundError):
+        use_remapped_scenes("missing", 7)

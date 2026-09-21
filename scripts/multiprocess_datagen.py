@@ -31,7 +31,9 @@ from interruption.experiments import (
     initialize_experiment_data,
 )
 from interruption.planning_framework import PlannerMode
-from interruption.constants import NUM_TASKS, PROCTHOR_SEED, FILTER_OBJECTS
+from interruption.constants import (
+    NUM_TASKS, PROCTHOR_SEED, FILTER_OBJECTS, NUM_ROOMS_FILTER, ONE_ROOM_FILTER, TWO_ROOM_FILTER
+)
 from interruption.learning.data import write_compressed_pickle
 from interruption.planner import astar_search, compute_interruption_value
 from interruption.utilities import (
@@ -52,15 +54,6 @@ DATA_GENERATION_SEED = 37
 REMOVE_DUPLICATES = True
 H_MULTIPLIER = 1
 WRITE_OUT_INDIVIDUAL_TASK_COSTS = True
-ONE_ROOM_FILTER = {
-    "num_scenes": 22, "num_pickupable_objects": 11, "num_valid_locations": 6,
-    "room_types": {"Kitchen"},
-}
-TWO_ROOM_FILTER = {"num_scenes": 10, "num_pickupable_objects": 20, "num_valid_locations": 10}
-
-
-# constants used to filter scenes
-NUM_ROOMS_FILTER = {1}
 
 # Concurrent AI2-THOR Controller instances this machine sustains without
 # throughput degrading (see benchmark_thor_concurrency.py: 8 is the
