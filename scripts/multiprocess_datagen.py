@@ -1,7 +1,7 @@
 """
 Data-generation script for expected value over interrupting task distribution for
 ProcTHOR environments.
-NOTE: this file contains a fix for the objects_seed misrecording issue that is not currently 
+NOTE: this file contains a fix for the objects_seed misrecording issue that is not currently
 updated in datagen.py
 """
 from functools import partial
@@ -42,6 +42,7 @@ from interruption.utilities import (
 )
 from railroad.core import (
     Action,
+    Fluent,
     Goal,
     convert_state_to_positive_preconditions,
     get_action_by_name,
@@ -49,7 +50,7 @@ from railroad.core import (
 from railroad.environment.procthor.resources import REMAP_DIR_ENV_VAR, get_procthor_10k_dir
 from railroad.environment.procthor.scenegraph import SceneGraph
 
-NUM_DATUM = 800  # datums to generate for each scene seed
+NUM_DATUM = 8  # datums to generate for each scene seed
 DATA_GENERATION_SEED = 37
 REMOVE_DUPLICATES = True
 H_MULTIPLIER = 1
@@ -72,17 +73,9 @@ SEED_STRIDE = 100_000
 MAX_RESHUFFLES_PER_VISIT = 5
 
 
-def _stable_hash(obj) -> int:
-    """
-    40-bit int from a canonical-JSON sha256. Unlike hash(), which is
-    randomized per process for strings, this is identical across processes
-    and machines - which is what lets a datum key double as a restart-safety
-    key.
-    """
-    payload = json.dumps(obj, sort_keys=True).encode("utf-8")
-    return int(hashlib.sha256(payload).hexdigest()[:10], 16)
-
-
+# --------------------------------------------------------------------------- #
+# Data types shared by the pipeline stages below
+# --------------------------------------------------------------------------- #
 @dataclass(frozen=True)
 class SceneSelection:
     matching_seeds: list[int]
@@ -91,6 +84,22 @@ class SceneSelection:
     remapped_scenes: dict[int, dict]  # empty when the plain scene is used as-is
 
 
+@dataclass
+class _SceneRun:
+    """A worker's persistent environment for one scene, plus its RNG bookkeeping."""
+    config: ExperimentConfig
+    data: ExperimentData
+    attempt: int = 0       # goal samples drawn so far; never reused, so no sample repeats
+    num_shuffles: int = 0  # reshuffles so far; seeds the next one
+    # whether the datum for the environment's current state was already written
+    # by the previous visit's walk (which passed through it), so it isn't
+    # written twice
+    start_state_recorded: bool = False
+
+
+# --------------------------------------------------------------------------- #
+# Pipeline (in the order main() drives them)
+# --------------------------------------------------------------------------- #
 def main():
     """
     Data-generation entrypoint: select scenes -> build the task distribution ->
@@ -111,6 +120,9 @@ def main():
         one_object_per_taskdist=True,
     )
     scene_keys = _compute_scene_keys(selection)
+    run_key = _run_key(scene_keys)
+    _write_scene_selection(selection, run_key)
+    _write_task_distribution(task_distribution, run_key)
     relevant_objects = extract_relevant_objects(task_distribution[0]) if FILTER_OBJECTS else None
 
     # NUM_DATUM is per scene: each worker takes a share of it for every scene
@@ -214,6 +226,55 @@ def _compute_scene_keys(selection: SceneSelection) -> dict[int, int]:
     }
 
 
+def _run_key(scene_keys: dict[int, int]) -> int:
+    """
+    Stable identifier for this run's set of scenes (see _stable_hash): the
+    same scene_keys always produce the same run_key, so it names the remap
+    directory and the run-level metadata files (scene selection, task
+    distribution) consistently across a run.
+    """
+    return _stable_hash(sorted(scene_keys.items()))
+
+
+def _write_scene_selection(selection: SceneSelection, run_key: int) -> None:
+    """
+    Persists the scenes chosen for this run - matching_seeds, task_objects,
+    task_locations - to disk before any worker is spawned, so the selection
+    that produced a run's task distribution is inspectable independent of the
+    generated data.
+    """
+    path = _run_metadata_path("scene_selection", run_key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "matching_seeds": selection.matching_seeds,
+        "task_objects": sorted(selection.task_objects),
+        "task_locations": sorted(selection.task_locations),
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+    print(f"Scene selection for this run: {path}")
+
+
+def _write_task_distribution(
+    task_distribution: tuple[Sequence[Goal], list[float]], run_key: int
+) -> None:
+    """
+    Persists this run's task distribution (goals + sampling weights) to disk
+    before any worker is spawned, so the tasks a run sampled from are
+    inspectable independent of the generated data.
+    """
+    path = _run_metadata_path("task_distribution", run_key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    goals, weights = task_distribution
+    payload = {
+        "goals": [_goal_to_dict(goal) for goal in goals],
+        "weights": list(weights),
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+    print(f"Task distribution for this run: {path}")
+
+
 @contextmanager
 def _remaps_enabled(remapped_scenes: dict[int, dict], scene_keys: dict[int, int]):
     """
@@ -226,10 +287,7 @@ def _remaps_enabled(remapped_scenes: dict[int, dict], scene_keys: dict[int, int]
     if not remapped_scenes:
         yield
         return
-    remap_dir = (
-        Path(get_procthor_10k_dir()) / "remapped_scenes"
-        / str(_stable_hash(sorted(scene_keys.items())))
-    )
+    remap_dir = Path(get_procthor_10k_dir()) / "remapped_scenes" / str(_run_key(scene_keys))
     for seed, remapped_scene in remapped_scenes.items():
         _write_remapped_scene_cache(remap_dir, seed, remapped_scene)
     os.environ[REMAP_DIR_ENV_VAR] = str(remap_dir)
@@ -238,11 +296,6 @@ def _remaps_enabled(remapped_scenes: dict[int, dict], scene_keys: dict[int, int]
         yield
     finally:
         os.environ.pop(REMAP_DIR_ENV_VAR, None)
-
-
-def _split_evenly(total: int, parts: int) -> list[int]:
-    base, remainder = divmod(total, parts)
-    return [base + (1 if i < remainder else 0) for i in range(parts)]
 
 
 def _run_workers(
@@ -270,157 +323,6 @@ def _run_workers(
             for worker_id, target in enumerate(targets_per_scene)
         ]
         return sum(future.result() for future in futures if future.result() != -1)
-
-
-def _merge_all_csvs(scene_keys: dict[int, int], num_workers: int) -> None:
-    for seed, key in scene_keys.items():
-        _merge_csv_shards(seed, key, num_workers)
-        if WRITE_OUT_INDIVIDUAL_TASK_COSTS:
-            _merge_csv_shards(seed, key, num_workers, True)
-        print(f"Index CSV for scene {seed}: {_csv_path('procthor_data', seed, key)}")
-
-
-def _write_remapped_scene_cache(remap_dir: Path, scene_seed: int, remapped_scene: dict) -> None:
-    """
-    Persists a remapped scene into remap_dir, the directory this run points
-    REMAP_DIR_ENV_VAR at, so construct_procthor_kitchen_environment
-    (seed=scene_seed, object_seed=None) loads it instead of the raw
-    ProcTHOR-10k scene.
-    """
-    remap_dir.mkdir(parents=True, exist_ok=True)
-    with open(remap_dir / f"scene_{scene_seed}.json", "w", encoding="utf-8") as f:
-        json.dump(remapped_scene, f)
-
-
-@dataclass
-class _SceneRun:
-    """A worker's persistent environment for one scene, plus its RNG bookkeeping."""
-    config: ExperimentConfig
-    data: ExperimentData
-    attempt: int = 0       # goal samples drawn so far; never reused, so no sample repeats
-    num_shuffles: int = 0  # reshuffles so far; seeds the next one
-    # whether the datum for the environment's current state was already written
-    # by the previous visit's walk (which passed through it), so it isn't
-    # written twice
-    start_state_recorded: bool = False
-
-
-def _open_scene_run(
-    scene_seed: int,
-    task_distribution: tuple[Sequence[Goal], list[float]],
-    relevant_objects: list[str] | None,
-) -> _SceneRun:
-    config = initialize_experiment_config(
-        get_example_procthor_goal(), task_distribution, scene_seed, None
-    )
-    data = initialize_experiment_data(
-        config, PlannerMode.MYOPIC, relevant_objects, REMOVE_DUPLICATES,
-        h_multiplier=H_MULTIPLIER,
-    )
-    return _SceneRun(config, data)
-
-
-def _sample_plan(run: _SceneRun, scene_seed: int, worker_id: int) -> list[Action] | None:
-    """
-    Samples a task from the goals not yet satisfied in the environment's
-    current state and plans it from that state. Each failure narrows the
-    candidate pool, so this terminates. None if every goal is already
-    satisfied (a saturated scene) or none can be planned.
-    """
-    data = run.data
-    assert run.config.interrupting_task_dist is not None
-    assert data.search_problem.interrupting_task_dist is not None
-
-    # scene_goals are the scene-mapped goals before negative-fluent
-    # conversion, so they evaluate against the raw env state; they are
-    # index-parallel with the converted goals used for search
-    scene_goals, _ = run.config.interrupting_task_dist
-    candidate_indices = [
-        i for i, goal in enumerate(scene_goals) if not goal.evaluate(data.env.state.fluents)
-    ]
-    interrupting_goals, _ = data.search_problem.interrupting_task_dist
-    initial_state = convert_state_to_positive_preconditions(
-        data.env.state, data.neg_to_pos_mapping
-    )
-    while candidate_indices:
-        random.seed(
-            DATA_GENERATION_SEED + scene_seed * SEED_STRIDE + worker_id * SEED_STRIDE
-            + run.attempt
-        )
-        run.attempt += 1
-        chosen_index = random.choice(candidate_indices)
-        data.search_problem.goal = interrupting_goals[chosen_index]
-        plan, _, success, _ = astar_search(
-            (initial_state, None), data.search_problem, data.planner_parameters
-        )
-        if success and plan:
-            return plan
-        candidate_indices.remove(chosen_index)
-    return None
-
-
-def _plan_next_task(run: _SceneRun, scene_seed: int, worker_id: int) -> list[Action] | None:
-    """
-    A plan for a task sampled from the environment's current state. When every
-    task is already satisfied, or none can be planned, re-deals the objects
-    over the scene's original container occupancy (held objects included) and
-    tries again, up to MAX_RESHUFFLES_PER_VISIT times. The shuffle is seeded by
-    (scene, worker, shuffle count), so replaying a worker from a fresh
-    environment reproduces the same trajectory.
-    """
-    for reshuffle in range(MAX_RESHUFFLES_PER_VISIT + 1):
-        if reshuffle:
-            rng = random.Random(
-                _stable_hash([DATA_GENERATION_SEED, scene_seed, worker_id, run.num_shuffles])
-            )
-            shuffled = run.data.env.fork()
-            shuffled.randomize_object_locations(rng)
-            run.data.env = shuffled
-            run.start_state_recorded = False  # a state nothing has passed through yet
-            run.num_shuffles += 1
-        plan = _sample_plan(run, scene_seed, worker_id)
-        if plan is not None:
-            return plan
-    return None
-
-
-def _record_datum(
-    env: KitchenProcTHOREnvironment,
-    data: ExperimentData,
-    task_distribution: tuple[Sequence[Goal], list[float]],
-    scene_seed: int,
-    scene_key: int,
-    worker_id: int,
-    file_counter: int,
-) -> bool:
-    """
-    Writes the datum for `env`'s current state (its scene graph and expected
-    value over the task distribution). True if the datum now exists on disk:
-    written here, or already there from a previous run (restart-safety).
-    False if some task can't be solved from this state, so no datum exists.
-    """
-    if datum_pickle_path(scene_seed, scene_key, file_counter).exists():
-        return True
-    assert data.search_problem.interrupting_task_dist is not None
-    expected_value, task_costs = compute_interruption_value(
-        convert_state_to_positive_preconditions(env.state, data.neg_to_pos_mapping),
-        data.search_problem.actions,
-        data.search_problem.interrupting_task_dist,
-        data.planner_parameters.heuristic_fn,
-    )
-    if expected_value == -1:
-        return False
-    write_datum_to_file(
-        scene_seed, scene_key, (env.scene.scene_graph, expected_value), file_counter,
-        csv_suffix=worker_id,
-    )
-    if WRITE_OUT_INDIVIDUAL_TASK_COSTS:
-        assert task_costs is not None
-        write_out_individual_task_costs(
-            scene_seed, scene_key, env.scene.scene_graph,
-            (task_distribution[0], task_costs), file_counter, csv_suffix=worker_id,
-        )
-    return True
 
 
 def _generate_worker_share(
@@ -509,101 +411,193 @@ def _generate_worker_share(
     return sum(counts.values())
 
 
-def write_out_individual_task_costs(
+def _record_datum(
+    env: KitchenProcTHOREnvironment,
+    data: ExperimentData,
+    task_distribution: tuple[Sequence[Goal], list[float]],
     scene_seed: int,
-    object_randomization_seed: int,
-    scene_graph: SceneGraph,
-    tasks_with_costs: tuple[Sequence[Goal], list[float]],
-    counter: int,
-    csv_suffix: int | None = None
-) -> None:
+    scene_key: int,
+    worker_id: int,
+    file_counter: int,
+) -> bool:
     """
-    Helper function for writing out the costs of completing tasks from the task 
-    distribution for a particular procthor scene.
+    Writes the datum for `env`'s current state (its scene graph and expected
+    value over the task distribution). True if the datum now exists on disk:
+    written here, or already there from a previous run (restart-safety).
+    False if some task can't be solved from this state, so no datum exists.
     """
-    for idx, (task, task_cost) in enumerate(zip(*tasks_with_costs)):
-        datum = (scene_graph, task, task_cost)
-        data_filepath = _task_datum_pickle_path(scene_seed, object_randomization_seed, counter, idx)
-        data_filepath.parent.mkdir(parents=True, exist_ok=True)
-        write_compressed_pickle(data_filepath, datum)
-        csv_filepath = _csv_path(
-            "procthor_individual_task_data", scene_seed, object_randomization_seed, csv_suffix
+    if datum_pickle_path(scene_seed, scene_key, file_counter).exists():
+        return True
+    assert data.search_problem.interrupting_task_dist is not None
+    expected_value, task_costs = compute_interruption_value(
+        convert_state_to_positive_preconditions(env.state, data.neg_to_pos_mapping),
+        data.search_problem.actions,
+        data.search_problem.interrupting_task_dist,
+        data.planner_parameters.heuristic_fn,
+    )
+    if expected_value == -1:
+        return False
+    write_datum_to_file(
+        scene_seed, scene_key, (env.scene.scene_graph, expected_value), file_counter,
+        csv_suffix=worker_id,
+    )
+    if WRITE_OUT_INDIVIDUAL_TASK_COSTS:
+        assert task_costs is not None
+        write_out_individual_task_costs(
+            scene_seed, scene_key, env.scene.scene_graph,
+            (task_distribution[0], task_costs), file_counter, csv_suffix=worker_id,
         )
-        with open(csv_filepath, 'a', encoding="utf-8") as f:
-            f.write(f'{data_filepath}\n')
+    return True
 
-def _csv_path(prefix: str, scene_seed: int, key: int, shard: int | None = None) -> Path:
+
+def _merge_all_csvs(scene_keys: dict[int, int], num_workers: int) -> None:
+    for seed, key in scene_keys.items():
+        _merge_csv_shards(seed, key, num_workers)
+        if WRITE_OUT_INDIVIDUAL_TASK_COSTS:
+            _merge_csv_shards(seed, key, num_workers, True)
+        print(f"Index CSV for scene {seed}: {_csv_path('procthor_data', seed, key)}")
+
+
+# --------------------------------------------------------------------------- #
+# Helpers shared across pipeline stages
+# --------------------------------------------------------------------------- #
+def _stable_hash(obj) -> int:
     """
-    Index-CSV location: {prefix}_{scene_seed}_{key}[_{shard}].csv. `key` is the
-    same content-addressed key that names the datum pickles (see `main`), so
-    a CSV only ever lists pickles generated from identical inputs; a run with
-    different inputs writes a different CSV instead of appending to this one.
+    40-bit int from a canonical-JSON sha256. Unlike hash(), which is
+    randomized per process for strings, this is identical across processes
+    and machines - which is what lets a datum key double as a restart-safety
+    key.
     """
-    name = f"{prefix}_{scene_seed}_{key}" + ("" if shard is None else f"_{shard}")
-    return Path(get_procthor_10k_dir()) / f"{name}.csv"
+    payload = json.dumps(obj, sort_keys=True).encode("utf-8")
+    return int(hashlib.sha256(payload).hexdigest()[:10], 16)
 
-def _task_datum_pickle_path(
-    scene_seed: int, object_randomization_seed: int, counter: int, task_idx: int
-) -> Path:
-    return (
-        Path(get_procthor_10k_dir()) / "pickles" / "task_costs"
-        / f"dat_{scene_seed}_{object_randomization_seed}_{counter}_{task_idx}.pgz"
-    )
 
-def datum_pickle_path(
-    scene_seed: int, object_randomization_seed: int, counter: int
-) -> Path:
+# --------------------------------------------------------------------------- #
+# Helpers for _run_workers
+# --------------------------------------------------------------------------- #
+def _split_evenly(total: int, parts: int) -> list[int]:
+    base, remainder = divmod(total, parts)
+    return [base + (1 if i < remainder else 0) for i in range(parts)]
+
+
+# --------------------------------------------------------------------------- #
+# Helpers for _write_scene_selection / _write_task_distribution
+# --------------------------------------------------------------------------- #
+def _run_metadata_path(prefix: str, run_key: int) -> Path:
     """
-    Canonical on-disk location of a single training-datum pickle. Kept as one
-    function so the existence check in `_generate_worker_share` and the write
-    in `write_datum_to_file` can never disagree about the filename.
-
-    `object_randomization_seed` is a real object seed on the legacy
-    get_randomized_procthor_data path; on the path `_generate_worker_share`
-    uses, it carries the scene's content-addressed key instead (see `main`),
-    so the existence check only matches data generated from identical inputs.
+    Location of a run-level (not per-scene) JSON metadata file, named for run_key (see _run_key).
     """
-    return (
-        Path(get_procthor_10k_dir()) / "pickles"
-        / f"dat_{scene_seed}_{object_randomization_seed}_{counter}.pgz"
-    )
+    return Path(get_procthor_10k_dir()) / "run_metadata" / f"{prefix}_{run_key}.json"
 
-def write_datum_to_file(
+
+def _fluent_to_dict(fluent: Fluent) -> dict:
+    return {"name": fluent.name, "args": fluent.args, "negated": fluent.negated}
+
+
+def _goal_to_dict(goal: Goal) -> dict:
+    """
+    A human-readable repr alongside the goal's literals (name/args/negated),
+    sorted by repr for a deterministic file across runs with identical goals.
+    """
+    literals = sorted(goal.get_all_literals(), key=repr)
+    return {"repr": repr(goal), "literals": [_fluent_to_dict(f) for f in literals]}
+
+
+# --------------------------------------------------------------------------- #
+# Helpers for _remaps_enabled
+# --------------------------------------------------------------------------- #
+def _write_remapped_scene_cache(remap_dir: Path, scene_seed: int, remapped_scene: dict) -> None:
+    """
+    Persists a remapped scene into remap_dir, the directory this run points
+    REMAP_DIR_ENV_VAR at, so construct_procthor_kitchen_environment
+    (seed=scene_seed, object_seed=None) loads it instead of the raw
+    ProcTHOR-10k scene.
+    """
+    remap_dir.mkdir(parents=True, exist_ok=True)
+    with open(remap_dir / f"scene_{scene_seed}.json", "w", encoding="utf-8") as f:
+        json.dump(remapped_scene, f)
+
+
+# --------------------------------------------------------------------------- #
+# Helpers for _generate_worker_share
+# --------------------------------------------------------------------------- #
+def _open_scene_run(
     scene_seed: int,
-    object_randomization_seed: int,
-    datum: tuple[SceneGraph, float],
-    counter: int,
-    csv_suffix: int | None = None,
-) -> None:
-    """
-    Helper function for writing out the training data.
-    Writes out the datum as a zipped pickle file and
-    adds an entry to the csv file used for tracking all the
-    datum files generated. csv_suffix routes concurrent workers to separate
-    shard files, avoiding interleaved/corrupted writes to one shared CSV.
-    """
-    data_filepath = datum_pickle_path(scene_seed, object_randomization_seed, counter)
-    data_filepath.parent.mkdir(parents=True, exist_ok=True)
-    write_compressed_pickle(data_filepath, datum)
-    csv_filepath = _csv_path("procthor_data", scene_seed, object_randomization_seed, csv_suffix)
-    with open(csv_filepath, 'a', encoding="utf-8") as f:
-        f.write(f'{data_filepath}\n')
+    task_distribution: tuple[Sequence[Goal], list[float]],
+    relevant_objects: list[str] | None,
+) -> _SceneRun:
+    config = initialize_experiment_config(
+        get_example_procthor_goal(), task_distribution, scene_seed, None
+    )
+    data = initialize_experiment_data(
+        config, PlannerMode.MYOPIC, relevant_objects, REMOVE_DUPLICATES,
+        h_multiplier=H_MULTIPLIER,
+    )
+    return _SceneRun(config, data)
 
-def _merge_csv_shards(
-    scene_seed: int, key: int, num_workers: int, individual_tasks: bool = False
-) -> None:
+
+def _plan_next_task(run: _SceneRun, scene_seed: int, worker_id: int) -> list[Action] | None:
     """
-    Concatenates each worker's CSV shard into the scene's combined,
-    key-named CSV (see _csv_path).
+    A plan for a task sampled from the environment's current state. When every
+    task is already satisfied, or none can be planned, re-deals the objects
+    over the scene's original container occupancy (held objects included) and
+    tries again, up to MAX_RESHUFFLES_PER_VISIT times. The shuffle is seeded by
+    (scene, worker, shuffle count), so replaying a worker from a fresh
+    environment reproduces the same trajectory.
     """
-    prefix = "procthor_individual_task_data" if individual_tasks else "procthor_data"
-    combined_path = _csv_path(prefix, scene_seed, key)
-    with open(combined_path, 'a', encoding="utf-8") as combined:
-        for worker_id in range(num_workers):
-            shard_path = _csv_path(prefix, scene_seed, key, worker_id)
-            if shard_path.exists():
-                combined.write(shard_path.read_text())
-                shard_path.unlink()
+    for reshuffle in range(MAX_RESHUFFLES_PER_VISIT + 1):
+        if reshuffle:
+            rng = random.Random(
+                _stable_hash([DATA_GENERATION_SEED, scene_seed, worker_id, run.num_shuffles])
+            )
+            shuffled = run.data.env.fork()
+            shuffled.randomize_object_locations(rng)
+            run.data.env = shuffled
+            run.start_state_recorded = False  # a state nothing has passed through yet
+            run.num_shuffles += 1
+        plan = _sample_plan(run, scene_seed, worker_id)
+        if plan is not None:
+            return plan
+    return None
+
+
+def _sample_plan(run: _SceneRun, scene_seed: int, worker_id: int) -> list[Action] | None:
+    """
+    Samples a task from the goals not yet satisfied in the environment's
+    current state and plans it from that state. Each failure narrows the
+    candidate pool, so this terminates. None if every goal is already
+    satisfied (a saturated scene) or none can be planned.
+    """
+    data = run.data
+    assert run.config.interrupting_task_dist is not None
+    assert data.search_problem.interrupting_task_dist is not None
+
+    # scene_goals are the scene-mapped goals before negative-fluent
+    # conversion, so they evaluate against the raw env state; they are
+    # index-parallel with the converted goals used for search
+    scene_goals, _ = run.config.interrupting_task_dist
+    candidate_indices = [
+        i for i, goal in enumerate(scene_goals) if not goal.evaluate(data.env.state.fluents)
+    ]
+    interrupting_goals, _ = data.search_problem.interrupting_task_dist
+    initial_state = convert_state_to_positive_preconditions(
+        data.env.state, data.neg_to_pos_mapping
+    )
+    while candidate_indices:
+        random.seed(
+            DATA_GENERATION_SEED + scene_seed * SEED_STRIDE + worker_id * SEED_STRIDE
+            + run.attempt
+        )
+        run.attempt += 1
+        chosen_index = random.choice(candidate_indices)
+        data.search_problem.goal = interrupting_goals[chosen_index]
+        plan, _, success, _ = astar_search(
+            (initial_state, None), data.search_problem, data.planner_parameters
+        )
+        if success and plan:
+            return plan
+        candidate_indices.remove(chosen_index)
+    return None
 
 
 def initialize_experiment_config(
@@ -628,6 +622,118 @@ def initialize_experiment_config(
     )
 
 
+# --------------------------------------------------------------------------- #
+# Helpers for _record_datum
+# --------------------------------------------------------------------------- #
+def datum_pickle_path(
+    scene_seed: int, object_randomization_seed: int, counter: int
+) -> Path:
+    """
+    Canonical on-disk location of a single training-datum pickle. Kept as one
+    function so the existence check in `_generate_worker_share` and the write
+    in `write_datum_to_file` can never disagree about the filename.
+
+    `object_randomization_seed` is a real object seed on the legacy
+    get_randomized_procthor_data path; on the path `_generate_worker_share`
+    uses, it carries the scene's content-addressed key instead (see `main`),
+    so the existence check only matches data generated from identical inputs.
+    """
+    return (
+        Path(get_procthor_10k_dir()) / "pickles"
+        / f"dat_{scene_seed}_{object_randomization_seed}_{counter}.pgz"
+    )
+
+
+def write_datum_to_file(
+    scene_seed: int,
+    object_randomization_seed: int,
+    datum: tuple[SceneGraph, float],
+    counter: int,
+    csv_suffix: int | None = None,
+) -> None:
+    """
+    Helper function for writing out the training data.
+    Writes out the datum as a zipped pickle file and
+    adds an entry to the csv file used for tracking all the
+    datum files generated. csv_suffix routes concurrent workers to separate
+    shard files, avoiding interleaved/corrupted writes to one shared CSV.
+    """
+    data_filepath = datum_pickle_path(scene_seed, object_randomization_seed, counter)
+    data_filepath.parent.mkdir(parents=True, exist_ok=True)
+    write_compressed_pickle(data_filepath, datum)
+    csv_filepath = _csv_path("procthor_data", scene_seed, object_randomization_seed, csv_suffix)
+    with open(csv_filepath, 'a', encoding="utf-8") as f:
+        f.write(f'{data_filepath}\n')
+
+
+def write_out_individual_task_costs(
+    scene_seed: int,
+    object_randomization_seed: int,
+    scene_graph: SceneGraph,
+    tasks_with_costs: tuple[Sequence[Goal], list[float]],
+    counter: int,
+    csv_suffix: int | None = None
+) -> None:
+    """
+    Helper function for writing out the costs of completing tasks from the task
+    distribution for a particular procthor scene.
+    """
+    for idx, (task, task_cost) in enumerate(zip(*tasks_with_costs)):
+        datum = (scene_graph, task, task_cost)
+        data_filepath = _task_datum_pickle_path(scene_seed, object_randomization_seed, counter, idx)
+        data_filepath.parent.mkdir(parents=True, exist_ok=True)
+        write_compressed_pickle(data_filepath, datum)
+        csv_filepath = _csv_path(
+            "procthor_individual_task_data", scene_seed, object_randomization_seed, csv_suffix
+        )
+        with open(csv_filepath, 'a', encoding="utf-8") as f:
+            f.write(f'{data_filepath}\n')
+
+
+def _task_datum_pickle_path(
+    scene_seed: int, object_randomization_seed: int, counter: int, task_idx: int
+) -> Path:
+    return (
+        Path(get_procthor_10k_dir()) / "pickles" / "task_costs"
+        / f"dat_{scene_seed}_{object_randomization_seed}_{counter}_{task_idx}.pgz"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Helpers for _merge_all_csvs
+# --------------------------------------------------------------------------- #
+def _merge_csv_shards(
+    scene_seed: int, key: int, num_workers: int, individual_tasks: bool = False
+) -> None:
+    """
+    Concatenates each worker's CSV shard into the scene's combined,
+    key-named CSV (see _csv_path).
+    """
+    prefix = "procthor_individual_task_data" if individual_tasks else "procthor_data"
+    combined_path = _csv_path(prefix, scene_seed, key)
+    with open(combined_path, 'a', encoding="utf-8") as combined:
+        for worker_id in range(num_workers):
+            shard_path = _csv_path(prefix, scene_seed, key, worker_id)
+            if shard_path.exists():
+                combined.write(shard_path.read_text())
+                shard_path.unlink()
+
+
+def _csv_path(prefix: str, scene_seed: int, key: int, shard: int | None = None) -> Path:
+    """
+    Index-CSV location: {prefix}_{scene_seed}_{key}[_{shard}].csv. `key` is the
+    same content-addressed key that names the datum pickles (see `main`), so
+    a CSV only ever lists pickles generated from identical inputs; a run with
+    different inputs writes a different CSV instead of appending to this one.
+    """
+    name = f"{prefix}_{scene_seed}_{key}" + ("" if shard is None else f"_{shard}")
+    return Path(get_procthor_10k_dir()) / f"{name}.csv"
+
+
+# --------------------------------------------------------------------------- #
+# Legacy / standalone - not on main()'s path, kept for reference and possible
+# reinstatement (see SEED_STRIDE and datum_pickle_path above)
+# --------------------------------------------------------------------------- #
 def get_randomized_procthor_data(
     goal: Goal,
     task_distribution: tuple[Sequence[Goal], list[float]],

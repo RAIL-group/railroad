@@ -1,11 +1,10 @@
 from functools import partial
 from interruption.constants import (
-    MODEL_NAME, NUM_TASKS, EXPECTED_TIME_NEXT_ARRIVAL,
-    PROCTHOR_SEED, OBJ_PLACEMENT_SEED, FILTER_OBJECTS
+    MODEL_NAME, EXPECTED_TIME_NEXT_ARRIVAL,
+    PROCTHOR_SEED, OBJ_PLACEMENT_SEED, FILTER_OBJECTS, REMAPPED_SCENES_HASH
 )
 from interruption.environments import (
-    construct_procthor_kitchen_environment,
-    get_alfred_task_distribution,
+    get_scene_task_distribution,
     # get_example_procthor_goal,
     # get_example_procthor_task_distribution,
 )
@@ -17,7 +16,7 @@ from interruption.experiments import (
 from interruption.planning_framework import PlannerMode
 from interruption.utilities import (
     RandomVariableType, randomize_task_distribution_order, get_task_arrival_prob,
-    extract_relevant_objects
+    extract_relevant_objects, use_remapped_scenes
 )
 from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 from railroad.core import LiteralGoal, Fluent as F
@@ -28,10 +27,17 @@ RANDOMIZE_TASK_SEQUENCE = True
 RUN_IDX_SEED = 4
 
 def main(randomize_order: bool = False, filter_objects: bool = False):
+    # evaluate on the scenes and task distribution of a data-generation run.
+    # Must come before any environment is built.
+    remap_dir = (
+        use_remapped_scenes(REMAPPED_SCENES_HASH, PROCTHOR_SEED) if REMAPPED_SCENES_HASH else None
+    )
     seeds = ExperimentSeeds(
         procthor_seed=PROCTHOR_SEED,
         experiment_seed=140 + RUN_IDX_SEED, 
-        object_placement_seed=OBJ_PLACEMENT_SEED,
+        # an object seed makes ThorInterface skip the remap, so a remapped
+        # scene keeps the object placement it was generated with
+        object_placement_seed=None if remap_dir else OBJ_PLACEMENT_SEED,
         task_sample_seed=75
     )
     task_arrival_fn = partial(
@@ -40,13 +46,7 @@ def main(randomize_order: bool = False, filter_objects: bool = False):
     )
 
     # get task distribution from alfred dataset used during training
-    env = construct_procthor_kitchen_environment(seeds.procthor_seed, remove_duplicates=True)
-    task_distribution = get_alfred_task_distribution(
-        env.scene.objects,
-        set(env.scene.locations),
-        size=NUM_TASKS,
-        one_object_per_taskdist=True
-    )
+    task_distribution = get_scene_task_distribution(seeds.procthor_seed, remap_dir)
     if randomize_order:
         current_goal, task_distribution = randomize_task_distribution_order(
             task_distribution, seeds.task_sample_seed
