@@ -14,11 +14,11 @@ ACTION_PROB_DEBUG = False
 SEARCH_DEBUG = False
 
 ## learned function for expected value of interrupting task distribution
-MODEL_NAME = "best_model_two_room_model_linux.pt"
+MODEL_NAME = "best_model_one_room_multi_scene_lr=0.001.pt"
 
 ## benchmark/experiment settings
 # benchmark run settings
-EXPERIMENT_REPEATS = 5
+EXPERIMENT_REPEATS = 30
 TIMEOUT = 1200
 # filter out non-task-relevant objects
 FILTER_OBJECTS = True
@@ -46,11 +46,11 @@ TWO_ROOM_FILTER = {"num_scenes": 10, "num_pickupable_objects": 20, "num_valid_lo
 # run: the name of its remapped_scenes/<hash>/ directory, which datagen prints
 # as "Remapped scenes for this run". None -> the plain PROCTHOR_SEED scene.
 # When set, PROCTHOR_SEED must be one of that directory's scenes.
-REMAPPED_SCENES_HASH: str | None = None
+REMAPPED_SCENES_HASH: str | None = "767821370226"
 
 # seeds
 # current: 2-room -> 64; 1-room -> 201
-PROCTHOR_SEED = 5
+PROCTHOR_SEED = 113
 # current: 2-room -> 2; 1-room -> 19
 OBJ_PLACEMENT_SEED = None
 

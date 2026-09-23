@@ -24,7 +24,7 @@ from railroad.core import LiteralGoal, Fluent as F
 # constants
 MODEL_PATH = DEFAULT_RESOURCES_BASE / "models"
 RANDOMIZE_TASK_SEQUENCE = True
-RUN_IDX_SEED = 4
+RUN_IDX_SEED = 2
 
 def main(randomize_order: bool = False, filter_objects: bool = False):
     # evaluate on the scenes and task distribution of a data-generation run.
@@ -82,7 +82,7 @@ def main(randomize_order: bool = False, filter_objects: bool = False):
 
     run_experiment(
         config,
-        PlannerMode.INTERRUPTION_AP,
+        PlannerMode.ANTICIPATORY_PLANNING,
         show_plot=False,
         remove_duplicates=True,
         benchmark_flag=False,

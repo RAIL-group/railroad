@@ -70,7 +70,6 @@ def _setup_experiment_config(
         case.params["procthor_seed"],
         case.params["interruption_seed"] + case.repeat_idx,
         75, # keep fixed for right now
-        # case.repeat_idx,
         # an object seed makes ThorInterface skip the remap, so a remapped
         # scene keeps the object placement it was generated with
         object_placement_seed=None if remap_dir else OBJ_PLACEMENT_SEED
@@ -123,25 +122,25 @@ def _setup_experiment_config(
     return config
 
 
-@benchmark(
-    name="procthor_interruption",
-    description=(
-        "Evaluates the interruption planner across "
-        "task-arrival probabilities in specified procthor environments."
-    ),
-    tags=["interruption", "procthor"],
-    timeout=TIMEOUT,
-    repeat=EXPERIMENT_REPEATS,
-)
-def bench_interruption_kitchen(case: BenchmarkCase):
-    """
-    Wrapper function to evaluate the interruption-based planner on procthor kitchen
-    environments. 
-    """
-    config = _setup_experiment_config(case, PlannerMode.INTERRUPTION)
-    return run_experiment(config, PlannerMode.INTERRUPTION, True, True)
+# @benchmark(
+#     name="procthor_interruption",
+#     description=(
+#         "Evaluates the interruption planner across "
+#         "task-arrival probabilities in specified procthor environments."
+#     ),
+#     tags=["interruption", "procthor"],
+#     timeout=TIMEOUT,
+#     repeat=EXPERIMENT_REPEATS,
+# )
+# def bench_interruption_kitchen(case: BenchmarkCase):
+#     """
+#     Wrapper function to evaluate the interruption-based planner on procthor kitchen
+#     environments. 
+#     """
+#     config = _setup_experiment_config(case, PlannerMode.INTERRUPTION)
+#     return run_experiment(config, PlannerMode.INTERRUPTION, True, True)
 
-bench_interruption_kitchen.add_cases(_get_cases())
+# bench_interruption_kitchen.add_cases(_get_cases())
 
 
 @benchmark(
