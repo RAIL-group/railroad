@@ -272,14 +272,18 @@ def _execution_loop(
         data.env.apply_time_penalty(PLANNER_FAILURE_COST)
         return completed_goals
 
+    # goals not yet credited; shrinks as they complete, so actions taken after the
+    # task is done (e.g. an anticipatory planner's extra literal) can't re-count them
+    pending = [goal] if isinstance(goal, LiteralGoal) else list(goal.children())
+
     # execution loop
     action_idx = 0
     while True:
+        task_arrival_prob = 0
         try:
             converted_action = plan[action_idx]
         except IndexError:
             converted_action = None
-            task_arrival_prob = 0
 
         if converted_action is not None:
             action = get_action_by_name(data.env.get_actions(), converted_action.name)
@@ -297,10 +301,8 @@ def _execution_loop(
 
         # check if current task was completed successfully
         # NOTE: only append to an action's name if the task wasn't already complete
-        sub_goals = [goal] if isinstance(goal, LiteralGoal) else goal.children()
-
         completed_by_action = [
-            sub_goal for sub_goal in sub_goals if sub_goal.evaluate(data.env.state.fluents)
+            sub_goal for sub_goal in pending if sub_goal.evaluate(data.env.state.fluents)
         ]
 
         completed_goals.extend(completed_by_action)
@@ -313,12 +315,13 @@ def _execution_loop(
             else:
                 event_trace[-1] += " | Goal Complete"
 
-            incomplete_goals = _get_incomplete_tasks(True, goal, None, completed_goals)
-            if len(incomplete_goals) > 0:
-                goal = _get_task(incomplete_goals)
+            pending = [g for g in pending if g not in completed_by_action]
 
         # check if interrupting task arrived
-        if not last_task_flag and random.random() < task_arrival_prob:
+        if (
+            converted_action is not None and not last_task_flag and
+            random.random() < task_arrival_prob
+        ):
             event_trace[-1] += " | Interrupt"
             break
 
@@ -326,49 +329,6 @@ def _execution_loop(
         action_idx+=1
         if len(plan) in {0, action_idx}:
             break
-        
-    # for converted_action in plan:
-    #     action = get_action_by_name(data.env.get_actions(), converted_action.name)
-    #     # perform the action
-    #     data.env.act(action)
-    #     # update the scene_graph
-    #     data.env.update_scene_graph(action)
-    #     event_trace.append(converted_action.name)
-
-    #     task_arrival_prob = (
-    #         data.search_problem.interruption_prob_fn
-    #         if isinstance(data.search_problem.interruption_prob_fn, (float, int))
-    #         else data.search_problem.interruption_prob_fn(get_action_cost(action))
-    #     )
-
-    #     # check if current task was completed successfully
-    #     # NOTE: only append to an action's name if the task wasn't already complete
-    #     sub_goals = [goal] if isinstance(goal, LiteralGoal) else goal.children()
-
-    #     completed_by_action = [
-    #         sub_goal for sub_goal in sub_goals if sub_goal.evaluate(data.env.state.fluents)
-    #     ]
-
-    #     completed_goals.extend(completed_by_action)
-
-    #     if len(completed_by_action) > 0 and len(event_trace) > 0:
-    #         event_trace[-1] += " | Goal Complete"
-    #         incomplete_goals = _get_incomplete_tasks(True, goal, None, completed_goals)
-    #         if len(incomplete_goals) > 0:
-    #             goal = _get_task(incomplete_goals)
-
-    #     # check if interrupting task arrived
-    #     if not last_task_flag and random.random() < task_arrival_prob:
-    #         event_trace[-1] += " | Interrupt"
-    #         break
-
-    # # case where the task that arrived is already complete
-    # if not plan and success:
-    #     if len(event_trace) > 0:
-    #         event_trace[-1] += " | Goal Complete"
-    #     else:
-    #         event_trace.append("Goal Complete")
-    #     completed_goals.append(goal)
 
     return completed_goals
 

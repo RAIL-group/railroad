@@ -50,7 +50,7 @@ from railroad.core import (
 from railroad.environment.procthor.resources import REMAP_DIR_ENV_VAR, get_procthor_10k_dir
 from railroad.environment.procthor.scenegraph import SceneGraph
 
-NUM_DATUM = 8  # datums to generate for each scene seed
+NUM_DATUM = 800  # datums to generate for each scene seed
 DATA_GENERATION_SEED = 37
 REMOVE_DUPLICATES = True
 H_MULTIPLIER = 1
