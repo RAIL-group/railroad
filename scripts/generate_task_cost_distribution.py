@@ -12,6 +12,8 @@ Usage:
     uv run python scripts/generate_task_cost_distribution.py
     uv run python scripts/generate_task_cost_distribution.py --group-by object
     uv run python scripts/generate_task_cost_distribution.py \
+        --scene-seed '2??' --exclude-scene-seed 205 '21?'
+    uv run python scripts/generate_task_cost_distribution.py \
         --data-dir resources/procthor-10k/pickles/task_costs \
         --out-image task_cost_cdf.jpeg --out-data task_cost_cdf.npz
 """
@@ -20,6 +22,7 @@ from __future__ import annotations
 import argparse
 from collections import defaultdict
 from dataclasses import dataclass
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Iterator, Sequence
 
@@ -76,19 +79,31 @@ def _parse_provenance(path: Path) -> tuple[int, int, int, int]:
     return int(scene_seed), int(object_seed), int(counter), int(task_idx)
 
 
+def _seed_matches(path: Path, patterns: Sequence[str]) -> bool:
+    """True if the scene seed in ``path``'s filename matches any glob pattern."""
+    return any(fnmatchcase(path.stem.split("_")[1], pat) for pat in patterns)
+
+
 def load_task_costs(
     data_dir: Path,
-    scene_seed: int | None = None,
+    scene_seeds: Sequence[str] | None = None,
+    exclude_scene_seeds: Sequence[str] | None = None,
     limit: int | None = None,
 ) -> Iterator[TaskCostRecord]:
     """Yield a ``TaskCostRecord`` per pickle under ``data_dir``.
 
-    ``scene_seed`` filters by the leading seed in the filename (cheap, no unpickle).
+    ``scene_seeds`` / ``exclude_scene_seeds`` are glob patterns (``fnmatch``
+    syntax) matched against the leading seed in the filename (cheap, no
+    unpickle). A pickle is kept if it matches any include pattern (or none are
+    given) and no exclude pattern; excludes win. A bare number like ``201``
+    matches exactly.
     ``limit`` caps how many records are yielded (handy while iterating).
     """
     paths = sorted(data_dir.glob("dat_*.pgz"))
-    if scene_seed is not None:
-        paths = [p for p in paths if p.stem.split("_")[1] == str(scene_seed)]
+    if scene_seeds:
+        paths = [p for p in paths if _seed_matches(p, scene_seeds)]
+    if exclude_scene_seeds:
+        paths = [p for p in paths if not _seed_matches(p, exclude_scene_seeds)]
     if limit is not None:
         paths = paths[:limit]
 
@@ -201,8 +216,12 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR,
                    help=f"directory of dat_*.pgz task-cost pickles (default: {DEFAULT_DATA_DIR})")
-    p.add_argument("--scene-seed", type=int, default=None,
-                   help="only include pickles for this ProcTHOR scene seed")
+    p.add_argument("--scene-seed", nargs="+", default=None, metavar="PATTERN",
+                   help="only include pickles whose scene seed matches any of these "
+                        "glob patterns, e.g. 201, '20*', '1[0-4]?' (quote to stop shell expansion)")
+    p.add_argument("--exclude-scene-seed", nargs="+", default=None, metavar="PATTERN",
+                   help="drop pickles whose scene seed matches any of these glob patterns; "
+                        "applied after --scene-seed")
     p.add_argument("--limit", type=int, default=None,
                    help="cap the number of pickles loaded (debugging)")
     p.add_argument("--group-by", choices=["none", "object", "task", "predicate", "scene"],
@@ -218,9 +237,15 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    records = list(load_task_costs(args.data_dir, args.scene_seed, args.limit))
+    records = list(load_task_costs(
+        args.data_dir, args.scene_seed, args.exclude_scene_seed, args.limit))
     if not records:
-        raise SystemExit(f"no task-cost pickles found under {args.data_dir}")
+        where = ""
+        if args.scene_seed:
+            where += f" matching scene seed(s) {args.scene_seed}"
+        if args.exclude_scene_seed:
+            where += f" excluding {args.exclude_scene_seed}"
+        raise SystemExit(f"no task-cost pickles found under {args.data_dir}{where}")
 
     if args.drop_zero:
         n_before = len(records)
@@ -238,6 +263,10 @@ def main() -> None:
 
     groups = group_records(records, args.group_by)
     subtitle = f"group-by={args.group_by}" + (", zero-cost excluded" if args.drop_zero else "")
+    if args.scene_seed:
+        subtitle += f", scenes={' '.join(args.scene_seed)}"
+    if args.exclude_scene_seed:
+        subtitle += f", excl={' '.join(args.exclude_scene_seed)}"
     plot_cdf(groups, args.out_image, title=f"Task-completion cost CDF ({subtitle})")
 
     if args.out_data is not None:
