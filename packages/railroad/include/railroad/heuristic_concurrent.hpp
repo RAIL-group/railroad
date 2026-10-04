@@ -81,6 +81,9 @@ struct ConcurrentHeuristicOptions {
   // MCTS only: expand a node's preferred actions (applicable actions on the
   // scheduled relaxed plan) before its others.
   bool preferred_first = false;
+  // Per-agent retry deltas walk a route between attempts (true) instead of
+  // starting each attempt from the relaxation's earliest position.
+  bool route_delta = false;
   // Achievers are ranked by cost / rho^prob_exponent. 1 is the expected cost
   // of independent retries; larger values let probability dominate, so a
   // relaxed plan routes through where an object most likely is rather than
@@ -628,9 +631,103 @@ private:
   double delta(Pass &P, int f) {
     if (P.delta[f] >= 0.0) return P.delta[f];
     double d = 0.0;
-    if (is_prob_choice(P, f)) d = compute_delta(P, f);
+    if (is_prob_choice(P, f)) {
+      d = (opts_.route_delta && P.agent >= 0) ? compute_route_delta(P, f)
+                                              : compute_delta(P, f);
+    }
     P.delta[f] = d;
     return d;
+  }
+
+  // Retry delta for one agent that has to walk between its attempts.
+  //
+  // compute_delta lets the searcher start every attempt from wherever the
+  // relaxation first reaches it, so after the first attempt all others look
+  // nearly free. Here agent P.agent walks a greedy route from its location:
+  // next is the unused attempt group with the highest probability per unit of
+  // (travel from the previous stop + execution). Pending attempts (outcomes
+  // already in flight) complete at their scheduled times regardless. With
+  // events merged in time order, the expected time to success is
+  //   t_ready + sum_i (T_i - T_{i-1}) * P(no success before T_i).
+  double compute_route_delta(const Pass &P, int f) {
+    const int r = P.agent;
+    struct Cand { int loc; double exec, prob, fallback; };
+    std::vector<Cand> cands;
+    std::vector<int> cand_group;
+    for (const auto &ach : achievers_[f]) {
+      if (!allowed(P, ach.action) || P.unmet[ach.action] != 0) continue;
+      const CAction &a = acts_[ach.action];
+      double p = a.adds[ach.add].prob;
+      if (p <= 1e-9) continue;
+      bool spent = false;
+      for (const auto &pd : pending_) {
+        if (pd.fluent == f && pd.group >= 0 && pd.group == ach.group) { spent = true; break; }
+      }
+      if (spent) continue;
+      int loc = -1;
+      for (int q : a.pre) {
+        if (loc_agent_[q] == r) { loc = q; break; }
+      }
+      Cand c{loc, a.dur, p, P.wait[ach.action]};
+      // One candidate per group: the one nearest in the relaxation.
+      bool merged = false;
+      for (std::size_t i = 0; i < cands.size(); ++i) {
+        if (cand_group[i] == ach.group) {
+          if (c.fallback < cands[i].fallback) cands[i] = c;
+          merged = true;
+          break;
+        }
+      }
+      if (!merged) {
+        cands.push_back(c);
+        cand_group.push_back(ach.group);
+      }
+    }
+
+    double ready = P.cost[agents_[r]];
+    if (!std::isfinite(ready)) ready = 0.0;
+    std::vector<std::pair<double, double>> events;  // (completion time, prob)
+    for (const auto &pd : pending_) {
+      if (pd.fluent == f) events.push_back({pd.time, pd.prob});
+    }
+    int cur = agent_location(P, r);
+    double t = ready;
+    double fail = 1.0;
+    std::vector<uint8_t> used(cands.size(), 0);
+    for (std::size_t step = 0; step < cands.size() && fail > 1e-3; ++step) {
+      int best = -1;
+      double best_ratio = -1.0, best_dt = 0.0;
+      for (std::size_t i = 0; i < cands.size(); ++i) {
+        if (used[i]) continue;
+        double travel;
+        if (cands[i].loc < 0 || cands[i].loc == cur) {
+          travel = 0.0;
+        } else {
+          travel = (cur >= 0) ? move_dur(r, cur, cands[i].loc) : INF;
+          if (!std::isfinite(travel)) travel = std::max(0.0, cands[i].fallback - t);
+        }
+        double dt = travel + cands[i].exec;
+        double ratio = cands[i].prob / std::max(dt, 1e-9);
+        if (ratio > best_ratio) { best_ratio = ratio; best = static_cast<int>(i); best_dt = dt; }
+      }
+      if (best < 0) break;
+      used[best] = 1;
+      t += best_dt;
+      if (cands[best].loc >= 0) cur = cands[best].loc;
+      events.push_back({t, cands[best].prob});
+      fail *= 1.0 - cands[best].prob;
+    }
+    if (events.empty()) return 0.0;
+    std::sort(events.begin(), events.end());
+    double expected = ready, prev = ready, still = 1.0;
+    for (const auto &[time, prob] : events) {
+      double tt = std::max(time, prev);
+      expected += (tt - prev) * still;
+      prev = tt;
+      still *= 1.0 - prob;
+    }
+    double d = expected - P.cost[f];
+    return d > 1e-9 ? d : 0.0;
   }
 
   struct Attempt {

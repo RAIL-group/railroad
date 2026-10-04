@@ -80,6 +80,8 @@ class MCTSPlanner:
         prob_exponent: float = 1.0,
         sum_completion: bool = True,
         preferred_first: bool = False,
+        route_delta: bool = False,
+        backup: str = "mean",
     ):
         """Initialize MCTSPlanner with automatic preprocessing.
 
@@ -144,6 +146,13 @@ class MCTSPlanner:
             preferred_first: (``"concurrent"`` only) MCTS expands the actions
                 on the scheduled relaxed plan that are applicable now (FF's
                 helpful actions) before a node's other actions.
+            route_delta: (``"concurrent"`` only) per-agent retry deltas walk a
+                greedy route between attempts instead of starting each one from
+                the relaxation's earliest position.
+            backup: MCTS value backup. ``"mean"`` (the default) averages the
+                rewards below a node; ``"max"`` (MaxUCT) values a decision node
+                by its best child and a chance node by the probability-weighted
+                mean of its outcomes.
 
         Defaults are an even split between h_add and h_ff (0.5, 0.0, 0.5).
         Weights are free-form (not normalized); the heuristic used during MCTS
@@ -168,6 +177,10 @@ class MCTSPlanner:
         self._prob_exponent = float(prob_exponent)
         self._sum_completion = bool(sum_completion)
         self._preferred_first = bool(preferred_first)
+        self._route_delta = bool(route_delta)
+        if backup not in ("mean", "max"):
+            raise ValueError(f"backup must be 'mean' or 'max', got {backup!r}")
+        self._backup = backup
 
         # Action-pruning configuration (applied per-call in __call__). Pruning
         # is enabled only when a keep-count is given; both None => off, so
@@ -220,6 +233,8 @@ class MCTSPlanner:
             prob_exponent=self._prob_exponent,
             sum_completion=self._sum_completion,
             preferred_first=self._preferred_first,
+            route_delta=self._route_delta,
+            backup=self._backup,
         )
 
     def _convert_actions(
@@ -434,6 +449,7 @@ class MCTSPlanner:
                 timed_init=self._timed_init,
                 prob_exponent=self._prob_exponent,
                 sum_completion=self._sum_completion,
+                route_delta=self._route_delta,
             )["value"]
         return _ff_heuristic_cpp(
             converted_state, converted_goal, self._search_actions,

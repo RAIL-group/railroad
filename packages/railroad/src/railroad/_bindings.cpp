@@ -674,7 +674,8 @@ PYBIND11_MODULE(_bindings, m) {
                        std::optional<double> dead_end_penalty,
                        const std::string &heuristic, bool agent_aware,
                        bool timed_init, double prob_exponent,
-                       bool sum_completion, bool preferred_first) {
+                       bool sum_completion, bool preferred_first,
+                       bool route_delta, const std::string &backup) {
              std::optional<ConcurrentHeuristicOptions> conc;
              if (heuristic == "concurrent") {
                ConcurrentHeuristicOptions o;
@@ -685,12 +686,16 @@ PYBIND11_MODULE(_bindings, m) {
                o.prob_exponent = prob_exponent;
                o.sum_completion = sum_completion;
                o.preferred_first = preferred_first;
+               o.route_delta = route_delta;
                conc = o;
              } else if (heuristic != "ff") {
                throw std::invalid_argument("heuristic must be 'ff' or 'concurrent'");
              }
+             if (backup != "mean" && backup != "max") {
+               throw std::invalid_argument("backup must be 'mean' or 'max'");
+             }
              return MCTSPlanner(std::move(all_actions), lambda_add, lambda_max,
-                                lambda_ff, dead_end_penalty, conc);
+                                lambda_ff, dead_end_penalty, conc, backup == "max");
            }),
            py::arg("all_actions"),
            py::arg("lambda_add") = 0.5,
@@ -703,6 +708,8 @@ PYBIND11_MODULE(_bindings, m) {
            py::arg("prob_exponent") = 1.0,
            py::arg("sum_completion") = true,
            py::arg("preferred_first") = false,
+           py::arg("route_delta") = false,
+           py::arg("backup") = "mean",
            "Construct an MCTSPlanner. The lambda_* weights mix the additive "
            "(h_add), max (h_max), and relaxed-plan-cost (h_ff) heuristic "
            "components used during search; defaults are an even split between "
@@ -754,8 +761,10 @@ PYBIND11_MODULE(_bindings, m) {
         [](const State &state, const GoalPtr &goal,
            const std::vector<Action> &all_actions, double lambda_add,
            double lambda_ms, bool agent_aware, bool timed_init,
-           bool at_implies_found, double prob_exponent, bool sum_completion) {
+           bool at_implies_found, double prob_exponent, bool sum_completion,
+           bool route_delta) {
           ConcurrentHeuristicOptions o;
+          o.route_delta = route_delta;
           o.prob_exponent = prob_exponent;
           o.sum_completion = sum_completion;
           o.lambda_add = lambda_add;
@@ -784,7 +793,7 @@ PYBIND11_MODULE(_bindings, m) {
         py::arg("lambda_add") = 0.5, py::arg("lambda_ms") = 0.5,
         py::arg("agent_aware") = true, py::arg("timed_init") = true,
         py::arg("at_implies_found") = true, py::arg("prob_exponent") = 1.0,
-        py::arg("sum_completion") = true,
+        py::arg("sum_completion") = true, py::arg("route_delta") = false,
         "Evaluate the concurrency-aware heuristic (heuristic_concurrent.hpp) "
         "and return its components: value, h_add, delta, makespan, h_ff, the "
         "per-goal finish times and the goal-to-agent assignment.");
