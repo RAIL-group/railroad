@@ -120,7 +120,10 @@ the *team* rather than of one sequential agent; the design notes at the top of
    places a task needs), and **LPT/EFT list scheduling** of goal tasks
    (`at X L` together with its implied `found X`) onto agents.
 4. **Retry deltas** per task, with achievers that consume the same
-   precondition counted as one attempt.
+   precondition counted as one attempt; or, with `expected_search`, the
+   task's uncertain search is costed as an **expected route** over its
+   candidate places (greedy by probability per unit travel + search time),
+   with the rest of the task costed from wherever the object turns up.
 5. **Value** `lambda_add * sum_g C_g + lambda_ms * max_g C_g` over the
    scheduled completion times.
 
@@ -133,7 +136,11 @@ Since this heuristic is calibrated (h tracks the remaining time), use it with
 improves with elapsed time along any decent path, so whichever branch is
 searched deepest looks best. `backup="max"` (MaxUCT: decision nodes take their
 best child, chance nodes the probability-weighted mean) keeps a few bad
-coordination choices below a node from swamping its value.
+coordination choices below a node from swamping its value. Every outcome of a
+chance node is valued from the heuristic when it is created, so the mean is
+over all outcomes from the start: otherwise a lucky low-probability outcome
+(an unlikely search succeeding) that happens to be sampled first stands in for
+the whole action.
 
 ### "at implies found" augmentation
 
