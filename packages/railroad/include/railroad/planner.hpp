@@ -7,11 +7,13 @@
 
 #include "railroad/core.hpp"
 #include "railroad/heuristic.hpp"
+#include "railroad/heuristic_concurrent.hpp"
 #include "railroad/goal.hpp"
 #include "railroad/state.hpp"
 #include "railroad/constants.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <functional>
 #include <iostream>
 #include <iomanip>
@@ -201,6 +203,18 @@ void print_best_path(std::ostream& os, const MCTSDecisionNode* node, HeuristicFn
         return;
     }
 
+    if (current_depth == 0 && std::getenv("RAILROAD_TRACE_ROOT")) {
+        std::vector<const MCTSChanceNode*> kids;
+        for (const auto& [action, cn] : node->children) kids.push_back(cn.get());
+        std::sort(kids.begin(), kids.end(), [](const MCTSChanceNode* a, const MCTSChanceNode* b) {
+            return a->visits > b->visits;
+        });
+        for (const auto* cn : kids) {
+            double q = cn->visits > 0 ? cn->value / cn->visits : 0.0;
+            os << "   [root] visits=" << cn->visits << " Q=" << q << "  " << cn->action->name() << std::endl;
+        }
+    }
+
     // --- Find the Best Child (Most Visited) to Traverse Next ---
     const MCTSChanceNode* best_chance_node = nullptr;
     int max_visits = -1;
@@ -255,7 +269,8 @@ inline std::string mcts(const State &root_state,
                         double lambda_add = 0.5,
                         double lambda_max = 0.0,
                         double lambda_ff  = 0.5,
-                        std::optional<double> dead_end_penalty = std::nullopt) {
+                        std::optional<double> dead_end_penalty = std::nullopt,
+                        std::optional<ConcurrentHeuristicOptions> concurrent = std::nullopt) {
   // RNG
   std::mt19937 &rng = mcts_rng();
 
@@ -265,11 +280,32 @@ inline std::string mcts(const State &root_state,
   auto root = std::make_unique<MCTSDecisionNode>(root_state.copy_and_zero_out_time());
   root->untried_actions = get_next_actions(root_state, all_actions);
 
-  HeuristicFn heuristic_fn = [goal, all_actions, ff_memory,
-                              lambda_add, lambda_max, lambda_ff](const State& s) -> double {
-    return ff_heuristic(s, goal, all_actions, ff_memory,
-                        lambda_add, lambda_max, lambda_ff);
+  HeuristicFn heuristic_fn;
+  std::unique_ptr<ConcurrentHeuristic> concurrent_h;
+  // Expand the heuristic's preferred actions first. Untried actions are
+  // popped from the back, so preferred ones are moved there.
+  auto order_untried = [&concurrent_h](MCTSDecisionNode &n) {
+    if (n.untried_actions.size() < 2) return;
+    const auto &pref = concurrent_h->preferred(n.state);
+    if (pref.empty()) return;
+    std::stable_partition(n.untried_actions.begin(), n.untried_actions.end(),
+                          [&pref](const Action *a) {
+                            return std::find(pref.begin(), pref.end(), a) == pref.end();
+                          });
   };
+  const bool preferred_first = concurrent && concurrent->preferred_first;
+  if (concurrent) {
+    // Compiled once per search over this call's (usable) action set.
+    concurrent_h = std::make_unique<ConcurrentHeuristic>(all_actions, goal, *concurrent);
+    heuristic_fn = [h = concurrent_h.get()](const State &s) -> double { return (*h)(s); };
+    if (preferred_first) order_untried(*root);
+  } else {
+    heuristic_fn = [goal, all_actions, ff_memory,
+                    lambda_add, lambda_max, lambda_ff](const State& s) -> double {
+      return ff_heuristic(s, goal, all_actions, ff_memory,
+                          lambda_add, lambda_max, lambda_ff);
+    };
+  }
 
   for (int it = 0; it < max_iterations; ++it) {
     bool is_node_goal = false;
@@ -361,6 +397,7 @@ inline std::string mcts(const State &root_state,
       reward = -node->state.time() + SUCCESS_REWARD + 0 * goal_count_val - accumulated_extra_cost;
     } else {
       h = heuristic_fn ? heuristic_fn(node->state) : 0.0;
+      if (preferred_first && node->visits == 0) order_untried(*node);
       if (h > 1e10 && dead_end_penalty) {
         // The relaxation proved the goal unreachable from here. Charge a
         // *flat* cost: what this branch spent getting here is irrelevant,
@@ -425,12 +462,14 @@ public:
                        double lambda_add = 0.5,
                        double lambda_max = 0.0,
                        double lambda_ff  = 0.5,
-                       std::optional<double> dead_end_penalty = std::nullopt)
+                       std::optional<double> dead_end_penalty = std::nullopt,
+                       std::optional<ConcurrentHeuristicOptions> concurrent = std::nullopt)
       : all_actions_(std::move(all_actions)),
         lambda_add_(lambda_add),
         lambda_max_(lambda_max),
         lambda_ff_(lambda_ff),
-        dead_end_penalty_(dead_end_penalty) {}
+        dead_end_penalty_(dead_end_penalty),
+        concurrent_(concurrent) {}
 
   // Call operator: planner(initial_state, goal) → string
   std::string operator()(const State &root_state,
@@ -442,7 +481,8 @@ public:
     return mcts(root_state, all_actions_, goal.get(), &ff_memory_,
                 max_iterations, max_depth, c, heuristic_multiplier,
                 &last_mcts_tree_trace_,
-                lambda_add_, lambda_max_, lambda_ff_, dead_end_penalty_);
+                lambda_add_, lambda_max_, lambda_ff_, dead_end_penalty_,
+                concurrent_);
   }
 
   void clear_cache() { ff_memory_.clear(); }
@@ -466,6 +506,7 @@ private:
   double lambda_max_;
   double lambda_ff_;
   std::optional<double> dead_end_penalty_;
+  std::optional<ConcurrentHeuristicOptions> concurrent_;
 };
 
 } // namespace railroad

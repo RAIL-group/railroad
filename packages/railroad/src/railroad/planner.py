@@ -74,6 +74,12 @@ class MCTSPlanner:
         frontier_objects: set[str] | None = None,
         project_irrelevant: bool = True,
         dead_end_penalty: SupportsFloat | None = None,
+        heuristic: str = "ff",
+        agent_aware: bool = True,
+        timed_init: bool = True,
+        prob_exponent: float = 1.0,
+        sum_completion: bool = True,
+        preferred_first: bool = False,
     ):
         """Initialize MCTSPlanner with automatic preprocessing.
 
@@ -118,6 +124,27 @@ class MCTSPlanner:
                 perturbs multi-robot search-ordering ties, which is why it is
                 opt-in rather than the default.
 
+            heuristic: leaf evaluator. ``"ff"`` (the default) is the FF/additive
+                mix of ``heuristic.hpp``. ``"concurrent"`` is the concurrency-
+                aware heuristic of ``heuristic_concurrent.hpp``: in-flight
+                effects count from when they are scheduled, and ``lambda_ff``
+                weights an agent-aware makespan (goals list-scheduled onto the
+                robots) in place of the sequential h_ff; ``lambda_max`` is
+                unused.
+            agent_aware: (``"concurrent"`` only) schedule goals onto the
+                individual agents; False schedules them onto one serial agent.
+            timed_init: (``"concurrent"`` only) make in-flight effects
+                available at their scheduled time rather than immediately.
+            prob_exponent: (``"concurrent"`` only) achievers are ranked by
+                ``cost / rho**prob_exponent``, rho being the probability that
+                their relaxed support succeeds.
+            sum_completion: (``"concurrent"`` only) ``lambda_add`` weights the
+                scheduled goals' summed completion times (True) instead of the
+                contention-blind h_add of the unrestricted relaxation.
+            preferred_first: (``"concurrent"`` only) MCTS expands the actions
+                on the scheduled relaxed plan that are applicable now (FF's
+                helpful actions) before a node's other actions.
+
         Defaults are an even split between h_add and h_ff (0.5, 0.0, 0.5).
         Weights are free-form (not normalized); the heuristic used during MCTS
         search is `lambda_add * h_add + lambda_max * h_max + lambda_ff * h_ff`
@@ -133,6 +160,14 @@ class MCTSPlanner:
         self._dead_end_penalty = (
             None if dead_end_penalty is None else float(dead_end_penalty)
         )
+        if heuristic not in ("ff", "concurrent"):
+            raise ValueError(f"heuristic must be 'ff' or 'concurrent', got {heuristic!r}")
+        self._heuristic = heuristic
+        self._agent_aware = bool(agent_aware)
+        self._timed_init = bool(timed_init)
+        self._prob_exponent = float(prob_exponent)
+        self._sum_completion = bool(sum_completion)
+        self._preferred_first = bool(preferred_first)
 
         # Action-pruning configuration (applied per-call in __call__). Pruning
         # is enabled only when a keep-count is given; both None => off, so
@@ -165,18 +200,27 @@ class MCTSPlanner:
         self._actions_relevant: Set[str] | None = None
         self._search_actions = self._converted_actions
 
-        self._cpp_planner = _MCTSPlannerCpp(
-            self._search_actions,
-            lambda_add=self._lambda_add,
-            lambda_max=self._lambda_max,
-            lambda_ff=self._lambda_ff,
-            dead_end_penalty=self._dead_end_penalty,
-        )
+        self._cpp_planner = self._make_cpp_planner(self._search_actions)
 
         # Action counts from the most recent search, for introspection/display:
         # how many actions MCTS actually considered vs. the unpruned total.
         self.num_actions_total: int = len(self._converted_actions)
         self.num_actions_considered: int = len(self._converted_actions)
+
+    def _make_cpp_planner(self, actions: List[Action]) -> _MCTSPlannerCpp:
+        return _MCTSPlannerCpp(
+            actions,
+            lambda_add=self._lambda_add,
+            lambda_max=self._lambda_max,
+            lambda_ff=self._lambda_ff,
+            dead_end_penalty=self._dead_end_penalty,
+            heuristic=self._heuristic,
+            agent_aware=self._agent_aware,
+            timed_init=self._timed_init,
+            prob_exponent=self._prob_exponent,
+            sum_completion=self._sum_completion,
+            preferred_first=self._preferred_first,
+        )
 
     def _convert_actions(
         self, actions: List[Action], mapping: Dict[Fluent, Fluent]
@@ -229,13 +273,7 @@ class MCTSPlanner:
             self._search_actions = self._converted_actions
 
             # Create new C++ planner with re-converted actions
-            self._cpp_planner = _MCTSPlannerCpp(
-                self._search_actions,
-                lambda_add=self._lambda_add,
-                lambda_max=self._lambda_max,
-                lambda_ff=self._lambda_ff,
-                dead_end_penalty=self._dead_end_penalty,
-            )
+            self._cpp_planner = self._make_cpp_planner(self._search_actions)
 
     def _project_for(self, goal: Goal, state: State) -> State:
         """Project `state`, rebuilding the projected action set if needed.
@@ -266,13 +304,7 @@ class MCTSPlanner:
             self._search_actions = [
                 project_action(a, needed) for a in self._converted_actions
             ]
-            self._cpp_planner = _MCTSPlannerCpp(
-                self._search_actions,
-                lambda_add=self._lambda_add,
-                lambda_max=self._lambda_max,
-                lambda_ff=self._lambda_ff,
-                dead_end_penalty=self._dead_end_penalty,
-            )
+            self._cpp_planner = self._make_cpp_planner(self._search_actions)
         return project_state(state, self._relevant)
 
     def __call__(
@@ -341,13 +373,7 @@ class MCTSPlanner:
                 frontier_objects=self._frontier_objects,
             )
             self.num_actions_considered = len(pruned_actions)
-            self._cpp_planner = _MCTSPlannerCpp(
-                pruned_actions,
-                lambda_add=self._lambda_add,
-                lambda_max=self._lambda_max,
-                lambda_ff=self._lambda_ff,
-                dead_end_penalty=self._dead_end_penalty,
-            )
+            self._cpp_planner = self._make_cpp_planner(pruned_actions)
 
         return self._cpp_planner(
             converted_state, converted_goal, max_iterations, max_depth, c,
@@ -397,6 +423,18 @@ class MCTSPlanner:
 
         # No dead_end_penalty here: that shapes the MCTS *reward*, while this
         # reports the raw heuristic, inf included.
+        if self._heuristic == "concurrent":
+            from railroad._bindings import concurrent_heuristic as _conc_cpp
+
+            return _conc_cpp(
+                converted_state, converted_goal, self._search_actions,
+                lambda_add=self._lambda_add,
+                lambda_ms=self._lambda_ff,
+                agent_aware=self._agent_aware,
+                timed_init=self._timed_init,
+                prob_exponent=self._prob_exponent,
+                sum_completion=self._sum_completion,
+            )["value"]
         return _ff_heuristic_cpp(
             converted_state, converted_goal, self._search_actions,
             lambda_add=self._lambda_add,
