@@ -397,6 +397,22 @@ def test_max_backup_values_a_rarely_visited_outcome_by_more_than_one_child():
     assert name == "search r1 x box"
 
 
+@pytest.mark.parametrize("backup", ["mean", "max"])
+def test_mcts_does_not_expand_past_the_goal(backup):
+    """A goal state ends the episode. Expanding it valued the goal by
+    continuations past it, which under max backup (once every action had been
+    tried) made reaching the goal look worse than it is."""
+    actions = _actions(["r1"], ["box"])
+    state = _state({"r1": "goal"}, extra={F("holding r1 box"), F("hand-full r1"), F("found box")})
+    planner = MCTSPlanner(actions, heuristic="concurrent", backup=backup)
+    name = planner(state, F("at box goal"), max_iterations=300, c=50, max_depth=20,
+                   heuristic_multiplier=1)
+    assert name == "place r1 goal box"
+    trace = planner.get_trace_from_last_mcts_tree()
+    goal_node = next(line for line in trace.splitlines() if "D:1|" in line)
+    assert goal_node.rstrip().endswith("#A=0")
+
+
 def test_unknown_heuristic_or_backup_is_rejected():
     with pytest.raises(ValueError):
         MCTSPlanner(_actions(["r1"], ["box"]), heuristic="nope")
