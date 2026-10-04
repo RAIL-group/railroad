@@ -201,6 +201,27 @@ def test_searches_of_one_location_are_one_attempt():
     assert dict(phantom["deltas"])["found box"] < dict(one["deltas"])["found box"]
 
 
+def test_expected_search_costs_delivery_unless_found_in_place():
+    """Searching the target place can find the object already delivered.
+
+    The box is at `goal` (20 away) or `b` (30 away), each with probability 0.5.
+    The relaxation's cheapest support for `at box goal` is to search `goal`,
+    whose success needs no delivery; the box may still turn up at `b`, from
+    where it must be brought over. The greedy route searches `goal` (done at
+    25), then `b` (done at 40): expected search time 25 + 0.5 * 15 = 32.5.
+    It succeeds with probability 0.75, at `b` in a third of those cases, and
+    delivering from `b` takes pick + 10 + place = 14: 32.5 + 14 / 3 in all.
+    """
+    def prob(robot, loc, obj):
+        return {"goal": 0.5, "b": 0.5}.get(loc, 0.0)
+
+    actions = _actions(["r1"], ["box"], find_prob=prob)
+    state = _state({"r1": "start"}, extra={F("revealed a"), F("revealed c")})
+    goal = F("at box goal")
+    planner = MCTSPlanner(actions, heuristic="concurrent")
+    assert _breakdown(planner, state, goal)["makespan"] == pytest.approx(32.5 + 14 / 3)
+
+
 def test_object_in_hand_is_delivered_before_fetching_another():
     """The relaxation frees a full hand by setting its object down anywhere.
 
