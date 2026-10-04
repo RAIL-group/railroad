@@ -669,13 +669,40 @@ PYBIND11_MODULE(_bindings, m) {
 
 
   py::class_<MCTSPlanner>(m, "MCTSPlanner")
-      .def(py::init<std::vector<Action>, double, double, double,
-                    std::optional<double>>(),
+      .def(py::init([](std::vector<Action> all_actions, double lambda_add,
+                       double lambda_max, double lambda_ff,
+                       std::optional<double> dead_end_penalty,
+                       const std::string &heuristic, bool agent_aware,
+                       bool timed_init, double prob_exponent,
+                       bool sum_completion, bool preferred_first) {
+             std::optional<ConcurrentHeuristicOptions> conc;
+             if (heuristic == "concurrent") {
+               ConcurrentHeuristicOptions o;
+               o.lambda_add = lambda_add;
+               o.lambda_ms = lambda_ff;
+               o.agent_aware = agent_aware;
+               o.timed_init = timed_init;
+               o.prob_exponent = prob_exponent;
+               o.sum_completion = sum_completion;
+               o.preferred_first = preferred_first;
+               conc = o;
+             } else if (heuristic != "ff") {
+               throw std::invalid_argument("heuristic must be 'ff' or 'concurrent'");
+             }
+             return MCTSPlanner(std::move(all_actions), lambda_add, lambda_max,
+                                lambda_ff, dead_end_penalty, conc);
+           }),
            py::arg("all_actions"),
            py::arg("lambda_add") = 0.5,
            py::arg("lambda_max") = 0.0,
            py::arg("lambda_ff")  = 0.5,
            py::arg("dead_end_penalty") = py::none(),
+           py::arg("heuristic") = "ff",
+           py::arg("agent_aware") = true,
+           py::arg("timed_init") = true,
+           py::arg("prob_exponent") = 1.0,
+           py::arg("sum_completion") = true,
+           py::arg("preferred_first") = false,
            "Construct an MCTSPlanner. The lambda_* weights mix the additive "
            "(h_add), max (h_max), and relaxed-plan-cost (h_ff) heuristic "
            "components used during search; defaults are an even split between "
@@ -722,6 +749,45 @@ PYBIND11_MODULE(_bindings, m) {
   m.def("seed_planner_rng", &seed_mcts_rng, py::arg("seed"),
         "Seed the MCTS outcome-sampling RNG for reproducible planning "
         "(thread-local: applies to planner calls from the calling thread)");
+
+  m.def("concurrent_heuristic",
+        [](const State &state, const GoalPtr &goal,
+           const std::vector<Action> &all_actions, double lambda_add,
+           double lambda_ms, bool agent_aware, bool timed_init,
+           bool at_implies_found, double prob_exponent, bool sum_completion) {
+          ConcurrentHeuristicOptions o;
+          o.prob_exponent = prob_exponent;
+          o.sum_completion = sum_completion;
+          o.lambda_add = lambda_add;
+          o.lambda_ms = lambda_ms;
+          o.agent_aware = agent_aware;
+          o.timed_init = timed_init;
+          o.at_implies_found = at_implies_found;
+          ConcurrentHeuristic h(all_actions, goal.get(), o);
+          ConcurrentHeuristicBreakdown bd;
+          h.evaluate(state, &bd);
+          py::dict d;
+          d["value"] = bd.value;
+          d["h_add"] = bd.h_add;
+          d["delta"] = bd.delta;
+          d["makespan"] = bd.makespan;
+          d["completion_sum"] = bd.completion_sum;
+          d["h_ff"] = bd.h_ff;
+          d["goal_finish"] = bd.goal_finish;
+          d["assignment"] = bd.assignment;
+          d["deltas"] = bd.deltas;
+          d["plan"] = bd.plan;
+          d["loads"] = bd.loads;
+          return d;
+        },
+        py::arg("state"), py::arg("goal"), py::arg("all_actions"),
+        py::arg("lambda_add") = 0.5, py::arg("lambda_ms") = 0.5,
+        py::arg("agent_aware") = true, py::arg("timed_init") = true,
+        py::arg("at_implies_found") = true, py::arg("prob_exponent") = 1.0,
+        py::arg("sum_completion") = true,
+        "Evaluate the concurrency-aware heuristic (heuristic_concurrent.hpp) "
+        "and return its components: value, h_add, delta, makespan, h_ff, the "
+        "per-goal finish times and the goal-to-agent assignment.");
 
   // ff_heuristic with Goal object
   m.def("ff_heuristic",
