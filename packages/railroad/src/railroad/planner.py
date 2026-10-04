@@ -49,12 +49,6 @@ class ConcurrentHeuristicOptions(TypedDict, total=False):
     route_chaining: bool
     #: Achievers consuming the same precondition count as one attempt. [True]
     group_attempts: bool
-    #: Experimental: retry deltas walk a route between attempts. [False]
-    route_delta: bool
-    #: Experimental: idle agents join the most uncertain search. [False]
-    multi_search: bool
-    #: Experimental: MCTS expands the heuristic's helpful actions first. [False]
-    preferred_first: bool
 
 
 def _normalize_goal(goal: Union[Goal, Fluent]) -> Goal:

@@ -86,15 +86,6 @@ struct ConcurrentHeuristicOptions {
   // Make in-flight effects available when they are scheduled (true) or at
   // time 0, as the FF heuristic's relaxed transition does (false).
   bool timed_init = true;
-  // MCTS only: expand a node's preferred actions (applicable actions on the
-  // scheduled relaxed plan) before its others.
-  bool preferred_first = false;
-  // Per-agent retry deltas walk a route between attempts (true) instead of
-  // starting each attempt from the relaxation's earliest position.
-  bool route_delta = false;
-  // Agents left without a task join the search of the uncertain tasks
-  // (expected find time from a parallel list schedule of the attempts).
-  bool multi_search = false;
   // Plan a goal `at X L` together with the `found X` it implies, as one task.
   bool joint_found = true;
   // Re-cost an agent's moves as a route through the locations its task
@@ -150,17 +141,16 @@ public:
   ConcurrentHeuristic &operator=(const ConcurrentHeuristic &) = delete;
 
   // Memoized evaluation (keyed on fluents + upcoming effects relative to now).
-  double operator()(const State &s) { return lookup_or_evaluate(s).value; }
-
-  // Actions applicable in `s` that lie on the relaxed plan the agents were
-  // scheduled to execute (FF's "helpful actions"). Pointers into the action
-  // vector this heuristic was compiled from.
-  const std::vector<const Action *> &preferred(const State &s) {
-    return lookup_or_evaluate(s).preferred;
+  double operator()(const State &s) {
+    std::size_t key = state_key(s);
+    auto it = memo_.find(key);
+    if (it != memo_.end()) return it->second;
+    double v = evaluate(s, nullptr);
+    memo_.emplace(key, v);
+    return v;
   }
 
   double evaluate(const State &s, ConcurrentHeuristicBreakdown *out) {
-    best_preferred_.clear();
     if (!goal_) return 0.0;
     if (goal_->get_type() == GoalType::TRUE_GOAL) return 0.0;
     if (goal_->get_type() == GoalType::FALSE_GOAL || branches_.empty()) return INF;
@@ -173,11 +163,9 @@ public:
     double best = INF;
     for (const auto &branch : branches_) {
       ConcurrentHeuristicBreakdown bd;
-      plan_actions_.clear();
       double v = evaluate_branch(branch, out ? &bd : nullptr);
       if (v < best) {
         best = v;
-        best_preferred_.swap(plan_actions_);
         if (out) *out = std::move(bd);
       }
     }
@@ -650,103 +638,9 @@ private:
   double delta(Pass &P, int f) {
     if (P.delta[f] >= 0.0) return P.delta[f];
     double d = 0.0;
-    if (is_prob_choice(P, f)) {
-      d = (opts_.route_delta && P.agent >= 0) ? compute_route_delta(P, f)
-                                              : compute_delta(P, f);
-    }
+    if (is_prob_choice(P, f)) d = compute_delta(P, f);
     P.delta[f] = d;
     return d;
-  }
-
-  // Retry delta for one agent that has to walk between its attempts.
-  //
-  // compute_delta lets the searcher start every attempt from wherever the
-  // relaxation first reaches it, so after the first attempt all others look
-  // nearly free. Here agent P.agent walks a greedy route from its location:
-  // next is the unused attempt group with the highest probability per unit of
-  // (travel from the previous stop + execution). Pending attempts (outcomes
-  // already in flight) complete at their scheduled times regardless. With
-  // events merged in time order, the expected time to success is
-  //   t_ready + sum_i (T_i - T_{i-1}) * P(no success before T_i).
-  double compute_route_delta(const Pass &P, int f) {
-    const int r = P.agent;
-    struct Cand { int loc; double exec, prob, fallback; };
-    std::vector<Cand> cands;
-    std::vector<int> cand_group;
-    for (const auto &ach : achievers_[f]) {
-      if (!allowed(P, ach.action) || P.unmet[ach.action] != 0) continue;
-      const CAction &a = acts_[ach.action];
-      double p = a.adds[ach.add].prob;
-      if (p <= 1e-9) continue;
-      bool spent = false;
-      for (const auto &pd : pending_) {
-        if (pd.fluent == f && pd.group >= 0 && pd.group == ach.group) { spent = true; break; }
-      }
-      if (spent) continue;
-      int loc = -1;
-      for (int q : a.pre) {
-        if (loc_agent_[q] == r) { loc = q; break; }
-      }
-      Cand c{loc, a.dur, p, P.wait[ach.action]};
-      // One candidate per group: the one nearest in the relaxation.
-      bool merged = false;
-      for (std::size_t i = 0; i < cands.size(); ++i) {
-        if (cand_group[i] == ach.group) {
-          if (c.fallback < cands[i].fallback) cands[i] = c;
-          merged = true;
-          break;
-        }
-      }
-      if (!merged) {
-        cands.push_back(c);
-        cand_group.push_back(ach.group);
-      }
-    }
-
-    double ready = P.cost[agents_[r]];
-    if (!std::isfinite(ready)) ready = 0.0;
-    std::vector<std::pair<double, double>> events;  // (completion time, prob)
-    for (const auto &pd : pending_) {
-      if (pd.fluent == f) events.push_back({pd.time, pd.prob});
-    }
-    int cur = agent_location(P, r);
-    double t = ready;
-    double fail = 1.0;
-    std::vector<uint8_t> used(cands.size(), 0);
-    for (std::size_t step = 0; step < cands.size() && fail > 1e-3; ++step) {
-      int best = -1;
-      double best_ratio = -1.0, best_dt = 0.0;
-      for (std::size_t i = 0; i < cands.size(); ++i) {
-        if (used[i]) continue;
-        double travel;
-        if (cands[i].loc < 0 || cands[i].loc == cur) {
-          travel = 0.0;
-        } else {
-          travel = (cur >= 0) ? move_dur(r, cur, cands[i].loc) : INF;
-          if (!std::isfinite(travel)) travel = std::max(0.0, cands[i].fallback - t);
-        }
-        double dt = travel + cands[i].exec;
-        double ratio = cands[i].prob / std::max(dt, 1e-9);
-        if (ratio > best_ratio) { best_ratio = ratio; best = static_cast<int>(i); best_dt = dt; }
-      }
-      if (best < 0) break;
-      used[best] = 1;
-      t += best_dt;
-      if (cands[best].loc >= 0) cur = cands[best].loc;
-      events.push_back({t, cands[best].prob});
-      fail *= 1.0 - cands[best].prob;
-    }
-    if (events.empty()) return 0.0;
-    std::sort(events.begin(), events.end());
-    double expected = ready, prev = ready, still = 1.0;
-    for (const auto &[time, prob] : events) {
-      double tt = std::max(time, prev);
-      expected += (tt - prev) * still;
-      prev = tt;
-      still *= 1.0 - prob;
-    }
-    double d = expected - P.cost[f];
-    return d > 1e-9 ? d : 0.0;
   }
 
   struct Attempt {
@@ -908,7 +802,6 @@ private:
     next_stamp();
     Extraction ux;
     extract(U, goals, ux);
-    plan_actions_.insert(plan_actions_.end(), ux.actions.begin(), ux.actions.end());
 
     if (bd) {
       for (int f : ux.fluents) {
@@ -975,7 +868,6 @@ private:
     std::vector<int> locs;  // locations to visit, in order
     std::vector<double> leg_fallback;  // relaxed-plan cost of each leg
     std::vector<int> covers;
-    std::vector<int> actions;
   };
 
   double route(int r, int start, const TaskPlan &tp) {
@@ -1006,7 +898,6 @@ private:
     if (companion >= 0) goal_cost = std::max(goal_cost, P.cost[companion]);
     tp.critical = std::max(0.0, goal_cost - ready);
     tp.covers = std::move(ex.fluents);
-    tp.actions = ex.actions;
     if (r < 0 || !opts_.route_chaining) {
       tp.other = ex.dur;  // no single agent to route, or routing disabled
       return tp;
@@ -1187,7 +1078,6 @@ private:
           done_at = best_f;
           done_agent = best_r;
           for (int f : tp.covers) cover_[f] = cover_gen_;
-          plan_actions_.insert(plan_actions_.end(), tp.actions.begin(), tp.actions.end());
           if (bd) {
             bd->assignment.push_back({fluent_str(t.fluent),
                                       per_agent ? agent_names_[best_r] : "team"});
@@ -1197,42 +1087,6 @@ private:
       done.push_back({static_cast<int>(ti), done_agent, done_at});
     }
 
-    // Idle agents join the search of the uncertain tasks, latest first.
-    if (opts_.multi_search && per_agent) {
-      std::vector<int> spare;
-      for (std::size_t r = 0; r < n_agents; ++r) {
-        if (n_assigned[r] == 0 && std::isfinite(ready[r])) spare.push_back(static_cast<int>(r));
-      }
-      std::vector<std::size_t> order(done.size());
-      std::iota(order.begin(), order.end(), 0);
-      std::sort(order.begin(), order.end(),
-                [&done](std::size_t a, std::size_t b) { return done[a].at > done[b].at; });
-      for (std::size_t k : order) {
-        if (spare.empty()) break;
-        Done &dn = done[k];
-        if (dn.agent < 0) continue;
-        Pass &P = passes_[dn.agent + 1];
-        const TaskPlan &tp = tasks[dn.task].plans[dn.agent];
-        // The task's most expensive uncertain subgoal.
-        int f_star = -1;
-        double d_star = 0.0;
-        for (int f : tp.covers) {
-          if (!is_prob_choice(P, f)) continue;
-          double d = delta(P, f);
-          if (d > d_star) { d_star = d; f_star = f; }
-        }
-        if (f_star < 0) continue;
-        std::vector<int> searchers{dn.agent};
-        searchers.insert(searchers.end(), spare.begin(), spare.end());
-        double e_multi = expected_search_time(f_star, searchers);
-        double d_multi = std::max(0.0, e_multi - P.cost[f_star]);
-        if (d_multi < d_star - 1e-9) {
-          dn.at -= d_star - d_multi;
-          spare.clear();  // committed to this search
-        }
-      }
-    }
-
     double makespan = 0.0;
     for (const auto &dn : done) {
       makespan = std::max(makespan, dn.at);
@@ -1240,98 +1094,6 @@ private:
       if (bd) bd->goal_finish.push_back({fluent_str(tasks[dn.task].fluent), dn.at});
     }
     return makespan;
-  }
-
-  // Expected time (from now) until fluent f is first achieved when `searchers`
-  // work through its attempt groups in parallel: whenever a searcher frees up
-  // it walks to the unused attempt with the most probability per unit of
-  // (travel + execution) -- a WSPT-style list schedule with travel as setup
-  // time. Pending outcomes complete at their scheduled times. With all events
-  // merged in time order, E = sum_i (T_i - T_{i-1}) * P(no success before T_i).
-  double expected_search_time(int f, const std::vector<int> &searchers) {
-    struct Cand { int group; int loc; double exec, prob, fallback; };
-    struct Searcher { int agent; double t; int loc; std::vector<Cand> cands; };
-    std::vector<int> spent;
-    std::vector<std::pair<double, double>> events;
-    for (const auto &pd : pending_) {
-      if (pd.fluent != f) continue;
-      events.push_back({pd.time, pd.prob});
-      if (pd.group >= 0) spent.push_back(pd.group);
-    }
-    std::vector<Searcher> ss;
-    for (int r : searchers) {
-      const Pass &P = passes_[r + 1];
-      Searcher sr{r, P.cost[agents_[r]], agent_location(P, r), {}};
-      if (!std::isfinite(sr.t)) continue;
-      for (const auto &ach : achievers_[f]) {
-        if (!allowed(P, ach.action) || P.unmet[ach.action] != 0) continue;
-        if (std::find(spent.begin(), spent.end(), ach.group) != spent.end()) continue;
-        const CAction &a = acts_[ach.action];
-        double p = a.adds[ach.add].prob;
-        if (p <= 1e-9) continue;
-        int loc = -1;
-        for (int q : a.pre) {
-          if (loc_agent_[q] == r) { loc = q; break; }
-        }
-        Cand c{ach.group, loc, a.dur, p, P.wait[ach.action]};
-        bool merged = false;
-        for (auto &e : sr.cands) {
-          if (e.group == c.group) {
-            if (c.fallback < e.fallback) e = c;
-            merged = true;
-            break;
-          }
-        }
-        if (!merged) sr.cands.push_back(c);
-      }
-      ss.push_back(std::move(sr));
-    }
-    std::vector<int> used;
-    double fail = 1.0;
-    for (const auto &e : events) fail *= 1.0 - e.second;
-    while (fail > 1e-3) {
-      // The searcher that frees up first takes its best remaining attempt.
-      int si = -1;
-      for (int i = 0; i < static_cast<int>(ss.size()); ++i) {
-        bool any = false;
-        for (const auto &c : ss[i].cands) {
-          if (std::find(used.begin(), used.end(), c.group) == used.end()) { any = true; break; }
-        }
-        if (any && (si < 0 || ss[i].t < ss[si].t)) si = i;
-      }
-      if (si < 0) break;
-      Searcher &sr = ss[si];
-      int best = -1;
-      double best_ratio = -1.0, best_dt = 0.0;
-      for (int i = 0; i < static_cast<int>(sr.cands.size()); ++i) {
-        const Cand &c = sr.cands[i];
-        if (std::find(used.begin(), used.end(), c.group) != used.end()) continue;
-        double travel = 0.0;
-        if (c.loc >= 0 && c.loc != sr.loc) {
-          travel = (sr.loc >= 0) ? move_dur(sr.agent, sr.loc, c.loc) : INF;
-          if (!std::isfinite(travel)) travel = std::max(0.0, c.fallback - sr.t);
-        }
-        double dt = travel + c.exec;
-        double ratio = c.prob / std::max(dt, 1e-9);
-        if (ratio > best_ratio) { best_ratio = ratio; best = i; best_dt = dt; }
-      }
-      const Cand &c = sr.cands[best];
-      used.push_back(c.group);
-      sr.t += best_dt;
-      if (c.loc >= 0) sr.loc = c.loc;
-      events.push_back({sr.t, c.prob});
-      fail *= 1.0 - c.prob;
-    }
-    if (events.empty()) return INF;
-    std::sort(events.begin(), events.end());
-    double expected = 0.0, prev = 0.0, still = 1.0;
-    for (const auto &[time, prob] : events) {
-      double tt = std::max(time, prev);
-      expected += (tt - prev) * still;
-      prev = tt;
-      still *= 1.0 - prob;
-    }
-    return expected;
   }
 
   double agent_ready_team() const {
@@ -1353,33 +1115,7 @@ private:
   std::vector<uint32_t> cover_;
   uint32_t cover_gen_ = 0;
   std::unordered_map<uint64_t, double> move_cache_;
-  struct MemoEntry {
-    double value;
-    std::vector<const Action *> preferred;
-  };
-  std::unordered_map<std::size_t, MemoEntry> memo_;
-  std::vector<int> plan_actions_, best_preferred_;
-
-  const MemoEntry &lookup_or_evaluate(const State &s) {
-    std::size_t key = state_key(s);
-    auto it = memo_.find(key);
-    if (it != memo_.end()) return it->second;
-    MemoEntry e;
-    e.value = evaluate(s, nullptr);
-    // Keep the plan actions whose preconditions all hold now.
-    const Pass &U = passes_[0];
-    std::sort(best_preferred_.begin(), best_preferred_.end());
-    best_preferred_.erase(std::unique(best_preferred_.begin(), best_preferred_.end()),
-                          best_preferred_.end());
-    for (int a : best_preferred_) {
-      bool now = true;
-      for (int p : acts_[a].pre) {
-        if (U.best[p] != BEST_AVAIL || U.cost[p] > 1e-9) { now = false; break; }
-      }
-      if (now) e.preferred.push_back(acts_[a].src);
-    }
-    return memo_.emplace(key, std::move(e)).first->second;
-  }
+  std::unordered_map<std::size_t, double> memo_;
 };
 
 }  // namespace railroad

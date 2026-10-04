@@ -211,17 +211,15 @@ def test_goal_already_true_is_zero_and_unreachable_is_inf():
     assert math.isinf(planner.heuristic(lost, F("at box goal")))
 
 
-@pytest.mark.parametrize(("preferred_first", "backup"),
-                         [(False, "mean"), (True, "mean"), (False, "max")])
-def test_mcts_with_concurrent_heuristic_completes_two_fetches(preferred_first, backup):
+@pytest.mark.parametrize("backup", ["mean", "max"])
+def test_mcts_with_concurrent_heuristic_completes_two_fetches(backup):
     actions = _actions(["r1", "r2"], ["box", "cup"])
     state = _state(
         {"r1": "start", "r2": "start"},
         extra={F("at box b"), F("at cup c"), F("found box"), F("found cup")},
     )
     goal = F("at box goal") & F("at cup goal")
-    planner = MCTSPlanner(actions, heuristic="concurrent", backup=backup,
-                          heuristic_options={"preferred_first": preferred_first})
+    planner = MCTSPlanner(actions, heuristic="concurrent", backup=backup)
     for _ in range(20):
         if goal.evaluate(state.fluents):
             break

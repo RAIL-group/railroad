@@ -674,10 +674,9 @@ PYBIND11_MODULE(_bindings, m) {
                        std::optional<double> dead_end_penalty,
                        const std::string &heuristic, bool agent_aware,
                        bool timed_init, double prob_exponent,
-                       bool sum_completion, bool preferred_first,
-                       bool route_delta, const std::string &backup,
-                       bool multi_search, bool joint_found,
-                       bool route_chaining, bool group_attempts) {
+                       bool sum_completion, const std::string &backup,
+                       bool joint_found, bool route_chaining,
+                       bool group_attempts) {
              std::optional<ConcurrentHeuristicOptions> conc;
              if (heuristic == "concurrent") {
                ConcurrentHeuristicOptions o;
@@ -687,9 +686,6 @@ PYBIND11_MODULE(_bindings, m) {
                o.timed_init = timed_init;
                o.prob_exponent = prob_exponent;
                o.sum_completion = sum_completion;
-               o.preferred_first = preferred_first;
-               o.route_delta = route_delta;
-               o.multi_search = multi_search;
                o.joint_found = joint_found;
                o.route_chaining = route_chaining;
                o.group_attempts = group_attempts;
@@ -713,10 +709,7 @@ PYBIND11_MODULE(_bindings, m) {
            py::arg("timed_init") = true,
            py::arg("prob_exponent") = 8.0,
            py::arg("sum_completion") = true,
-           py::arg("preferred_first") = false,
-           py::arg("route_delta") = false,
            py::arg("backup") = "mean",
-           py::arg("multi_search") = false,
            py::arg("joint_found") = true,
            py::arg("route_chaining") = true,
            py::arg("group_attempts") = true,
@@ -772,15 +765,11 @@ PYBIND11_MODULE(_bindings, m) {
            const std::vector<Action> &all_actions, double lambda_add,
            double lambda_ms, bool agent_aware, bool timed_init,
            bool at_implies_found, double prob_exponent, bool sum_completion,
-           bool route_delta, bool multi_search, bool joint_found,
-           bool route_chaining, bool group_attempts, bool preferred_first) {
+           bool joint_found, bool route_chaining, bool group_attempts) {
           ConcurrentHeuristicOptions o;
-          o.preferred_first = preferred_first;  // MCTS-only; no effect on the value
           o.route_chaining = route_chaining;
           o.group_attempts = group_attempts;
           o.joint_found = joint_found;
-          o.route_delta = route_delta;
-          o.multi_search = multi_search;
           o.prob_exponent = prob_exponent;
           o.sum_completion = sum_completion;
           o.lambda_add = lambda_add;
@@ -809,10 +798,8 @@ PYBIND11_MODULE(_bindings, m) {
         py::arg("lambda_add") = 0.5, py::arg("lambda_ms") = 0.5,
         py::arg("agent_aware") = true, py::arg("timed_init") = true,
         py::arg("at_implies_found") = true, py::arg("prob_exponent") = 8.0,
-        py::arg("sum_completion") = true, py::arg("route_delta") = false,
-        py::arg("multi_search") = false, py::arg("joint_found") = true,
+        py::arg("sum_completion") = true, py::arg("joint_found") = true,
         py::arg("route_chaining") = true, py::arg("group_attempts") = true,
-        py::arg("preferred_first") = false,
         "Evaluate the concurrency-aware heuristic (heuristic_concurrent.hpp) "
         "and return its components: value, h_add, delta, makespan, h_ff, the "
         "per-goal finish times and the goal-to-agent assignment.");
