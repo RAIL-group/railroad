@@ -320,23 +320,10 @@ inline std::string mcts(const State &root_state,
 
   HeuristicFn heuristic_fn;
   std::unique_ptr<ConcurrentHeuristic> concurrent_h;
-  // Expand the heuristic's preferred actions first. Untried actions are
-  // popped from the back, so preferred ones are moved there.
-  auto order_untried = [&concurrent_h](MCTSDecisionNode &n) {
-    if (n.untried_actions.size() < 2) return;
-    const auto &pref = concurrent_h->preferred(n.state);
-    if (pref.empty()) return;
-    std::stable_partition(n.untried_actions.begin(), n.untried_actions.end(),
-                          [&pref](const Action *a) {
-                            return std::find(pref.begin(), pref.end(), a) == pref.end();
-                          });
-  };
-  const bool preferred_first = concurrent && concurrent->preferred_first;
   if (concurrent) {
     // Compiled once per search over this call's (usable) action set.
     concurrent_h = std::make_unique<ConcurrentHeuristic>(all_actions, goal, *concurrent);
     heuristic_fn = [h = concurrent_h.get()](const State &s) -> double { return (*h)(s); };
-    if (preferred_first) order_untried(*root);
   } else {
     heuristic_fn = [goal, all_actions, ff_memory,
                     lambda_add, lambda_max, lambda_ff](const State& s) -> double {
@@ -435,7 +422,6 @@ inline std::string mcts(const State &root_state,
       reward = -node->state.time() + SUCCESS_REWARD + 0 * goal_count_val - accumulated_extra_cost;
     } else {
       h = heuristic_fn ? heuristic_fn(node->state) : 0.0;
-      if (preferred_first && node->visits == 0) order_untried(*node);
       if (h > 1e10 && dead_end_penalty) {
         // The relaxation proved the goal unreachable from here. Charge a
         // *flat* cost: what this branch spent getting here is irrelevant,
