@@ -62,7 +62,11 @@
 //      search), pending outcomes complete when scheduled, and the expected
 //      time to the first success is integrated over the merged timeline. The
 //      rest of the task (delivery) is costed from each place the object may
-//      turn up, weighted by the chance it is found there.
+//      turn up, weighted by the chance it is found there. A search of the
+//      target place itself would find the object already delivered; when
+//      that is the goal's cheapest relaxed support, the task is planned
+//      through its deterministic achiever instead, so that every other place
+//      it may turn up still pays for delivery.
 //
 // The value of a goal branch is
 //     lambda_add * sum_g C_g + lambda_ms * max_g C_g
@@ -925,12 +929,15 @@ private:
     std::vector<double> leg_fallback;  // relaxed-plan cost of each leg
     std::vector<int> covers;
     // Expected-search costing (expected_search): the uncertain subgoal, the
-    // places needed before and after it, the non-move durations other than
-    // the search itself, and the retry deltas of everything else.
+    // places needed before and after it (after it, from wherever it
+    // succeeds), the non-move durations before and after it (the search's
+    // own is inside the expected search time), and the retry deltas of
+    // everything else.
     int search_f = -1;
+    int goal = -1;  // the task's goal fluent
     std::vector<int> pre_locs, post_locs;
     std::vector<double> pre_fb, post_fb;
-    double other_ns = 0.0;
+    double other_pre = 0.0, other_post = 0.0;
     double delta_rest = 0.0;
     // For ordering an agent's tasks (order_conflicts), excluding the agent's
     // location (route chaining handles it): facts the plan relies on from the
@@ -951,15 +958,67 @@ private:
     return total;
   }
 
+  // The location fluent of agent r that action a moves it to (-1: a is not
+  // one of r's moves).
+  int move_dest(int a, int r) const {
+    for (const auto &ad : acts_[a].adds) {
+      if (loc_agent_[ad.fluent] == r && ad.prob >= 1.0 - 1e-9 &&
+          std::find(acts_[a].pre.begin(), acts_[a].pre.end(), ad.fluent) == acts_[a].pre.end()) {
+        return ad.fluent;
+      }
+    }
+    return -1;
+  }
+
+  // g's cheapest deterministic achiever in P (-1 if none).
+  int deterministic_achiever(const Pass &P, int g) const {
+    int best = -1;
+    double best_t = INF;
+    for (const auto &ach : achievers_[g]) {
+      const CAction &a = acts_[ach.action];
+      const CAdd &ad = a.adds[ach.add];
+      if (!allowed(P, ach.action) || P.unmet[ach.action] != 0) continue;
+      if (ad.prob < 1.0 - 1e-9 || ad.conditional) continue;
+      double t = P.wait[ach.action] + a.dur;
+      if (t < best_t) { best_t = t; best = ach.action; }
+    }
+    return best;
+  }
+
   TaskPlan plan_task(Pass &P, int g, int companion, int r, double ready) {
     TaskPlan tp;
     if (!reachable(P, g)) return tp;
     if (companion >= 0 && !reachable(P, companion)) companion = -1;
+    // Under expected search, a goal whose cheapest support is itself an
+    // uncertain search (searching the target place, which would reveal the
+    // object already there) is planned through its deterministic achiever:
+    // wherever else the object turns up it still has to be brought over.
+    // The search outcomes that achieve the goal in place cost no delivery.
+    int forced_from = BEST_NONE;
+    if (opts_.expected_search && opts_.route_chaining && r >= 0 && is_prob_choice(P, g)) {
+      int d = deterministic_achiever(P, g);
+      if (d >= 0) {
+        forced_from = P.best[g];
+        P.best[g] = d;
+      }
+    }
+    struct Restore {
+      Pass &P;
+      int g, from;
+      ~Restore() { if (from != BEST_NONE) P.best[g] = from; }
+    } restore{P, g, forced_from};
     next_stamp();
     Extraction ex;
-    std::vector<int> roots{g};
-    if (companion >= 0) roots.push_back(companion);
-    extract(P, roots, ex);
+    if (forced_from != BEST_NONE) {
+      // The goal first, so that the search on its forced plan does not
+      // count as achieving it in passing.
+      extract(P, {g}, ex);
+      if (companion >= 0) extract(P, {companion}, ex);
+    } else {
+      std::vector<int> roots{g};
+      if (companion >= 0) roots.push_back(companion);
+      extract(P, roots, ex);
+    }
     tp.ok = true;
     tp.delta = ex.delta;
     double goal_cost = P.cost[g];
@@ -988,19 +1047,10 @@ private:
     // relaxation never makes it walk back), plus move destinations nothing
     // else on the plan consumes (waypoints, or location goals). Each is
     // needed when the earliest plan action requiring it could start.
-    auto dest_of = [&](int a) {
-      for (const auto &ad : acts_[a].adds) {
-        if (loc_agent_[ad.fluent] == r && ad.prob >= 1.0 - 1e-9 &&
-            std::find(acts_[a].pre.begin(), acts_[a].pre.end(), ad.fluent) == acts_[a].pre.end()) {
-          return ad.fluent;
-        }
-      }
-      return -1;
-    };
     std::vector<std::pair<double, int>> visits;  // (need time, location)
     std::vector<int> move_dests;
     for (int a : ex.actions) {
-      int dest = dest_of(a);
+      int dest = move_dest(a, r);
       if (dest >= 0) {
         move_dests.push_back(dest);
         continue;
@@ -1031,7 +1081,7 @@ private:
       int b = P.best[v.second];
       tp.leg_fallback.push_back(b >= 0 ? acts_[b].dur : 0.0);
     }
-    if (opts_.expected_search) split_search(P, r, companion, uniq, tp);
+    if (opts_.expected_search) split_search(P, r, g, companion, ex.actions, move_dests, tp);
     return tp;
   }
 
@@ -1041,8 +1091,16 @@ private:
   struct SearchAttempt {
     int group, loc;
     double exec, prob, fallback;
+    bool achieves;  // succeeding also achieves the task goal (in place)
   };
-  std::vector<SearchAttempt> attempts_for(const Pass &P, int r, int f) const {
+  bool adds_fluent(int a, int f) const {
+    if (f < 0) return false;
+    for (const auto &ad : acts_[a].adds) {
+      if (ad.fluent == f) return true;
+    }
+    return false;
+  }
+  std::vector<SearchAttempt> attempts_for(const Pass &P, int r, int f, int goal = -1) const {
     std::vector<SearchAttempt> out;
     for (const auto &ach : achievers_[f]) {
       if (!allowed(P, ach.action) || P.unmet[ach.action] != 0) continue;
@@ -1058,7 +1116,7 @@ private:
       for (int q : a.pre) {
         if (loc_agent_[q] == r) { loc = q; break; }
       }
-      SearchAttempt at{ach.group, loc, a.dur, p, P.wait[ach.action]};
+      SearchAttempt at{ach.group, loc, a.dur, p, P.wait[ach.action], adds_fluent(ach.action, goal)};
       bool merged = false;
       for (auto &e : out) {
         if (e.group == at.group) {
@@ -1074,45 +1132,70 @@ private:
 
   // Identify the task's uncertain search -- the implied `found X` when the
   // task has one, else the probabilistic subgoal with the most attempt groups
-  // -- and split the plan's places into those needed before and after it.
-  void split_search(Pass &P, int r, int companion,
-                    const std::vector<std::pair<double, int>> &visits, TaskPlan &tp) {
+  // -- and split the plan into what comes before it and what comes after.
+  // After it, an action that needs something the search reveals (picking the
+  // object up where it is) happens wherever the search succeeds, so only the
+  // other actions' places (where to bring it) are on the route from there.
+  void split_search(Pass &P, int r, int g, int companion, const std::vector<int> &plan,
+                    const std::vector<int> &move_dests, TaskPlan &tp) {
     int f_star = -1;
     std::size_t best_n = 1;
     for (int f : tp.covers) {
       if (!is_prob_choice(P, f)) continue;
-      std::size_t n = attempts_for(P, r, f).size();
+      std::size_t n = attempts_for(P, r, f, g).size();
       if (f == companion && n >= 2) { f_star = f; break; }
       if (n > best_n) { best_n = n; f_star = f; }
     }
     if (f_star < 0) return;
     int b = P.best[f_star];
-    // Where the plan searches, and when.
-    int search_loc = -1;
-    double search_need = 0.0;
-    if (b >= 0) {
-      for (int q : acts_[b].pre) {
-        if (loc_agent_[q] == r) { search_loc = q; break; }
+    double search_need = (b >= 0) ? P.wait[b] : 0.0;
+    auto anchored = [&](int a) {
+      if (b < 0) return false;
+      for (const auto &ad : acts_[b].adds) {
+        if (ad.prob >= 1.0 - 1e-9 && !ad.conditional) continue;
+        const auto &pre = acts_[a].pre;
+        if (std::find(pre.begin(), pre.end(), ad.fluent) != pre.end()) return true;
       }
-      search_need = P.wait[b];
+      return false;
+    };
+    std::vector<std::pair<double, int>> before, after;  // (need time, location)
+    for (int a : plan) {
+      if (a == b || move_dest(a, r) >= 0) continue;
+      bool post = P.wait[a] >= search_need;
+      (post ? tp.other_post : tp.other_pre) += acts_[a].dur;
+      if (post && anchored(a)) continue;
+      for (int q : acts_[a].pre) {
+        if (loc_agent_[q] == r) (post ? after : before).push_back({P.wait[a], q});
+      }
     }
+    // Waypoints and location goals, as in plan_task.
+    for (int d : move_dests) {
+      bool consumed = false;
+      for (int a : plan) {
+        if (move_dest(a, r) >= 0) continue;
+        const auto &pre = acts_[a].pre;
+        consumed = consumed || std::find(pre.begin(), pre.end(), d) != pre.end();
+      }
+      if (!consumed) (P.cost[d] >= search_need ? after : before).push_back({P.cost[d], d});
+    }
+    if (loc_agent_[g] == r) (P.cost[g] >= search_need ? after : before).push_back({P.cost[g], g});
+    auto order = [&](std::vector<std::pair<double, int>> &v, std::vector<int> &locs,
+                     std::vector<double> &fb) {
+      std::sort(v.begin(), v.end());
+      for (const auto &[t, loc] : v) {
+        if (std::find(locs.begin(), locs.end(), loc) != locs.end()) continue;
+        locs.push_back(loc);
+        int bb = P.best[loc];
+        fb.push_back(bb >= 0 ? acts_[bb].dur : 0.0);
+      }
+    };
+    order(before, tp.pre_locs, tp.pre_fb);
+    order(after, tp.post_locs, tp.post_fb);
     tp.search_f = f_star;
-    for (std::size_t i = 0; i < visits.size(); ++i) {
-      int loc = visits[i].second;
-      double fb = tp.leg_fallback[i];
-      if (loc == search_loc) continue;
-      if (visits[i].first < search_need) {
-        tp.pre_locs.push_back(loc);
-        tp.pre_fb.push_back(fb);
-      } else {
-        tp.post_locs.push_back(loc);
-        tp.post_fb.push_back(fb);
-      }
-    }
-    // The search's own duration is inside the expected search time; the
-    // retry deltas of the search outcome (and of anything else the same
-    // action achieves, e.g. `at X place`) are superseded by it.
-    tp.other_ns = tp.other - (b >= 0 ? acts_[b].dur : 0.0);
+    tp.goal = g;
+    // The retry deltas of the search outcome (and of anything else the same
+    // action achieves, e.g. `at X place`) are superseded by the expected
+    // search time.
     tp.delta_rest = 0.0;
     for (int f : tp.covers) {
       if (!is_prob_choice(P, f)) continue;
@@ -1142,26 +1225,35 @@ private:
   // + execution (a greedy route). Pending outcomes complete at their
   // scheduled times regardless. With all events in time order,
   // E = sum_i (T_i - T_{i-1}) P(no success before T_i) from t_start. `where`
-  // receives (place as r's location fluent, probability the search ends there).
-  double expected_search(int f, int r, int pos, double t_start,
-                         std::vector<std::pair<int, double>> &where) {
+  // receives, per place the search may end (as r's location fluent), the
+  // probability it ends there and whether that success already achieves the
+  // task goal `goal`.
+  struct Found {
+    int loc;
+    double prob;
+    bool achieves;
+  };
+  double expected_search(int f, int goal, int r, int pos, double t_start,
+                         std::vector<Found> &where) {
     where.clear();
-    struct Event { double t, p; int loc; };
+    struct Event { double t, p; int loc; bool achieves; };
     std::vector<Event> events;
     for (const auto &pd : pending_) {
       if (pd.fluent != f) continue;
       int loc = -1;  // where the pending attempt happens, as r's fluent
+      bool achieves = false;
       for (const auto &ach : achievers_[f]) {
         if (ach.group != pd.group || pd.group < 0) continue;
         for (int q : acts_[ach.action].pre) {
           if (loc_agent_[q] >= 0) { loc = as_agent_loc(r, q); break; }
         }
+        achieves = adds_fluent(ach.action, goal);
         if (loc >= 0) break;
       }
-      events.push_back({pd.time, pd.prob, loc});
+      events.push_back({pd.time, pd.prob, loc, achieves});
     }
     const Pass &P = (passes_.size() > 1 && r >= 0) ? passes_[r + 1] : passes_[0];
-    const std::vector<SearchAttempt> cands = attempts_for(P, r, f);
+    const std::vector<SearchAttempt> cands = attempts_for(P, r, f, goal);
     std::vector<char> used(cands.size(), 0);
     double fail = 1.0;
     for (const auto &e : events) fail *= 1.0 - e.p;
@@ -1186,7 +1278,7 @@ private:
       used[best] = 1;
       t += best_dt;
       if (c.loc >= 0) pos = c.loc;
-      events.push_back({t, c.prob, as_agent_loc(r, c.loc)});
+      events.push_back({t, c.prob, as_agent_loc(r, c.loc), c.achieves});
       fail *= 1.0 - c.prob;
     }
     if (events.empty()) return INF;
@@ -1198,13 +1290,13 @@ private:
       expected += (tt - prev) * still;
       prev = tt;
       double here = still * e.p;
-      if (here > 0.0) where.push_back({e.loc, here});
+      if (here > 0.0) where.push_back({e.loc, here, e.achieves});
       mass += here;
       still *= 1.0 - e.p;
     }
     // Condition the places on the search succeeding at all.
     if (mass > 0.0) {
-      for (auto &w : where) w.second /= mass;
+      for (auto &w : where) w.prob /= mass;
     }
     return expected;
   }
@@ -1224,19 +1316,23 @@ private:
     int pos = start;
     double pre = route_through(r, start, tp.pre_locs, tp.pre_fb, pos);
     (void)P;
-    std::vector<std::pair<int, double>> where;
-    double search = expected_search(tp.search_f, r, pos, t_start + pre, where);
+    std::vector<Found> where;
+    double search = expected_search(tp.search_f, tp.goal, r, pos, t_start + pre, where);
     if (!std::isfinite(search)) {
       delta_out = tp.delta;
       return tp.other + route(r, start, tp);
     }
+    // The rest of the task from wherever the object turns up; nothing if
+    // finding it there already achieves the goal.
     double post = 0.0;
-    for (const auto &[loc, w] : where) {
+    for (const auto &w : where) {
+      if (w.achieves) continue;
       int end;
-      post += w * route_through(r, loc >= 0 ? loc : pos, tp.post_locs, tp.post_fb, end);
+      post += w.prob * (route_through(r, w.loc >= 0 ? w.loc : pos, tp.post_locs, tp.post_fb, end) +
+                        tp.other_post);
     }
     delta_out = tp.delta_rest;
-    return pre + search + post + tp.other_ns;
+    return pre + search + post + tp.other_pre;
   }
 
   // List-schedule the goal fluents onto agents (or one serial agent).
