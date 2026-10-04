@@ -53,6 +53,8 @@ class ConcurrentHeuristicOptions(TypedDict, total=False):
     expected_search: bool
     #: With expected_search, idle agents join the slowest uncertain search. [False]
     parallel_search: bool
+    #: On one agent, order tasks so none destroys a fact another relies on. [True]
+    order_conflicts: bool
 
 
 def _normalize_goal(goal: Union[Goal, Fluent]) -> Goal:
