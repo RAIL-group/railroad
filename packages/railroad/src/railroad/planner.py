@@ -49,10 +49,8 @@ class ConcurrentHeuristicOptions(TypedDict, total=False):
     route_chaining: bool
     #: Achievers consuming the same precondition count as one attempt. [True]
     group_attempts: bool
-    #: Cost an uncertain search as an expected route over its candidate places. [False]
+    #: Cost an uncertain search as an expected route over its candidate places. [True]
     expected_search: bool
-    #: With expected_search, idle agents join the slowest uncertain search. [False]
-    parallel_search: bool
     #: On one agent, order tasks so none destroys a fact another relies on. [True]
     order_conflicts: bool
 
