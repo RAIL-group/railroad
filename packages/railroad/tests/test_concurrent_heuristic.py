@@ -222,6 +222,26 @@ def test_expected_search_costs_delivery_unless_found_in_place():
     assert _breakdown(planner, state, goal)["makespan"] == pytest.approx(32.5 + 14 / 3)
 
 
+def test_single_precision_find_probabilities_are_handled_like_doubles():
+    """Learned estimators return float32; `1 - p` then rounds in float32.
+
+    The branches of a search then sum to just under one, which must not make
+    what every branch adds (the robot free again) look uncertain -- that
+    hid the delivery leg after a search where the robot stands.
+    """
+    np = pytest.importorskip("numpy")
+
+    def value(cast):
+        def prob(robot, loc, obj):
+            return cast({"a": 0.455, "b": 0.455}.get(loc, 0.0))
+        actions = _actions(["r1"], ["box"], find_prob=prob)
+        state = _state({"r1": "a"}, extra={F("revealed goal"), F("revealed c")})
+        planner = MCTSPlanner(actions, heuristic="concurrent")
+        return _breakdown(planner, state, F("at box goal"))["makespan"]
+
+    assert value(np.float32) == pytest.approx(value(float), rel=1e-5)
+
+
 def test_object_in_hand_is_delivered_before_fetching_another():
     """The relaxation frees a full hand by setting its object down anywhere.
 

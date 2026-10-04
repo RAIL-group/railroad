@@ -308,10 +308,16 @@ private:
         }
       }
       ca.dur = duration + a.extra_cost();
+      // Branch probabilities may come from single-precision estimates; a
+      // fluent every branch adds is certain whenever they sum to one.
+      double total = 0.0;
+      for (const auto &sp : succs) total += std::max(sp.second, 0.0);
+      const bool complete = std::abs(total - 1.0) < 1e-6;
       for (const auto &[f, p] : prob) {
         if (f.is_negated()) continue;
         bool conditional = succs.size() > 1 && membership[f] < succs.size();
-        ca.adds.push_back({intern(f), std::min(p, 1.0), conditional});
+        double pf = (!conditional && complete) ? 1.0 : std::min(p, 1.0);
+        ca.adds.push_back({intern(f), pf, conditional});
       }
 
       // Deterministic consumption: a precondition deleted by a top-level
@@ -1405,21 +1411,9 @@ private:
       }
       tasks.push_back(std::move(t));
     }
-    // Longest processing time first.
-    std::stable_sort(tasks.begin(), tasks.end(),
-                     [](const Task &a, const Task &b) { return a.key > b.key; });
-
-    std::vector<double> finish = ready;
-    std::vector<int> end_loc = start_loc;
-    std::vector<int> n_assigned(n_agents, 0);
-
-    // Fluents achieved along an assigned task's plan (e.g. `found X` on the
-    // way to `at X L`) need no task of their own.
-    if (cover_.size() != fluents_.size()) cover_.assign(fluents_.size(), 0);
-    if (++cover_gen_ == 0) {
-      std::fill(cover_.begin(), cover_.end(), 0);
-      cover_gen_ = 1;
-    }
+    std::vector<double> finish;
+    std::vector<int> end_loc;
+    std::vector<int> n_assigned;
     struct Done {
       int task;  // index into tasks
       double at;
@@ -1458,7 +1452,7 @@ private:
       }
       return true;
     };
-    std::vector<char> taken(tasks.size(), 0);
+    std::vector<char> taken;
     auto needs_agent = [&](const Task &t) {
       return t.finish_fixed < 0.0 && cover_[t.fluent] != cover_gen_;
     };
@@ -1471,18 +1465,32 @@ private:
       return false;
     };
 
+    // List-schedule the tasks in the given priority order: each goes to the
+    // agent that would finish it earliest, deferring a task whose best agent
+    // would spoil another (unless every remaining task would).
     std::vector<Done> done;
+    auto run = [&](const std::vector<std::size_t> &order, bool record) {
+      finish = ready;
+      end_loc = start_loc;
+      n_assigned.assign(n_agents, 0);
+      taken.assign(tasks.size(), 0);
+      done.clear();
+      // Fluents achieved along an assigned task's plan (e.g. `found X` on
+      // the way to `at X L`) need no task of their own.
+      if (cover_.size() != fluents_.size()) cover_.assign(fluents_.size(), 0);
+      if (++cover_gen_ == 0) {
+        std::fill(cover_.begin(), cover_.end(), 0);
+        cover_gen_ = 1;
+      }
     for (std::size_t step = 0; step < tasks.size(); ++step) {
-      // Longest first, deferring a task whose best agent would spoil another
-      // (unless every remaining task would).
       std::size_t ti = tasks.size(), first = tasks.size();
-      for (std::size_t k = 0; k < tasks.size() && ti == tasks.size(); ++k) {
+      for (std::size_t k : order) {
         if (taken[k]) continue;
         if (first == tasks.size()) first = k;
         if (!opts_.order_conflicts || !needs_agent(tasks[k])) { ti = k; break; }
         int r;
         earliest(tasks[k], r);
-        if (r < 0 || !spoils(k, r)) ti = k;
+        if (r < 0 || !spoils(k, r)) { ti = k; break; }
       }
       if (ti == tasks.size()) ti = first;
       taken[ti] = 1;
@@ -1508,7 +1516,7 @@ private:
           if (!tp.locs.empty()) end_loc[best_r] = tp.locs.back();
           done_at = best_f;
           for (int f : tp.covers) cover_[f] = cover_gen_;
-          if (bd) {
+          if (record) {
             bd->assignment.push_back({fluent_str(t.fluent),
                                       per_agent ? agent_names_[best_r] : "team"});
           }
@@ -1516,13 +1524,40 @@ private:
       }
       done.push_back({static_cast<int>(ti), done_at});
     }
+      double ms = 0.0, sum = 0.0;
+      for (const auto &dn : done) {
+        ms = std::max(ms, dn.at);
+        sum += dn.at;
+        if (record) bd->goal_finish.push_back({fluent_str(tasks[dn.task].fluent), dn.at});
+      }
+      return std::make_pair(ms, sum);
+    };
 
-    double makespan = 0.0;
-    for (const auto &dn : done) {
-      makespan = std::max(makespan, dn.at);
-      completion_sum += dn.at;
-      if (bd) bd->goal_finish.push_back({fluent_str(tasks[dn.task].fluent), dn.at});
+    // Longest first suits the makespan (LPT); shortest first the sum of
+    // completion times (SPT), and on one agent the makespan barely depends
+    // on the order. Keep whichever order the value prefers.
+    std::vector<std::size_t> lpt(tasks.size());
+    std::iota(lpt.begin(), lpt.end(), 0);
+    std::stable_sort(lpt.begin(), lpt.end(),
+                     [&tasks](std::size_t a, std::size_t b) { return tasks[a].key > tasks[b].key; });
+    std::vector<std::size_t> best_order = lpt;
+    auto [makespan, sum] = run(lpt, false);
+    if (tasks.size() > 1) {
+      std::vector<std::size_t> spt = lpt;
+      std::stable_sort(spt.begin(), spt.end(),
+                       [&tasks](std::size_t a, std::size_t b) { return tasks[a].key < tasks[b].key; });
+      if (spt != lpt) {
+        auto [ms2, sum2] = run(spt, false);
+        if (opts_.lambda_add * sum2 + opts_.lambda_ms * ms2 <
+            opts_.lambda_add * sum + opts_.lambda_ms * makespan - 1e-9) {
+          makespan = ms2;
+          sum = sum2;
+          best_order = spt;
+        }
+      }
     }
+    if (bd) run(best_order, true);
+    completion_sum = sum;
     return makespan;
   }
 
