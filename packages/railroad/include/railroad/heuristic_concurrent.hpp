@@ -568,7 +568,8 @@ private:
   void offer(Pass &P, int f, double cost, double rho, int best,
              std::priority_queue<QItem, std::vector<QItem>, std::greater<QItem>> &pq) {
     if (rho <= 1e-12) return;
-    double score = cost / std::pow(rho, opts_.prob_exponent);
+    // Most fluents sit on deterministic supports (rho == 1): skip the pow.
+    double score = rho >= 1.0 ? cost : cost / std::pow(rho, opts_.prob_exponent);
     const double eps = 1e-9;
     if (score < P.score[f] - eps ||
         (score <= P.score[f] + eps && cost < P.cost[f] - eps)) {
