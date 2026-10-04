@@ -189,47 +189,32 @@ def bench_procthor_search(case: BenchmarkCase):
     return result
 
 
+# Planner configurations: the FF heuristic with mean backup and multiplier 4
+# (the original setup), and the concurrency-aware heuristic with MaxUCT
+# backup, which wants multiplier 1. Select one with -k, e.g.
+# `-k "procthor_search and mcts.heuristic=concurrent"`.
+PLANNER_CONFIGS = [
+    {"mcts.heuristic": "ff", "mcts.backup": "mean", "mcts.h_mult": 4},
+    {"mcts.heuristic": "concurrent", "mcts.backup": "max", "mcts.h_mult": 1},
+]
+
 bench_procthor_search.add_cases([
     {
         "mcts.iterations": iterations,
         "mcts.c": c,
-        "mcts.h_mult": h_mult,
+        **planner,
+        "find_prob": find_prob,
         "num_robots": num_robots,
         "num_objects": num_objects,
         "scene_seed": scene_seed,
     }
-    for scene_seed, c, num_robots, h_mult, iterations, num_objects in itertools.product(
+    for scene_seed, c, num_robots, planner, find_prob, iterations, num_objects in itertools.product(
         list(range(8610, 8620)),  # scene_seed
-        [400],               # mcts.c
-        [1, 2, 3],           # num_robots
-        [4],                 # mcts.h_mult
-        [4000],              # mcts.iterations
-        [2],                 # num_objects
+        [400],                    # mcts.c
+        [1, 2, 3],                # num_robots
+        PLANNER_CONFIGS,          # mcts.heuristic, mcts.backup, mcts.h_mult
+        ["oracle", "learned"],    # find_prob: ground-truth-backed 0.8/0.1, or the learned estimator
+        [4000],                   # mcts.iterations
+        [2],                      # num_objects
     )
-])
-
-# The same scenes with the concurrency-aware heuristic and MaxUCT backup
-# (which want heuristic multiplier 1), and both planners with the learned
-# find-probability estimator. Select with e.g. `-k "procthor_search and
-# concurrent"` or `-k "procthor_search and learned"`; the cases above keep
-# their original parameters.
-bench_procthor_search.add_cases([
-    {
-        "mcts.iterations": 4000,
-        "mcts.c": 400,
-        "mcts.h_mult": h_mult,
-        "mcts.heuristic": heuristic,
-        "mcts.backup": backup,
-        "find_prob": find_prob,
-        "num_robots": num_robots,
-        "num_objects": 2,
-        "scene_seed": scene_seed,
-    }
-    for (heuristic, backup, h_mult), find_prob, scene_seed, num_robots in itertools.product(
-        [("ff", "mean", 4), ("concurrent", "max", 1)],
-        ["oracle", "learned"],
-        list(range(8610, 8620)),
-        [1, 2, 3],
-    )
-    if not (heuristic == "ff" and find_prob == "oracle")  # the original cases
 ])
