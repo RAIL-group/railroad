@@ -47,6 +47,19 @@
 //      expected retry overhead (best of several attempt orderings) is charged
 //      to the task of the agent that makes the attempts.
 //
+//   7. Expected search (option expected_search). With real uncertainty about
+//      where an object is, a plan through one place plus a retry delta is
+//      inconsistent: walking towards a candidate need not lower the
+//      estimate, and idle detours look free. Instead the task's uncertain
+//      subgoal is costed as an expected route: from where the agent is, it
+//      visits candidate places greedily by probability per unit of (travel +
+//      search), pending outcomes complete when scheduled, and the expected
+//      time to the first success is integrated over the merged timeline. The
+//      rest of the task (delivery) is costed from each place the object may
+//      turn up, weighted by the chance it is found there. Optionally
+//      (parallel_search) agents left without a task join the slowest search
+//      as a parallel list schedule.
+//
 // The value of a goal branch is
 //     lambda_add * sum_g C_g + lambda_ms * max_g C_g
 // over the scheduled completion times C_g -- makespan plus a sum that gives
