@@ -77,7 +77,7 @@ class MCTSPlanner:
         heuristic: str = "ff",
         agent_aware: bool = True,
         timed_init: bool = True,
-        prob_exponent: float = 1.0,
+        prob_exponent: float = 8.0,
         sum_completion: bool = True,
         preferred_first: bool = False,
         route_delta: bool = False,

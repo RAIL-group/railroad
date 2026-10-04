@@ -4,50 +4,60 @@
 //
 // The FF heuristic (heuristic.hpp) estimates the cost of a *sequential* plan:
 // h_ff sums the durations of every relaxed-plan action whichever robot runs
-// it, and the relaxed initial state treats every in-flight effect as already
-// done. Both are exact for one robot and degrade with several, where the
-// objective (time until the goal holds) is a makespan. This header implements
-// a heuristic for that objective. It differs from ff_heuristic in four ways:
+// it, and its relaxed initial state treats every in-flight effect as already
+// done. Both are harmless with one robot. With several, the objective (time
+// until the goal holds) is a makespan, MCTS leaves are reached while other
+// robots are mid-action, and the estimate degrades (it undercounts remaining
+// time by 30-50% on the ProcTHOR search benchmark with 2-3 robots). This
+// header estimates the remaining time of the *team*:
 //
 //   1. Timed relaxed initial state. Fluents an in-flight action will add are
-//      available at the time they are scheduled, not at time 0, so committed
-//      but unfinished work still counts towards the estimate (cf. the
-//      temporal relaxed planning graph of CRIKEY/POPF). The outcomes of an
-//      in-flight probabilistic effect become *pending achievers* that carry
-//      their branch probability, instead of one branch picked arbitrarily.
+//      available when they are scheduled, not at time 0, so committed but
+//      unfinished work still counts (cf. the temporal relaxed planning graph
+//      of CRIKEY/POPF). The outcomes of an in-flight probabilistic effect
+//      become *pending achievers* carrying their branch probability, rather
+//      than one branch picked arbitrarily.
 //
-//   2. Probability-aware achiever choice. Each fluent carries the
-//      probability rho that its relaxed support succeeds (the product along
-//      the chosen achievers). Achievers are ranked by cost / rho, the expected
-//      cost of independently retried attempts (self-loop determinization), so a
-//      relaxed plan no longer routes a pick through the nearest location an
-//      object is *unlikely* to be at. The ranking is monotone, so costs are
-//      computed with a single Dijkstra-style pass.
+//   2. Probability-aware relaxed costs. Each fluent carries the probability
+//      rho that its relaxed support succeeds (the product along the chosen
+//      achievers); achievers are ranked by cost / rho^prob_exponent. The
+//      ranking is monotone along supports, so all costs come from one
+//      Dijkstra-style pass. A large exponent routes a relaxed plan through
+//      where an object most likely is, not the nearest place it might be.
 //
-//   3. Agent-aware makespan. Agents are the arguments of `free` fluents (the
-//      core's existing convention). For each agent the relaxation is re-run
-//      using only that agent's actions (plus agent-free actions and pending
-//      effects), giving the cost of each goal if that agent does it alone.
-//      Goals are then list-scheduled onto agents -- longest task first, each
-//      to the agent that would finish it earliest (LPT/EFT) -- starting from
-//      each agent's ready time. The makespan of that schedule replaces h_ff.
-//      With one agent it reduces to h_ff's "sum of durations" (without
-//      sharing actions between goals).
+//   3. Per-agent relaxations. Agents are the arguments of `free` fluents (the
+//      core's existing convention). The relaxation is re-run per agent with
+//      only that agent's actions (plus agent-free actions and pending
+//      effects): the cost of each goal if that agent does it alone.
 //
-//   4. Probabilistic retries without phantom independence. Two probabilistic
-//      achievers that consume the same precondition (e.g. robot1 and robot2
-//      searching the same location: both delete `not-searched loc obj`) are
-//      one attempt, not two independent ones. The retry delta is computed per
-//      agent, over that agent's attempts plus pending ones.
+//   4. Route chaining. A delete relaxation lets an agent be in several places
+//      at once -- a fetch costs start->object + start->target, and an agent
+//      standing at the target never has to come back. Each agent's location
+//      fluents are recognised as a mutex group (actions that add P(r, y) and
+//      delete P(r, x)); a task's moves are re-costed as one route through the
+//      locations the plan needs, in the order it needs them.
 //
-// The final value, per goal branch, is
-//     lambda_add * (h_add + delta) + lambda_ms * makespan
-// minimised over DNF branches. With one agent and no in-flight effects this
-// tracks ff_heuristic's 0.5 * h_add + 0.5 * h_ff + delta closely.
+//   5. List scheduling. Goals are tasks (a goal `at X L` together with the
+//      `found X` it implies); longest first, each goes to the agent that
+//      would finish it earliest (LPT/EFT), from each agent's ready time.
+//
+//   6. Retry deltas without phantom independence. Probabilistic achievers
+//      that consume the same precondition (two robots searching one place
+//      both delete `not-searched place obj`) are one attempt, not two. The
+//      expected retry overhead (best of several attempt orderings) is charged
+//      to the task of the agent that makes the attempts.
+//
+// The value of a goal branch is
+//     lambda_add * sum_g C_g + lambda_ms * max_g C_g
+// over the scheduled completion times C_g -- makespan plus a sum that gives
+// every task, not only the critical one, a gradient -- minimised over DNF
+// branches. With one agent and no in-flight effects it is a sequential,
+// route-aware h_ff.
 //
 // Everything that depends only on the action set and goal is compiled once
 // (integer fluent ids, precondition/achiever adjacency, agent partition), so a
-// per-state evaluation touches flat arrays only.
+// per-state evaluation touches flat arrays only; it is several times faster
+// than ff_heuristic on large grounded problems.
 
 #include "railroad/core.hpp"
 #include "railroad/goal.hpp"
@@ -96,7 +106,7 @@ struct ConcurrentHeuristicOptions {
   // of independent retries; larger values let probability dominate, so a
   // relaxed plan routes through where an object most likely is rather than
   // the nearest place it might be.
-  double prob_exponent = 1.0;
+  double prob_exponent = 8.0;
   // The lambda_add term: the scheduled goals' summed completion times (true)
   // or the contention-blind h_add + delta of the unrestricted relaxation.
   bool sum_completion = true;
