@@ -371,15 +371,16 @@ inline std::string mcts(const State &root_state,
 
     // ---------------- Selection ----------------
     while (depth < max_depth) {
-      if (!node->untried_actions.empty())
-        break;
-      if (node->children.empty())
-        break;
-      // Use GoalBase::evaluate for goal check
+      // A goal state ends the episode: check it before untried actions, or
+      // a goal node gets expanded and valued by continuations past the goal.
       if (goal->evaluate(node->state.fluents())) {
         is_node_goal = true;
         break;
       }
+      if (!node->untried_actions.empty())
+        break;
+      if (node->children.empty())
+        break;
 
       MCTSChanceNode *best_chance = nullptr;
       double best_score = -std::numeric_limits<double>::infinity();
