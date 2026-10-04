@@ -201,6 +201,26 @@ def test_searches_of_one_location_are_one_attempt():
     assert dict(phantom["deltas"])["found box"] < dict(one["deltas"])["found box"]
 
 
+def test_expected_search_walks_a_route_over_candidate_places():
+    """An uncertain fetch is costed over where the object might turn up.
+
+    The box is at `a` (10 away) or `b` (30 away), each with probability 0.5.
+    The greedy route searches `a` first (done at 15), then `b` (done at 40):
+    expected search time 15 + 0.5 * 25 = 27.5. Delivery to `goal` is 10 from
+    either place, and pick + place take 4: 41.5 in total.
+    """
+    def prob(robot, loc, obj):
+        return {"a": 0.5, "b": 0.5}.get(loc, 0.0)
+
+    actions = _actions(["r1"], ["box"], find_prob=prob)
+    state = _state({"r1": "start"}, extra={F("revealed goal"), F("revealed c")})
+    goal = F("at box goal")
+    planner = MCTSPlanner(actions, heuristic="concurrent",
+                          heuristic_options={"expected_search": True})
+    d = _breakdown(planner, state, goal, expected_search=True)
+    assert d["makespan"] == pytest.approx(41.5)
+
+
 def test_goal_already_true_is_zero_and_unreachable_is_inf():
     actions = _actions(["r1"], ["box"])
     planner = MCTSPlanner(actions, heuristic="concurrent")

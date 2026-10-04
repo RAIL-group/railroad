@@ -93,6 +93,13 @@ struct ConcurrentHeuristicOptions {
   bool route_chaining = true;
   // Treat achievers that consume the same precondition as one attempt.
   bool group_attempts = true;
+  // Cost a task's uncertain search as an expected route over its candidate
+  // places (and the rest of the task from wherever the object turns up),
+  // instead of a plan through one place plus a retry delta.
+  bool expected_search = false;
+  // With expected_search: agents left without a task join the slowest
+  // uncertain search (a parallel list schedule of its attempts).
+  bool parallel_search = false;
   // Achievers are ranked by cost / rho^prob_exponent. 1 is the expected cost
   // of independent retries; larger values let probability dominate, so a
   // relaxed plan routes through where an object most likely is rather than
@@ -212,6 +219,17 @@ private:
   std::vector<int> found_of_;  // `at X ...` -> `found X` (or -1)
   std::vector<int> loc_agent_;  // location fluent -> its agent (or -1)
   std::vector<std::vector<int>> loc_fluents_;  // agent -> its location fluents
+  std::vector<int> loc_place_;  // location fluent -> place id (or -1)
+  std::vector<std::unordered_map<int, int>> place_loc_;  // agent -> place -> fluent
+
+  // Agent r's location fluent for the place of location fluent `loc`.
+  int as_agent_loc(int r, int loc) const {
+    if (loc < 0 || r < 0 || loc_agent_[loc] == r) return loc;
+    int pl = loc_place_[loc];
+    if (pl < 0) return -1;
+    auto it = place_loc_[r].find(pl);
+    return it == place_loc_[r].end() ? -1 : it->second;
+  }
   std::vector<int> agents_;    // agent id -> fid of `free <agent>`
   std::vector<std::string> agent_names_;
   std::vector<std::vector<int>> branches_;  // DNF branches (fids, -1 = unknown)
@@ -374,6 +392,24 @@ private:
               loc_fluents_[ca.agent].push_back(id);
             }
           }
+        }
+      }
+    }
+
+    // Places: a location fluent with its agent argument removed, so that
+    // `at robot1 L` and `at robot2 L` name the same place.
+    loc_place_.assign(nf, -1);
+    place_loc_.assign(agents_.size(), {});
+    {
+      std::unordered_map<std::string, int> place_id;
+      for (std::size_t ag = 0; ag < agents_.size(); ++ag) {
+        for (int f : loc_fluents_[ag]) {
+          const Fluent &fl = fluents_[f];
+          std::string key = fl.name();
+          for (std::size_t i = 1; i < fl.args().size(); ++i) key += " " + fl.args()[i];
+          auto [it, inserted] = place_id.emplace(key, static_cast<int>(place_id.size()));
+          loc_place_[f] = it->second;
+          place_loc_[ag].emplace(it->second, f);
         }
       }
     }
@@ -868,6 +904,14 @@ private:
     std::vector<int> locs;  // locations to visit, in order
     std::vector<double> leg_fallback;  // relaxed-plan cost of each leg
     std::vector<int> covers;
+    // Expected-search costing (expected_search): the uncertain subgoal, the
+    // places needed before and after it, the non-move durations other than
+    // the search itself, and the retry deltas of everything else.
+    int search_f = -1;
+    std::vector<int> pre_locs, post_locs;
+    std::vector<double> pre_fb, post_fb;
+    double other_ns = 0.0;
+    double delta_rest = 0.0;
   };
 
   double route(int r, int start, const TaskPlan &tp) {
@@ -950,7 +994,237 @@ private:
       int b = P.best[v.second];
       tp.leg_fallback.push_back(b >= 0 ? acts_[b].dur : 0.0);
     }
+    if (opts_.expected_search) split_search(P, r, companion, uniq, tp);
     return tp;
+  }
+
+  // Probabilistic attempts at f open to agent r in pass P, one per attempt
+  // group (the nearest in the relaxation): (group, location, exec, prob,
+  // relaxed start time). `spent` groups (already in flight) are skipped.
+  struct SearchAttempt {
+    int group, loc;
+    double exec, prob, fallback;
+  };
+  std::vector<SearchAttempt> attempts_for(const Pass &P, int r, int f) const {
+    std::vector<SearchAttempt> out;
+    for (const auto &ach : achievers_[f]) {
+      if (!allowed(P, ach.action) || P.unmet[ach.action] != 0) continue;
+      const CAction &a = acts_[ach.action];
+      double p = a.adds[ach.add].prob;
+      if (p <= 1e-9) continue;
+      bool spent = false;
+      for (const auto &pd : pending_) {
+        if (pd.fluent == f && pd.group >= 0 && pd.group == ach.group) { spent = true; break; }
+      }
+      if (spent) continue;
+      int loc = -1;
+      for (int q : a.pre) {
+        if (loc_agent_[q] == r) { loc = q; break; }
+      }
+      SearchAttempt at{ach.group, loc, a.dur, p, P.wait[ach.action]};
+      bool merged = false;
+      for (auto &e : out) {
+        if (e.group == at.group) {
+          if (at.fallback < e.fallback) e = at;
+          merged = true;
+          break;
+        }
+      }
+      if (!merged) out.push_back(at);
+    }
+    return out;
+  }
+
+  // Identify the task's uncertain search -- the implied `found X` when the
+  // task has one, else the probabilistic subgoal with the most attempt groups
+  // -- and split the plan's places into those needed before and after it.
+  void split_search(Pass &P, int r, int companion,
+                    const std::vector<std::pair<double, int>> &visits, TaskPlan &tp) {
+    int f_star = -1;
+    std::size_t best_n = 1;
+    for (int f : tp.covers) {
+      if (!is_prob_choice(P, f)) continue;
+      std::size_t n = attempts_for(P, r, f).size();
+      if (f == companion && n >= 2) { f_star = f; break; }
+      if (n > best_n) { best_n = n; f_star = f; }
+    }
+    if (f_star < 0) return;
+    int b = P.best[f_star];
+    // Where the plan searches, and when.
+    int search_loc = -1;
+    double search_need = 0.0;
+    if (b >= 0) {
+      for (int q : acts_[b].pre) {
+        if (loc_agent_[q] == r) { search_loc = q; break; }
+      }
+      search_need = P.wait[b];
+    }
+    tp.search_f = f_star;
+    for (std::size_t i = 0; i < visits.size(); ++i) {
+      int loc = visits[i].second;
+      double fb = tp.leg_fallback[i];
+      if (loc == search_loc) continue;
+      if (visits[i].first < search_need) {
+        tp.pre_locs.push_back(loc);
+        tp.pre_fb.push_back(fb);
+      } else {
+        tp.post_locs.push_back(loc);
+        tp.post_fb.push_back(fb);
+      }
+    }
+    // The search's own duration is inside the expected search time; the
+    // retry deltas of the search outcome (and of anything else the same
+    // action achieves, e.g. `at X place`) are superseded by it.
+    tp.other_ns = tp.other - (b >= 0 ? acts_[b].dur : 0.0);
+    tp.delta_rest = 0.0;
+    for (int f : tp.covers) {
+      if (!is_prob_choice(P, f)) continue;
+      if (f == f_star || (b >= 0 && P.best[f] == b)) continue;
+      tp.delta_rest += delta(P, f);
+    }
+  }
+
+  double route_through(int r, int start, const std::vector<int> &locs,
+                       const std::vector<double> &fb, int &end) {
+    double total = 0.0;
+    int prev = start;
+    for (std::size_t i = 0; i < locs.size(); ++i) {
+      int y = locs[i];
+      if (y == prev) continue;
+      double d = (prev >= 0) ? move_dur(r, prev, y) : INF;
+      total += std::isfinite(d) ? d : fb[i];
+      prev = y;
+    }
+    end = prev;
+    return total;
+  }
+
+  // Expected time, from t_start, until f holds when `searchers` (agent,
+  // place, ready time; the first is the task's own agent) work through its
+  // attempt groups: whenever a searcher frees up it walks to the unused
+  // attempt with the most probability per unit of travel + execution -- a
+  // list schedule with travel as setup time (with one searcher, a greedy
+  // route). Pending outcomes complete at their scheduled times regardless.
+  // With all events in time order, E = sum_i (T_i - T_{i-1}) P(no success
+  // before T_i) from t_start. `where` receives (place as the first searcher's
+  // location fluent, probability the search ends there).
+  struct Searcher {
+    int agent, loc;
+    double t;
+  };
+  double expected_search(int f, std::vector<Searcher> searchers, double t_start,
+                         std::vector<std::pair<int, double>> &where) {
+    where.clear();
+    const int owner = searchers.front().agent;
+    struct Event { double t, p; int loc; };
+    std::vector<Event> events;
+    std::vector<int> spent;
+    for (const auto &pd : pending_) {
+      if (pd.fluent != f) continue;
+      int loc = -1;  // where the pending attempt happens, as owner's fluent
+      for (const auto &ach : achievers_[f]) {
+        if (ach.group != pd.group || pd.group < 0) continue;
+        for (int q : acts_[ach.action].pre) {
+          if (loc_agent_[q] >= 0) { loc = as_agent_loc(owner, q); break; }
+        }
+        if (loc >= 0) break;
+      }
+      events.push_back({pd.time, pd.prob, loc});
+    }
+    std::vector<std::vector<SearchAttempt>> cands(searchers.size());
+    for (std::size_t k = 0; k < searchers.size(); ++k) {
+      int a = searchers[k].agent;
+      const Pass &P = (passes_.size() > 1 && a >= 0) ? passes_[a + 1] : passes_[0];
+      cands[k] = attempts_for(P, a, f);
+    }
+    std::vector<int> used;
+    double fail = 1.0;
+    for (const auto &e : events) fail *= 1.0 - e.p;
+    searchers.front().t = t_start;
+    while (fail > 1e-3) {
+      // The searcher that frees up first takes its best remaining attempt.
+      int si = -1;
+      for (int k = 0; k < static_cast<int>(searchers.size()); ++k) {
+        bool any = false;
+        for (const auto &c : cands[k]) {
+          if (std::find(used.begin(), used.end(), c.group) == used.end()) { any = true; break; }
+        }
+        if (any && (si < 0 || searchers[k].t < searchers[si].t)) si = k;
+      }
+      if (si < 0) break;
+      Searcher &sr = searchers[si];
+      int best = -1;
+      double best_ratio = -1.0, best_dt = 0.0;
+      for (int i = 0; i < static_cast<int>(cands[si].size()); ++i) {
+        const SearchAttempt &c = cands[si][i];
+        if (std::find(used.begin(), used.end(), c.group) != used.end()) continue;
+        double travel = 0.0;
+        if (c.loc >= 0 && c.loc != sr.loc) {
+          travel = (sr.loc >= 0) ? move_dur(sr.agent, sr.loc, c.loc) : INF;
+          if (!std::isfinite(travel)) travel = std::max(0.0, c.fallback - sr.t);
+        }
+        double dt = travel + c.exec;
+        double ratio = c.prob / std::max(dt, 1e-9);
+        if (ratio > best_ratio) { best_ratio = ratio; best = i; best_dt = dt; }
+      }
+      const SearchAttempt &c = cands[si][best];
+      used.push_back(c.group);
+      sr.t += best_dt;
+      if (c.loc >= 0) sr.loc = c.loc;
+      events.push_back({sr.t, c.prob, as_agent_loc(owner, c.loc)});
+      fail *= 1.0 - c.prob;
+    }
+    if (events.empty()) return INF;
+    std::sort(events.begin(), events.end(),
+              [](const Event &a, const Event &b) { return a.t < b.t; });
+    double expected = 0.0, prev = t_start, still = 1.0, mass = 0.0;
+    for (const auto &e : events) {
+      double tt = std::max(e.t, prev);
+      expected += (tt - prev) * still;
+      prev = tt;
+      double here = still * e.p;
+      if (here > 0.0) where.push_back({e.loc, here});
+      mass += here;
+      still *= 1.0 - e.p;
+    }
+    // Condition the places on the search succeeding at all.
+    if (mass > 0.0) {
+      for (auto &w : where) w.second /= mass;
+    }
+    return expected;
+  }
+
+  // Serial duration of task tp for agent r starting at `start` at time
+  // t_start, and the retry delta to add on top.
+  double task_serial(const Pass &P, int r, int start, double t_start,
+                     const TaskPlan &tp, double &delta_out,
+                     const std::vector<Searcher> &helpers = {}) {
+    if (r < 0) {
+      delta_out = tp.delta;
+      return tp.other;
+    }
+    if (tp.search_f < 0) {
+      delta_out = tp.delta;
+      return tp.other + route(r, start, tp);
+    }
+    int pos = start;
+    double pre = route_through(r, start, tp.pre_locs, tp.pre_fb, pos);
+    (void)P;
+    std::vector<std::pair<int, double>> where;
+    std::vector<Searcher> searchers{{r, pos, t_start + pre}};
+    searchers.insert(searchers.end(), helpers.begin(), helpers.end());
+    double search = expected_search(tp.search_f, searchers, t_start + pre, where);
+    if (!std::isfinite(search)) {
+      delta_out = tp.delta;
+      return tp.other + route(r, start, tp);
+    }
+    double post = 0.0;
+    for (const auto &[loc, w] : where) {
+      int end;
+      post += w * route_through(r, loc >= 0 ? loc : pos, tp.post_locs, tp.post_fb, end);
+    }
+    delta_out = tp.delta_rest;
+    return pre + search + post + tp.other_ns;
   }
 
   // List-schedule the goal fluents onto agents (or one serial agent).
@@ -1013,10 +1287,11 @@ private:
           t.plans[r] = plan_task(P, g, companion_of(g), agent, ready[r]);
           if (!t.plans[r].ok) continue;
           const TaskPlan &tp = t.plans[r];
-          double serial = tp.other + (agent >= 0 ? route(agent, start_loc[r], tp) : 0.0);
-          double load = std::max(serial, tp.critical) + tp.delta;
+          double dl = 0.0;
+          double serial = task_serial(P, agent, start_loc[r], ready[r], tp, dl);
+          double load = std::max(serial, tp.critical) + dl;
           m = std::min(m, load);
-          if (bd) bd->loads.push_back({fluent_str(g), static_cast<int>(r), serial, tp.critical, tp.delta});
+          if (bd) bd->loads.push_back({fluent_str(g), static_cast<int>(r), serial, tp.critical, dl});
         }
         t.key = m;
       }
@@ -1041,12 +1316,18 @@ private:
       int task;    // index into tasks
       int agent;   // -1: fixed / fallback
       double at;
+      double start_t = 0.0;  // when the agent began this task, and where
+      int start_loc = -1;
+      bool first = false;    // the agent's first task (critical path applies)
     };
     std::vector<Done> done;
     for (std::size_t ti = 0; ti < tasks.size(); ++ti) {
       Task &t = tasks[ti];
       double done_at;
       int done_agent = -1;
+      double dn_start_t = 0.0;
+      int dn_start_loc = -1;
+      bool dn_first = false;
       if (t.finish_fixed >= 0.0) {
         done_at = t.finish_fixed;
       } else if (cover_[t.fluent] == cover_gen_) {
@@ -1058,9 +1339,11 @@ private:
           if (!t.plans[r].ok || !std::isfinite(finish[r])) continue;
           const TaskPlan &tp = t.plans[r];
           int agent = per_agent ? static_cast<int>(r) : solo;
-          double serial = tp.other + (agent >= 0 ? route(agent, end_loc[r], tp) : 0.0);
+          Pass &P = per_agent ? passes_[r + 1] : U;
+          double dl = 0.0;
+          double serial = task_serial(P, agent, end_loc[r], finish[r], tp, dl);
           // The relaxed critical path only bounds an agent's first task.
-          double load = (n_assigned[r] == 0 ? std::max(serial, tp.critical) : serial) + tp.delta;
+          double load = (n_assigned[r] == 0 ? std::max(serial, tp.critical) : serial) + dl;
           double f = finish[r] + load;
           if (f < best_f) { best_f = f; best_r = static_cast<int>(r); }
         }
@@ -1072,6 +1355,9 @@ private:
           done_at = U.cost[t.fluent] + ex.delta;
         } else {
           const TaskPlan &tp = t.plans[best_r];
+          dn_start_t = finish[best_r];
+          dn_start_loc = end_loc[best_r];
+          dn_first = n_assigned[best_r] == 0;
           finish[best_r] = best_f;
           n_assigned[best_r] += 1;
           if (!tp.locs.empty()) end_loc[best_r] = tp.locs.back();
@@ -1084,7 +1370,36 @@ private:
           }
         }
       }
-      done.push_back({static_cast<int>(ti), done_agent, done_at});
+      done.push_back({static_cast<int>(ti), done_agent, done_at, dn_start_t, dn_start_loc, dn_first});
+    }
+
+    // Agents left without a task join the uncertain searches, slowest first.
+    if (opts_.parallel_search && per_agent) {
+      std::vector<Searcher> spare;
+      for (std::size_t r = 0; r < n_agents; ++r) {
+        if (n_assigned[r] == 0 && std::isfinite(ready[r])) {
+          spare.push_back({static_cast<int>(r), start_loc[r], ready[r]});
+        }
+      }
+      std::vector<std::size_t> order(done.size());
+      std::iota(order.begin(), order.end(), 0);
+      std::sort(order.begin(), order.end(),
+                [&done](std::size_t a, std::size_t b) { return done[a].at > done[b].at; });
+      for (std::size_t k : order) {
+        if (spare.empty()) break;
+        Done &dn = done[k];
+        if (dn.agent < 0) continue;
+        const TaskPlan &tp = tasks[dn.task].plans[dn.agent];
+        if (tp.search_f < 0) continue;
+        Pass &P = passes_[dn.agent + 1];
+        double dl = 0.0;
+        double serial = task_serial(P, dn.agent, dn.start_loc, dn.start_t, tp, dl, spare);
+        double load = (dn.first ? std::max(serial, tp.critical) : serial) + dl;
+        if (dn.start_t + load < dn.at - 1e-9) {
+          dn.at = dn.start_t + load;
+          spare.clear();  // committed to this search
+        }
+      }
     }
 
     double makespan = 0.0;
