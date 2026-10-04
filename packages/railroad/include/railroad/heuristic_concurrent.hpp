@@ -40,6 +40,12 @@
 //   5. List scheduling. Goals are tasks (a goal `at X L` together with the
 //      `found X` it implies); longest first, each goes to the agent that
 //      would finish it earliest (LPT/EFT), from each agent's ready time.
+//      Tasks are planned independently, so one task's relaxed plan may
+//      destroy a fact another relies on: fetching a second object "frees"
+//      the hand by setting down the one being delivered, whose own delivery
+//      then still finds it in hand. On one agent such a task waits for the
+//      tasks it would spoil (option order_conflicts) -- a threat between
+//      causal links from the state, resolved by ordering.
 //
 //   6. Retry deltas without phantom independence. Probabilistic achievers
 //      that consume the same precondition (two robots searching one place
@@ -106,6 +112,10 @@ struct ConcurrentHeuristicOptions {
   bool route_chaining = true;
   // Treat achievers that consume the same precondition as one attempt.
   bool group_attempts = true;
+  // On one agent, do a task before any task whose plan would destroy a fact
+  // (true now) that it relies on -- e.g. deliver the object in hand before
+  // fetching another, which needs the hand free.
+  bool order_conflicts = true;
   // Cost a task's uncertain search as an expected route over its candidate
   // places (and the rest of the task from wherever the object turns up),
   // instead of a plan through one place plus a retry delta.
@@ -770,6 +780,7 @@ private:
     double delta = 0.0;   // sum of retry deltas over probabilistic fluents
     std::vector<int> fluents;  // fluents visited (for coverage)
     std::vector<int> actions;  // actions on the plan
+    std::vector<int> avail;    // subgoals already available in the state
   };
 
   void next_stamp() {
@@ -803,6 +814,7 @@ private:
       if (fl_stamp_[f] == stamp_) continue;
       fl_stamp_[f] = stamp_;
       int b = P.best[f];
+      if (b == BEST_AVAIL) ex.avail.push_back(f);
       if (b == BEST_AVAIL || b == BEST_NONE) continue;
       ex.fluents.push_back(f);
       if (is_prob_choice(P, f)) ex.delta += delta(P, f);
@@ -925,6 +937,10 @@ private:
     std::vector<double> pre_fb, post_fb;
     double other_ns = 0.0;
     double delta_rest = 0.0;
+    // For ordering an agent's tasks (order_conflicts), excluding the agent's
+    // location (route chaining handles it): facts the plan relies on from the
+    // state, facts its actions delete for good, and facts they add.
+    std::vector<int> relies, destroys, adds;
   };
 
   double route(int r, int start, const TaskPlan &tp) {
@@ -955,6 +971,19 @@ private:
     if (companion >= 0) goal_cost = std::max(goal_cost, P.cost[companion]);
     tp.critical = std::max(0.0, goal_cost - ready);
     tp.covers = std::move(ex.fluents);
+    if (r >= 0 && opts_.order_conflicts) {
+      for (int f : ex.avail) {
+        if (loc_agent_[f] < 0) tp.relies.push_back(f);
+      }
+      for (int a : ex.actions) {
+        for (int c : acts_[a].consumes) {
+          if (loc_agent_[c] < 0) tp.destroys.push_back(c);
+        }
+        for (const auto &ad : acts_[a].adds) {
+          if (loc_agent_[ad.fluent] < 0 && ad.prob > 1e-9) tp.adds.push_back(ad.fluent);
+        }
+      }
+    }
     if (r < 0 || !opts_.route_chaining) {
       tp.other = ex.dur;  // no single agent to route, or routing disabled
       return tp;
@@ -1333,8 +1362,68 @@ private:
       int start_loc = -1;
       bool first = false;    // the agent's first task (critical path applies)
     };
+    // The agent that would finish task t earliest (earliest finish time).
+    auto earliest = [&](const Task &t, int &best_r) {
+      best_r = -1;
+      double best_f = INF;
+      for (std::size_t r = 0; r < n_agents; ++r) {
+        if (!t.plans[r].ok || !std::isfinite(finish[r])) continue;
+        const TaskPlan &tp = t.plans[r];
+        int agent = per_agent ? static_cast<int>(r) : solo;
+        Pass &P = per_agent ? passes_[r + 1] : U;
+        double dl = 0.0;
+        double serial = task_serial(P, agent, end_loc[r], finish[r], tp, dl);
+        // The relaxed critical path only bounds an agent's first task.
+        double load = (n_assigned[r] == 0 ? std::max(serial, tp.critical) : serial) + dl;
+        double f = finish[r] + load;
+        if (f < best_f) { best_f = f; best_r = static_cast<int>(r); }
+      }
+      return best_f;
+    };
+    // Plan a destroys a fact plan b relies on from the state, and adds
+    // nothing b still needs (if it did, as delivering the object in hand
+    // frees the hand for the next fetch, the fact only fed a step that a
+    // would make unnecessary).
+    auto has = [](const std::vector<int> &v, int x) {
+      return std::find(v.begin(), v.end(), x) != v.end();
+    };
+    auto clobbers = [&has](const TaskPlan &a, const TaskPlan &b) {
+      bool hit = false;
+      for (int c : a.destroys) hit = hit || has(b.relies, c);
+      if (!hit) return false;
+      for (int f : a.adds) {
+        if (has(b.covers, f)) return false;
+      }
+      return true;
+    };
+    std::vector<char> taken(tasks.size(), 0);
+    auto needs_agent = [&](const Task &t) {
+      return t.finish_fixed < 0.0 && cover_[t.fluent] != cover_gen_;
+    };
+    // Would doing task ti on agent r now spoil a task still to be scheduled?
+    auto spoils = [&](std::size_t ti, int r) {
+      for (std::size_t tj = 0; tj < tasks.size(); ++tj) {
+        if (tj == ti || taken[tj] || !needs_agent(tasks[tj])) continue;
+        if (tasks[tj].plans[r].ok && clobbers(tasks[ti].plans[r], tasks[tj].plans[r])) return true;
+      }
+      return false;
+    };
+
     std::vector<Done> done;
-    for (std::size_t ti = 0; ti < tasks.size(); ++ti) {
+    for (std::size_t step = 0; step < tasks.size(); ++step) {
+      // Longest first, deferring a task whose best agent would spoil another
+      // (unless every remaining task would).
+      std::size_t ti = tasks.size(), first = tasks.size();
+      for (std::size_t k = 0; k < tasks.size() && ti == tasks.size(); ++k) {
+        if (taken[k]) continue;
+        if (first == tasks.size()) first = k;
+        if (!opts_.order_conflicts || !needs_agent(tasks[k])) { ti = k; break; }
+        int r;
+        earliest(tasks[k], r);
+        if (r < 0 || !spoils(k, r)) ti = k;
+      }
+      if (ti == tasks.size()) ti = first;
+      taken[ti] = 1;
       Task &t = tasks[ti];
       double done_at;
       int done_agent = -1;
@@ -1347,19 +1436,7 @@ private:
         continue;  // achieved along another task's plan
       } else {
         int best_r = -1;
-        double best_f = INF;
-        for (std::size_t r = 0; r < n_agents; ++r) {
-          if (!t.plans[r].ok || !std::isfinite(finish[r])) continue;
-          const TaskPlan &tp = t.plans[r];
-          int agent = per_agent ? static_cast<int>(r) : solo;
-          Pass &P = per_agent ? passes_[r + 1] : U;
-          double dl = 0.0;
-          double serial = task_serial(P, agent, end_loc[r], finish[r], tp, dl);
-          // The relaxed critical path only bounds an agent's first task.
-          double load = (n_assigned[r] == 0 ? std::max(serial, tp.critical) : serial) + dl;
-          double f = finish[r] + load;
-          if (f < best_f) { best_f = f; best_r = static_cast<int>(r); }
-        }
+        double best_f = earliest(t, best_r);
         if (best_r < 0) {
           // No single agent can do it: fall back to the team relaxation.
           next_stamp();

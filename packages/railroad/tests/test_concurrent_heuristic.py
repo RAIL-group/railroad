@@ -201,6 +201,26 @@ def test_searches_of_one_location_are_one_attempt():
     assert dict(phantom["deltas"])["found box"] < dict(one["deltas"])["found box"]
 
 
+def test_object_in_hand_is_delivered_before_fetching_another():
+    """The relaxation frees a full hand by setting its object down anywhere.
+
+    r1 stands at `a` holding the box, next to the cup; both belong at `goal`
+    (10 away). Relaxed, the cup's plan drops the box to free the hand, and the
+    box is then "placed" at `goal` again for free, since `holding r1 box` is
+    never deleted: 16 in all. That plan destroys the holding the box's own
+    delivery relies on, so the box goes first (10 + 2) and the cup is fetched
+    from `goal` (10 + 2 + 10 + 2): 36, the true optimum.
+    """
+    actions = _actions(["r1"], ["box", "cup"])
+    state = _state({"r1": "a"}, extra={
+        F("holding r1 box"), F("hand-full r1"), F("at cup a"),
+        F("found box"), F("found cup"), F("revealed a"), F("revealed goal")})
+    goal = F("at box goal") & F("at cup goal")
+    planner = MCTSPlanner(actions, heuristic="concurrent")
+    assert _breakdown(planner, state, goal)["makespan"] == pytest.approx(36.0)
+    assert _breakdown(planner, state, goal, order_conflicts=False)["makespan"] == pytest.approx(16.0)
+
+
 def test_expected_search_walks_a_route_over_candidate_places():
     """An uncertain fetch is costed over where the object might turn up.
 
@@ -240,7 +260,9 @@ def test_mcts_with_concurrent_heuristic_completes_two_fetches(backup):
     )
     goal = F("at box goal") & F("at cup goal")
     planner = MCTSPlanner(actions, heuristic="concurrent", backup=backup)
-    for _ in range(20):
+    # The cup's delivery fixes the finish time, so a robot with slack may fill
+    # it with short actions at no cost: allow more decisions than moves.
+    for _ in range(40):
         if goal.evaluate(state.fluents):
             break
         name = planner(state, goal, max_iterations=1000, c=50, max_depth=20,
