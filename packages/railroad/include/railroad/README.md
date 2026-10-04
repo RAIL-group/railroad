@@ -28,6 +28,9 @@ Probabilistic PDDL planning system.
 - **heuristic.hpp**: umbrella header — includes the four above plus
   `goal.hpp`, and provides the public introspection helpers and the
   top-level `ff_heuristic` orchestrator (see "Header split" below).
+- **heuristic_concurrent.hpp**: the concurrency-aware heuristic
+  (`ConcurrentHeuristic`) -- a self-contained alternative to `ff_heuristic`
+  for multi-robot problems (see "concurrent_heuristic" below).
 - **planner.hpp**: MCTS planner implementation
 - **constants.hpp**: Global constants
 
@@ -97,6 +100,40 @@ h = ff_heuristic(state, goal, all_actions,
 
 The `lambda_*` weights are free-form (not normalized); defaults are an even
 split between `h_add` and `h_ff` (`0.5, 0.0, 0.5`).
+
+### concurrent_heuristic
+
+`MCTSPlanner(..., heuristic="concurrent")`. Estimates the remaining time of
+the *team* rather than of one sequential agent; the design notes at the top of
+`heuristic_concurrent.hpp` explain each step. In brief:
+
+1. **Timed relaxed state.** In-flight effects become available when they are
+   scheduled; in-flight probabilistic outcomes are *pending achievers* with
+   their branch probability (the FF heuristic applies all upcoming effects at
+   time 0 and keeps one branch of each probabilistic effect, picked by hash
+   order).
+2. **Probability-aware costs.** Achievers ranked by `cost / rho^k`, `rho` the
+   probability that the relaxed support succeeds (`prob_exponent`, default
+   8); one Dijkstra-style pass.
+3. **Per-agent relaxations** (agents = arguments of `free`), **route
+   chaining** over each agent's location fluents (no teleporting between the
+   places a task needs), and **LPT/EFT list scheduling** of goal tasks
+   (`at X L` together with its implied `found X`) onto agents.
+4. **Retry deltas** per task, with achievers that consume the same
+   precondition counted as one attempt.
+5. **Value** `lambda_add * sum_g C_g + lambda_ms * max_g C_g` over the
+   scheduled completion times.
+
+Compiled once per search into integer-indexed arrays, so evaluations are
+several times faster than `ff_heuristic` on large grounded problems. Options
+(`ConcurrentHeuristicOptions`) switch each component off for ablations.
+
+Since this heuristic is calibrated (h tracks the remaining time), use it with
+`heuristic_multiplier=1`: the leaf value is `-(t + w h)`, which for `w > 1`
+improves with elapsed time along any decent path, so whichever branch is
+searched deepest looks best. `backup="max"` (MaxUCT: decision nodes take their
+best child, chance nodes the probability-weighted mean) keeps a few bad
+coordination choices below a node from swamping its value.
 
 ### "at implies found" augmentation
 
