@@ -111,7 +111,8 @@ the *team* rather than of one sequential agent; the design notes at the top of
    scheduled; in-flight probabilistic outcomes are *pending achievers* with
    their branch probability (the FF heuristic applies all upcoming effects at
    time 0 and keeps one branch of each probabilistic effect, picked by hash
-   order).
+   order). A free agent cannot idle, so its own pending effects count only
+   after the shortest action it can start now.
 2. **Probability-aware costs.** Achievers ranked by `cost / rho^k`, `rho` the
    probability that the relaxed support succeeds (`prob_exponent`, default
    8); one Dijkstra-style pass.
@@ -150,7 +151,10 @@ the whole action. And until each of a decision node's actions has been tried,
 its own heuristic value stands in for the untried ones: chance outcomes are
 visited rarely, and valued by their one expanded child they inherit that
 arbitrary action's value (the likely outcome of a good search valued as a
-detour).
+detour). Under max backup the root action recommended is the one with the
+best estimate (ties to visits): visits are only a proxy, and a child that
+stays optimistic while its actions are untried can gather the most visits
+and still turn out worse.
 
 ### "at implies found" augmentation
 

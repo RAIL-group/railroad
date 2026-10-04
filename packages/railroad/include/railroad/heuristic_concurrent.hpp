@@ -16,7 +16,10 @@
 //      unfinished work still counts (cf. the temporal relaxed planning graph
 //      of CRIKEY/POPF). The outcomes of an in-flight probabilistic effect
 //      become *pending achievers* carrying their branch probability, rather
-//      than one branch picked arbitrarily.
+//      than one branch picked arbitrarily. A free agent must act at once, so
+//      its own pending effects (e.g. a flag that clears 0.1 s after a pick,
+//      forbidding an immediate place) count only after the shortest action
+//      it can start now.
 //
 //   2. Probability-aware relaxed costs. Each fluent carries the probability
 //      rho that its relaxed support succeeds (the product along the chosen
