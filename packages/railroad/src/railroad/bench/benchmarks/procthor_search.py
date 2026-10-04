@@ -63,12 +63,22 @@ def bench_procthor_search(case: BenchmarkCase):
             self._operators = self.define_operators()
 
         def define_operators(self) -> list[Operator]:
-            def object_find_prob_fn(robot: str, location: str, obj: str) -> float:
-                del robot
-                for loc, objs in self.scene.object_locations.items():
-                    if obj in objs:
-                        return 0.8 if loc == location else 0.1
-                return 0.1
+            if case.params.get("find_prob", "oracle") == "learned":
+                # The packaged ProcTHOR model, as `railroad example procthor-search
+                # --estimate-object-find-prob`; loaded once per environment.
+                if not hasattr(self, "_learned_find_prob_fn"):
+                    from railroad.environment.procthor.learning.utils import get_default_fcnn_model_path
+                    self._learned_find_prob_fn = self.scene.get_object_find_prob_fn(
+                        nn_model_path=str(get_default_fcnn_model_path()),
+                    )
+                object_find_prob_fn = self._learned_find_prob_fn
+            else:
+                def object_find_prob_fn(robot: str, location: str, obj: str) -> float:
+                    del robot
+                    for loc, objs in self.scene.object_locations.items():
+                        if obj in objs:
+                            return 0.8 if loc == location else 0.1
+                    return 0.1
 
             move_op = operators.construct_move_operator_blocking(self.estimate_move_time)
             search_op = operators.construct_search_operator(object_find_prob_fn, 10.0)
@@ -196,4 +206,30 @@ bench_procthor_search.add_cases([
         [4000],              # mcts.iterations
         [2],                 # num_objects
     )
+])
+
+# The same scenes with the concurrency-aware heuristic and MaxUCT backup
+# (which want heuristic multiplier 1), and both planners with the learned
+# find-probability estimator. Select with e.g. `-k "procthor_search and
+# concurrent"` or `-k "procthor_search and learned"`; the cases above keep
+# their original parameters.
+bench_procthor_search.add_cases([
+    {
+        "mcts.iterations": 4000,
+        "mcts.c": 400,
+        "mcts.h_mult": h_mult,
+        "mcts.heuristic": heuristic,
+        "mcts.backup": backup,
+        "find_prob": find_prob,
+        "num_robots": num_robots,
+        "num_objects": 2,
+        "scene_seed": scene_seed,
+    }
+    for (heuristic, backup, h_mult), find_prob, scene_seed, num_robots in itertools.product(
+        [("ff", "mean", 4), ("concurrent", "max", 1)],
+        ["oracle", "learned"],
+        list(range(8610, 8620)),
+        [1, 2, 3],
+    )
+    if not (heuristic == "ff" and find_prob == "oracle")  # the original cases
 ])
