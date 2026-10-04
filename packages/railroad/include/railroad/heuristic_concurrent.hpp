@@ -253,6 +253,8 @@ private:
     return it == place_loc_[r].end() ? -1 : it->second;
   }
   std::vector<int> agents_;    // agent id -> fid of `free <agent>`
+  std::vector<std::vector<int>> agent_acts_;  // agent id -> its actions
+  std::vector<uint8_t> now_;   // per-state scratch: fluent available now
   std::vector<std::string> agent_names_;
   std::vector<std::vector<int>> branches_;  // DNF branches (fids, -1 = unknown)
 
@@ -347,6 +349,11 @@ private:
         ca.consumes.push_back(p);
       }
       acts_.push_back(std::move(ca));
+    }
+
+    agent_acts_.assign(agents_.size(), {});
+    for (int ai = 0; ai < static_cast<int>(acts_.size()); ++ai) {
+      if (acts_[ai].agent >= 0) agent_acts_[acts_[ai].agent].push_back(ai);
     }
 
     // Goal fluents may be absent from every action; intern them too so that
@@ -609,6 +616,38 @@ private:
         if (id == fb) tb = std::min(tb, t);
       }
       if (std::isfinite(tb)) avail_.push_back({fa, tb});
+    }
+    if (opts_.timed_init) defer_own_effects();
+  }
+
+  // A free agent acts now; it cannot idle until one of its own pending
+  // effects fires (e.g. a "just picked" flag that clears 0.1 s after the
+  // pick, which forbids putting the object straight back). Such effects are
+  // usable by the agent only after the shortest action it can start now.
+  void defer_own_effects() {
+    if (now_.size() != fluents_.size()) now_.assign(fluents_.size(), 0);
+    std::fill(now_.begin(), now_.end(), 0);
+    for (const auto &[f, t] : avail_) {
+      if (t <= 1e-9) now_[f] = 1;
+    }
+    for (std::size_t r = 0; r < agents_.size(); ++r) {
+      if (!now_[agents_[r]]) continue;  // busy: its effects are part of its action
+      double d_min = -1.0;
+      for (auto &[f, t] : avail_) {
+        if (t <= 1e-9 || static_cast<int>(f) == agents_[r]) continue;
+        const Fluent &fl = fluents_[f];
+        if (fl.args().empty() || fl.args()[0] != agent_names_[r]) continue;
+        if (d_min < 0.0) {
+          d_min = INF;
+          for (int a : agent_acts_[r]) {
+            bool ok = true;
+            for (int q : acts_[a].pre) ok = ok && now_[q];
+            if (ok) d_min = std::min(d_min, acts_[a].dur);
+          }
+          if (!std::isfinite(d_min)) d_min = 0.0;
+        }
+        t = std::max(t, d_min);
+      }
     }
   }
 
