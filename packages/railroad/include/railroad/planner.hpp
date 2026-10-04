@@ -184,7 +184,8 @@ inline void backpropagate(MCTSDecisionNode *leaf, double reward) {
 
 
 // Max backup (Keller & Helmert's MaxUCT): a decision node is worth its best
-// child, a chance node the probability-weighted mean of its visited outcomes.
+// child, a chance node the probability-weighted mean of its outcomes (each
+// valued from the heuristic when the chance node is created, then refined).
 // Under mean backup a node is worth the average of everything the tree policy
 // tried below it, so with broad exploration an action whose continuations
 // are mostly bad is undervalued even when one is the best on offer -- and in
@@ -215,7 +216,7 @@ inline void backpropagate_max(MCTSDecisionNode *leaf, double reward) {
     double num = 0.0, den = 0.0;
     for (std::size_t i = 0; i < c->children.size(); ++i) {
       const auto &o = c->children[i];
-      if (o->visits == 0) continue;
+      if (o->visits == 0 && !o->evaluated) continue;
       num += c->outcome_weights[i] * o->estimate;
       den += c->outcome_weights[i];
     }
@@ -332,9 +333,27 @@ inline std::string mcts(const State &root_state,
     };
   }
 
+  // Reward of evaluating `n` as a leaf (goal reward or the heuristic value).
+  auto leaf_reward = [&](const MCTSDecisionNode *n, double extra_cost) -> double {
+    if (goal->evaluate(n->state.fluents())) {
+      return -n->state.time() + SUCCESS_REWARD - extra_cost;
+    }
+    double h = heuristic_fn ? heuristic_fn(n->state) : 0.0;
+    if (h > 1e10 && dead_end_penalty) {
+      // The relaxation proved the goal unreachable from here. Charge a
+      // *flat* cost: what this branch spent getting here is irrelevant,
+      // because no continuation of it can reach the goal. Folding the
+      // elapsed time and accumulated cost in would rank a slow failure
+      // below a fast one and push the search toward failing quickly,
+      // which is not a preference we want to express.
+      return -*dead_end_penalty;
+    }
+    if (h > 1e10) h = HEURISTIC_CANNOT_FIND_GOAL_PENALTY;
+    return -n->state.time() - h * heuristic_multiplier - extra_cost;
+  };
+
   for (int it = 0; it < max_iterations; ++it) {
     bool is_node_goal = false;
-    bool did_need_relaxed_transition = false;
 
     #ifdef RAILROAD_USE_PYBIND
     if (PyErr_CheckSignals() != 0) {
@@ -408,6 +427,19 @@ inline std::string mcts(const State &root_state,
         if (chance_raw->children.empty())
           continue;
 
+        // Under max backup a chance node is the expectation over *all* its
+        // outcomes, so each is valued now from the heuristic; otherwise the
+        // first sampled outcome stands in for all of them, and a lucky
+        // low-probability branch (an unlikely search succeeding) makes its
+        // action look like a sure thing.
+        if (max_backup) {
+          for (auto &child : chance_raw->children) {
+            child->leaf_value = leaf_reward(child.get(), accumulated_extra_cost);
+            child->estimate = child->leaf_value;
+            child->evaluated = true;
+          }
+        }
+
         std::size_t idx = sample_index(chance_raw->outcome_weights, rng);
         node = chance_raw->children[idx].get();
         ++depth;
@@ -415,31 +447,9 @@ inline std::string mcts(const State &root_state,
     }
 
     // ---------------- Simulation / Evaluation ----------------
-    double reward;
-    double h = 0.0;
-    int goal_count_val = goal->goal_count(node->state.fluents());
-    if (goal->evaluate(node->state.fluents())) {
-      reward = -node->state.time() + SUCCESS_REWARD + 0 * goal_count_val - accumulated_extra_cost;
-    } else {
-      h = heuristic_fn ? heuristic_fn(node->state) : 0.0;
-      if (h > 1e10 && dead_end_penalty) {
-        // The relaxation proved the goal unreachable from here. Charge a
-        // *flat* cost: what this branch spent getting here is irrelevant,
-        // because no continuation of it can reach the goal. Folding the
-        // elapsed time and accumulated cost in would rank a slow failure
-        // below a fast one and push the search toward failing quickly,
-        // which is not a preference we want to express.
-        reward = -*dead_end_penalty;
-      } else {
-        if (h > 1e10) {
-          h = HEURISTIC_CANNOT_FIND_GOAL_PENALTY;
-        }
-        if (did_need_relaxed_transition)
-          h += 100;
-
-        reward = -node->state.time() - h * heuristic_multiplier + 0 * goal_count_val - accumulated_extra_cost;
-      }
-    }
+    double reward = (max_backup && node->evaluated)
+                        ? node->leaf_value
+                        : leaf_reward(node, accumulated_extra_cost);
 
     // ---------------- Backpropagation ----------------
     if (max_backup) {
