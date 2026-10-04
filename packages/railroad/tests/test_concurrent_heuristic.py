@@ -5,6 +5,7 @@ every expected value can be worked out by hand from the move times.
 """
 
 import math
+from typing import Any, cast
 
 import pytest
 
@@ -186,16 +187,16 @@ def test_searches_of_one_location_are_one_attempt():
     actions_2 = _actions(["r1", "r2"], ["box"], find_prob=0.5)
     goal = F("found box")
     one = _breakdown(
-        MCTSPlanner(actions_1, heuristic="concurrent", agent_aware=False),
+        MCTSPlanner(actions_1, heuristic="concurrent", heuristic_options={"agent_aware": False}),
         _state({"r1": "a"}), goal)
     two = _breakdown(
-        MCTSPlanner(actions_2, heuristic="concurrent", agent_aware=False),
+        MCTSPlanner(actions_2, heuristic="concurrent", heuristic_options={"agent_aware": False}),
         _state({"r1": "a", "r2": "a"}), goal)
     assert dict(two["deltas"])["found box"] == pytest.approx(dict(one["deltas"])["found box"])
 
     # Counted as independent trials, the second robot "halves" the failure risk.
     phantom = _breakdown(
-        MCTSPlanner(actions_2, heuristic="concurrent", agent_aware=False),
+        MCTSPlanner(actions_2, heuristic="concurrent", heuristic_options={"agent_aware": False}),
         _state({"r1": "a", "r2": "a"}), goal, group_attempts=False)
     assert dict(phantom["deltas"])["found box"] < dict(one["deltas"])["found box"]
 
@@ -219,8 +220,8 @@ def test_mcts_with_concurrent_heuristic_completes_two_fetches(preferred_first, b
         extra={F("at box b"), F("at cup c"), F("found box"), F("found cup")},
     )
     goal = F("at box goal") & F("at cup goal")
-    planner = MCTSPlanner(actions, heuristic="concurrent",
-                          preferred_first=preferred_first, backup=backup)
+    planner = MCTSPlanner(actions, heuristic="concurrent", backup=backup,
+                          heuristic_options={"preferred_first": preferred_first})
     for _ in range(20):
         if goal.evaluate(state.fluents):
             break
@@ -238,3 +239,9 @@ def test_unknown_heuristic_or_backup_is_rejected():
         MCTSPlanner(_actions(["r1"], ["box"]), heuristic="nope")
     with pytest.raises(ValueError):
         MCTSPlanner(_actions(["r1"], ["box"]), backup="median")
+    misspelled = cast(Any, {"agent_awareness": False})
+    with pytest.raises(ValueError):
+        MCTSPlanner(_actions(["r1"], ["box"]), heuristic="concurrent",
+                    heuristic_options=misspelled)
+    with pytest.raises(ValueError):  # options only mean something to "concurrent"
+        MCTSPlanner(_actions(["r1"], ["box"]), heuristic_options={"agent_aware": False})

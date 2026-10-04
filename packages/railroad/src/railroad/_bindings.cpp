@@ -773,8 +773,9 @@ PYBIND11_MODULE(_bindings, m) {
            double lambda_ms, bool agent_aware, bool timed_init,
            bool at_implies_found, double prob_exponent, bool sum_completion,
            bool route_delta, bool multi_search, bool joint_found,
-           bool route_chaining, bool group_attempts) {
+           bool route_chaining, bool group_attempts, bool preferred_first) {
           ConcurrentHeuristicOptions o;
+          o.preferred_first = preferred_first;  // MCTS-only; no effect on the value
           o.route_chaining = route_chaining;
           o.group_attempts = group_attempts;
           o.joint_found = joint_found;
@@ -811,6 +812,7 @@ PYBIND11_MODULE(_bindings, m) {
         py::arg("sum_completion") = true, py::arg("route_delta") = false,
         py::arg("multi_search") = false, py::arg("joint_found") = true,
         py::arg("route_chaining") = true, py::arg("group_attempts") = true,
+        py::arg("preferred_first") = false,
         "Evaluate the concurrency-aware heuristic (heuristic_concurrent.hpp) "
         "and return its components: value, h_add, delta, makespan, h_ff, the "
         "per-goal finish times and the goal-to-agent assignment.");
