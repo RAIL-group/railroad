@@ -151,7 +151,9 @@ the whole action. And until each of a decision node's actions has been tried,
 its own heuristic value stands in for the untried ones: chance outcomes are
 visited rarely, and valued by their one expanded child they inherit that
 arbitrary action's value (the likely outcome of a good search valued as a
-detour). Under max backup the root action recommended is the one with the
+detour). Goal states are terminal in selection (checked before untried
+actions, so a goal node is never expanded and valued by continuations past
+the goal). Under max backup the root action recommended is the one with the
 best estimate (ties to visits): visits are only a proxy, and a child that
 stays optimistic while its actions are untried can gather the most visits
 and still turn out worse.
