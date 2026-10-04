@@ -49,6 +49,10 @@ class ConcurrentHeuristicOptions(TypedDict, total=False):
     route_chaining: bool
     #: Achievers consuming the same precondition count as one attempt. [True]
     group_attempts: bool
+    #: Cost an uncertain search as an expected route over its candidate places. [False]
+    expected_search: bool
+    #: With expected_search, idle agents join the slowest uncertain search. [False]
+    parallel_search: bool
 
 
 def _normalize_goal(goal: Union[Goal, Fluent]) -> Goal:
