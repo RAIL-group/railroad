@@ -131,7 +131,11 @@ def bench_procthor_search(case: BenchmarkCase):
                 break
 
             all_actions = env.get_actions()
-            mcts = MCTSPlanner(all_actions)
+            mcts = MCTSPlanner(
+                all_actions,
+                heuristic=case.params.get("mcts.heuristic", "ff"),
+                backup=case.params.get("mcts.backup", "mean"),
+            )
             action_name = mcts(
                 env.state, goal,
                 max_iterations=case.mcts.iterations,
