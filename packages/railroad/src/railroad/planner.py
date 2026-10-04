@@ -82,6 +82,8 @@ class MCTSPlanner:
         preferred_first: bool = False,
         route_delta: bool = False,
         backup: str = "mean",
+        multi_search: bool = False,
+        joint_found: bool = True,
     ):
         """Initialize MCTSPlanner with automatic preprocessing.
 
@@ -153,6 +155,10 @@ class MCTSPlanner:
                 rewards below a node; ``"max"`` (MaxUCT) values a decision node
                 by its best child and a chance node by the probability-weighted
                 mean of its outcomes.
+            multi_search: (``"concurrent"`` only) agents left without a task
+                join the search for the most uncertain tasks' objects.
+            joint_found: (``"concurrent"`` only) schedule a goal ``at X L``
+                and the ``found X`` it implies as one task.
 
         Defaults are an even split between h_add and h_ff (0.5, 0.0, 0.5).
         Weights are free-form (not normalized); the heuristic used during MCTS
@@ -181,6 +187,8 @@ class MCTSPlanner:
         if backup not in ("mean", "max"):
             raise ValueError(f"backup must be 'mean' or 'max', got {backup!r}")
         self._backup = backup
+        self._multi_search = bool(multi_search)
+        self._joint_found = bool(joint_found)
 
         # Action-pruning configuration (applied per-call in __call__). Pruning
         # is enabled only when a keep-count is given; both None => off, so
@@ -235,6 +243,8 @@ class MCTSPlanner:
             preferred_first=self._preferred_first,
             route_delta=self._route_delta,
             backup=self._backup,
+            multi_search=self._multi_search,
+            joint_found=self._joint_found,
         )
 
     def _convert_actions(
@@ -450,6 +460,8 @@ class MCTSPlanner:
                 prob_exponent=self._prob_exponent,
                 sum_completion=self._sum_completion,
                 route_delta=self._route_delta,
+                multi_search=self._multi_search,
+                joint_found=self._joint_found,
             )["value"]
         return _ff_heuristic_cpp(
             converted_state, converted_goal, self._search_actions,
