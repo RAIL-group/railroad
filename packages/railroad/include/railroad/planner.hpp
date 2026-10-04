@@ -481,11 +481,20 @@ inline std::string mcts(const State &root_state,
     const Action *best_action = nullptr;
     int most_visits = 0;
 
+    // Under max backup the estimate is the value; visits are only a proxy,
+    // and a child that stays optimistic while its actions are untried can
+    // gather the most visits and still end up worse. Ties go to visits.
+    double best_est = -std::numeric_limits<double>::infinity();
     for (auto &kv : result.root->children) {
       MCTSChanceNode *cn = kv.second.get();
       if (cn->visits == 0)
         continue;
-      if (cn->visits > most_visits) {
+      bool better = max_backup
+                        ? (cn->estimate > best_est ||
+                           (cn->estimate == best_est && cn->visits > most_visits))
+                        : cn->visits > most_visits;
+      if (better) {
+        best_est = cn->estimate;
         most_visits = cn->visits;
         best_action = kv.first;
       }
