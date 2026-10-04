@@ -210,15 +210,17 @@ def test_goal_already_true_is_zero_and_unreachable_is_inf():
     assert math.isinf(planner.heuristic(lost, F("at box goal")))
 
 
-@pytest.mark.parametrize("preferred_first", [False, True])
-def test_mcts_with_concurrent_heuristic_completes_two_fetches(preferred_first):
+@pytest.mark.parametrize(("preferred_first", "backup"),
+                         [(False, "mean"), (True, "mean"), (False, "max")])
+def test_mcts_with_concurrent_heuristic_completes_two_fetches(preferred_first, backup):
     actions = _actions(["r1", "r2"], ["box", "cup"])
     state = _state(
         {"r1": "start", "r2": "start"},
         extra={F("at box b"), F("at cup c"), F("found box"), F("found cup")},
     )
     goal = F("at box goal") & F("at cup goal")
-    planner = MCTSPlanner(actions, heuristic="concurrent", preferred_first=preferred_first)
+    planner = MCTSPlanner(actions, heuristic="concurrent",
+                          preferred_first=preferred_first, backup=backup)
     for _ in range(20):
         if goal.evaluate(state.fluents):
             break
@@ -231,6 +233,8 @@ def test_mcts_with_concurrent_heuristic_completes_two_fetches(preferred_first):
     assert state.time < 128
 
 
-def test_unknown_heuristic_name_is_rejected():
+def test_unknown_heuristic_or_backup_is_rejected():
     with pytest.raises(ValueError):
         MCTSPlanner(_actions(["r1"], ["box"]), heuristic="nope")
+    with pytest.raises(ValueError):
+        MCTSPlanner(_actions(["r1"], ["box"]), backup="median")

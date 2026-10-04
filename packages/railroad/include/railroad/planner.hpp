@@ -13,7 +13,6 @@
 #include "railroad/constants.hpp"
 
 #include <algorithm>
-#include <cstdlib>
 #include <functional>
 #include <iostream>
 #include <iomanip>
@@ -251,19 +250,6 @@ void print_best_path(std::ostream& os, const MCTSDecisionNode* node, HeuristicFn
         for (int i = 0; i < current_depth; ++i) os << "  ";
         os << "  (Leaf Node)" << std::endl;
         return;
-    }
-
-    if (current_depth == 0 && std::getenv("RAILROAD_TRACE_ROOT")) {
-        std::vector<const MCTSChanceNode*> kids;
-        for (const auto& [action, cn] : node->children) kids.push_back(cn.get());
-        std::sort(kids.begin(), kids.end(), [](const MCTSChanceNode* a, const MCTSChanceNode* b) {
-            return a->visits > b->visits;
-        });
-        for (const auto* cn : kids) {
-            double q = cn->visits > 0 ? cn->value / cn->visits : 0.0;
-            os << "   [root] visits=" << cn->visits << " Q=" << q << " est=" << cn->estimate
-               << "  " << cn->action->name() << std::endl;
-        }
     }
 
     // --- Find the Best Child (Most Visited) to Traverse Next ---
