@@ -262,6 +262,30 @@ def test_single_precision_find_probabilities_are_handled_like_doubles():
     assert value(np.float32) == pytest.approx(value(float), rel=1e-5)
 
 
+def test_a_free_robot_cannot_idle_until_its_own_flag_clears():
+    """Blocking operators forbid putting an object straight back: `just-picked`
+    clears 0.1 s after the pick. A free robot must act now, so it can place the
+    box only after another action -- here a move of 10 -- not after 0.1 s. Each
+    blocking action's last effect (clearing its own flag) comes 0.1 s after it
+    ends: 10.1 + 2.1, against 2.1 when pending effects count from time 0.
+    """
+    objects_by_type = {"robot": {"r1"}, "location": set(POSITION), "object": {"box"}}
+    ops = [
+        operators.construct_move_operator_blocking(_move_time),
+        operators.construct_pick_operator_blocking(2.0),
+        operators.construct_place_operator_blocking(2.0),
+    ]
+    actions = sorted((a for op in ops for a in op.instantiate(objects_by_type)),
+                     key=lambda a: a.name)
+    state = _state({"r1": "goal"}, extra={F("at box goal"), F("found box")})
+    held = _apply(actions, state, "pick r1 goal box")
+    assert F("free r1") in held.fluents and held.upcoming_effects
+    planner = MCTSPlanner(actions, heuristic="concurrent")
+    assert planner.heuristic(held, F("at box goal")) == pytest.approx(10.1 + 2.1)
+    assert (_breakdown(planner, held, F("at box goal"), timed_init=False)["makespan"]
+            == pytest.approx(2.1))
+
+
 def test_object_in_hand_is_delivered_before_fetching_another():
     """The relaxation frees a full hand by setting its object down anywhere.
 
