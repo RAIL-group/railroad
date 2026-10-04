@@ -118,12 +118,18 @@ the *team* rather than of one sequential agent; the design notes at the top of
 3. **Per-agent relaxations** (agents = arguments of `free`), **route
    chaining** over each agent's location fluents (no teleporting between the
    places a task needs), and **LPT/EFT list scheduling** of goal tasks
-   (`at X L` together with its implied `found X`) onto agents.
-4. **Retry deltas** per task, with achievers that consume the same
-   precondition counted as one attempt; or, with `expected_search`, the
-   task's uncertain search is costed as an **expected route** over its
-   candidate places (greedy by probability per unit travel + search time),
-   with the rest of the task costed from wherever the object turns up.
+   (`at X L` together with its implied `found X`) onto agents. On one agent,
+   a task whose relaxed plan destroys a fact (true now) that another relies
+   on waits for it (`order_conflicts`): delivering the object in hand comes
+   before fetching another, which the relaxation would otherwise do by
+   setting the first down anywhere while still "holding" it.
+4. **Expected search** (`expected_search`, default on): a task's uncertain
+   search is costed as an expected route over its candidate places (greedy
+   by probability per unit travel + search time), with the rest of the task
+   costed from wherever the object turns up -- nothing more where finding it
+   already achieves the goal (it was on the target place all along). With it
+   off, a plan through one place plus a retry delta, with achievers that
+   consume the same precondition counted as one attempt.
 5. **Value** `lambda_add * sum_g C_g + lambda_ms * max_g C_g` over the
    scheduled completion times.
 
@@ -140,7 +146,11 @@ coordination choices below a node from swamping its value. Every outcome of a
 chance node is valued from the heuristic when it is created, so the mean is
 over all outcomes from the start: otherwise a lucky low-probability outcome
 (an unlikely search succeeding) that happens to be sampled first stands in for
-the whole action.
+the whole action. And until each of a decision node's actions has been tried,
+its own heuristic value stands in for the untried ones: chance outcomes are
+visited rarely, and valued by their one expanded child they inherit that
+arbitrary action's value (the likely outcome of a good search valued as a
+detour).
 
 ### "at implies found" augmentation
 
