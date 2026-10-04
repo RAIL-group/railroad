@@ -84,6 +84,8 @@ class MCTSPlanner:
         backup: str = "mean",
         multi_search: bool = False,
         joint_found: bool = True,
+        route_chaining: bool = True,
+        group_attempts: bool = True,
     ):
         """Initialize MCTSPlanner with automatic preprocessing.
 
@@ -159,6 +161,11 @@ class MCTSPlanner:
                 join the search for the most uncertain tasks' objects.
             joint_found: (``"concurrent"`` only) schedule a goal ``at X L``
                 and the ``found X`` it implies as one task.
+            route_chaining: (``"concurrent"`` only) cost an agent's moves as a
+                route through the locations its task needs, rather than with
+                the relaxed plan's (teleporting) move durations.
+            group_attempts: (``"concurrent"`` only) probabilistic achievers that
+                consume the same precondition count as one attempt.
 
         Defaults are an even split between h_add and h_ff (0.5, 0.0, 0.5).
         Weights are free-form (not normalized); the heuristic used during MCTS
@@ -189,6 +196,8 @@ class MCTSPlanner:
         self._backup = backup
         self._multi_search = bool(multi_search)
         self._joint_found = bool(joint_found)
+        self._route_chaining = bool(route_chaining)
+        self._group_attempts = bool(group_attempts)
 
         # Action-pruning configuration (applied per-call in __call__). Pruning
         # is enabled only when a keep-count is given; both None => off, so
@@ -245,6 +254,8 @@ class MCTSPlanner:
             backup=self._backup,
             multi_search=self._multi_search,
             joint_found=self._joint_found,
+            route_chaining=self._route_chaining,
+            group_attempts=self._group_attempts,
         )
 
     def _convert_actions(
@@ -462,6 +473,8 @@ class MCTSPlanner:
                 route_delta=self._route_delta,
                 multi_search=self._multi_search,
                 joint_found=self._joint_found,
+                route_chaining=self._route_chaining,
+                group_attempts=self._group_attempts,
             )["value"]
         return _ff_heuristic_cpp(
             converted_state, converted_goal, self._search_actions,

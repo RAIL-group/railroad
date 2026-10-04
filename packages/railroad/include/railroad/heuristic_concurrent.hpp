@@ -56,8 +56,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
-#include <cstdlib>
 #include <limits>
 #include <numeric>
 #include <queue>
@@ -89,6 +87,11 @@ struct ConcurrentHeuristicOptions {
   bool multi_search = false;
   // Plan a goal `at X L` together with the `found X` it implies, as one task.
   bool joint_found = true;
+  // Re-cost an agent's moves as a route through the locations its task
+  // needs (false: the relaxed plan's own move durations).
+  bool route_chaining = true;
+  // Treat achievers that consume the same precondition as one attempt.
+  bool group_attempts = true;
   // Achievers are ranked by cost / rho^prob_exponent. 1 is the expected cost
   // of independent retries; larger values let probability dominate, so a
   // relaxed plan routes through where an object most likely is rather than
@@ -124,7 +127,10 @@ public:
       : opts_(opts), goal_(goal) {
     compile_actions(actions);
     compile_goal();
-    passes_.resize(1 + (opts_.agent_aware ? agents_.size() : 0));
+    // One unrestricted pass, plus one per agent when there is a choice of
+    // agents to schedule onto.
+    const bool per_agent = opts_.agent_aware && agents_.size() > 1;
+    passes_.resize(1 + (per_agent ? agents_.size() : 0));
     for (std::size_t p = 0; p < passes_.size(); ++p) {
       passes_[p].agent = (p == 0) ? -1 : static_cast<int>(p - 1);
     }
@@ -211,7 +217,6 @@ private:
   std::vector<int> agents_;    // agent id -> fid of `free <agent>`
   std::vector<std::string> agent_names_;
   std::vector<std::vector<int>> branches_;  // DNF branches (fids, -1 = unknown)
-  std::vector<uint8_t> branch_has_unknown_;
 
   int intern(const Fluent &f) {
     auto it = fid_.find(f);
@@ -333,13 +338,15 @@ private:
           if (!inserted) parent[find(i)] = find(it->second);
         }
       }
-      for (int i = 0; i < static_cast<int>(achs.size()); ++i) achs[i].group = find(i);
+      for (int i = 0; i < static_cast<int>(achs.size()); ++i) {
+        achs[i].group = opts_.group_attempts ? find(i) : i;
+      }
       bool any_prob = false;
       for (const auto &r : achs) {
         const auto &ad = acts_[r.action].adds[r.add];
         if (ad.prob < 1.0 - 1e-9 || ad.conditional) any_prob = true;
       }
-      if (any_prob) {
+      if (any_prob && opts_.group_attempts) {
         for (const auto &[c, i] : first_with) group_by_consumed_[f].push_back({c, find(i)});
       }
     }
@@ -849,7 +856,6 @@ private:
       if (b == BEST_AVAIL || b == BEST_NONE) continue;
       ex.fluents.push_back(f);
       if (is_prob_choice(P, f)) ex.delta += delta(P, f);
-      if (debug_) fprintf(stderr, "    pop %s cost=%.1f best=%d prob=%d delta=%.1f ach=%d\n", fluent_str(f).c_str(), P.cost[f], b, (int)is_prob_choice(P, f), is_prob_choice(P, f) ? delta(P, f) : 0.0, (int)(ach_stamp_[f] == stamp_));
       if (b <= -3 || ach_stamp_[f] == stamp_) continue;
       if (act_stamp_[b] == stamp_) continue;
       act_stamp_[b] = stamp_;
@@ -982,19 +988,6 @@ private:
     TaskPlan tp;
     if (!reachable(P, g)) return tp;
     if (companion >= 0 && !reachable(P, companion)) companion = -1;
-    if (debug_) {
-      fprintf(stderr, "  task %s agent %d\n", fluent_str(g).c_str(), r);
-      if (const char *w = std::getenv("RAILROAD_HWATCH")) {
-        std::string watch(w);
-        for (int f = 0; f < static_cast<int>(fluents_.size()); ++f) {
-          std::string fs = fluent_str(f);
-          if (watch.find("|" + fs + "|") == std::string::npos) continue;
-          int b = P.best[f];
-          fprintf(stderr, "      watch %s cost=%.1f rho=%.3f score=%.1f best=%s\n", fs.c_str(), P.cost[f], P.rho[f], P.score[f],
-                  b >= 0 ? acts_[b].src->name().c_str() : (b == BEST_AVAIL ? "AVAIL" : (b == BEST_NONE ? "NONE" : "PENDING")));
-        }
-      }
-    }
     next_stamp();
     Extraction ex;
     std::vector<int> roots{g};
@@ -1007,8 +1000,8 @@ private:
     tp.critical = std::max(0.0, goal_cost - ready);
     tp.covers = std::move(ex.fluents);
     tp.actions = ex.actions;
-    if (r < 0) {
-      tp.other = ex.dur;  // no single agent to route
+    if (r < 0 || !opts_.route_chaining) {
+      tp.other = ex.dur;  // no single agent to route, or routing disabled
       return tp;
     }
     // Locations the plan needs the agent at: the location preconditions of
@@ -1353,7 +1346,6 @@ private:
   std::vector<uint32_t> cover_;
   uint32_t cover_gen_ = 0;
   std::unordered_map<uint64_t, double> move_cache_;
-  bool debug_ = std::getenv("RAILROAD_HDEBUG") != nullptr;
   struct MemoEntry {
     double value;
     std::vector<const Action *> preferred;

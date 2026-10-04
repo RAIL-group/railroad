@@ -61,7 +61,7 @@ def _state(robots, extra=(), time=0.0):
     return State(time, fluents, [])
 
 
-def _breakdown(planner, state, goal):
+def _breakdown(planner, state, goal, **options):
     """Components of the concurrent heuristic, under the planner's conversion."""
     goal = _normalize_goal(goal)
     planner.heuristic(state, goal)  # builds the mapping and projection
@@ -70,7 +70,7 @@ def _breakdown(planner, state, goal):
         planner._relevant,
     )
     g = convert_goal_to_positive_preconditions(goal, planner._current_mapping)
-    return concurrent_heuristic(converted, g, planner._search_actions)
+    return concurrent_heuristic(converted, g, planner._search_actions, **options)
 
 
 def _apply(actions, state, name):
@@ -91,6 +91,11 @@ def test_single_fetch_is_costed_as_a_route():
     # start -> a (10), pick (2), a -> goal (10), place (2)
     assert d["makespan"] == pytest.approx(24.0)
     assert d["value"] == pytest.approx(24.0)  # one goal: sum == max
+
+    # Without chaining, the return leg is costed from `start`: 10+2+20+2.
+    planner = MCTSPlanner(actions, heuristic="concurrent")
+    teleport = _breakdown(planner, state, goal, route_chaining=False)
+    assert teleport["makespan"] == pytest.approx(34.0)
 
 
 def test_robot_already_at_target_must_walk_back():
@@ -187,6 +192,12 @@ def test_searches_of_one_location_are_one_attempt():
         MCTSPlanner(actions_2, heuristic="concurrent", agent_aware=False),
         _state({"r1": "a", "r2": "a"}), goal)
     assert dict(two["deltas"])["found box"] == pytest.approx(dict(one["deltas"])["found box"])
+
+    # Counted as independent trials, the second robot "halves" the failure risk.
+    phantom = _breakdown(
+        MCTSPlanner(actions_2, heuristic="concurrent", agent_aware=False),
+        _state({"r1": "a", "r2": "a"}), goal, group_attempts=False)
+    assert dict(phantom["deltas"])["found box"] < dict(one["deltas"])["found box"]
 
 
 def test_goal_already_true_is_zero_and_unreachable_is_inf():
