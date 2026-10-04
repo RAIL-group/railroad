@@ -252,6 +252,42 @@ def test_mcts_with_concurrent_heuristic_completes_two_fetches(backup):
     assert state.time < 128
 
 
+def test_max_backup_values_a_rarely_visited_outcome_by_more_than_one_child():
+    """A node keeps its own value until each of its actions has been tried.
+
+    The robot stands at `x`, where the box is with probability 0.8; `y` (0.5)
+    is 30 away, and `start` is far from everything. Expansion takes actions
+    from the back of the list, ordered here so that the first action tried
+    after the search succeeds is a long detour to `a`. If the likely outcome is
+    valued by that one child, searching here looks worse than walking to `y`.
+    """
+    near = {("x", "goal"): 10.0, ("x", "y"): 30.0, ("y", "a"): 5.0, ("y", "goal"): 32.0}
+
+    def move_time(robot, frm, to):
+        del robot
+        return 0.0 if frm == to else near.get((frm, to), near.get((to, frm), 500.0))
+
+    def prob(robot, loc, obj):
+        return {"x": 0.8, "y": 0.5}.get(loc, 0.0)
+
+    objects_by_type = {"robot": {"r1"}, "location": {"x", "y", "a", "goal", "start"},
+                       "object": {"box"}}
+    ops = [
+        operators.construct_move_operator(move_time),
+        operators.construct_pick_operator(2.0),
+        operators.construct_place_operator(2.0),
+        operators.construct_search_operator(prob, 5.0),
+    ]
+    actions = sorted((a for op in ops for a in op.instantiate(objects_by_type)),
+                     key=lambda a: a.name, reverse=True)
+    state = State(0.0, {F("revealed goal"), F("at r1 x"), F("free r1")}, [])
+    planner = MCTSPlanner(actions, heuristic="concurrent", backup="max",
+                          heuristic_options={"expected_search": True})
+    name = planner(state, F("at box goal"), max_iterations=200, c=50, max_depth=20,
+                   heuristic_multiplier=1)
+    assert name == "search r1 x box"
+
+
 def test_unknown_heuristic_or_backup_is_rejected():
     with pytest.raises(ValueError):
         MCTSPlanner(_actions(["r1"], ["box"]), heuristic="nope")

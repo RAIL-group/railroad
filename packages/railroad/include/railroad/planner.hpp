@@ -207,6 +207,11 @@ inline void backpropagate_max(MCTSDecisionNode *leaf, double reward) {
       any = true;
       best = std::max(best, kv.second->estimate);
     }
+    // Until every action has been tried, the node's own evaluation stands in
+    // for the untried ones; otherwise one arbitrary first child would decide
+    // the estimate of every rarely visited node (most chance outcomes).
+    if (!d->untried_actions.empty() && d->evaluated)
+      best = std::max(best, d->leaf_value);
     d->estimate = any ? best : d->leaf_value;
 
     MCTSChanceNode *c = d->parent;
