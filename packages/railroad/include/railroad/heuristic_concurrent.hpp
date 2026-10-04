@@ -84,6 +84,11 @@ struct ConcurrentHeuristicOptions {
   // Per-agent retry deltas walk a route between attempts (true) instead of
   // starting each attempt from the relaxation's earliest position.
   bool route_delta = false;
+  // Agents left without a task join the search of the uncertain tasks
+  // (expected find time from a parallel list schedule of the attempts).
+  bool multi_search = false;
+  // Plan a goal `at X L` together with the `found X` it implies, as one task.
+  bool joint_found = true;
   // Achievers are ranked by cost / rho^prob_exponent. 1 is the expected cost
   // of independent retries; larger values let probability dominate, so a
   // relaxed plan routes through where an object most likely is rather than
@@ -973,9 +978,10 @@ private:
     return total;
   }
 
-  TaskPlan plan_task(Pass &P, int g, int r, double ready) {
+  TaskPlan plan_task(Pass &P, int g, int companion, int r, double ready) {
     TaskPlan tp;
     if (!reachable(P, g)) return tp;
+    if (companion >= 0 && !reachable(P, companion)) companion = -1;
     if (debug_) {
       fprintf(stderr, "  task %s agent %d\n", fluent_str(g).c_str(), r);
       if (const char *w = std::getenv("RAILROAD_HWATCH")) {
@@ -991,10 +997,14 @@ private:
     }
     next_stamp();
     Extraction ex;
-    extract(P, {g}, ex);
+    std::vector<int> roots{g};
+    if (companion >= 0) roots.push_back(companion);
+    extract(P, roots, ex);
     tp.ok = true;
     tp.delta = ex.delta;
-    tp.critical = std::max(0.0, P.cost[g] - ready);
+    double goal_cost = P.cost[g];
+    if (companion >= 0) goal_cost = std::max(goal_cost, P.cost[companion]);
+    tp.critical = std::max(0.0, goal_cost - ready);
     tp.covers = std::move(ex.fluents);
     tp.actions = ex.actions;
     if (r < 0) {
@@ -1078,9 +1088,26 @@ private:
       std::vector<TaskPlan> plans;  // per agent
       double key;
     };
+    // `at X L` and the `found X` it implies are one job -- whoever brings X
+    // to L must find it first -- so they are planned as one task. Planned
+    // apart, `at X L` can be "achieved" by searching L in the hope that X is
+    // already there, while finding X becomes a second task for another agent.
+    auto companion_of = [&](int g) {
+      if (!opts_.joint_found) return -1;
+      int fx = found_of_[g];
+      if (fx < 0 || std::find(goals.begin(), goals.end(), fx) == goals.end()) return -1;
+      if (U.best[fx] == BEST_AVAIL && U.cost[fx] <= 1e-9) return -1;
+      return fx;
+    };
+    std::vector<int> paired;
+    for (int g : goals) {
+      int fx = companion_of(g);
+      if (fx >= 0) paired.push_back(fx);
+    }
     std::vector<Task> tasks;
     for (int g : goals) {
       if (U.best[g] == BEST_AVAIL && U.cost[g] <= 1e-9) continue;
+      if (std::find(paired.begin(), paired.end(), g) != paired.end()) continue;
       Task t;
       t.fluent = g;
       t.finish_fixed = (U.best[g] == BEST_AVAIL) ? U.cost[g] : -1.0;
@@ -1092,7 +1119,7 @@ private:
           if (!std::isfinite(ready[r])) continue;
           Pass &P = per_agent ? passes_[r + 1] : U;
           int agent = per_agent ? static_cast<int>(r) : solo;
-          t.plans[r] = plan_task(P, g, agent, ready[r]);
+          t.plans[r] = plan_task(P, g, companion_of(g), agent, ready[r]);
           if (!t.plans[r].ok) continue;
           const TaskPlan &tp = t.plans[r];
           double serial = tp.other + (agent >= 0 ? route(agent, start_loc[r], tp) : 0.0);
@@ -1119,9 +1146,16 @@ private:
       std::fill(cover_.begin(), cover_.end(), 0);
       cover_gen_ = 1;
     }
-    double makespan = 0.0;
-    for (auto &t : tasks) {
+    struct Done {
+      int task;    // index into tasks
+      int agent;   // -1: fixed / fallback
+      double at;
+    };
+    std::vector<Done> done;
+    for (std::size_t ti = 0; ti < tasks.size(); ++ti) {
+      Task &t = tasks[ti];
       double done_at;
+      int done_agent = -1;
       if (t.finish_fixed >= 0.0) {
         done_at = t.finish_fixed;
       } else if (cover_[t.fluent] == cover_gen_) {
@@ -1151,6 +1185,7 @@ private:
           n_assigned[best_r] += 1;
           if (!tp.locs.empty()) end_loc[best_r] = tp.locs.back();
           done_at = best_f;
+          done_agent = best_r;
           for (int f : tp.covers) cover_[f] = cover_gen_;
           plan_actions_.insert(plan_actions_.end(), tp.actions.begin(), tp.actions.end());
           if (bd) {
@@ -1159,11 +1194,144 @@ private:
           }
         }
       }
-      makespan = std::max(makespan, done_at);
-      completion_sum += done_at;
-      if (bd) bd->goal_finish.push_back({fluent_str(t.fluent), done_at});
+      done.push_back({static_cast<int>(ti), done_agent, done_at});
+    }
+
+    // Idle agents join the search of the uncertain tasks, latest first.
+    if (opts_.multi_search && per_agent) {
+      std::vector<int> spare;
+      for (std::size_t r = 0; r < n_agents; ++r) {
+        if (n_assigned[r] == 0 && std::isfinite(ready[r])) spare.push_back(static_cast<int>(r));
+      }
+      std::vector<std::size_t> order(done.size());
+      std::iota(order.begin(), order.end(), 0);
+      std::sort(order.begin(), order.end(),
+                [&done](std::size_t a, std::size_t b) { return done[a].at > done[b].at; });
+      for (std::size_t k : order) {
+        if (spare.empty()) break;
+        Done &dn = done[k];
+        if (dn.agent < 0) continue;
+        Pass &P = passes_[dn.agent + 1];
+        const TaskPlan &tp = tasks[dn.task].plans[dn.agent];
+        // The task's most expensive uncertain subgoal.
+        int f_star = -1;
+        double d_star = 0.0;
+        for (int f : tp.covers) {
+          if (!is_prob_choice(P, f)) continue;
+          double d = delta(P, f);
+          if (d > d_star) { d_star = d; f_star = f; }
+        }
+        if (f_star < 0) continue;
+        std::vector<int> searchers{dn.agent};
+        searchers.insert(searchers.end(), spare.begin(), spare.end());
+        double e_multi = expected_search_time(f_star, searchers);
+        double d_multi = std::max(0.0, e_multi - P.cost[f_star]);
+        if (d_multi < d_star - 1e-9) {
+          dn.at -= d_star - d_multi;
+          spare.clear();  // committed to this search
+        }
+      }
+    }
+
+    double makespan = 0.0;
+    for (const auto &dn : done) {
+      makespan = std::max(makespan, dn.at);
+      completion_sum += dn.at;
+      if (bd) bd->goal_finish.push_back({fluent_str(tasks[dn.task].fluent), dn.at});
     }
     return makespan;
+  }
+
+  // Expected time (from now) until fluent f is first achieved when `searchers`
+  // work through its attempt groups in parallel: whenever a searcher frees up
+  // it walks to the unused attempt with the most probability per unit of
+  // (travel + execution) -- a WSPT-style list schedule with travel as setup
+  // time. Pending outcomes complete at their scheduled times. With all events
+  // merged in time order, E = sum_i (T_i - T_{i-1}) * P(no success before T_i).
+  double expected_search_time(int f, const std::vector<int> &searchers) {
+    struct Cand { int group; int loc; double exec, prob, fallback; };
+    struct Searcher { int agent; double t; int loc; std::vector<Cand> cands; };
+    std::vector<int> spent;
+    std::vector<std::pair<double, double>> events;
+    for (const auto &pd : pending_) {
+      if (pd.fluent != f) continue;
+      events.push_back({pd.time, pd.prob});
+      if (pd.group >= 0) spent.push_back(pd.group);
+    }
+    std::vector<Searcher> ss;
+    for (int r : searchers) {
+      const Pass &P = passes_[r + 1];
+      Searcher sr{r, P.cost[agents_[r]], agent_location(P, r), {}};
+      if (!std::isfinite(sr.t)) continue;
+      for (const auto &ach : achievers_[f]) {
+        if (!allowed(P, ach.action) || P.unmet[ach.action] != 0) continue;
+        if (std::find(spent.begin(), spent.end(), ach.group) != spent.end()) continue;
+        const CAction &a = acts_[ach.action];
+        double p = a.adds[ach.add].prob;
+        if (p <= 1e-9) continue;
+        int loc = -1;
+        for (int q : a.pre) {
+          if (loc_agent_[q] == r) { loc = q; break; }
+        }
+        Cand c{ach.group, loc, a.dur, p, P.wait[ach.action]};
+        bool merged = false;
+        for (auto &e : sr.cands) {
+          if (e.group == c.group) {
+            if (c.fallback < e.fallback) e = c;
+            merged = true;
+            break;
+          }
+        }
+        if (!merged) sr.cands.push_back(c);
+      }
+      ss.push_back(std::move(sr));
+    }
+    std::vector<int> used;
+    double fail = 1.0;
+    for (const auto &e : events) fail *= 1.0 - e.second;
+    while (fail > 1e-3) {
+      // The searcher that frees up first takes its best remaining attempt.
+      int si = -1;
+      for (int i = 0; i < static_cast<int>(ss.size()); ++i) {
+        bool any = false;
+        for (const auto &c : ss[i].cands) {
+          if (std::find(used.begin(), used.end(), c.group) == used.end()) { any = true; break; }
+        }
+        if (any && (si < 0 || ss[i].t < ss[si].t)) si = i;
+      }
+      if (si < 0) break;
+      Searcher &sr = ss[si];
+      int best = -1;
+      double best_ratio = -1.0, best_dt = 0.0;
+      for (int i = 0; i < static_cast<int>(sr.cands.size()); ++i) {
+        const Cand &c = sr.cands[i];
+        if (std::find(used.begin(), used.end(), c.group) != used.end()) continue;
+        double travel = 0.0;
+        if (c.loc >= 0 && c.loc != sr.loc) {
+          travel = (sr.loc >= 0) ? move_dur(sr.agent, sr.loc, c.loc) : INF;
+          if (!std::isfinite(travel)) travel = std::max(0.0, c.fallback - sr.t);
+        }
+        double dt = travel + c.exec;
+        double ratio = c.prob / std::max(dt, 1e-9);
+        if (ratio > best_ratio) { best_ratio = ratio; best = i; best_dt = dt; }
+      }
+      const Cand &c = sr.cands[best];
+      used.push_back(c.group);
+      sr.t += best_dt;
+      if (c.loc >= 0) sr.loc = c.loc;
+      events.push_back({sr.t, c.prob});
+      fail *= 1.0 - c.prob;
+    }
+    if (events.empty()) return INF;
+    std::sort(events.begin(), events.end());
+    double expected = 0.0, prev = 0.0, still = 1.0;
+    for (const auto &[time, prob] : events) {
+      double tt = std::max(time, prev);
+      expected += (tt - prev) * still;
+      prev = tt;
+      still *= 1.0 - prob;
+    }
+    return expected;
   }
 
   double agent_ready_team() const {
