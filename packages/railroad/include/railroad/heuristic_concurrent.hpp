@@ -446,7 +446,6 @@ private:
   static constexpr int BEST_NONE = -1;
   static constexpr int BEST_AVAIL = -2;
   static int pending_code(int k) { return -3 - k; }
-  static int pending_index(int code) { return -3 - code; }
 
   bool allowed(const Pass &P, int a) const {
     if (P.agent < 0) return true;
@@ -471,7 +470,7 @@ private:
     return h_fluents;
   }
 
-  void walk_effect(const GroundedEffect &e, double trel, double prob, int root,
+  void walk_effect(const GroundedEffect &e, double trel, double prob,
                    std::vector<std::pair<int, double>> &prob_adds,
                    std::vector<double> &prob_times) {
     for (const auto &f : e.pos_fluents()) {
@@ -499,14 +498,13 @@ private:
     // Relaxed: conditional branches are assumed to fire.
     for (const auto &cb : e.cond_effects()) {
       for (const auto &sub : cb.effects()) {
-        walk_effect(*sub, trel + sub->time(), prob, root, prob_adds, prob_times);
+        walk_effect(*sub, trel + sub->time(), prob, prob_adds, prob_times);
       }
     }
     for (const auto &pb : e.prob_effects()) {
       if (pb.prob() <= 0.0) continue;
       for (const auto &sub : pb.effects()) {
-        walk_effect(*sub, trel + sub->time(), prob * pb.prob(), root, prob_adds,
-                    prob_times);
+        walk_effect(*sub, trel + sub->time(), prob * pb.prob(), prob_adds, prob_times);
       }
     }
   }
@@ -521,12 +519,11 @@ private:
     const double t0 = s.time();
     std::vector<std::pair<int, double>> prob_adds;
     std::vector<double> prob_times;
-    int root = 0;
     for (const auto &[t_abs, e] : s.upcoming_effects()) {
       double trel = opts_.timed_init ? std::max(0.0, t_abs - t0) : 0.0;
       prob_adds.clear();
       prob_times.clear();
-      walk_effect(*e, trel, 1.0, root, prob_adds, prob_times);
+      walk_effect(*e, trel, 1.0, prob_adds, prob_times);
       for (std::size_t i = 0; i < prob_adds.size(); ++i) {
         int f = prob_adds[i].first;
         double p = std::min(prob_adds[i].second, 1.0);
@@ -547,7 +544,6 @@ private:
         }
         pending_.push_back({f, t, p, group});
       }
-      ++root;
     }
 
     // `waiting a b`: a becomes free when b does (transition() resolves it).
