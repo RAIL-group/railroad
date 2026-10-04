@@ -1137,7 +1137,9 @@ private:
   }
 
   // Identify the task's uncertain search -- the implied `found X` when the
-  // task has one, else the probabilistic subgoal with the most attempt groups
+  // task has one (even with a single place left, so that the estimate does
+  // not switch costing schemes when the second-last place fails), else the
+  // probabilistic subgoal with the most attempt groups
   // -- and split the plan into what comes before it and what comes after.
   // After it, an action that needs something the search reveals (picking the
   // object up where it is) happens wherever the search succeeds, so only the
@@ -1149,7 +1151,7 @@ private:
     for (int f : tp.covers) {
       if (!is_prob_choice(P, f)) continue;
       std::size_t n = attempts_for(P, r, f, g).size();
-      if (f == companion && n >= 2) { f_star = f; break; }
+      if (f == companion && n >= 1) { f_star = f; break; }
       if (n > best_n) { best_n = n; f_star = f; }
     }
     if (f_star < 0) return;
@@ -1290,19 +1292,18 @@ private:
     if (events.empty()) return INF;
     std::sort(events.begin(), events.end(),
               [](const Event &a, const Event &b) { return a.t < b.t; });
-    double expected = 0.0, prev = t_start, still = 1.0, mass = 0.0;
+    // `where` is not conditioned on success: with independent attempts that
+    // may all fail, a search's value is then the probability-weighted mean
+    // of its outcomes' values (conditioning re-weights the remaining places
+    // after every failure, so the estimate jumps whenever a search fails).
+    double expected = 0.0, prev = t_start, still = 1.0;
     for (const auto &e : events) {
       double tt = std::max(e.t, prev);
       expected += (tt - prev) * still;
       prev = tt;
       double here = still * e.p;
       if (here > 0.0) where.push_back({e.loc, here, e.achieves});
-      mass += here;
       still *= 1.0 - e.p;
-    }
-    // Condition the places on the search succeeding at all.
-    if (mass > 0.0) {
-      for (auto &w : where) w.prob /= mass;
     }
     return expected;
   }
@@ -1340,6 +1341,11 @@ private:
     delta_out = tp.delta_rest;
     return pre + search + post + tp.other_pre;
   }
+
+  // Lower bound on a task's duration from the relaxed critical path. Not for
+  // an expected search: that is an expectation over outcomes, some of which
+  // end sooner than the relaxed time to success.
+  static double bound(const TaskPlan &tp) { return tp.search_f >= 0 ? 0.0 : tp.critical; }
 
   // List-schedule the goal fluents onto agents (or one serial agent).
   double schedule(const std::vector<int> &goals, ConcurrentHeuristicBreakdown *bd,
@@ -1403,7 +1409,7 @@ private:
           const TaskPlan &tp = t.plans[r];
           double dl = 0.0;
           double serial = task_serial(P, agent, start_loc[r], ready[r], tp, dl);
-          double load = std::max(serial, tp.critical) + dl;
+          double load = std::max(serial, bound(tp)) + dl;
           m = std::min(m, load);
           if (bd) bd->loads.push_back({fluent_str(g), static_cast<int>(r), serial, tp.critical, dl});
         }
@@ -1430,7 +1436,7 @@ private:
         double dl = 0.0;
         double serial = task_serial(P, agent, end_loc[r], finish[r], tp, dl);
         // The relaxed critical path only bounds an agent's first task.
-        double load = (n_assigned[r] == 0 ? std::max(serial, tp.critical) : serial) + dl;
+        double load = (n_assigned[r] == 0 ? std::max(serial, bound(tp)) : serial) + dl;
         double f = finish[r] + load;
         if (f < best_f) { best_f = f; best_r = static_cast<int>(r); }
       }

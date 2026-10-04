@@ -209,8 +209,8 @@ def test_expected_search_costs_delivery_unless_found_in_place():
     whose success needs no delivery; the box may still turn up at `b`, from
     where it must be brought over. The greedy route searches `goal` (done at
     25), then `b` (done at 40): expected search time 25 + 0.5 * 15 = 32.5.
-    It succeeds with probability 0.75, at `b` in a third of those cases, and
-    delivering from `b` takes pick + 10 + place = 14: 32.5 + 14 / 3 in all.
+    The box turns up at `b` with probability 0.25, and delivering it from
+    there takes pick + 10 + place = 14: 32.5 + 0.25 * 14 = 36.
     """
     def prob(robot, loc, obj):
         return {"goal": 0.5, "b": 0.5}.get(loc, 0.0)
@@ -219,7 +219,27 @@ def test_expected_search_costs_delivery_unless_found_in_place():
     state = _state({"r1": "start"}, extra={F("revealed a"), F("revealed c")})
     goal = F("at box goal")
     planner = MCTSPlanner(actions, heuristic="concurrent")
-    assert _breakdown(planner, state, goal)["makespan"] == pytest.approx(32.5 + 14 / 3)
+    assert _breakdown(planner, state, goal)["makespan"] == pytest.approx(36.0)
+
+
+@pytest.mark.parametrize("probs", [{"a": 0.5, "b": 0.3, "c": 0.4},
+                                   {"a": 0.6, "goal": 0.5, "b": 0.1},
+                                   {"a": 0.9, "b": 0.2}])
+def test_searching_where_the_route_starts_is_valued_by_its_outcomes(probs):
+    """Before a search the expected route starts with, h is the search time
+    plus the probability-weighted values of its two outcomes (one robot, one
+    object): failing a likely search must not look better or worse than the
+    estimate already counted on."""
+    def prob(robot, loc, obj):
+        return probs.get(loc, 0.0)
+
+    actions = _actions(["r1"], ["box"], find_prob=prob)
+    state = _state({"r1": "a"})
+    goal = F("at box goal")
+    planner = MCTSPlanner(actions, heuristic="concurrent")
+    outcomes = transition(state, get_action_by_name(actions, "search r1 a box"))
+    expected = sum(pr * (s.time - state.time + planner.heuristic(s, goal)) for s, pr in outcomes)
+    assert planner.heuristic(state, goal) == pytest.approx(expected)
 
 
 def test_single_precision_find_probabilities_are_handled_like_doubles():
@@ -267,8 +287,10 @@ def test_expected_search_walks_a_route_over_candidate_places():
 
     The box is at `a` (10 away) or `b` (30 away), each with probability 0.5.
     The greedy route searches `a` first (done at 15), then `b` (done at 40):
-    expected search time 15 + 0.5 * 25 = 27.5. Delivery to `goal` is 10 from
-    either place, and pick + place take 4: 41.5 in total.
+    expected search time 15 + 0.5 * 25 = 27.5. As independent attempts, the
+    searches find the box with probability 0.75, and delivery to `goal`
+    (pick + 10 + place = 14 from either place) is charged in proportion:
+    27.5 + 0.75 * 14 = 38.
     """
     def prob(robot, loc, obj):
         return {"a": 0.5, "b": 0.5}.get(loc, 0.0)
@@ -279,7 +301,7 @@ def test_expected_search_walks_a_route_over_candidate_places():
     planner = MCTSPlanner(actions, heuristic="concurrent",
                           heuristic_options={"expected_search": True})
     d = _breakdown(planner, state, goal, expected_search=True)
-    assert d["makespan"] == pytest.approx(41.5)
+    assert d["makespan"] == pytest.approx(38.0)
 
 
 def test_goal_already_true_is_zero_and_unreachable_is_inf():
