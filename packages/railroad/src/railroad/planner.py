@@ -1,9 +1,10 @@
-from typing import List, Dict, Union, SupportsFloat, SupportsInt
+from typing import List, Dict, TypedDict, Union, SupportsFloat, SupportsInt
 from collections.abc import Set
 from railroad._bindings import get_usable_actions, seed_planner_rng
 from railroad._action_pruning import prune_probabilistic_achievers
 
 __all__ = [
+    "ConcurrentHeuristicOptions",
     "MCTSPlanner",
     "get_usable_actions",
     "prune_probabilistic_achievers",
@@ -24,6 +25,36 @@ from railroad.core import (
     project_state,
     relevant_predicates,
 )
+
+
+class ConcurrentHeuristicOptions(TypedDict, total=False):
+    """Switches for ``MCTSPlanner(heuristic="concurrent", heuristic_options=...)``.
+
+    Mirrors ``ConcurrentHeuristicOptions`` in heuristic_concurrent.hpp; the
+    defaults (in brackets) are the configuration to use. The switches exist
+    mainly for ablations.
+    """
+
+    #: Schedule goals onto the individual agents; False: one serial agent. [True]
+    agent_aware: bool
+    #: In-flight effects become available when scheduled; False: at t=0. [True]
+    timed_init: bool
+    #: Achievers ranked by cost / rho**prob_exponent, rho = P(support succeeds). [8.0]
+    prob_exponent: float
+    #: lambda_add weights summed completion times; False: h_add + retry delta. [True]
+    sum_completion: bool
+    #: Plan `at X L` together with the `found X` it implies, as one task. [True]
+    joint_found: bool
+    #: Cost an agent's moves as one route; False: the relaxed plan's moves. [True]
+    route_chaining: bool
+    #: Achievers consuming the same precondition count as one attempt. [True]
+    group_attempts: bool
+    #: Experimental: retry deltas walk a route between attempts. [False]
+    route_delta: bool
+    #: Experimental: idle agents join the most uncertain search. [False]
+    multi_search: bool
+    #: Experimental: MCTS expands the heuristic's helpful actions first. [False]
+    preferred_first: bool
 
 
 def _normalize_goal(goal: Union[Goal, Fluent]) -> Goal:
@@ -75,17 +106,8 @@ class MCTSPlanner:
         project_irrelevant: bool = True,
         dead_end_penalty: SupportsFloat | None = None,
         heuristic: str = "ff",
-        agent_aware: bool = True,
-        timed_init: bool = True,
-        prob_exponent: float = 8.0,
-        sum_completion: bool = True,
-        preferred_first: bool = False,
-        route_delta: bool = False,
         backup: str = "mean",
-        multi_search: bool = False,
-        joint_found: bool = True,
-        route_chaining: bool = True,
-        group_attempts: bool = True,
+        heuristic_options: ConcurrentHeuristicOptions | None = None,
     ):
         """Initialize MCTSPlanner with automatic preprocessing.
 
@@ -132,40 +154,18 @@ class MCTSPlanner:
 
             heuristic: leaf evaluator. ``"ff"`` (the default) is the FF/additive
                 mix of ``heuristic.hpp``. ``"concurrent"`` is the concurrency-
-                aware heuristic of ``heuristic_concurrent.hpp``: in-flight
-                effects count from when they are scheduled, and ``lambda_ff``
-                weights an agent-aware makespan (goals list-scheduled onto the
-                robots) in place of the sequential h_ff; ``lambda_max`` is
-                unused.
-            agent_aware: (``"concurrent"`` only) schedule goals onto the
-                individual agents; False schedules them onto one serial agent.
-            timed_init: (``"concurrent"`` only) make in-flight effects
-                available at their scheduled time rather than immediately.
-            prob_exponent: (``"concurrent"`` only) achievers are ranked by
-                ``cost / rho**prob_exponent``, rho being the probability that
-                their relaxed support succeeds.
-            sum_completion: (``"concurrent"`` only) ``lambda_add`` weights the
-                scheduled goals' summed completion times (True) instead of the
-                contention-blind h_add of the unrestricted relaxation.
-            preferred_first: (``"concurrent"`` only) MCTS expands the actions
-                on the scheduled relaxed plan that are applicable now (FF's
-                helpful actions) before a node's other actions.
-            route_delta: (``"concurrent"`` only) per-agent retry deltas walk a
-                greedy route between attempts instead of starting each one from
-                the relaxation's earliest position.
+                aware heuristic of ``heuristic_concurrent.hpp``, which estimates
+                the team's remaining time by list-scheduling the goals onto the
+                robots: ``lambda_add`` weights the summed goal completion times
+                and ``lambda_ff`` the makespan (``lambda_max`` is unused). It
+                is calibrated (h tracks the remaining time), so pair it with
+                ``heuristic_multiplier=1`` and ``backup="max"``.
             backup: MCTS value backup. ``"mean"`` (the default) averages the
                 rewards below a node; ``"max"`` (MaxUCT) values a decision node
                 by its best child and a chance node by the probability-weighted
                 mean of its outcomes.
-            multi_search: (``"concurrent"`` only) agents left without a task
-                join the search for the most uncertain tasks' objects.
-            joint_found: (``"concurrent"`` only) schedule a goal ``at X L``
-                and the ``found X`` it implies as one task.
-            route_chaining: (``"concurrent"`` only) cost an agent's moves as a
-                route through the locations its task needs, rather than with
-                the relaxed plan's (teleporting) move durations.
-            group_attempts: (``"concurrent"`` only) probabilistic achievers that
-                consume the same precondition count as one attempt.
+            heuristic_options: switches for ``heuristic="concurrent"``, mainly
+                for ablations (see ``ConcurrentHeuristicOptions``).
 
         Defaults are an even split between h_add and h_ff (0.5, 0.0, 0.5).
         Weights are free-form (not normalized); the heuristic used during MCTS
@@ -184,20 +184,18 @@ class MCTSPlanner:
         )
         if heuristic not in ("ff", "concurrent"):
             raise ValueError(f"heuristic must be 'ff' or 'concurrent', got {heuristic!r}")
-        self._heuristic = heuristic
-        self._agent_aware = bool(agent_aware)
-        self._timed_init = bool(timed_init)
-        self._prob_exponent = float(prob_exponent)
-        self._sum_completion = bool(sum_completion)
-        self._preferred_first = bool(preferred_first)
-        self._route_delta = bool(route_delta)
         if backup not in ("mean", "max"):
             raise ValueError(f"backup must be 'mean' or 'max', got {backup!r}")
+        self._heuristic = heuristic
         self._backup = backup
-        self._multi_search = bool(multi_search)
-        self._joint_found = bool(joint_found)
-        self._route_chaining = bool(route_chaining)
-        self._group_attempts = bool(group_attempts)
+        self._heuristic_options: ConcurrentHeuristicOptions = (
+            heuristic_options.copy() if heuristic_options else {}
+        )
+        unknown = set(self._heuristic_options) - set(ConcurrentHeuristicOptions.__annotations__)
+        if unknown:
+            raise ValueError(f"unknown heuristic_options: {sorted(unknown)}")
+        if self._heuristic_options and heuristic != "concurrent":
+            raise ValueError("heuristic_options only apply to heuristic='concurrent'")
 
         # Action-pruning configuration (applied per-call in __call__). Pruning
         # is enabled only when a keep-count is given; both None => off, so
@@ -245,17 +243,8 @@ class MCTSPlanner:
             lambda_ff=self._lambda_ff,
             dead_end_penalty=self._dead_end_penalty,
             heuristic=self._heuristic,
-            agent_aware=self._agent_aware,
-            timed_init=self._timed_init,
-            prob_exponent=self._prob_exponent,
-            sum_completion=self._sum_completion,
-            preferred_first=self._preferred_first,
-            route_delta=self._route_delta,
             backup=self._backup,
-            multi_search=self._multi_search,
-            joint_found=self._joint_found,
-            route_chaining=self._route_chaining,
-            group_attempts=self._group_attempts,
+            **self._heuristic_options,
         )
 
     def _convert_actions(
@@ -466,15 +455,7 @@ class MCTSPlanner:
                 converted_state, converted_goal, self._search_actions,
                 lambda_add=self._lambda_add,
                 lambda_ms=self._lambda_ff,
-                agent_aware=self._agent_aware,
-                timed_init=self._timed_init,
-                prob_exponent=self._prob_exponent,
-                sum_completion=self._sum_completion,
-                route_delta=self._route_delta,
-                multi_search=self._multi_search,
-                joint_found=self._joint_found,
-                route_chaining=self._route_chaining,
-                group_attempts=self._group_attempts,
+                **self._heuristic_options,
             )["value"]
         return _ff_heuristic_cpp(
             converted_state, converted_goal, self._search_actions,
