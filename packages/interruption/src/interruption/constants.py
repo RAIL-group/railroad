@@ -9,7 +9,7 @@ LAMBDA_MAX = 0
 LAMBDA_FF = 1
 
 ## debug related constants
-AP_DEBUG = False
+AP_DEBUG = True
 ACTION_PROB_DEBUG = False
 SEARCH_DEBUG = False
 
@@ -19,7 +19,7 @@ MODEL_NAME = "best_model_one_room_multi_scene_lr=0.001.pt"
 ## benchmark/experiment settings
 # benchmark run settings
 EXPERIMENT_REPEATS = 30
-TIMEOUT = 1200
+TIMEOUT = 3600
 # filter out non-task-relevant objects
 FILTER_OBJECTS = True
 # current task gets augmented by arriving task
@@ -57,17 +57,17 @@ OBJ_PLACEMENT_SEED = None
 EXPECTED_TIME_NEXT_ARRIVAL = [
     calibrate_beta_parameter(0, 5), # No interruptions
     # 5% of tasks from the training dataset take longer to complete
-    calibrate_beta_parameter(0.5, 295.368),
+    calibrate_beta_parameter(0.5, 333.879),
     # 10% of tasks from the training dataset take longer to complete
-    calibrate_beta_parameter(0.5, 257.341),
+    calibrate_beta_parameter(0.5, 302.144),
     # 25% of tasks from the training dataset take longer to complete
-    calibrate_beta_parameter(0.5, 217.495),
+    calibrate_beta_parameter(0.5, 292.144),
     # 50% of tasks from the training dataset take longer to complete
-    calibrate_beta_parameter(0.5, 180.088),
+    calibrate_beta_parameter(0.5, 233.522),
     # 75% of tasks from the training dataset take longer to complete
-    calibrate_beta_parameter(0.5, 136.660),
+    calibrate_beta_parameter(0.5, 181.939),
     # 95% of tasks from the training dataset take longer to complete
-    calibrate_beta_parameter(0.5, 76.998),
+    calibrate_beta_parameter(0.5, 122.143),
 ]
 
 ## interuption heuristic related constants
@@ -88,5 +88,5 @@ H_MULTIPLIER = 1
 PLANNER_FAILURE_COST = 500
 
 # A.P. related constants
-NUM_AUGMENTED_TASK_SAMPLES = 8
+NUM_AUGMENTED_TASK_SAMPLES = 200 #8
 AP_SEED = 12

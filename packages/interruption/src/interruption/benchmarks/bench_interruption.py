@@ -69,7 +69,7 @@ def _setup_experiment_config(
     seeds = ExperimentSeeds(
         case.params["procthor_seed"],
         case.params["interruption_seed"] + case.repeat_idx,
-        75, # keep fixed for right now
+        case.repeat_idx, # keep fixed for right now
         # an object seed makes ThorInterface skip the remap, so a remapped
         # scene keeps the object placement it was generated with
         object_placement_seed=None if remap_dir else OBJ_PLACEMENT_SEED
@@ -89,15 +89,15 @@ def _setup_experiment_config(
             task_distribution, seeds.task_sample_seed
         )
 
-        # for smaller scale experiments, just reorder the task sequence
-        task_sequence = (
-            task_distribution[0][:case.params["num_task_sequence"]-1],
-            task_distribution[1][:case.params["num_task_sequence"]-1]
-        )
-        _, task_sequence = randomize_task_distribution_order(task_sequence, case.repeat_idx)
+        # # for smaller scale experiments, just reorder the task sequence
+        # task_sequence = (
+        #     task_distribution[0][:case.params["num_task_sequence"]-1],
+        #     task_distribution[1][:case.params["num_task_sequence"]-1]
+        # )
+        # _, task_sequence = randomize_task_distribution_order(task_sequence, case.repeat_idx)
 
-        task_distribution[0][:case.params["num_task_sequence"]-1] = task_sequence[0]
-        task_distribution[1][:case.params["num_task_sequence"]-1] = task_sequence[1]
+        # task_distribution[0][:case.params["num_task_sequence"]-1] = task_sequence[0]
+        # task_distribution[1][:case.params["num_task_sequence"]-1] = task_sequence[1]
 
     model_path = (
         DEFAULT_RESOURCES_BASE / f"models/{MODEL_NAME}"

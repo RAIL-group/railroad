@@ -38,7 +38,7 @@ def main(randomize_order: bool = False, filter_objects: bool = False):
         # an object seed makes ThorInterface skip the remap, so a remapped
         # scene keeps the object placement it was generated with
         object_placement_seed=None if remap_dir else OBJ_PLACEMENT_SEED,
-        task_sample_seed=75
+        task_sample_seed=0
     )
     task_arrival_fn = partial(
         get_task_arrival_prob, RandomVariableType.CONTINUOUS,
@@ -52,15 +52,15 @@ def main(randomize_order: bool = False, filter_objects: bool = False):
             task_distribution, seeds.task_sample_seed
         )
 
-        # for smaller scale experiments, just reorder the task sequence
-        task_sequence = (
-            task_distribution[0][:4],
-            task_distribution[1][:4]
-        )
-        _, task_sequence = randomize_task_distribution_order(task_sequence, RUN_IDX_SEED)
+        # # for smaller scale experiments, just reorder the task sequence
+        # task_sequence = (
+        #     task_distribution[0][:4],
+        #     task_distribution[1][:4]
+        # )
+        # _, task_sequence = randomize_task_distribution_order(task_sequence, RUN_IDX_SEED)
 
-        task_distribution[0][:4] = task_sequence[0]
-        task_distribution[1][:4] = task_sequence[1]
+        # task_distribution[0][:4] = task_sequence[0]
+        # task_distribution[1][:4] = task_sequence[1]
     else:
         # both apple and pan are located at countertop3
         current_goal = task_distribution[0][0] # apple at fridge
