@@ -105,6 +105,9 @@ struct MCTSDecisionNode {
   bool evaluated = false;
   double leaf_value = 0.0;
   double estimate = 0.0;
+  // Cost of the step into this node beyond elapsed time and the action's
+  // extra cost (the concurrent heuristic's flowtime objective).
+  double step_cost = 0.0;
 
   explicit MCTSDecisionNode(const State &s, MCTSChanceNode *p = nullptr)
       : state(s), parent(p) {}
@@ -400,6 +403,7 @@ inline std::string mcts(const State &root_state,
       accumulated_extra_cost += best_chance->action->extra_cost();
       std::size_t idx = sample_index(best_chance->outcome_weights, rng);
       node = best_chance->children[idx].get();
+      accumulated_extra_cost += node->step_cost;
       ++depth;
     }
 
@@ -424,6 +428,7 @@ inline std::string mcts(const State &root_state,
             continue;
           auto child_decision =
               std::make_unique<MCTSDecisionNode>(succ, chance_raw);
+          if (concurrent_h) child_decision->step_cost = concurrent_h->step_cost(node->state, succ);
           child_decision->untried_actions =
               get_next_actions(child_decision->state, all_actions);
           chance_raw->outcome_weights.push_back(prob);
@@ -440,7 +445,8 @@ inline std::string mcts(const State &root_state,
         // action look like a sure thing.
         if (max_backup) {
           for (auto &child : chance_raw->children) {
-            child->leaf_value = leaf_reward(child.get(), accumulated_extra_cost);
+            child->leaf_value =
+                leaf_reward(child.get(), accumulated_extra_cost + child->step_cost);
             child->estimate = child->leaf_value;
             child->evaluated = true;
           }
@@ -448,6 +454,7 @@ inline std::string mcts(const State &root_state,
 
         std::size_t idx = sample_index(chance_raw->outcome_weights, rng);
         node = chance_raw->children[idx].get();
+        accumulated_extra_cost += node->step_cost;
         ++depth;
       }
     }

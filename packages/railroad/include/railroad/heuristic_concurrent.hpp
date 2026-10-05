@@ -58,6 +58,7 @@
 #include "railroad/heuristic_concurrent_schedule.hpp"
 #include "railroad/state.hpp"
 
+#include <limits>
 #include <memory>
 #include <unordered_map>
 
@@ -113,6 +114,38 @@ class ConcurrentHeuristic {
     }
     if (out) out->value = best;
     return best;
+  }
+
+  // Goal tasks still open in s: unsatisfied literals of the goal branch with
+  // the fewest (what the value's sum term counts).
+  int open_tasks(const State &s) const {
+    if (!goal_) return 0;
+    const auto &fl = s.fluents();
+    auto holds = [&fl](const Fluent &f) {
+      return f.is_negated() ? fl.count(f.invert()) == 0 : fl.count(f) > 0;
+    };
+    constexpr std::size_t kMaxBranches = 1024;
+    if (goal_->dnf_branch_count() == 0 || goal_->dnf_branch_count() > kMaxBranches) {
+      int n = 0;
+      for (const auto &f : goal_->get_all_literals()) n += !holds(f);
+      return n;
+    }
+    int best = std::numeric_limits<int>::max();
+    for (const auto &br : goal_->get_dnf_branches()) {
+      int n = 0;
+      for (const auto &f : br) n += !holds(f);
+      best = std::min(best, n);
+    }
+    return best;
+  }
+
+  // What MCTS charges, beyond elapsed time, for a step from `from` to `to`
+  // (the flowtime objective; 0 when it is off).
+  double step_cost(const State &from, const State &to) const {
+    if (!opts_.flowtime_objective) return 0.0;
+    const double dt = to.time() - from.time();
+    if (dt <= 0.0) return 0.0;
+    return (opts_.lambda_ms - 1.0 + opts_.lambda_add * open_tasks(from)) * dt;
   }
 
   std::size_t num_agents() const { return pb_.num_agents(); }

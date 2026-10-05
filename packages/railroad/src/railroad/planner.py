@@ -53,6 +53,8 @@ class ConcurrentHeuristicOptions(TypedDict, total=False):
     expected_search: bool
     #: On one agent, order tasks so none destroys a fact another relies on. [True]
     order_conflicts: bool
+    #: MCTS charges makespan plus flowtime, what the value estimates. [False]
+    flowtime_objective: bool
 
 
 def _normalize_goal(goal: Union[Goal, Fluent]) -> Goal:
@@ -459,6 +461,15 @@ class MCTSPlanner:
             lambda_max=self._lambda_max,
             lambda_ff=self._lambda_ff,
         )
+
+    def step_cost(self, state: State, successor: State, goal: Union[Goal, Fluent]) -> float:
+        """What MCTS charges for a step from ``state`` to ``successor`` beyond
+        the elapsed time and the action's extra cost."""
+        if self._heuristic != "concurrent":
+            return 0.0
+        converted, converted_goal = self._prepare(state, goal)
+        converted_succ, _ = self._prepare(successor, goal)
+        return self._evaluator(converted_goal).step_cost(converted, converted_succ)
 
     def heuristic_breakdown(self, state: State, goal: Union[Goal, Fluent]) -> dict:
         """The concurrent heuristic's value at ``state`` and its components
