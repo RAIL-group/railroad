@@ -63,7 +63,7 @@ class ReplayKnownMapSearchEnvironment(
     :func:`~railroad.replay.driver.run_replay` can swap policies on a reused arena.
     """
 
-    default_mcts = MctsConfig(iterations=4000, c=300.0, max_depth=20, heuristic_multiplier=2.0)
+    default_mcts = MctsConfig(iterations=4000, c=300.0, max_depth=20)
     default_max_planning_iterations = 60
     dashboard_fluent_keywords = ("at", "found", "searched")
 

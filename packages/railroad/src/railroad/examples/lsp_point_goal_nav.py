@@ -138,7 +138,6 @@ def main(
                 max_iterations=5000,
                 c=300,
                 max_depth=10,
-                heuristic_multiplier=1.5,
             )
 
             if action_name == "NONE":

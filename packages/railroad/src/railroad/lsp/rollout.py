@@ -221,7 +221,7 @@ def run_point_goal_rollout(
     mcts_iterations: int = 4000,
     mcts_c: float = 10,
     mcts_max_depth: int = 20,
-    mcts_heuristic_multiplier: float = 5,
+    mcts_heuristic_multiplier: float = 1,
 ) -> RolloutResult:
     """Run one full plan/act rollout headlessly, writing training data.
 

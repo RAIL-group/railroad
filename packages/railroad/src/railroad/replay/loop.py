@@ -33,7 +33,7 @@ class MctsConfig:
     iterations: int = 4000
     c: float = 10.0
     max_depth: int = 20
-    heuristic_multiplier: float = 5.0
+    heuristic_multiplier: float = 1.0
 
 
 def mcts_selector(config: MctsConfig) -> ActionSelector:

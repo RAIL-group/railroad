@@ -68,7 +68,7 @@ class ReplayPointGoalNavEnvironment(
 ):
     """LSP point-goal environment driven over a recorded final map."""
 
-    default_mcts = MctsConfig(iterations=4000, c=10.0, max_depth=20, heuristic_multiplier=5.0)
+    default_mcts = MctsConfig(iterations=4000, c=10.0, max_depth=20)
     default_max_planning_iterations = 300
     dashboard_fluent_keywords = ("at", "explored", "revealed")
 
