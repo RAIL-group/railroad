@@ -107,7 +107,7 @@ class ReplayKnownMapSearchEnvironment(
         # set. search reads the estimator through self._object_find_statistics,
         # so the candidate can be swapped without rebuilding the arena.
         return [
-            _operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0),
+            _operators.construct_no_op_operator(no_op_time=5.0),
             _operators.construct_move_operator_blocking(self.estimate_move_time),
             _operators.construct_search_operator(
                 self._container_find_prob, self._search_time
