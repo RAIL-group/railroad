@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -298,3 +299,28 @@ def test_problem_object_is_reusable_across_calls(ap_setup):
 
     assert fake1.calls[0].goal is ap_setup.original_goal
     assert fake2.calls[0].goal is ap_setup.original_goal
+
+
+@pytest.mark.parametrize(argnames="num_failures", argvalues=[0, 2])
+def test_search_with_retry_reports_number_of_retries(monkeypatch, num_failures):
+    # the solver fails num_failures times before finding a plan for a sub-task
+    outcomes = iter([False] * num_failures + [True])
+    monkeypatch.setattr(
+        pf, "search_without_retry", lambda *args: (["plan"], next(outcomes), 0)
+    )
+    monkeypatch.setattr(pf, "convert_state_to_positive_preconditions", lambda state, _: state)
+    monkeypatch.setattr(pf, "_get_task_goal_count", lambda goal: 3)
+    monkeypatch.setattr(pf, "_decompose_task", lambda state, task, *args: [task])
+
+    goal = LiteralGoal(F("at apple fridge"))
+    search_problem = SimpleNamespace(goal=goal, actions=[])
+    planner_parameters = SimpleNamespace(max_task_complexity=-1, heuristic_fn=None)
+
+    search_with_retry: Any = pf.search_with_retry  # called with stand-in arguments
+    plan, success, num_retries = search_with_retry(
+        pf.PlannerMode.MYOPIC, SimpleNamespace(state=None), search_problem, planner_parameters, {}
+    )
+
+    assert (plan, success, num_retries) == (["plan"], True, num_failures)
+    assert search_problem.goal is goal
+    assert planner_parameters.max_task_complexity == (-1 if num_failures == 0 else 1)

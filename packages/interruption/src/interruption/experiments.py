@@ -137,7 +137,7 @@ def run_experiment(
 
     start_time = time.perf_counter()
 
-    event_trace, task_sequence = _get_task_sequence_event_trace(
+    event_trace, task_sequence, search_retries = _get_task_sequence_event_trace(
         experiment_data, config, experiment_mode
     )
 
@@ -164,7 +164,9 @@ def run_experiment(
         dashboard, dash_env, recording_console,
         start_time, show_plot, save_plot, save_video
     )
-    return _get_results(config.augment_task, task_sequence_goal, event_trace, dash_data)
+    return _get_results(
+        config.augment_task, task_sequence_goal, event_trace, search_retries, dash_data
+    )
 
 
 # helper functions
@@ -172,13 +174,15 @@ def _get_task_sequence_event_trace(
     data: ExperimentData,
     config: ExperimentConfig,
     experiment_mode: PlannerMode,
-) -> tuple[list[str], list[Goal]]:
+) -> tuple[list[str], list[Goal], int]:
     """
     Searchs for a plan and executes the plan in the environment for the specificed n length
     task sequence. Additionally, stores a trace of the envents, in the form a of list of action
     names, which can later be deterministically replayed by the AstarDashboardPlanner.
+    Also returns the total number of search retries across all calls to the solver.
     """
     event_trace = []
+    search_retries = 0
     task_arrival_sequence = [config.goal]
     current_task = config.goal
     num_incomplete_goals = config.num_task_sequence
@@ -205,13 +209,14 @@ def _get_task_sequence_event_trace(
             planner_config.max_task_complexity = data.planner_parameters.max_task_complexity
 
         search_fn = search_with_retry if config.retry_with_subgoals else search_without_retry
-        plan, success = search_fn(
+        plan, success, num_retries = search_fn(
             planner_mode,
             data.env,
             data.search_problem,
             planner_config,
             data.neg_to_pos_mapping
         )
+        search_retries += num_retries
 
         # execute the plan in the environment
         completed_goals = _execution_loop(
@@ -249,7 +254,7 @@ def _get_task_sequence_event_trace(
             else iteration_count < config.num_task_sequence
         )
 
-    return event_trace, task_arrival_sequence
+    return event_trace, task_arrival_sequence, search_retries
 
 
 def _execution_loop(
@@ -491,6 +496,7 @@ def _get_results(
     augment: bool,
     all_goals: Goal,
     event_trace: list[str],
+    search_retries: int,
     dash_data: DashboardData
 ) -> dict:
     """
@@ -509,6 +515,11 @@ def _get_results(
         "wall_time": time.perf_counter() - dash_data.start_time,
         "plan_cost": float(dash_data.dash_env.state.time),
         "actions_count": len(event_trace),
+        # the solver had to retry on a smaller sub-task at least once
+        "required_search_retry": search_retries > 0,
+        "search_retries": search_retries,
+        # without retries, a failed search costs PLANNER_FAILURE_COST instead
+        "had_failed_search": "Failed Task" in event_trace,
         "actions": event_trace,
         "log_html": "",
         "log_plot": b''

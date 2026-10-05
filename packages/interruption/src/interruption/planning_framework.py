@@ -258,10 +258,11 @@ def search_without_retry(
     search_problem: InterruptionSearchProblem,
     planner_parameters: PlannerConfig,
     neg_to_pos_mapping: dict[F, F]
-) -> tuple[list[Action], bool]:
+) -> tuple[list[Action], bool, int]:
     """
     Wrapper function of the planning algorithms used in the task sequence
-    with continous task arrival experiments.
+    with continous task arrival experiments. Returns a tuple containing the
+    plan, success_flag, and the number of search retries (always 0).
     """
     initial_state = convert_state_to_positive_preconditions(
         environment.state, neg_to_pos_mapping
@@ -285,7 +286,7 @@ def search_without_retry(
         plan, _, success, _ = astar_search(
             state_scene_graph, search_problem, planner_parameters
         )
-    return plan, success
+    return plan, success, 0
 
 
 def search_with_retry(
@@ -294,13 +295,13 @@ def search_with_retry(
     search_problem: InterruptionSearchProblem,
     planner_parameters: PlannerConfig,
     neg_to_pos_mapping: dict[F, F]
-) -> tuple[list[Action], bool]:
+) -> tuple[list[Action], bool, int]:
     """
     A wrapper function for planning algorithms utilized as part of interruption
     experiments. If a task is too complex to be solved within the alotted search
     budget, then the complex task is decomposed into a smaller sub-task to be solved.
-    Returns a tuple containing the plan, success_flag, and the number of goals in the task
-    that the solver failed to find a plan for.
+    Returns a tuple containing the plan, success_flag, and the number of search retries,
+    i.e. failed searches before a sub-task the solver could find a plan for.
     """
     initial_state = convert_state_to_positive_preconditions(
         environment.state, neg_to_pos_mapping
@@ -323,7 +324,7 @@ def search_with_retry(
         )
         search_problem.goal = ranked_sub_goals[0]
 
-        plan, success = search_without_retry(
+        plan, success, _ = search_without_retry(
             planner_mode, environment, search_problem,
             planner_parameters, neg_to_pos_mapping
         )
@@ -342,7 +343,7 @@ def search_with_retry(
     if failure_count > 0:
         planner_parameters.max_task_complexity = num_goals
 
-    return plan, success
+    return plan, success, failure_count
 
 
 def _decompose_task(
