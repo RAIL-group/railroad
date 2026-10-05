@@ -4,6 +4,7 @@
 #include "railroad/goal.hpp"
 #include "railroad/planner.hpp"
 #include "railroad/state.hpp"
+#include <memory>
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
@@ -11,6 +12,14 @@
 
 namespace py = pybind11;
 using namespace railroad;
+
+// A compiled ConcurrentHeuristic for Python. The heuristic keeps pointers into
+// its action list, so the wrapper owns a copy for the evaluator's lifetime.
+struct PyConcurrentHeuristic {
+  std::vector<Action> actions;
+  GoalPtr goal;
+  std::unique_ptr<ConcurrentHeuristic> h;
+};
 
 PYBIND11_MODULE(_bindings, m) {
   py::class_<Fluent>(m, "Fluent")
@@ -672,25 +681,13 @@ PYBIND11_MODULE(_bindings, m) {
       .def(py::init([](std::vector<Action> all_actions, double lambda_add,
                        double lambda_max, double lambda_ff,
                        std::optional<double> dead_end_penalty,
-                       const std::string &heuristic, bool agent_aware,
-                       bool timed_init,
-                       bool sum_completion, const std::string &backup,
-                       bool joint_found, bool route_chaining,
-                       bool group_attempts, bool expected_search,
-                       bool order_conflicts) {
+                       const std::string &heuristic, const std::string &backup,
+                       std::optional<ConcurrentHeuristicOptions> heuristic_options) {
              std::optional<ConcurrentHeuristicOptions> conc;
              if (heuristic == "concurrent") {
-               ConcurrentHeuristicOptions o;
+               ConcurrentHeuristicOptions o = heuristic_options.value_or(ConcurrentHeuristicOptions{});
                o.lambda_add = lambda_add;
                o.lambda_ms = lambda_ff;
-               o.agent_aware = agent_aware;
-               o.timed_init = timed_init;
-               o.sum_completion = sum_completion;
-               o.joint_found = joint_found;
-               o.route_chaining = route_chaining;
-               o.group_attempts = group_attempts;
-               o.expected_search = expected_search;
-               o.order_conflicts = order_conflicts;
                conc = o;
              } else if (heuristic != "ff") {
                throw std::invalid_argument("heuristic must be 'ff' or 'concurrent'");
@@ -707,15 +704,8 @@ PYBIND11_MODULE(_bindings, m) {
            py::arg("lambda_ff")  = 0.5,
            py::arg("dead_end_penalty") = py::none(),
            py::arg("heuristic") = "concurrent",
-           py::arg("agent_aware") = true,
-           py::arg("timed_init") = true,
-           py::arg("sum_completion") = true,
            py::arg("backup") = "max",
-           py::arg("joint_found") = true,
-           py::arg("route_chaining") = true,
-           py::arg("group_attempts") = true,
-           py::arg("expected_search") = true,
-           py::arg("order_conflicts") = true,
+           py::arg("heuristic_options") = py::none(),
            "Construct an MCTSPlanner. The lambda_* weights mix the additive "
            "(h_add), max (h_max), and relaxed-plan-cost (h_ff) heuristic "
            "components used during search; defaults are an even split between "
@@ -763,52 +753,59 @@ PYBIND11_MODULE(_bindings, m) {
         "Seed the MCTS outcome-sampling RNG for reproducible planning "
         "(thread-local: applies to planner calls from the calling thread)");
 
-  m.def("concurrent_heuristic",
-        [](const State &state, const GoalPtr &goal,
-           const std::vector<Action> &all_actions, double lambda_add,
-           double lambda_ms, bool agent_aware, bool timed_init,
-           bool at_implies_found, bool sum_completion,
-           bool joint_found, bool route_chaining, bool group_attempts,
-           bool expected_search, bool order_conflicts) {
-          ConcurrentHeuristicOptions o;
-          o.order_conflicts = order_conflicts;
-          o.expected_search = expected_search;
-          o.route_chaining = route_chaining;
-          o.group_attempts = group_attempts;
-          o.joint_found = joint_found;
-          o.sum_completion = sum_completion;
-          o.lambda_add = lambda_add;
-          o.lambda_ms = lambda_ms;
-          o.agent_aware = agent_aware;
-          o.timed_init = timed_init;
-          o.at_implies_found = at_implies_found;
-          ConcurrentHeuristic h(all_actions, goal.get(), o);
-          ConcurrentHeuristicBreakdown bd;
-          h.evaluate(state, &bd);
-          py::dict d;
-          d["value"] = bd.value;
-          d["h_add"] = bd.h_add;
-          d["delta"] = bd.delta;
-          d["makespan"] = bd.makespan;
-          d["completion_sum"] = bd.completion_sum;
-          d["h_ff"] = bd.h_ff;
-          d["goal_finish"] = bd.goal_finish;
-          d["assignment"] = bd.assignment;
-          d["deltas"] = bd.deltas;
-          d["plan"] = bd.plan;
-          d["loads"] = bd.loads;
-          return d;
-        },
-        py::arg("state"), py::arg("goal"), py::arg("all_actions"),
-        py::arg("lambda_add") = 0.5, py::arg("lambda_ms") = 0.5,
-        py::arg("agent_aware") = true, py::arg("timed_init") = true,
-        py::arg("at_implies_found") = true,
-        py::arg("sum_completion") = true, py::arg("joint_found") = true,
-        py::arg("route_chaining") = true, py::arg("group_attempts") = true,
-        py::arg("expected_search") = true, py::arg("order_conflicts") = true,
-        "Evaluate the concurrency-aware heuristic (heuristic_concurrent.hpp) "
-        "and return its components: value, h_add, delta, makespan, h_ff, the "
-        "per-goal finish times and the goal-to-agent assignment.");
+  py::class_<ConcurrentHeuristicOptions>(m, "ConcurrentHeuristicOptions",
+      "Settings of the concurrent heuristic (heuristic_concurrent.hpp). The "
+      "defaults are the configuration to use; the switches exist for ablations.")
+      .def(py::init<>())
+      .def_readwrite("lambda_add", &ConcurrentHeuristicOptions::lambda_add)
+      .def_readwrite("lambda_ms", &ConcurrentHeuristicOptions::lambda_ms)
+      .def_readwrite("at_implies_found", &ConcurrentHeuristicOptions::at_implies_found)
+      .def_readwrite("agent_aware", &ConcurrentHeuristicOptions::agent_aware)
+      .def_readwrite("timed_init", &ConcurrentHeuristicOptions::timed_init)
+      .def_readwrite("joint_found", &ConcurrentHeuristicOptions::joint_found)
+      .def_readwrite("route_chaining", &ConcurrentHeuristicOptions::route_chaining)
+      .def_readwrite("group_attempts", &ConcurrentHeuristicOptions::group_attempts)
+      .def_readwrite("order_conflicts", &ConcurrentHeuristicOptions::order_conflicts)
+      .def_readwrite("expected_search", &ConcurrentHeuristicOptions::expected_search)
+      .def_readwrite("sum_completion", &ConcurrentHeuristicOptions::sum_completion);
+
+  py::class_<PyConcurrentHeuristic>(m, "ConcurrentHeuristic",
+      "The concurrency-aware heuristic compiled for one action set and goal; "
+      "call it on states (memoized) or ask for the breakdown of one.")
+      .def(py::init([](std::vector<Action> actions, const GoalPtr &goal,
+                       std::optional<ConcurrentHeuristicOptions> options) {
+             auto self = std::make_unique<PyConcurrentHeuristic>();
+             self->actions = std::move(actions);
+             self->goal = goal;
+             self->h = std::make_unique<ConcurrentHeuristic>(
+                 self->actions, self->goal.get(), options.value_or(ConcurrentHeuristicOptions{}));
+             return self;
+           }),
+           py::arg("actions"), py::arg("goal"), py::arg("options") = py::none())
+      .def("__call__", [](PyConcurrentHeuristic &self, const State &s) { return (*self.h)(s); },
+           py::arg("state"), "The heuristic value of a state (memoized).")
+      .def("breakdown",
+           [](PyConcurrentHeuristic &self, const State &s) {
+             ConcurrentHeuristicBreakdown bd;
+             self.h->evaluate(s, &bd);
+             py::dict d;
+             d["value"] = bd.value;
+             d["h_add"] = bd.h_add;
+             d["delta"] = bd.delta;
+             d["makespan"] = bd.makespan;
+             d["completion_sum"] = bd.completion_sum;
+             d["h_ff"] = bd.h_ff;
+             d["goal_finish"] = bd.goal_finish;
+             d["assignment"] = bd.assignment;
+             d["deltas"] = bd.deltas;
+             d["plan"] = bd.plan;
+             d["loads"] = bd.loads;
+             return d;
+           },
+           py::arg("state"),
+           "The value and its components: value, h_add, delta, makespan, "
+           "completion_sum, h_ff, per-goal finish times, the goal-to-agent "
+           "assignment, retry deltas, the relaxed plan and per-agent loads.");
 
   // ff_heuristic with Goal object
   m.def("ff_heuristic",

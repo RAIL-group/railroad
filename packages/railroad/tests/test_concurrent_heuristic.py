@@ -10,17 +10,13 @@ from typing import Any, cast
 import pytest
 
 from railroad import operators
-from railroad._bindings import concurrent_heuristic
 from railroad.core import (
     Fluent,
     State,
-    convert_goal_to_positive_preconditions,
-    convert_state_to_positive_preconditions,
     get_action_by_name,
-    project_state,
     transition,
 )
-from railroad.planner import MCTSPlanner, _normalize_goal
+from railroad.planner import MCTSPlanner
 
 F = Fluent
 
@@ -63,15 +59,11 @@ def _state(robots, extra=(), time=0.0):
 
 
 def _breakdown(planner, state, goal, **options):
-    """Components of the concurrent heuristic, under the planner's conversion."""
-    goal = _normalize_goal(goal)
-    planner.heuristic(state, goal)  # builds the mapping and projection
-    converted = project_state(
-        convert_state_to_positive_preconditions(state, planner._current_mapping),
-        planner._relevant,
-    )
-    g = convert_goal_to_positive_preconditions(goal, planner._current_mapping)
-    return concurrent_heuristic(converted, g, planner._search_actions, **options)
+    """Components of the concurrent heuristic, optionally with switches changed."""
+    if options:
+        planner = MCTSPlanner(planner._original_actions,
+                              heuristic_options={**planner._heuristic_options, **options})
+    return planner.heuristic_breakdown(state, goal)
 
 
 def _apply(actions, state, name):
