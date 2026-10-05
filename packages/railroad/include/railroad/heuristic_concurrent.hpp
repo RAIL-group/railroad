@@ -24,14 +24,14 @@
 //   4. List schedule -- tasks go to the agent that would finish them
 //      earliest; the value is computed from the completion times C_g:
 //          lambda_add * sum_g C_g + lambda_ms * max_g C_g
-//      minimised over goal DNF branches. The makespan alone leaves an agent
-//      whose task is off the critical path without a gradient (in ProcTHOR,
-//      plans 10-20% longer with 2-3 robots); the sum gives every task one.
-//      With n tasks open the value falls at lambda_ms + lambda_add * n per
-//      unit of time, which is what MCTS charges under flowtime_objective
-//      (makespan plus flowtime); charged elapsed time only, as by default,
-//      the value is pessimistic by that difference, as if multiplied by
-//      (n + 1) / 2 at the default weights.
+//      minimised over goal DNF branches. The objective is the makespan; the
+//      sum is a shaping term. The makespan alone leaves an agent whose task
+//      is off the critical path without a gradient (in ProcTHOR, plans
+//      3-22% longer with 2-3 robots, 12% on average). The price is consistency: with n
+//      tasks open the value falls at lambda_ms + lambda_add * n per unit of
+//      time while MCTS charges 1, as if h were multiplied by (n + 1) / 2 at
+//      the default weights. Charging MCTS that rate instead (makespan plus
+//      flowtime) is consistent but planned no better, and optimises a proxy.
 //                                          [heuristic_concurrent_schedule.hpp]
 //
 // Refinements that apply only where the domain has the structure they need:
@@ -64,7 +64,6 @@
 #include "railroad/heuristic_concurrent_schedule.hpp"
 #include "railroad/state.hpp"
 
-#include <limits>
 #include <memory>
 #include <unordered_map>
 
@@ -120,49 +119,6 @@ class ConcurrentHeuristic {
     }
     if (out) out->value = best;
     return best;
-  }
-
-  // Goal tasks still open in s, counted as the value's sum term counts them:
-  // the unsatisfied literals of the goal branch with the fewest, with a
-  // `found X` that goes with an open `at X L` (one joint task) not counted
-  // again.
-  int open_tasks(const State &s) const {
-    if (!goal_) return 0;
-    const auto &fl = s.fluents();
-    auto holds = [&fl](const Fluent &f) {
-      return f.is_negated() ? fl.count(f.invert()) == 0 : fl.count(f) > 0;
-    };
-    auto count = [&](const auto &literals) {
-      int n = 0;
-      for (const auto &f : literals) {
-        if (holds(f)) continue;
-        bool joint = false;
-        if (opts_.joint_found && !f.is_negated() && f.name() == "found" && f.args().size() == 1) {
-          for (const auto &g : literals) {
-            joint = joint || (!g.is_negated() && g.name() == "at" && !g.args().empty() &&
-                              g.args()[0] == f.args()[0] && !holds(g));
-          }
-        }
-        n += !joint;
-      }
-      return n;
-    };
-    constexpr std::size_t kMaxBranches = 1024;
-    if (goal_->dnf_branch_count() == 0 || goal_->dnf_branch_count() > kMaxBranches) {
-      return count(goal_->get_all_literals());
-    }
-    int best = std::numeric_limits<int>::max();
-    for (const auto &br : goal_->get_dnf_branches()) best = std::min(best, count(br));
-    return best;
-  }
-
-  // What MCTS charges, beyond elapsed time, for a step from `from` to `to`
-  // (the flowtime objective; 0 when it is off).
-  double step_cost(const State &from, const State &to) const {
-    if (!opts_.flowtime_objective) return 0.0;
-    const double dt = to.time() - from.time();
-    if (dt <= 0.0) return 0.0;
-    return (opts_.lambda_ms - 1.0 + opts_.lambda_add * open_tasks(from)) * dt;
   }
 
   std::size_t num_agents() const { return pb_.num_agents(); }

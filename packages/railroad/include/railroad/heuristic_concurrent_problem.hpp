@@ -53,11 +53,6 @@ struct ConcurrentHeuristicOptions {
   // The lambda_add term: the scheduled goals' summed completion times (true)
   // or the contention-blind h_add + delta of the unrestricted relaxation.
   bool sum_completion = true;
-  // MCTS charges what the value estimates: per unit of time, lambda_ms plus
-  // lambda_add per open goal task (makespan plus flowtime). False: elapsed
-  // time only, under which the value falls faster than time passes whenever
-  // several goal tasks are open.
-  bool flowtime_objective = false;
 };
 
 // Per-branch components of the most recent evaluation (for introspection).
