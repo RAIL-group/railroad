@@ -148,7 +148,13 @@ remaining time of the *team* rather than of one sequential agent; the design not
    off, a plan through one place plus a retry delta, with achievers that
    consume the same precondition counted as one attempt.
 5. **Value** `lambda_add * sum_g C_g + lambda_ms * max_g C_g` over the
-   scheduled completion times.
+   scheduled completion times. The sum gives a task off the critical path a
+   gradient; with `n` tasks open it makes the value fall at
+   `lambda_ms + lambda_add * n` per unit of time. `flowtime_objective` makes
+   MCTS charge exactly that (makespan plus flowtime); by default MCTS charges
+   elapsed time only. `railroad.consistency` (and `railroad example <name>
+   --check-heuristic`) measures how far the value is from its own one-step
+   lookahead on any problem.
 
 Compiled once per search into integer-indexed arrays, so evaluations are
 several times faster than `ff_heuristic` on large grounded problems. Options
