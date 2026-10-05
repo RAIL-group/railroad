@@ -24,8 +24,14 @@
 //   4. List schedule -- tasks go to the agent that would finish them
 //      earliest; the value is computed from the completion times C_g:
 //          lambda_add * sum_g C_g + lambda_ms * max_g C_g
-//      (makespan plus a sum that gives every task, not only the critical
-//      one, a gradient), minimised over goal DNF branches.
+//      minimised over goal DNF branches. The makespan alone leaves an agent
+//      whose task is off the critical path without a gradient (in ProcTHOR,
+//      plans 10-20% longer with 2-3 robots); the sum gives every task one.
+//      With n tasks open the value falls at lambda_ms + lambda_add * n per
+//      unit of time, which is what MCTS charges under flowtime_objective
+//      (makespan plus flowtime); charged elapsed time only, as by default,
+//      the value is pessimistic by that difference, as if multiplied by
+//      (n + 1) / 2 at the default weights.
 //                                          [heuristic_concurrent_schedule.hpp]
 //
 // Refinements that apply only where the domain has the structure they need:
@@ -116,26 +122,37 @@ class ConcurrentHeuristic {
     return best;
   }
 
-  // Goal tasks still open in s: unsatisfied literals of the goal branch with
-  // the fewest (what the value's sum term counts).
+  // Goal tasks still open in s, counted as the value's sum term counts them:
+  // the unsatisfied literals of the goal branch with the fewest, with a
+  // `found X` that goes with an open `at X L` (one joint task) not counted
+  // again.
   int open_tasks(const State &s) const {
     if (!goal_) return 0;
     const auto &fl = s.fluents();
     auto holds = [&fl](const Fluent &f) {
       return f.is_negated() ? fl.count(f.invert()) == 0 : fl.count(f) > 0;
     };
+    auto count = [&](const auto &literals) {
+      int n = 0;
+      for (const auto &f : literals) {
+        if (holds(f)) continue;
+        bool joint = false;
+        if (opts_.joint_found && !f.is_negated() && f.name() == "found" && f.args().size() == 1) {
+          for (const auto &g : literals) {
+            joint = joint || (!g.is_negated() && g.name() == "at" && !g.args().empty() &&
+                              g.args()[0] == f.args()[0] && !holds(g));
+          }
+        }
+        n += !joint;
+      }
+      return n;
+    };
     constexpr std::size_t kMaxBranches = 1024;
     if (goal_->dnf_branch_count() == 0 || goal_->dnf_branch_count() > kMaxBranches) {
-      int n = 0;
-      for (const auto &f : goal_->get_all_literals()) n += !holds(f);
-      return n;
+      return count(goal_->get_all_literals());
     }
     int best = std::numeric_limits<int>::max();
-    for (const auto &br : goal_->get_dnf_branches()) {
-      int n = 0;
-      for (const auto &f : br) n += !holds(f);
-      best = std::min(best, n);
-    }
+    for (const auto &br : goal_->get_dnf_branches()) best = std::min(best, count(br));
     return best;
   }
 
