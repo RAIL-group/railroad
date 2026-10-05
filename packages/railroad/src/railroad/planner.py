@@ -11,6 +11,8 @@ __all__ = [
     "seed_planner_rng",
 ]
 from railroad._bindings import MCTSPlanner as _MCTSPlannerCpp
+from railroad._bindings import ConcurrentHeuristic as _ConcurrentHeuristicCpp
+from railroad._bindings import ConcurrentHeuristicOptions as _ConcurrentHeuristicOptionsCpp
 from railroad._bindings import Action, State, Fluent
 from railroad._bindings import Goal, LiteralGoal
 from railroad.core import (
@@ -194,6 +196,15 @@ class MCTSPlanner:
             raise ValueError(f"unknown heuristic_options: {sorted(unknown)}")
         if self._heuristic_options and heuristic != "concurrent":
             raise ValueError("heuristic_options only apply to heuristic='concurrent'")
+        self._concurrent_options = _ConcurrentHeuristicOptionsCpp()
+        self._concurrent_options.lambda_add = self._lambda_add
+        self._concurrent_options.lambda_ms = self._lambda_ff
+        for key, value in self._heuristic_options.items():
+            setattr(self._concurrent_options, key, value)
+        # Compiled heuristic evaluators for heuristic(), per goal, valid for
+        # the action list they were compiled from.
+        self._evaluators: Dict[str, _ConcurrentHeuristicCpp] = {}
+        self._evaluators_for: List[Action] | None = None
 
         # Action-pruning configuration (applied per-call in __call__). Pruning
         # is enabled only when a keep-count is given; both None => off, so
@@ -242,7 +253,7 @@ class MCTSPlanner:
             dead_end_penalty=self._dead_end_penalty,
             heuristic=self._heuristic,
             backup=self._backup,
-            **self._heuristic_options,
+            heuristic_options=self._concurrent_options if self._heuristic == "concurrent" else None,
         )
 
     def _convert_actions(
@@ -409,59 +420,52 @@ class MCTSPlanner:
         """Get trace from the last MCTS tree (delegates to C++ planner)."""
         return self._cpp_planner.get_trace_from_last_mcts_tree()
 
+    def _prepare(self, state: State, goal: Union[Goal, Fluent]) -> tuple[State, Goal]:
+        """The state and goal as MCTS searches them: positive preconditions only,
+        projected onto the predicates that can influence the search."""
+        goal = _normalize_goal(goal)
+        self._ensure_mapping_includes_goal(goal)
+        converted_state = convert_state_to_positive_preconditions(state, self._current_mapping)
+        converted_goal = convert_goal_to_positive_preconditions(goal, self._current_mapping)
+        return self._project_for(converted_goal, converted_state), converted_goal
+
+    def _evaluator(self, goal: Goal) -> _ConcurrentHeuristicCpp:
+        """The concurrent heuristic compiled for the current search actions and
+        ``goal`` (already converted), reused across calls."""
+        if self._evaluators_for is not self._search_actions:
+            self._evaluators = {}
+            self._evaluators_for = self._search_actions
+        key = str(goal)
+        if key not in self._evaluators:
+            self._evaluators[key] = _ConcurrentHeuristicCpp(
+                self._search_actions, goal, self._concurrent_options)
+        return self._evaluators[key]
+
     def heuristic(self, state: State, goal: Union[Goal, Fluent]) -> float:
-        """Compute FF heuristic using converted state/goal/actions.
+        """The heuristic MCTS uses at leaves, for ``state`` and ``goal``.
 
-        This method computes the FF heuristic with proper conversion of
-        negative preconditions to positive equivalents, matching the
-        internal heuristic used by the MCTS planner.
-
-        Args:
-            state: Current state (will be automatically converted)
-            goal: Goal to achieve. Can be:
-                - A Goal object: F("a") & F("b"), AndGoal([...]), etc.
-                - A single Fluent: F("visited a") (auto-wrapped to LiteralGoal)
-
-        Returns:
-            Heuristic value (estimated cost to reach goal)
+        The state and goal are converted and projected as the search does, so
+        the value matches the planner's own (``inf`` when the relaxation proves
+        the goal unreachable; ``dead_end_penalty`` only shapes MCTS rewards).
         """
+        converted_state, converted_goal = self._prepare(state, goal)
+        if self._heuristic == "concurrent":
+            return self._evaluator(converted_goal)(converted_state)
         from railroad._bindings import ff_heuristic as _ff_heuristic_cpp
 
-        # Normalize goal (wrap Fluent in LiteralGoal if needed)
-        goal = _normalize_goal(goal)
-
-        # Ensure mapping includes goal's negative fluents
-        self._ensure_mapping_includes_goal(goal)
-
-        # Convert state with (possibly extended) mapping
-        converted_state = convert_state_to_positive_preconditions(
-            state, self._current_mapping
-        )
-
-        # Convert goal with (possibly extended) mapping
-        converted_goal = convert_goal_to_positive_preconditions(
-            goal, self._current_mapping
-        )
-
-        # Same projection MCTS searches under, so the two agree.
-        converted_state = self._project_for(converted_goal, converted_state)
-
-        # No dead_end_penalty here: that shapes the MCTS *reward*, while this
-        # reports the raw heuristic, inf included.
-        if self._heuristic == "concurrent":
-            from railroad._bindings import concurrent_heuristic as _conc_cpp
-
-            return _conc_cpp(
-                converted_state, converted_goal, self._search_actions,
-                lambda_add=self._lambda_add,
-                lambda_ms=self._lambda_ff,
-                **self._heuristic_options,
-            )["value"]
         return _ff_heuristic_cpp(
             converted_state, converted_goal, self._search_actions,
             lambda_add=self._lambda_add,
             lambda_max=self._lambda_max,
             lambda_ff=self._lambda_ff,
         )
+
+    def heuristic_breakdown(self, state: State, goal: Union[Goal, Fluent]) -> dict:
+        """The concurrent heuristic's value at ``state`` and its components
+        (see ``ConcurrentHeuristic.breakdown``)."""
+        if self._heuristic != "concurrent":
+            raise ValueError("heuristic_breakdown needs heuristic='concurrent'")
+        converted_state, converted_goal = self._prepare(state, goal)
+        return self._evaluator(converted_goal).breakdown(converted_state)
 
 
