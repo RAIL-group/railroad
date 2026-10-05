@@ -87,10 +87,11 @@ def test_record_consistency_checks_every_planner_call_and_restores_the_planner()
     assert MCTSPlanner.__call__ is original
 
 
-def test_charging_flowtime_makes_two_deliveries_consistent():
-    """With two goal tasks open the value falls at 1.5x the rate of time (its
-    sum term counts each open task); charging MCTS that same rate
-    (flowtime_objective) makes the one-step lookahead agree with it exactly."""
+def test_the_sum_term_makes_the_value_fall_faster_than_time():
+    """The value's sum of completion times is a shaping term: with two goal
+    tasks open it falls at 1.5x the rate of time, so one step of lookahead
+    finds the first 10 s move 5 s cheaper than the value implied; with one
+    task left the value is consistent again."""
     objects_by_type = {"robot": {"r1"}, "location": set(POSITION), "object": {"box", "cup"}}
     ops = [
         operators.construct_move_operator(lambda r, a, b: abs(POSITION[a] - POSITION[b])),
@@ -101,12 +102,7 @@ def test_charging_flowtime_makes_two_deliveries_consistent():
     state = State(0.0, {F("at r1 start"), F("free r1"), F("at box a"), F("found box"),
                         F("at cup b"), F("found cup")}, [])
     goal = F("at box goal") & F("at cup goal")
-
-    time_only = check_consistency(MCTSPlanner(actions), state, goal, actions, rollouts=1, epsilon=0.0)
-    first = time_only.residuals[0]
-    assert first.gap == pytest.approx(-0.5 * 10.0)  # the first move takes 10 s
-
-    flowtime = MCTSPlanner(actions, heuristic_options={"flowtime_objective": True})
-    report = check_consistency(flowtime, state, goal, actions, rollouts=1, epsilon=0.0)
-    assert report.residuals
-    assert all(abs(r.gap) < 1e-6 for r in report.residuals)
+    report = check_consistency(MCTSPlanner(actions), state, goal, actions, rollouts=1, epsilon=0.0)
+    first, last = report.residuals[0], report.residuals[-1]
+    assert first.gap == pytest.approx(-0.5 * 10.0)  # two tasks open, a 10 s move
+    assert last.gap == pytest.approx(0.0)  # one task open
