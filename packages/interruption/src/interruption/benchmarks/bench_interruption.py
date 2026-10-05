@@ -6,7 +6,7 @@ interruption-planning sweeps can be run in parallel and tracked in
 MLflow / viewed via `railroad benchmarks dashboard`.
 """
 from functools import partial
-import itertools
+from pathlib import Path
 from typing import Any
 
 from railroad.bench import BenchmarkCase, benchmark
@@ -14,13 +14,12 @@ from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 
 from ..constants import (
     MODEL_NAME, EXPERIMENT_REPEATS, AUGMENT_TASK, EXPECTED_TIME_NEXT_ARRIVAL,
-    PROCTHOR_SEED, OBJ_PLACEMENT_SEED, FILTER_OBJECTS, TIMEOUT, RETRY_WITH_SUBGOALS,
-    REMAPPED_SCENES_HASH
+    INTERRUPTION_SEEDS, PROCTHOR_SEED, OBJ_PLACEMENT_SEED, FILTER_OBJECTS, TIMEOUT,
+    RETRY_WITH_SUBGOALS, REMAPPED_SCENES_HASH
 )
 from ..environments import (
     get_example_procthor_goal,
     get_scene_task_distribution,
-    # get_example_procthor_task_distribution,
 )
 from ..experiments import ExperimentConfig, ExperimentSeeds, run_experiment
 from ..planning_framework import PlannerMode
@@ -28,6 +27,16 @@ from ..utilities import (
     RandomVariableType, randomize_task_distribution_order, get_task_arrival_prob,
     extract_relevant_objects, use_remapped_scenes
 )
+
+# number of tasks in each sampled task sequence
+NUM_TASK_SEQUENCE = 5
+
+# planner modes that need the learned expected-value model
+_LEARNED_MODES = {
+    PlannerMode.INTERRUPTION,
+    PlannerMode.ANTICIPATORY_PLANNING,
+    PlannerMode.INTERRUPTION_AP,
+}
 
 
 def _get_cases() -> list[dict[str, Any]]:
@@ -38,18 +47,41 @@ def _get_cases() -> list[dict[str, Any]]:
     return [
         {
             "procthor_seed": PROCTHOR_SEED,
-            "task_dist_idx": 0,
             "time_between_arrivals": time_between_arrivals,
             "interruption_seed": seed,
-            "num_task_sequence": num_task_sequence,
+            "num_task_sequence": NUM_TASK_SEQUENCE,
             "randomize_task_sequence": True,
             "augment_task": AUGMENT_TASK
         }
-        for (time_between_arrivals, seed), num_task_sequence in itertools.product(
-            zip(EXPECTED_TIME_NEXT_ARRIVAL, [140, 42, 240, 57, 1096, 4065, 720]),
-            [5]
+        # each arrival rate is paired with its own seed
+        for time_between_arrivals, seed in zip(
+            EXPECTED_TIME_NEXT_ARRIVAL, INTERRUPTION_SEEDS, strict=True
         )
     ]
+
+
+def _build_seeds(case: BenchmarkCase, remap_dir: Path | None) -> ExperimentSeeds:
+    """
+    Helper function for deriving the per-repeat experiment seeds of a case.
+    """
+    return ExperimentSeeds(
+        procthor_seed=case.params["procthor_seed"],
+        experiment_seed=case.params["interruption_seed"] + case.repeat_idx,
+        task_sample_seed=case.repeat_idx,
+        # an object seed makes ThorInterface skip the remap, so a remapped
+        # scene keeps the object placement it was generated with
+        object_placement_seed=None if remap_dir else OBJ_PLACEMENT_SEED
+    )
+
+
+def _model_path(experiment_mode: PlannerMode) -> Path | str:
+    """
+    Helper function that returns the path of the learned expected-value model
+    for the planner modes that use it, and an empty string otherwise.
+    """
+    if experiment_mode in _LEARNED_MODES:
+        return DEFAULT_RESOURCES_BASE / f"models/{MODEL_NAME}"
+    return ""
 
 
 def _setup_experiment_config(
@@ -66,159 +98,80 @@ def _setup_experiment_config(
         use_remapped_scenes(REMAPPED_SCENES_HASH, case.params["procthor_seed"])
         if REMAPPED_SCENES_HASH else None
     )
-    seeds = ExperimentSeeds(
-        case.params["procthor_seed"],
-        case.params["interruption_seed"] + case.repeat_idx,
-        case.repeat_idx, # keep fixed for right now
-        # an object seed makes ThorInterface skip the remap, so a remapped
-        # scene keeps the object placement it was generated with
-        object_placement_seed=None if remap_dir else OBJ_PLACEMENT_SEED
-    )
+    seeds = _build_seeds(case, remap_dir)
     task_arrival_fn = partial(
         get_task_arrival_prob,
         RandomVariableType.CONTINUOUS,
-        -1,
+        -1,  # arrival_prob: only used by the discrete random variable
         case.params["time_between_arrivals"]
     )
 
     # get task distribution from alfred dataset used during training
     task_distribution = get_scene_task_distribution(seeds.procthor_seed, remap_dir)
-    current_goal = get_example_procthor_goal()
     if case.params["randomize_task_sequence"]:
         current_goal, task_distribution = randomize_task_distribution_order(
             task_distribution, seeds.task_sample_seed
         )
+    else:
+        current_goal = get_example_procthor_goal()
 
-        # # for smaller scale experiments, just reorder the task sequence
-        # task_sequence = (
-        #     task_distribution[0][:case.params["num_task_sequence"]-1],
-        #     task_distribution[1][:case.params["num_task_sequence"]-1]
-        # )
-        # _, task_sequence = randomize_task_distribution_order(task_sequence, case.repeat_idx)
-
-        # task_distribution[0][:case.params["num_task_sequence"]-1] = task_sequence[0]
-        # task_distribution[1][:case.params["num_task_sequence"]-1] = task_sequence[1]
-
-    model_path = (
-        DEFAULT_RESOURCES_BASE / f"models/{MODEL_NAME}"
-        if experiment_mode in [
-            PlannerMode.INTERRUPTION,
-            PlannerMode.ANTICIPATORY_PLANNING,
-            PlannerMode.INTERRUPTION_AP
-        ]
-        else ""
-    )
-
-    config = ExperimentConfig(
-        seeds,
-        current_goal,
-        task_distribution,
-        task_arrival_fn,
-        model_path,
-        case.params["num_task_sequence"],
-        case.params["augment_task"],
+    return ExperimentConfig(
+        seeds=seeds,
+        goal=current_goal,
+        interrupting_task_dist=task_distribution,
+        task_arrival_fn=task_arrival_fn,
+        ev_model_path=_model_path(experiment_mode),
+        num_task_sequence=case.params["num_task_sequence"],
+        augment_task=case.params["augment_task"],
         retry_with_subgoals=RETRY_WITH_SUBGOALS
     )
-    return config
 
 
-# @benchmark(
-#     name="procthor_interruption",
-#     description=(
-#         "Evaluates the interruption planner across "
-#         "task-arrival probabilities in specified procthor environments."
-#     ),
-#     tags=["interruption", "procthor"],
-#     timeout=TIMEOUT,
-#     repeat=EXPERIMENT_REPEATS,
-# )
-# def bench_interruption_kitchen(case: BenchmarkCase):
-#     """
-#     Wrapper function to evaluate the interruption-based planner on procthor kitchen
-#     environments. 
-#     """
-#     config = _setup_experiment_config(case, PlannerMode.INTERRUPTION)
-#     return run_experiment(config, PlannerMode.INTERRUPTION, True, True)
-
-# bench_interruption_kitchen.add_cases(_get_cases())
-
-
-@benchmark(
-    name="procthor_interruption_ap",
-    description=(
-        "Evaluates the interruption-ap planner across "
-        "task-arrival probabilities in specified procthor environments."
-    ),
-    tags=["interruption", "procthor", "ap", "interruption_experiments"],
-    timeout=TIMEOUT,
-    repeat=EXPERIMENT_REPEATS,
-)
-def bench_interruption_ap_kitchen(case: BenchmarkCase):
+def _run(case: BenchmarkCase, experiment_mode: PlannerMode) -> dict:
     """
-    Wrapper function to evaluate the interruption-based planner on procthor kitchen
-    environments. 
+    Runs a single benchmark case with the given planner.
     """
-    config = _setup_experiment_config(case, PlannerMode.INTERRUPTION_AP)
+    config = _setup_experiment_config(case, experiment_mode)
     return run_experiment(
         config,
-        PlannerMode.INTERRUPTION_AP,
-        True,
-        True,
-        extract_relevant_objects(config.interrupting_task_dist[0]) if FILTER_OBJECTS else None
+        experiment_mode,
+        remove_duplicates=True,
+        benchmark_flag=True,
+        relevant_objects=(
+            extract_relevant_objects(config.interrupting_task_dist[0])
+            if FILTER_OBJECTS else None
+        )
     )
 
-bench_interruption_ap_kitchen.add_cases(_get_cases())
+
+def _register(experiment_mode: PlannerMode, name: str, label: str, tag: str):
+    """
+    Registers a benchmark that evaluates the given planner on the shared
+    benchmark cases.
+    """
+    @benchmark(
+        name=name,
+        description=(
+            f"Evaluates the {label} planner across "
+            "task-arrival probabilities in specified procthor environments."
+        ),
+        tags=["interruption", "procthor", tag, "interruption_experiments"],
+        timeout=TIMEOUT,
+        repeat=EXPERIMENT_REPEATS,
+    )
+    def bench(case: BenchmarkCase):
+        return _run(case, experiment_mode)
+
+    bench.add_cases(_get_cases())
+    return bench
 
 
-@benchmark(
-    name="procthor_myopic",
-    description=(
-        "Evaluates the myopic planner across "
-        "task-arrival probabilities in specified procthor environments."
-    ),
-    tags=["interruption", "procthor", "myopic", "interruption_experiments"],
-    timeout=TIMEOUT,
-    repeat=EXPERIMENT_REPEATS,
+bench_interruption_ap = _register(
+    PlannerMode.INTERRUPTION_AP, "procthor_interruption_ap", "interruption-ap", "interruption_ap"
 )
-def bench_myopic_interruption_kitchen(case: BenchmarkCase):
-    """
-    Wrapper function to evaluate the interruption-based planner on procthor kitchen
-    environments. 
-    """
-    config = _setup_experiment_config(case, PlannerMode.MYOPIC)
-    return run_experiment(
-        config,
-        PlannerMode.MYOPIC,
-        True,
-        True,
-        extract_relevant_objects(config.interrupting_task_dist[0]) if FILTER_OBJECTS else None
-    )
-
-bench_myopic_interruption_kitchen.add_cases(_get_cases())
-
-
-@benchmark(
-    name="procthor_ap",
-    description=(
-        "Evaluates the anticipatory planning planner across "
-        "task-arrival probabilities in specified procthor environments."
-    ),
-    tags=["interruption", "procthor", "ap", "interruption_experiments"],
-    timeout=TIMEOUT,
-    repeat=EXPERIMENT_REPEATS,
+bench_myopic = _register(
+    PlannerMode.MYOPIC, "procthor_myopic", "myopic", "myopic"
 )
-def bench_ap_kitchen(case: BenchmarkCase):
-    """
-    Wrapper function to evaluate the interruption-based planner on procthor kitchen
-    environments
-    """
-    config = _setup_experiment_config(case, PlannerMode.ANTICIPATORY_PLANNING)
-    return run_experiment(
-        config,
-        PlannerMode.ANTICIPATORY_PLANNING,
-        True,
-        True,
-        extract_relevant_objects(config.interrupting_task_dist[0]) if FILTER_OBJECTS else None
-    )
-
-bench_ap_kitchen.add_cases(_get_cases())
+bench_ap = _register(
+    PlannerMode.ANTICIPATORY_PLANNING, "procthor_ap", "anticipatory planning", "ap"
+)

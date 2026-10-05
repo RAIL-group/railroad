@@ -19,7 +19,7 @@ from interruption.utilities import (
     extract_relevant_objects, use_remapped_scenes
 )
 from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
-from railroad.core import LiteralGoal, Fluent as F
+# from railroad.core import LiteralGoal, Fluent as F
 
 # constants
 MODEL_PATH = DEFAULT_RESOURCES_BASE / "models"
@@ -34,7 +34,7 @@ def main(randomize_order: bool = False, filter_objects: bool = False):
     )
     seeds = ExperimentSeeds(
         procthor_seed=PROCTHOR_SEED,
-        experiment_seed=140 + RUN_IDX_SEED, 
+        experiment_seed=140 + RUN_IDX_SEED,
         # an object seed makes ThorInterface skip the remap, so a remapped
         # scene keeps the object placement it was generated with
         object_placement_seed=None if remap_dir else OBJ_PLACEMENT_SEED,

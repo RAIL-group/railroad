@@ -9,7 +9,7 @@ LAMBDA_MAX = 0
 LAMBDA_FF = 1
 
 ## debug related constants
-AP_DEBUG = True
+AP_DEBUG = False
 ACTION_PROB_DEBUG = False
 SEARCH_DEBUG = False
 
@@ -69,6 +69,8 @@ EXPECTED_TIME_NEXT_ARRIVAL = [
     # 95% of tasks from the training dataset take longer to complete
     calibrate_beta_parameter(0.5, 122.143),
 ]
+# experiment seed for each arrival rate above (paired by position)
+INTERRUPTION_SEEDS = [140, 42, 240, 57, 1096, 4065, 720]
 
 ## interuption heuristic related constants
 # interruption heuristic weights (ff-heuristic_weight, EV_weight)
