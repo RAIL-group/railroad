@@ -31,7 +31,21 @@ Probabilistic PDDL planning system.
 - **heuristic_concurrent.hpp**: the concurrency-aware heuristic
   (`ConcurrentHeuristic`) -- the planner's default leaf evaluator, a
   self-contained alternative to `ff_heuristic` (see "concurrent_heuristic"
-  below).
+  below). Umbrella header: its opening comment says which parts are core and
+  which are refinements, and the class ties the parts together. The parts, in
+  dependency order:
+  - **heuristic_concurrent_problem.hpp**: options, breakdown, and the
+    compiled problem (fluent ids, actions, agents, attempt groups, agent
+    location groups, `at`->`found`, goal branches).
+  - **heuristic_concurrent_relaxation.hpp** (core): the timed relaxed state,
+    the cost/rho relaxation passes with retry deltas, and relaxed-plan
+    extraction.
+  - **heuristic_concurrent_search.hpp**: expected search over a subgoal's
+    attempts, planned and in flight.
+  - **heuristic_concurrent_tasks.hpp**: per-agent task plans, route chaining,
+    and splitting a task around its search.
+  - **heuristic_concurrent_schedule.hpp** (core): list scheduling of tasks
+    onto agents, with task ordering.
 - **planner.hpp**: MCTS planner implementation
 - **constants.hpp**: Global constants
 
@@ -106,7 +120,7 @@ split between `h_add` and `h_ff` (`0.5, 0.0, 0.5`).
 
 `MCTSPlanner(...)`'s default (`heuristic="concurrent"`). Estimates the
 remaining time of the *team* rather than of one sequential agent; the design notes at the top of
-`heuristic_concurrent.hpp` explain each step. In brief:
+`heuristic_concurrent.hpp` and its part headers explain each step. In brief:
 
 1. **Timed relaxed state.** In-flight effects become available when they are
    scheduled; in-flight probabilistic outcomes are *pending achievers* with
