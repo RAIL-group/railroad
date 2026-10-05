@@ -673,7 +673,7 @@ PYBIND11_MODULE(_bindings, m) {
                        double lambda_max, double lambda_ff,
                        std::optional<double> dead_end_penalty,
                        const std::string &heuristic, bool agent_aware,
-                       bool timed_init, double prob_exponent,
+                       bool timed_init,
                        bool sum_completion, const std::string &backup,
                        bool joint_found, bool route_chaining,
                        bool group_attempts, bool expected_search,
@@ -685,7 +685,6 @@ PYBIND11_MODULE(_bindings, m) {
                o.lambda_ms = lambda_ff;
                o.agent_aware = agent_aware;
                o.timed_init = timed_init;
-               o.prob_exponent = prob_exponent;
                o.sum_completion = sum_completion;
                o.joint_found = joint_found;
                o.route_chaining = route_chaining;
@@ -707,12 +706,11 @@ PYBIND11_MODULE(_bindings, m) {
            py::arg("lambda_max") = 0.0,
            py::arg("lambda_ff")  = 0.5,
            py::arg("dead_end_penalty") = py::none(),
-           py::arg("heuristic") = "ff",
+           py::arg("heuristic") = "concurrent",
            py::arg("agent_aware") = true,
            py::arg("timed_init") = true,
-           py::arg("prob_exponent") = 8.0,
            py::arg("sum_completion") = true,
-           py::arg("backup") = "mean",
+           py::arg("backup") = "max",
            py::arg("joint_found") = true,
            py::arg("route_chaining") = true,
            py::arg("group_attempts") = true,
@@ -738,7 +736,7 @@ PYBIND11_MODULE(_bindings, m) {
           },
           py::arg("state"), py::arg("goal"),
           py::arg("max_iterations") = 1000, py::arg("max_depth") = 20,
-          py::arg("c") = 1.414, py::arg("heuristic_multiplier") = 5.0,
+          py::arg("c") = 1.414, py::arg("heuristic_multiplier") = 1.0,
           "Plan with a Goal object (supports complex AND/OR goals)")
       .def_property_readonly("lambda_add", &MCTSPlanner::lambda_add)
       .def_property_readonly("lambda_max", &MCTSPlanner::lambda_max)
@@ -769,7 +767,7 @@ PYBIND11_MODULE(_bindings, m) {
         [](const State &state, const GoalPtr &goal,
            const std::vector<Action> &all_actions, double lambda_add,
            double lambda_ms, bool agent_aware, bool timed_init,
-           bool at_implies_found, double prob_exponent, bool sum_completion,
+           bool at_implies_found, bool sum_completion,
            bool joint_found, bool route_chaining, bool group_attempts,
            bool expected_search, bool order_conflicts) {
           ConcurrentHeuristicOptions o;
@@ -778,7 +776,6 @@ PYBIND11_MODULE(_bindings, m) {
           o.route_chaining = route_chaining;
           o.group_attempts = group_attempts;
           o.joint_found = joint_found;
-          o.prob_exponent = prob_exponent;
           o.sum_completion = sum_completion;
           o.lambda_add = lambda_add;
           o.lambda_ms = lambda_ms;
@@ -805,7 +802,7 @@ PYBIND11_MODULE(_bindings, m) {
         py::arg("state"), py::arg("goal"), py::arg("all_actions"),
         py::arg("lambda_add") = 0.5, py::arg("lambda_ms") = 0.5,
         py::arg("agent_aware") = true, py::arg("timed_init") = true,
-        py::arg("at_implies_found") = true, py::arg("prob_exponent") = 8.0,
+        py::arg("at_implies_found") = true,
         py::arg("sum_completion") = true, py::arg("joint_found") = true,
         py::arg("route_chaining") = true, py::arg("group_attempts") = true,
         py::arg("expected_search") = true, py::arg("order_conflicts") = true,

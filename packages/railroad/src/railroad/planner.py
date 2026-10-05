@@ -39,8 +39,6 @@ class ConcurrentHeuristicOptions(TypedDict, total=False):
     agent_aware: bool
     #: In-flight effects become available when scheduled; False: at t=0. [True]
     timed_init: bool
-    #: Achievers ranked by cost / rho**prob_exponent, rho = P(support succeeds). [8.0]
-    prob_exponent: float
     #: lambda_add weights summed completion times; False: h_add + retry delta. [True]
     sum_completion: bool
     #: Plan `at X L` together with the `found X` it implies, as one task. [True]
@@ -103,8 +101,8 @@ class MCTSPlanner:
         frontier_objects: set[str] | None = None,
         project_irrelevant: bool = True,
         dead_end_penalty: SupportsFloat | None = None,
-        heuristic: str = "ff",
-        backup: str = "mean",
+        heuristic: str = "concurrent",
+        backup: str = "max",
         heuristic_options: ConcurrentHeuristicOptions | None = None,
     ):
         """Initialize MCTSPlanner with automatic preprocessing.
@@ -150,25 +148,27 @@ class MCTSPlanner:
                 perturbs multi-robot search-ordering ties, which is why it is
                 opt-in rather than the default.
 
-            heuristic: leaf evaluator. ``"ff"`` (the default) is the FF/additive
-                mix of ``heuristic.hpp``. ``"concurrent"`` is the concurrency-
-                aware heuristic of ``heuristic_concurrent.hpp``, which estimates
-                the team's remaining time by list-scheduling the goals onto the
-                robots: ``lambda_add`` weights the summed goal completion times
-                and ``lambda_ff`` the makespan (``lambda_max`` is unused). It
-                is calibrated (h tracks the remaining time), so pair it with
-                ``heuristic_multiplier=1`` and ``backup="max"``.
-            backup: MCTS value backup. ``"mean"`` (the default) averages the
-                rewards below a node; ``"max"`` (MaxUCT) values a decision node
-                by its best child and a chance node by the probability-weighted
-                mean of its outcomes.
+            heuristic: leaf evaluator. ``"concurrent"`` (the default) is the
+                concurrency-aware heuristic of ``heuristic_concurrent.hpp``,
+                which estimates the team's expected remaining time by
+                list-scheduling the goals onto the robots: ``lambda_add``
+                weights the summed goal completion times and ``lambda_ff`` the
+                makespan (``lambda_max`` is unused). It is calibrated (h tracks
+                the remaining time), hence the default
+                ``heuristic_multiplier=1``. ``"ff"`` is the FF/additive mix of
+                ``heuristic.hpp``, which was tuned with multipliers of 2-5.
+            backup: MCTS value backup. ``"max"`` (the default, MaxUCT) values a
+                decision node by its best child and a chance node by the
+                probability-weighted mean of its outcomes; ``"mean"`` averages
+                the rewards below a node.
             heuristic_options: switches for ``heuristic="concurrent"``, mainly
                 for ablations (see ``ConcurrentHeuristicOptions``).
 
-        Defaults are an even split between h_add and h_ff (0.5, 0.0, 0.5).
-        Weights are free-form (not normalized); the heuristic used during MCTS
-        search is `lambda_add * h_add + lambda_max * h_max + lambda_ff * h_ff`
-        plus the probabilistic-retry delta.
+        Lambda defaults are an even split (0.5, 0.0, 0.5). Weights are
+        free-form (not normalized); with ``heuristic="ff"`` the heuristic used
+        during MCTS search is
+        `lambda_add * h_add + lambda_max * h_max + lambda_ff * h_ff` plus the
+        probabilistic-retry delta.
         """
         # Store original actions for later re-conversion if needed
         self._original_actions = actions
@@ -337,7 +337,7 @@ class MCTSPlanner:
         max_iterations: SupportsInt = 1000,
         max_depth: SupportsInt = 100,
         c: SupportsFloat = 1.414,
-        heuristic_multiplier: SupportsFloat = 5.0,
+        heuristic_multiplier: SupportsFloat = 1.0,
     ) -> str:
         """Run MCTS planning to find the next action.
 
@@ -350,6 +350,8 @@ class MCTSPlanner:
             max_depth: Maximum depth for rollouts
             c: Exploration constant for UCB1
             heuristic_multiplier: Multiplier for heuristic in reward calculation
+                (leaf value -(t + w h)). 1 suits the default calibrated
+                heuristic; larger values make deeper branches look better.
 
         Returns:
             Name of the selected action as a string

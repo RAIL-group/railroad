@@ -112,7 +112,7 @@ def bench_procthor_search(case: BenchmarkCase):
     )
     env.set_target_objects(target_objects)
 
-    # `found {obj}` is intentionally left implicit: the FF heuristic's
+    # `found {obj}` is intentionally left implicit: the heuristics'
     # "at implies found" augmentation infers that an object's location can
     # only be established by finding it.
     goal = reduce(and_, [
@@ -143,8 +143,8 @@ def bench_procthor_search(case: BenchmarkCase):
             all_actions = env.get_actions()
             mcts = MCTSPlanner(
                 all_actions,
-                heuristic=case.params.get("mcts.heuristic", "ff"),
-                backup=case.params.get("mcts.backup", "mean"),
+                heuristic=case.params["mcts.heuristic"],
+                backup=case.params["mcts.backup"],
             )
             action_name = mcts(
                 env.state, goal,

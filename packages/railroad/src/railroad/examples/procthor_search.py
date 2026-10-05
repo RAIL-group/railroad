@@ -126,7 +126,7 @@ def main(
     from functools import reduce
     from operator import and_
 
-    # `found {obj}` is left implicit: the FF heuristic's "at implies found"
+    # `found {obj}` is left implicit: the heuristics' "at implies found"
     # augmentation infers that an object's location can only be established
     # by finding it.
     goal = reduce(and_, [
@@ -153,7 +153,6 @@ def main(
                 max_iterations=10000,
                 c=300,
                 max_depth=20,
-                heuristic_multiplier=2,
             )
 
             if action_name == "NONE":
