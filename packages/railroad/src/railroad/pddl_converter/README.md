@@ -134,8 +134,10 @@ PDDL fixtures instead.
 ## Solving, and what it does not tell you
 
 The sweep pins *conversion*, not solving — whether MCTS reaches a goal is a
-planner property. With the shipped defaults (4000 iterations, seeds 0-2, a
-300-step cap) the converted domains solve 11/11, 6/9, and 3/5 respectively.
+planner property. With the FF heuristic (`heuristic="ff"`, mean backup,
+multiplier 5 -- the planner's defaults when this was measured), 4000
+iterations, seeds 0-2 and a 300-step cap, the converted domains solve 11/11,
+6/9, and 3/5 respectively.
 A 10x iteration budget moved no domain in either direction, so the failures
 are heuristic and dead-end problems rather than search-effort ones.
 
