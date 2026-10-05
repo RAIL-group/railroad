@@ -99,13 +99,14 @@ inline int deterministic_achiever(const Problem &pb, const Pass &P, int g) {
 }
 
 // Identify the task's uncertain search -- the implied `found X` when the
-// task has one (even with a single place left, so that the estimate does not
-// switch costing schemes when the second-last place fails), else the
-// probabilistic subgoal with the most attempt groups -- and split the plan
-// into what comes before it and what comes after. After it, an action that
-// needs something the search reveals (picking the object up where it is)
-// happens wherever the search succeeds, so only the other actions' places
-// (where to bring it) are on the route from there.
+// task has one (even with a single attempt left, so that the estimate does
+// not switch costing schemes when the second-last place fails), else the
+// probabilistic subgoal with the most attempts -- and split the plan into
+// what comes before it and what comes after. Attempts count whether planned
+// or in flight. After the search, an action that needs something the search
+// reveals (picking the object up where it is) happens wherever the search
+// succeeds, so only the other actions' places (where to bring it) are on the
+// route from there.
 inline void split_search(Context &cx, Pass &P, int r, int g, int companion,
                          const std::vector<int> &plan, const std::vector<int> &move_dests,
                          TaskPlan &tp) {
@@ -119,14 +120,14 @@ inline void split_search(Context &cx, Pass &P, int r, int g, int companion,
     if (n > best_n) { best_n = n; f_star = f; }
   }
   if (f_star < 0) return;
-  int b = P.best[f_star];
+  // The attempt the plan's search is (an action to start, or one in flight
+  // that the plan relies on), when it needs to start, and what it reveals.
+  const int b = P.best[f_star];
+  const int att = support_attempt(cx.ts, P, f_star);
   double search_need = (b >= 0) ? P.wait[b] : 0.0;
   auto anchored = [&](int a) {
-    if (b < 0) return false;
-    for (const auto &ad : pb.acts[b].adds) {
-      if (!ad.uncertain()) continue;
-      const auto &pre = pb.acts[a].pre;
-      if (std::find(pre.begin(), pre.end(), ad.fluent) != pre.end()) return true;
+    for (int q : pb.acts[a].pre) {
+      if (attempt_reveals(pb, cx.ts, att, q)) return true;
     }
     return false;
   };
@@ -166,12 +167,12 @@ inline void split_search(Context &cx, Pass &P, int r, int g, int companion,
   tp.search_f = f_star;
   tp.goal = g;
   // The retry deltas of the search outcome (and of anything else the same
-  // action achieves, e.g. `at X place`) are superseded by the expected
-  // search time.
+  // attempt reveals, e.g. `at X place`) are superseded by the expected search
+  // time.
   tp.delta_rest = 0.0;
   for (int f : tp.covers) {
     if (!P.uncertain(pb, f)) continue;
-    if (f == f_star || (b >= 0 && P.best[f] == b)) continue;
+    if (f == f_star || (att != -1 && support_attempt(cx.ts, P, f) == att)) continue;
     tp.delta_rest += P.delta(pb, cx.ts, f);
   }
 }

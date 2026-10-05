@@ -148,6 +148,28 @@ def test_committing_to_a_move_is_not_free():
     assert ff.heuristic(after, goal) < ff.heuristic(state, goal) - 20
 
 
+@pytest.mark.parametrize("probs", [{"a": 0.5, "b": 0.3},
+                                   {"a": 0.8, "b": 0.1},
+                                   {"a": 0.3, "b": 0.6, "c": 0.4},
+                                   {"a": 0.9}])
+def test_starting_the_planned_search_does_not_move_the_estimate(probs):
+    """A search the estimate already counts on costs the same once started.
+
+    r1 stands at `a`, the first place its expected search visits; r2 is free,
+    so after r1 commits the search is in flight at the same time. Planned and
+    in-flight attempts are the same attempt: the in-flight one is the task's
+    search (even when it is the last place left), and the pick that follows
+    it happens wherever the box turns up.
+    """
+    actions = _actions(["r1", "r2"], ["box"], find_prob=lambda r, l, o: probs.get(l, 0.0))
+    state = _state({"r1": "a", "r2": "c"}, extra={F("revealed goal")})
+    goal = F("at box goal")
+    planner = MCTSPlanner(actions)
+    searching = _apply(actions, state, "search r1 a box")
+    assert searching.time == 0.0
+    assert planner.heuristic(searching, goal) == pytest.approx(planner.heuristic(state, goal))
+
+
 def test_pending_search_is_weighted_not_an_arbitrary_branch():
     """An in-flight search contributes its outcome *probabilistically*.
 

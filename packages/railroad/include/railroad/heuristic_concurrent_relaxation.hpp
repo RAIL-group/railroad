@@ -5,11 +5,13 @@
 //
 //   TimedState  The state as the relaxation sees it. Fluents true now are
 //               available at time 0; an in-flight effect's fluents become
-//               available when it fires, and the uncertain outcomes of an
-//               in-flight probabilistic effect are *pending* achievers that
-//               keep their probability. A free agent must act at once, so its
-//               own pending effects count only after the shortest action it
-//               can start now.
+//               available when it fires. An in-flight probabilistic effect is
+//               an *attempt* already under way: its uncertain outcomes are
+//               pending achievers that keep their probability, and the
+//               attempt is recorded so that expected search treats it like
+//               one an agent could still start. A free agent must act at
+//               once, so its own pending effects count only after the
+//               shortest action it can start now.
 //   Pass        One relaxation over the timed state, restricted to one
 //               agent's actions (plus agent-free ones) or unrestricted. Each
 //               fluent gets a cost and the probability rho that its relaxed
@@ -35,17 +37,34 @@ struct Pending {
   int fluent;
   double time;
   double prob;
-  int group;  // achiever group of `fluent` it belongs to (-1: its own)
+  int group;    // achiever group of `fluent` it belongs to (-1: its own)
+  int attempt;  // the in-flight attempt it is an outcome of
+};
+
+// An in-flight probabilistic effect: an attempt already under way.
+struct InFlight {
+  std::vector<int> outcomes;  // its uncertain outcomes (indices into pending)
+  int loc;  // a location fluent of where it happens (any agent's; -1: unknown)
 };
 
 class TimedState {
  public:
   std::vector<std::pair<int, double>> avail;  // deterministic (fluent, time)
   std::vector<Pending> pending;
+  std::vector<InFlight> in_flight;
+
+  // Is q an uncertain outcome of in-flight attempt k?
+  bool reveals(int k, int q) const {
+    for (int i : in_flight[k].outcomes) {
+      if (pending[i].fluent == q) return true;
+    }
+    return false;
+  }
 
   void load(const Problem &pb, const ConcurrentHeuristicOptions &opts, const State &s) {
     avail.clear();
     pending.clear();
+    in_flight.clear();
     for (const auto &f : s.fluents()) {
       int id = pb.lookup(f);
       if (id >= 0) avail.push_back({id, 0.0});
@@ -58,6 +77,8 @@ class TimedState {
       prob_adds.clear();
       prob_times.clear();
       walk_effect(pb, *e, trel, 1.0, prob_adds, prob_times);
+      const int attempt = static_cast<int>(in_flight.size());
+      InFlight fl{{}, -1};
       for (std::size_t i = 0; i < prob_adds.size(); ++i) {
         int f = prob_adds[i].first;
         double p = std::min(prob_adds[i].second, 1.0);
@@ -76,8 +97,21 @@ class TimedState {
           }
           if (group >= 0) break;
         }
-        pending.push_back({f, t, p, group});
+        // Where the attempt happens: the location precondition of an
+        // achiever in the same group (the action that was started).
+        if (fl.loc < 0 && group >= 0) {
+          for (const auto &ach : pb.achievers[f]) {
+            if (ach.group != group) continue;
+            for (int q : pb.acts[ach.action].pre) {
+              if (pb.loc_agent[q] >= 0) { fl.loc = q; break; }
+            }
+            if (fl.loc >= 0) break;
+          }
+        }
+        fl.outcomes.push_back(static_cast<int>(pending.size()));
+        pending.push_back({f, t, p, group, attempt});
       }
+      if (!fl.outcomes.empty()) in_flight.push_back(std::move(fl));
     }
 
     // `waiting a b`: a becomes free when b does (transition() resolves it).

@@ -20,39 +20,48 @@
 namespace railroad {
 namespace concurrent {
 
-// An attempt at uncertain fluent f that agent r can still start: one per
-// attempt group (the nearest in the relaxation).
+// An attempt at uncertain fluent f, as agent r sees it: either one r can
+// still start (one per attempt group, the nearest in the relaxation), or one
+// already in flight, whoever started it. Planned and in-flight attempts are
+// the same thing at different times, and everything below treats them alike,
+// so starting an attempt does not change how the search is costed.
 struct SearchAttempt {
   int group, loc;   // loc: r's location fluent where it happens (-1: none)
   double exec, prob;
-  double fallback;  // relaxed time the attempt could start
+  double fallback;  // relaxed time it could start (in flight: when it ends)
   bool achieves;    // succeeding also achieves the task goal (in place)
+  int in_flight;    // >= 0: the in-flight attempt (TimedState::in_flight)
 };
 
-// Attempts at f open to agent r in pass P. Groups with an attempt already in
-// flight are spent.
 inline std::vector<SearchAttempt> attempts_for(const Problem &pb, const TimedState &ts,
                                                const Pass &P, int r, int f, int goal = -1) {
   std::vector<SearchAttempt> out;
+  for (const auto &pd : ts.pending) {
+    if (pd.fluent != f) continue;
+    int loc = pb.as_agent_loc(r, ts.in_flight[pd.attempt].loc);
+    out.push_back({pd.group, loc, 0.0, pd.prob, pd.time, ts.reveals(pd.attempt, goal), pd.attempt});
+  }
+  const std::size_t n_in_flight = out.size();
   for (const auto &ach : pb.achievers[f]) {
     if (!P.allowed(pb, ach.action) || P.unmet[ach.action] != 0) continue;
     const CompiledAction &a = pb.acts[ach.action];
     double p = a.adds[ach.add].prob;
     if (p <= 1e-9) continue;
+    // A group with an attempt in flight is spent.
     bool spent = false;
-    for (const auto &pd : ts.pending) {
-      if (pd.fluent == f && pd.group >= 0 && pd.group == ach.group) { spent = true; break; }
+    for (std::size_t i = 0; i < n_in_flight; ++i) {
+      if (out[i].group >= 0 && out[i].group == ach.group) { spent = true; break; }
     }
     if (spent) continue;
     int loc = -1;
     for (int q : a.pre) {
       if (pb.loc_agent[q] == r) { loc = q; break; }
     }
-    SearchAttempt at{ach.group, loc, a.dur, p, P.wait[ach.action], pb.adds(ach.action, goal)};
+    SearchAttempt at{ach.group, loc, a.dur, p, P.wait[ach.action], pb.adds(ach.action, goal), -1};
     bool merged = false;
-    for (auto &e : out) {
-      if (e.group == at.group) {
-        if (at.fallback < e.fallback) e = at;
+    for (std::size_t i = n_in_flight; i < out.size(); ++i) {
+      if (out[i].group == at.group) {
+        if (at.fallback < out[i].fallback) out[i] = at;
         merged = true;
         break;
       }
@@ -60,6 +69,26 @@ inline std::vector<SearchAttempt> attempts_for(const Problem &pb, const TimedSta
     if (!merged) out.push_back(at);
   }
   return out;
+}
+
+// The attempt behind f's chosen support in P, as an id comparable across
+// fluents: an action (>= 0), an in-flight attempt (-2 - index), or none (-1).
+inline int support_attempt(const TimedState &ts, const Pass &P, int f) {
+  int b = P.best[f];
+  if (b >= 0) return b;
+  if (Pass::is_pending(b)) return -2 - ts.pending[Pass::pending_index(b)].attempt;
+  return -1;
+}
+
+// Is q an uncertain outcome of attempt id `att` (see support_attempt)?
+inline bool attempt_reveals(const Problem &pb, const TimedState &ts, int att, int q) {
+  if (att >= 0) {
+    for (const auto &ad : pb.acts[att].adds) {
+      if (ad.uncertain() && ad.fluent == q) return true;
+    }
+    return false;
+  }
+  return att <= -2 && ts.reveals(-2 - att, q);
 }
 
 // Where a search may succeed (as r's location fluent), with the
@@ -79,24 +108,17 @@ inline double expected_search(const Problem &pb, const TimedState &ts, const Pas
   where.clear();
   struct Event { double t, p; int loc; bool achieves; };
   std::vector<Event> events;
-  for (const auto &pd : ts.pending) {
-    if (pd.fluent != f) continue;
-    int loc = -1;  // where the pending attempt happens, as r's fluent
-    bool achieves = false;
-    for (const auto &ach : pb.achievers[f]) {
-      if (ach.group != pd.group || pd.group < 0) continue;
-      for (int q : pb.acts[ach.action].pre) {
-        if (pb.loc_agent[q] >= 0) { loc = pb.as_agent_loc(r, q); break; }
-      }
-      achieves = pb.adds(ach.action, goal);
-      if (loc >= 0) break;
-    }
-    events.push_back({pd.time, pd.prob, loc, achieves});
-  }
-  const std::vector<SearchAttempt> cands = attempts_for(pb, ts, P, r, f, goal);
-  std::vector<char> used(cands.size(), 0);
+  std::vector<SearchAttempt> cands;
   double fail = 1.0;
-  for (const auto &e : events) fail *= 1.0 - e.p;
+  for (const auto &at : attempts_for(pb, ts, P, r, f, goal)) {
+    if (at.in_flight >= 0) {
+      events.push_back({at.fallback, at.prob, at.loc, at.achieves});
+      fail *= 1.0 - at.prob;
+    } else {
+      cands.push_back(at);
+    }
+  }
+  std::vector<char> used(cands.size(), 0);
   double t = t_start;
   while (fail > 1e-3) {
     int best = -1;
