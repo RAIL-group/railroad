@@ -23,10 +23,10 @@
 //
 //   2. Probability-aware relaxed costs. Each fluent carries the probability
 //      rho that its relaxed support succeeds (the product along the chosen
-//      achievers); achievers are ranked by cost / rho^prob_exponent. The
-//      ranking is monotone along supports, so all costs come from one
-//      Dijkstra-style pass. A large exponent routes a relaxed plan through
-//      where an object most likely is, not the nearest place it might be.
+//      achievers); achievers are ranked by cost / rho, the expected cost of
+//      retrying an independent attempt until it succeeds. The ranking is
+//      monotone along supports, so all costs come from one Dijkstra-style
+//      pass.
 //
 //   3. Per-agent relaxations. Agents are the arguments of `free` fluents (the
 //      core's existing convention). The relaxation is re-run per agent with
@@ -125,11 +125,6 @@ struct ConcurrentHeuristicOptions {
   // places (and the rest of the task from wherever the object turns up),
   // instead of a plan through one place plus a retry delta.
   bool expected_search = true;
-  // Achievers are ranked by cost / rho^prob_exponent. 1 is the expected cost
-  // of independent retries; larger values let probability dominate, so a
-  // relaxed plan routes through where an object most likely is rather than
-  // the nearest place it might be.
-  double prob_exponent = 8.0;
   // The lambda_add term: the scheduled goals' summed completion times (true)
   // or the contention-blind h_add + delta of the unrestricted relaxation.
   bool sum_completion = true;
@@ -662,8 +657,8 @@ private:
   void offer(Pass &P, int f, double cost, double rho, int best,
              std::priority_queue<QItem, std::vector<QItem>, std::greater<QItem>> &pq) {
     if (rho <= 1e-12) return;
-    // Most fluents sit on deterministic supports (rho == 1): skip the pow.
-    double score = rho >= 1.0 ? cost : cost / std::pow(rho, opts_.prob_exponent);
+    // Expected cost of retrying an independent attempt until it succeeds.
+    double score = cost / rho;
     const double eps = 1e-9;
     if (score < P.score[f] - eps ||
         (score <= P.score[f] + eps && cost < P.cost[f] - eps)) {

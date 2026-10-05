@@ -148,7 +148,7 @@ def test_committing_to_a_move_is_not_free():
     state = _state({"r1": "start", "r2": "c"}, extra={F("at box b"), F("found box")})
     goal = F("at box goal")
     conc = MCTSPlanner(actions, heuristic="concurrent")
-    ff = MCTSPlanner(actions)
+    ff = MCTSPlanner(actions, heuristic="ff")
 
     after = _apply(actions, state, "move r1 start b")
     assert after.time == 0.0
@@ -423,4 +423,5 @@ def test_unknown_heuristic_or_backup_is_rejected():
         MCTSPlanner(_actions(["r1"], ["box"]), heuristic="concurrent",
                     heuristic_options=misspelled)
     with pytest.raises(ValueError):  # options only mean something to "concurrent"
-        MCTSPlanner(_actions(["r1"], ["box"]), heuristic_options={"agent_aware": False})
+        MCTSPlanner(_actions(["r1"], ["box"]), heuristic="ff",
+                    heuristic_options={"agent_aware": False})

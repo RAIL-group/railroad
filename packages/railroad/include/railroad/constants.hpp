@@ -9,7 +9,7 @@ namespace railroad {
 // multi-robot search-ordering ties (see test_mcts_search_picks_more_likely_
 // location), so it stays 0 for now; dead-end-aware planning is future work.
 const double HEURISTIC_CANNOT_FIND_GOAL_PENALTY = 0.0;
-const double HEURISTIC_MULTIPLIER = 5;
+const double HEURISTIC_MULTIPLIER = 1;
 const double SUCCESS_REWARD = 0.0;
 const double ALL_ROBOTS_WAITING_PENALTY = 10.0;
 const int NUM_EXTRA_VISITS_PROB = 0;

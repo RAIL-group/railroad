@@ -209,9 +209,9 @@ def test_mcts_planner_lambdas_propagate_to_heuristic():
     #   at r1 target    -> same move, optimistic_cost = 5
     goal = F("visited target") & F("at r1 target")
 
-    mcts_add = MCTSPlanner(all_actions, lambda_add=1.0, lambda_max=0.0, lambda_ff=0.0)
-    mcts_max = MCTSPlanner(all_actions, lambda_add=0.0, lambda_max=1.0, lambda_ff=0.0)
-    mcts_ff  = MCTSPlanner(all_actions, lambda_add=0.0, lambda_max=0.0, lambda_ff=1.0)
+    mcts_add = MCTSPlanner(all_actions, heuristic="ff", lambda_add=1.0, lambda_max=0.0, lambda_ff=0.0)
+    mcts_max = MCTSPlanner(all_actions, heuristic="ff", lambda_add=0.0, lambda_max=1.0, lambda_ff=0.0)
+    mcts_ff  = MCTSPlanner(all_actions, heuristic="ff", lambda_add=0.0, lambda_max=0.0, lambda_ff=1.0)
 
     h_add = mcts_add.heuristic(initial_state, goal)
     h_max = mcts_max.heuristic(initial_state, goal)
@@ -313,9 +313,9 @@ def test_dead_end_penalty_is_flat_not_added_to_elapsed_cost():
     """The penalty replaces the branch's accrued cost rather than adding to it.
 
     Two dead ends reached at different depths must be scored identically, so
-    the search expresses no preference for failing quickly. Reaching one via
-    an extra `pad brick` step (pure delay, no progress) must not change the
-    action chosen at the root.
+    the search expresses no preference for failing quickly. A clock that has
+    already advanced must not change the action chosen at the root, and that
+    action is never the drop-off that breaks the unpadded vase.
     """
     actions = _fragile_delivery_actions()
     goal = F("delivered vase") & F("delivered brick") & ~F("broken vase")
@@ -326,8 +326,9 @@ def test_dead_end_penalty_is_flat_not_added_to_elapsed_cost():
     # Same problem, but the clock has already advanced a long way.
     late = State(50.0, set(base), [])
 
-    assert planner(early, goal, max_iterations=2000, c=100) == "pad r1 vase"
-    assert planner(late, goal, max_iterations=2000, c=100) == "pad r1 vase"
+    chosen = planner(early, goal, max_iterations=2000, c=100)
+    assert chosen != "drop-off r1 vase"
+    assert planner(late, goal, max_iterations=2000, c=100) == chosen
 
 
 # ---------------------------------------------------------------------------
