@@ -150,7 +150,7 @@ def main(
     )
     pick_op = operators.construct_pick_operator_blocking(get_skill_time("pick"))
     place_op = operators.construct_place_operator_blocking(get_skill_time("place"))
-    no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
+    no_op = operators.construct_no_op_operator(no_op_time=5.0)
 
     # Initialize symbolic environment
     initial_state = State(0.0, initial_fluents, [])

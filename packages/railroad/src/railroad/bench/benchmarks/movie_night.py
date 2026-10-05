@@ -103,8 +103,7 @@ def bench_movie_night(case: BenchmarkCase):
     )
 
     no_op = operators.construct_no_op_operator(
-        no_op_time=env.get_skills_time_fn('no_op'),
-        extra_cost=100
+        no_op_time=env.get_skills_time_fn('no_op')
     )
     pick_op = operators.construct_pick_operator_blocking(
         pick_time=env.get_skills_time_fn('pick')

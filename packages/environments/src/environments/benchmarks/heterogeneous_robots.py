@@ -110,8 +110,7 @@ def bench_heterogeneous_robots(case: BenchmarkCase):
     search_op = operators.construct_search_operator(object_find_prob=lambda r, loc, o: 1.0,
                                                     search_time=env.get_skills_time_fn('search'))
     no_op = operators.construct_no_op_operator(
-        no_op_time=env.get_skills_time_fn('no_op'),
-        extra_cost=100
+        no_op_time=env.get_skills_time_fn('no_op')
     )
     pick_op = operators.construct_pick_operator_blocking(
         pick_time=env.get_skills_time_fn('pick')

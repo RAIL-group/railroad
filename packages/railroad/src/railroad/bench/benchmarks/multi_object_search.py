@@ -95,8 +95,7 @@ def bench_multi_object_search_base(case: BenchmarkCase, do_plot=False):
     )
 
     no_op = operators.construct_no_op_operator(
-        no_op_time=env.get_skills_time_fn('no_op'),
-        extra_cost=10
+        no_op_time=env.get_skills_time_fn('no_op')
     )
 
     # Create simulator
