@@ -1,6 +1,6 @@
 from functools import partial
 from interruption.constants import (
-    MODEL_NAME, EXPECTED_TIME_NEXT_ARRIVAL,
+    MODEL_NAME, ARRIVAL_EXCEEDANCE_FRACTIONS,
     PROCTHOR_SEED, OBJ_PLACEMENT_SEED, FILTER_OBJECTS, REMAPPED_SCENES_HASH
 )
 from interruption.environments import (
@@ -16,7 +16,7 @@ from interruption.experiments import (
 from interruption.planning_framework import PlannerMode
 from interruption.utilities import (
     RandomVariableType, randomize_task_distribution_order, get_task_arrival_prob,
-    extract_relevant_objects, use_remapped_scenes
+    extract_relevant_objects, use_remapped_scenes, get_expected_time_next_arrival
 )
 from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 # from railroad.core import LiteralGoal, Fluent as F
@@ -42,7 +42,7 @@ def main(randomize_order: bool = False, filter_objects: bool = False):
     )
     task_arrival_fn = partial(
         get_task_arrival_prob, RandomVariableType.CONTINUOUS,
-        -1, EXPECTED_TIME_NEXT_ARRIVAL[0]
+        -1, get_expected_time_next_arrival(ARRIVAL_EXCEEDANCE_FRACTIONS[0], REMAPPED_SCENES_HASH)
     )
 
     # get task distribution from alfred dataset used during training

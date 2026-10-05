@@ -13,7 +13,9 @@ from interruption.utilities import (
     find_shared_obj_loc_scenes,
     get_action_cost,
     get_augmented_task_dist,
+    get_expected_time_next_arrival,
     get_next_state,
+    get_task_cost_quantile,
     get_task_arrival_prob,
     get_task_distribution_from_remap_dir,
     remap_scene_objects_and_locations,
@@ -119,6 +121,45 @@ def test_get_task_arrival_prob(rv_type, arrival_prob, time_between_arrivals, act
 )
 def test_calibrate_beta_parameter(prob, a_t, sol):
     assert calibrate_beta_parameter(prob, a_t) == pytest.approx(sol)
+
+
+@pytest.mark.parametrize(
+    argnames="percentile, sol",
+    argvalues=[(0, 10.0), (50, 20.0), (75, 30.0), (95, 38.0), (100, 40.0)]
+)
+def test_get_task_cost_quantile(percentile, sol):
+    quantiles = {"percentiles": [0, 50, 100], "costs": [10.0, 20.0, 40.0]}
+    assert get_task_cost_quantile(quantiles, percentile) == pytest.approx(sol)
+
+
+def test_get_task_cost_quantile_out_of_range():
+    with pytest.raises(ValueError):
+        get_task_cost_quantile({"percentiles": [5, 95], "costs": [1.0, 2.0]}, 99)
+
+
+def test_get_expected_time_next_arrival(tmp_path, monkeypatch):
+    monkeypatch.setattr("interruption.utilities.get_procthor_10k_dir", lambda: tmp_path)
+    (tmp_path / "run_metadata").mkdir()
+    (tmp_path / "run_metadata" / "task_cost_quantiles_abc.json").write_text(
+        json.dumps({"percentiles": list(range(101)), "costs": [float(p) for p in range(101)]}),
+        encoding="utf-8",
+    )
+    # 25% of tasks take longer than the median arrival time -> a_t is the 75th percentile
+    assert get_expected_time_next_arrival(0.25, "abc") == pytest.approx(
+        calibrate_beta_parameter(0.5, 75.0)
+    )
+    # no interruptions needs no quantiles file
+    assert get_expected_time_next_arrival(0, "missing") == math.inf
+    with pytest.raises(FileNotFoundError, match="--write-quantiles"):
+        get_expected_time_next_arrival(0.25, "missing")
+    with pytest.raises(ValueError):
+        get_expected_time_next_arrival(1, "abc")
+    # a zero-cost percentile has no valid arrival rate
+    (tmp_path / "run_metadata" / "task_cost_quantiles_zeros.json").write_text(
+        json.dumps({"percentiles": [0, 50, 100], "costs": [0.0, 0.0, 40.0]}), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="--drop-zero"):
+        get_expected_time_next_arrival(0.75, "zeros")
 
 
 @pytest.mark.parametrize(

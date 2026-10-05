@@ -5,6 +5,7 @@ Wraps `run_experiment` (experiments.py) as a railroad.bench benchmark so
 interruption-planning sweeps can be run in parallel and tracked in
 MLflow / viewed via `railroad benchmarks dashboard`.
 """
+import math
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,7 @@ from railroad.bench import BenchmarkCase, benchmark
 from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 
 from ..constants import (
-    MODEL_NAME, EXPERIMENT_REPEATS, AUGMENT_TASK, EXPECTED_TIME_NEXT_ARRIVAL,
+    MODEL_NAME, EXPERIMENT_REPEATS, AUGMENT_TASK, ARRIVAL_EXCEEDANCE_FRACTIONS,
     INTERRUPTION_SEEDS, PROCTHOR_SEED, OBJ_PLACEMENT_SEED, FILTER_OBJECTS, TIMEOUT,
     RETRY_WITH_SUBGOALS, REMAPPED_SCENES_HASH
 )
@@ -25,7 +26,7 @@ from ..experiments import ExperimentConfig, ExperimentSeeds, run_experiment
 from ..planning_framework import PlannerMode
 from ..utilities import (
     RandomVariableType, randomize_task_distribution_order, get_task_arrival_prob,
-    extract_relevant_objects, use_remapped_scenes
+    extract_relevant_objects, use_remapped_scenes, get_expected_time_next_arrival
 )
 
 # number of tasks in each sampled task sequence
@@ -47,15 +48,15 @@ def _get_cases() -> list[dict[str, Any]]:
     return [
         {
             "procthor_seed": PROCTHOR_SEED,
-            "time_between_arrivals": time_between_arrivals,
+            "arrival_exceedance": arrival_exceedance,
             "interruption_seed": seed,
             "num_task_sequence": NUM_TASK_SEQUENCE,
             "randomize_task_sequence": True,
             "augment_task": AUGMENT_TASK
         }
         # each arrival rate is paired with its own seed
-        for time_between_arrivals, seed in zip(
-            EXPECTED_TIME_NEXT_ARRIVAL, INTERRUPTION_SEEDS, strict=True
+        for arrival_exceedance, seed in zip(
+            ARRIVAL_EXCEEDANCE_FRACTIONS, INTERRUPTION_SEEDS, strict=True
         )
     ]
 
@@ -87,10 +88,11 @@ def _model_path(experiment_mode: PlannerMode) -> Path | str:
 def _setup_experiment_config(
         case: BenchmarkCase,
         experiment_mode: PlannerMode
-    ) -> ExperimentConfig:
+    ) -> tuple[ExperimentConfig, float]:
     """
     Helper function for setting up the experimental config for both the 
-    baseline and interruption-based planner benchmark experiments.
+    baseline and interruption-based planner benchmark experiments. Also
+    returns the average time between task arrivals the config was built with.
     """
     # evaluate on the scenes and task distribution of a data-generation run.
     # Set per case, in the worker process, before any environment is built.
@@ -99,11 +101,16 @@ def _setup_experiment_config(
         if REMAPPED_SCENES_HASH else None
     )
     seeds = _build_seeds(case, remap_dir)
+    # resolved here rather than in the case, so registering the benchmarks
+    # doesn't need the run's task-cost quantiles on disk
+    time_between_arrivals = get_expected_time_next_arrival(
+        case.params["arrival_exceedance"], REMAPPED_SCENES_HASH
+    )
     task_arrival_fn = partial(
         get_task_arrival_prob,
         RandomVariableType.CONTINUOUS,
         -1,  # arrival_prob: only used by the discrete random variable
-        case.params["time_between_arrivals"]
+        time_between_arrivals
     )
 
     # get task distribution from alfred dataset used during training
@@ -115,7 +122,7 @@ def _setup_experiment_config(
     else:
         current_goal = get_example_procthor_goal()
 
-    return ExperimentConfig(
+    config = ExperimentConfig(
         seeds=seeds,
         goal=current_goal,
         interrupting_task_dist=task_distribution,
@@ -125,14 +132,15 @@ def _setup_experiment_config(
         augment_task=case.params["augment_task"],
         retry_with_subgoals=RETRY_WITH_SUBGOALS
     )
+    return config, time_between_arrivals
 
 
 def _run(case: BenchmarkCase, experiment_mode: PlannerMode) -> dict:
     """
     Runs a single benchmark case with the given planner.
     """
-    config = _setup_experiment_config(case, experiment_mode)
-    return run_experiment(
+    config, time_between_arrivals = _setup_experiment_config(case, experiment_mode)
+    result = run_experiment(
         config,
         experiment_mode,
         remove_duplicates=True,
@@ -142,6 +150,10 @@ def _run(case: BenchmarkCase, experiment_mode: PlannerMode) -> dict:
             if FILTER_OBJECTS else None
         )
     )
+    # logged as a metric; inf (no interruptions) is left out
+    if math.isfinite(time_between_arrivals):
+        result["time_between_arrivals"] = time_between_arrivals
+    return result
 
 
 def _register(experiment_mode: PlannerMode, name: str, label: str, tag: str):

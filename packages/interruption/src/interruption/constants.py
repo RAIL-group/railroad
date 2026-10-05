@@ -1,7 +1,6 @@
 """
 A module for keeping track of experiment related user-defined constants.
 """
-from .utilities import calibrate_beta_parameter
 
 ## railroad heuristic related constants
 LAMBDA_ADD = 0
@@ -54,21 +53,13 @@ PROCTHOR_SEED = 113
 # current: 2-room -> 2; 1-room -> 19
 OBJ_PLACEMENT_SEED = None
 
-EXPECTED_TIME_NEXT_ARRIVAL = [
-    calibrate_beta_parameter(0, 5), # No interruptions
-    # 5% of tasks from the training dataset take longer to complete
-    calibrate_beta_parameter(0.5, 333.879),
-    # 10% of tasks from the training dataset take longer to complete
-    calibrate_beta_parameter(0.5, 302.144),
-    # 25% of tasks from the training dataset take longer to complete
-    calibrate_beta_parameter(0.5, 292.144),
-    # 50% of tasks from the training dataset take longer to complete
-    calibrate_beta_parameter(0.5, 233.522),
-    # 75% of tasks from the training dataset take longer to complete
-    calibrate_beta_parameter(0.5, 181.939),
-    # 95% of tasks from the training dataset take longer to complete
-    calibrate_beta_parameter(0.5, 122.143),
-]
+# task-arrival rates, each given as the fraction of the training tasks that take
+# longer to complete than the median time to the next arrival (0 -> no
+# interruptions). Turned into the average time between arrivals by
+# utilities.get_expected_time_next_arrival, from the task-cost quantiles that
+# scripts/generate_task_cost_distribution.py --write-quantiles writes for
+# REMAPPED_SCENES_HASH.
+ARRIVAL_EXCEEDANCE_FRACTIONS = [0, 0.05, 0.10, 0.25, 0.50, 0.75, 0.95]
 # experiment seed for each arrival rate above (paired by position)
 INTERRUPTION_SEEDS = [140, 42, 240, 57, 1096, 4065, 720]
 

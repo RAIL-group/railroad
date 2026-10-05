@@ -6,7 +6,7 @@ import random
 from collections import Counter, defaultdict
 from collections.abc import Callable
 from enum import Enum
-from functools import partial
+from functools import lru_cache, partial
 from pathlib import Path
 from typing import Any, Sequence, Optional
 
@@ -155,6 +155,74 @@ def calibrate_beta_parameter(prob: float, a_t: float) -> float:
     if prob == 0:
         return float('inf')
     return -a_t / math.log(1 - prob)
+
+
+def task_cost_quantiles_path(run_key: str | None) -> Path:
+    """
+    Location of the task-cost quantiles of a data-generation run, written by
+    scripts/generate_task_cost_distribution.py --write-quantiles. run_key is the
+    run's remapped_scenes/<hash>/ name (constants.REMAPPED_SCENES_HASH), which
+    also names the run's other run_metadata files; None -> an unkeyed file.
+    """
+    name = "task_cost_quantiles.json" if run_key is None else f"task_cost_quantiles_{run_key}.json"
+    return get_procthor_10k_dir() / "run_metadata" / name
+
+
+@lru_cache(maxsize=None)
+def load_task_cost_quantiles(path: Path) -> dict[str, Any]:
+    """
+    Loads a task-cost quantiles file: "costs"[i] is the "percentiles"[i]-th
+    percentile of the pooled task-completion costs, alongside the provenance
+    of the data they were computed from.
+    """
+    if not path.exists():
+        raise FileNotFoundError(
+            f"no task-cost quantiles at {path}; generate them from the run's task costs with "
+            "`uv run python scripts/generate_task_cost_distribution.py --write-quantiles`"
+        )
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def get_task_cost_quantile(quantiles: dict[str, Any], percentile: float) -> float:
+    """
+    Helper function that returns the task-completion cost at the given
+    percentile ([0, 100]), linearly interpolating between the stored ones.
+    """
+    percentiles, costs = quantiles["percentiles"], quantiles["costs"]
+    if not percentiles[0] <= percentile <= percentiles[-1]:
+        raise ValueError(
+            f"percentile {percentile} is outside the stored range "
+            f"[{percentiles[0]}, {percentiles[-1]}]"
+        )
+    for idx in range(1, len(percentiles)):
+        if percentile <= percentiles[idx]:
+            lo, hi = percentiles[idx - 1], percentiles[idx]
+            weight = (percentile - lo) / (hi - lo)
+            return costs[idx - 1] + weight * (costs[idx] - costs[idx - 1])
+    return costs[-1]
+
+
+def get_expected_time_next_arrival(exceedance_fraction: float, run_key: str | None) -> float:
+    """
+    Helper function that returns the average time between task arrivals (tau)
+    for which the given fraction of the run's training tasks take longer to
+    complete than the median time to the next arrival, i.e. the median arrival
+    time is the (1 - exceedance_fraction) quantile of the task-completion costs.
+    A fraction of 0 means no interruptions (tau = inf) and needs no quantiles.
+    """
+    if not 0 <= exceedance_fraction < 1:
+        raise ValueError(f"exceedance fraction must be in [0, 1), got {exceedance_fraction}")
+    if exceedance_fraction == 0:
+        return math.inf
+    quantiles = load_task_cost_quantiles(task_cost_quantiles_path(run_key))
+    a_t = get_task_cost_quantile(quantiles, 100 * (1 - exceedance_fraction))
+    if a_t <= 0:
+        raise ValueError(
+            f"the {100 * (1 - exceedance_fraction):g}th percentile task cost is {a_t}, which gives "
+            "no valid arrival rate; regenerate the quantiles with --drop-zero to exclude "
+            "already-satisfied tasks"
+        )
+    return calibrate_beta_parameter(0.5, a_t)
 
 
 def print_plan(actions: list[str]) -> None:

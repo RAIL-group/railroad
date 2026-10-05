@@ -16,10 +16,17 @@ Usage:
     uv run python scripts/generate_task_cost_distribution.py \
         --data-dir resources/procthor-10k/pickles/task_costs \
         --out-image task_cost_cdf.jpeg --out-data task_cost_cdf.npz
+    uv run python scripts/generate_task_cost_distribution.py --write-quantiles
+
+``--write-quantiles`` persists the percentiles of the pooled costs to
+``<procthor-10k>/run_metadata/task_cost_quantiles_<run-key>.json``, which the
+experiments turn into task-arrival rates (see
+``interruption.utilities.get_expected_time_next_arrival``).
 """
 from __future__ import annotations
 
 import argparse
+import json
 from collections import defaultdict
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
@@ -30,7 +37,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
 
+from interruption.constants import REMAPPED_SCENES_HASH
 from interruption.learning.data import load_compressed_pickle
+from interruption.utilities import task_cost_quantiles_path
 from railroad.environment.procthor.resources import get_procthor_10k_dir
 from railroad.environment.procthor.utils import get_generic_name
 
@@ -152,6 +161,46 @@ def summarize(costs: Sequence[float]) -> dict[str, float]:
     return stats
 
 
+def write_quantiles(
+    records: list[TaskCostRecord], run_key: str | None, provenance: dict
+) -> Path:
+    """Write the 0..100th percentiles of the pooled costs, plus provenance.
+
+    Read back by ``interruption.utilities.load_task_cost_quantiles``.
+    """
+    percentiles = list(range(101))
+    costs = np.percentile([r.cost for r in records], percentiles)
+    payload = {
+        "run_key": run_key,
+        "n": len(records),
+        "scene_seeds": sorted({r.scene_seed for r in records}),
+        **provenance,
+        "percentiles": percentiles,
+        "costs": [float(c) for c in costs],
+    }
+    path = task_cost_quantiles_path(run_key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+    return path
+
+
+def _warn_if_not_run_scenes(records: list[TaskCostRecord], run_key: str | None) -> None:
+    """Warn when the pooled scenes aren't exactly the run's remapped scenes."""
+    if run_key is None:
+        return
+    remap_dir = get_procthor_10k_dir() / "remapped_scenes" / run_key
+    run_seeds = {int(p.stem.removeprefix("scene_")) for p in remap_dir.glob("scene_*.json")}
+    pooled_seeds = {r.scene_seed for r in records}
+    if not run_seeds:
+        print(f"WARNING: no remapped scenes in {remap_dir}; can't check the pooled "
+              f"scenes {sorted(pooled_seeds)} belong to run {run_key}")
+    elif run_seeds != pooled_seeds:
+        print(f"WARNING: pooled scenes differ from run {run_key}'s scenes -- "
+              f"not in the run: {sorted(pooled_seeds - run_seeds)}, "
+              f"missing from the data: {sorted(run_seeds - pooled_seeds)}")
+
+
 # --------------------------------------------------------------------------- #
 # Plotting
 # --------------------------------------------------------------------------- #
@@ -231,6 +280,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--out-image", type=Path, default=Path("task_cost_cdf.jpeg"))
     p.add_argument("--out-data", type=Path, default=None,
                    help="optional .npz to dump raw costs + provenance for reuse")
+    p.add_argument("--write-quantiles", action="store_true",
+                   help="write the pooled cost percentiles to "
+                        "run_metadata/task_cost_quantiles_<run-key>.json for the experiments")
+    p.add_argument("--run-key", default=REMAPPED_SCENES_HASH,
+                   help="data-generation run the quantiles belong to: its remapped_scenes/<hash>/ "
+                        "name (default: constants.REMAPPED_SCENES_HASH = %(default)s)")
     return p.parse_args()
 
 
@@ -280,6 +335,17 @@ def main() -> None:
             task=np.array([r.task for r in records]),
         )
         print(f"wrote {args.out_data}")
+
+    if args.write_quantiles:
+        _warn_if_not_run_scenes(records, args.run_key)
+        path = write_quantiles(records, args.run_key, provenance={
+            "data_dir": str(args.data_dir),
+            "scene_seed_patterns": args.scene_seed,
+            "exclude_scene_seed_patterns": args.exclude_scene_seed,
+            "drop_zero": args.drop_zero,
+            "limit": args.limit,
+        })
+        print(f"wrote {path}")
 
     # TODO(research): decide how this CDF feeds the expected-value targets --
     # e.g. reweight `interrupting_task_dist` probabilities by cost, or normalise
