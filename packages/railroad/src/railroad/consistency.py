@@ -3,10 +3,11 @@
 MCTS values a leaf as elapsed time plus ``h`` and compares siblings by that
 value. A heuristic that agrees with its own one-step lookahead satisfies
 
-    h(s) = min_a [ extra_cost(a) + sum_o p_o * ((t_o - t_s) + h(o)) ]
+    h(s) = min_a [ extra_cost(a) + sum_o p_o * ((t_o - t_s) + c(s, o) + h(o)) ]
 
 over the actions MCTS branches on at ``s`` (those of the first free robot)
-and the outcomes ``o`` of each transition, with ``h = 0`` at goal states and
+and the outcomes ``o`` of each transition, where ``c`` is any further step
+cost the planner charges (``MCTSPlanner.step_cost``), with ``h = 0`` at goal states and
 dead ends valued as MCTS values them (by default ``h = 0``: an outcome from
 which the goal is unreachable costs only the time spent reaching it). The
 *gap* ``min_a Q(s, a) - h(s)`` measures how far one step of lookahead moves
@@ -75,7 +76,8 @@ def lookahead(
         outcomes = transition(state, action)
         q = action.extra_cost
         for succ, prob in outcomes:
-            q += prob * ((succ.time - state.time) + _value(planner, succ, goal))
+            step = (succ.time - state.time) + planner.step_cost(state, succ, goal)
+            q += prob * (step + _value(planner, succ, goal))
         commit = len(outcomes) == 1 and outcomes[0][0].time == state.time
         out.append((action, q, commit))
     return out

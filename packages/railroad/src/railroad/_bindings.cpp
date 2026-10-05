@@ -767,7 +767,8 @@ PYBIND11_MODULE(_bindings, m) {
       .def_readwrite("group_attempts", &ConcurrentHeuristicOptions::group_attempts)
       .def_readwrite("order_conflicts", &ConcurrentHeuristicOptions::order_conflicts)
       .def_readwrite("expected_search", &ConcurrentHeuristicOptions::expected_search)
-      .def_readwrite("sum_completion", &ConcurrentHeuristicOptions::sum_completion);
+      .def_readwrite("sum_completion", &ConcurrentHeuristicOptions::sum_completion)
+      .def_readwrite("flowtime_objective", &ConcurrentHeuristicOptions::flowtime_objective);
 
   py::class_<PyConcurrentHeuristic>(m, "ConcurrentHeuristic",
       "The concurrency-aware heuristic compiled for one action set and goal; "
@@ -784,6 +785,12 @@ PYBIND11_MODULE(_bindings, m) {
            py::arg("actions"), py::arg("goal"), py::arg("options") = py::none())
       .def("__call__", [](PyConcurrentHeuristic &self, const State &s) { return (*self.h)(s); },
            py::arg("state"), "The heuristic value of a state (memoized).")
+      .def("step_cost",
+           [](PyConcurrentHeuristic &self, const State &from, const State &to) {
+             return self.h->step_cost(from, to);
+           },
+           py::arg("from_state"), py::arg("to_state"),
+           "What MCTS charges for the step beyond elapsed time and extra cost.")
       .def("breakdown",
            [](PyConcurrentHeuristic &self, const State &s) {
              ConcurrentHeuristicBreakdown bd;
