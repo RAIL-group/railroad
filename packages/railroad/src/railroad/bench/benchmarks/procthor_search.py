@@ -5,6 +5,11 @@ Wraps the procthor_search example as a benchmark case. Robots must search
 a ProcTHOR-generated household scene to find target objects and bring them
 to a designated room.
 
+Registered once per planner configuration, so each benchmark's cases vary
+only in the problem: `procthor_search` runs the planner's defaults (the
+concurrent heuristic with MaxUCT backup), and `procthor_search_ff` the FF
+heuristic with mean backup, the original setup.
+
 Modeled on movie_night.py for benchmark plumbing and on
 railroad.examples.procthor_search for the environment / operator setup.
 """
@@ -39,14 +44,7 @@ def _sample_objects_and_location(scene, num_objects: int, seed: int | None):
     )
 
 
-@benchmark(
-    name="procthor_search",
-    description="Multi-robot search in a ProcTHOR-generated household scene.",
-    tags=["multi-agent", "search", "procthor"],
-    timeout=600.0,
-    repeat=15,
-)
-def bench_procthor_search(case: BenchmarkCase):
+def _run_procthor_search(case: BenchmarkCase, **planner_kwargs):
     from railroad.environment.procthor import ProcTHOREnvironment
 
     num_robots = case.params["num_robots"]
@@ -141,11 +139,7 @@ def bench_procthor_search(case: BenchmarkCase):
                 break
 
             all_actions = env.get_actions()
-            mcts = MCTSPlanner(
-                all_actions,
-                heuristic=case.params["mcts.heuristic"],
-                backup=case.params["mcts.backup"],
-            )
+            mcts = MCTSPlanner(all_actions, **planner_kwargs)
             action_name = mcts(
                 env.state, goal,
                 max_iterations=case.mcts.iterations,
@@ -189,32 +183,50 @@ def bench_procthor_search(case: BenchmarkCase):
     return result
 
 
-# Planner configurations: the FF heuristic with mean backup and multiplier 4
-# (the original setup), and the concurrency-aware heuristic with MaxUCT
-# backup, which wants multiplier 1. Select one with -k, e.g.
-# `-k "procthor_search and mcts.heuristic=concurrent"`.
-PLANNER_CONFIGS = [
-    {"mcts.heuristic": "ff", "mcts.backup": "mean", "mcts.h_mult": 4},
-    {"mcts.heuristic": "concurrent", "mcts.backup": "max", "mcts.h_mult": 1},
-]
+@benchmark(
+    name="procthor_search",
+    description="Multi-robot search in a ProcTHOR-generated household scene.",
+    tags=["multi-agent", "search", "procthor"],
+    timeout=600.0,
+    repeat=15,
+)
+def bench_procthor_search(case: BenchmarkCase):
+    return _run_procthor_search(case)
 
-bench_procthor_search.add_cases([
-    {
-        "mcts.iterations": iterations,
-        "mcts.c": c,
-        **planner,
-        "find_prob": find_prob,
-        "num_robots": num_robots,
-        "num_objects": num_objects,
-        "scene_seed": scene_seed,
-    }
-    for scene_seed, c, num_robots, planner, find_prob, iterations, num_objects in itertools.product(
-        list(range(8610, 8620)),  # scene_seed
-        [400],                    # mcts.c
-        [1, 2, 3],                # num_robots
-        PLANNER_CONFIGS,          # mcts.heuristic, mcts.backup, mcts.h_mult
-        ["oracle", "learned"],    # find_prob: ground-truth-backed 0.8/0.1, or the learned estimator
-        [4000],                   # mcts.iterations
-        [2],                      # num_objects
-    )
-])
+
+@benchmark(
+    name="procthor_search_ff",
+    description="procthor_search planned with the FF heuristic and mean backup.",
+    tags=["multi-agent", "search", "procthor"],
+    timeout=600.0,
+    repeat=15,
+)
+def bench_procthor_search_ff(case: BenchmarkCase):
+    return _run_procthor_search(case, heuristic="ff", backup="mean")
+
+
+def _cases(h_mult: float) -> list[dict]:
+    return [
+        {
+            "mcts.iterations": iterations,
+            "mcts.c": c,
+            "mcts.h_mult": h_mult,
+            "find_prob": find_prob,
+            "num_robots": num_robots,
+            "num_objects": num_objects,
+            "scene_seed": scene_seed,
+        }
+        for scene_seed, c, num_robots, find_prob, iterations, num_objects in itertools.product(
+            list(range(8610, 8620)),  # scene_seed
+            [400],                    # mcts.c
+            [1, 2, 3],                # num_robots
+            ["oracle", "learned"],    # find_prob: ground-truth-backed 0.8/0.1, or the learned estimator
+            [4000],                   # mcts.iterations
+            [2],                      # num_objects
+        )
+    ]
+
+
+# MaxUCT wants multiplier 1; the FF heuristic with mean backup, 4.
+bench_procthor_search.add_cases(_cases(h_mult=1))
+bench_procthor_search_ff.add_cases(_cases(h_mult=4))
