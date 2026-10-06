@@ -49,10 +49,6 @@ struct GoalPlan {
   std::vector<double> pre_fb, post_fb;
   double other_pre = 0.0, other_post = 0.0;
   double delta_rest = 0.0;
-  // For ordering an agent's goals (order_conflicts), excluding the agent's
-  // location (route chaining handles it): facts the plan relies on from the
-  // state, facts its actions delete for good, and facts they add.
-  std::vector<int> relies, destroys, adds;
 };
 
 // Where agent r is (or will be once its current action ends): its location
@@ -220,19 +216,6 @@ inline GoalPlan plan_goal(Context &cx, Pass &P, int g, int companion, int r, dou
   if (companion >= 0) goal_cost = std::max(goal_cost, P.cost[companion]);
   tp.critical = std::max(0.0, goal_cost - ready);
   tp.covers = std::move(ex.fluents);
-  if (r >= 0 && cx.opts.order_conflicts) {
-    for (int f : ex.avail) {
-      if (pb.loc_agent[f] < 0) tp.relies.push_back(f);
-    }
-    for (int a : ex.actions) {
-      for (int c : pb.acts[a].consumes) {
-        if (pb.loc_agent[c] < 0) tp.destroys.push_back(c);
-      }
-      for (const auto &ad : pb.acts[a].adds) {
-        if (pb.loc_agent[ad.fluent] < 0 && ad.prob > 1e-9) tp.adds.push_back(ad.fluent);
-      }
-    }
-  }
   if (r < 0 || !cx.opts.route_chaining) {
     tp.other = ex.dur;  // no single agent to route, or routing disabled
     return tp;

@@ -769,8 +769,6 @@ PYBIND11_MODULE(_bindings, m) {
                      "Plan `at X L` together with the `found X` it implies.")
       .def_readwrite("route_chaining", &ConcurrentHeuristicOptions::route_chaining,
                      "Cost an agent's moves as one route; False: relaxed-plan moves.")
-      .def_readwrite("order_conflicts", &ConcurrentHeuristicOptions::order_conflicts,
-                     "On one agent, order goals so none destroys a fact another relies on.")
       .def_readwrite("expected_search", &ConcurrentHeuristicOptions::expected_search,
                      "Cost an uncertain search as an expected route over its attempts.");
 

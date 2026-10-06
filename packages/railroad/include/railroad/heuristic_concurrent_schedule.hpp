@@ -9,13 +9,6 @@
 // yields every goal's completion time. Longest-first (LPT) suits the
 // makespan, shortest-first (SPT) the sum of completion times; both orders are
 // tried and the one the value prefers is kept.
-//
-// Goal ordering (order_conflicts): goals are planned independently, so one
-// goal's relaxed plan may destroy a fact another relies on -- fetching a
-// second object "frees" the hand by setting down the one being delivered,
-// whose own delivery then still finds it in hand. On one agent such a goal
-// waits for the goals it would spoil: a threat between causal links from the
-// state, resolved by ordering.
 
 #include "railroad/heuristic_concurrent_plans.hpp"
 
@@ -119,38 +112,8 @@ class Scheduler {
       }
       return best_f;
     };
-    // Plan a destroys a fact plan b relies on from the state, and adds
-    // nothing b still needs (if it did, as delivering the object in hand
-    // frees the hand for the next fetch, the fact only fed a step that a
-    // would make unnecessary).
-    auto has = [](const std::vector<int> &v, int x) {
-      return std::find(v.begin(), v.end(), x) != v.end();
-    };
-    auto clobbers = [&has](const GoalPlan &a, const GoalPlan &b) {
-      bool hit = false;
-      for (int c : a.destroys) hit = hit || has(b.relies, c);
-      if (!hit) return false;
-      for (int f : a.adds) {
-        if (has(b.covers, f)) return false;
-      }
-      return true;
-    };
-    std::vector<char> taken;
-    auto needs_agent = [&](const OpenGoal &t) {
-      return t.finish_fixed < 0.0 && cover_[t.fluent] != cover_gen_;
-    };
-    // Would doing goal ti on agent r now spoil a goal still to be scheduled?
-    auto spoils = [&](std::size_t ti, int r) {
-      for (std::size_t tj = 0; tj < open.size(); ++tj) {
-        if (tj == ti || taken[tj] || !needs_agent(open[tj])) continue;
-        if (open[tj].plans[r].ok && clobbers(open[ti].plans[r], open[tj].plans[r])) return true;
-      }
-      return false;
-    };
-
     // List-schedule the goals in the given priority order: each goes to the
-    // agent that would finish it earliest, deferring a goal whose best agent
-    // would spoil another (unless every remaining goal would).
+    // agent that would finish it earliest.
     struct Done {
       int goal;  // index into open
       double at;
@@ -160,7 +123,6 @@ class Scheduler {
       finish = ready;
       end_loc = start_loc;
       n_assigned.assign(n_agents, 0);
-      taken.assign(open.size(), 0);
       done.clear();
       // Fluents achieved along an assigned goal's plan (e.g. `found X` on the
       // way to `at X L`) need no goal of their own.
@@ -169,19 +131,8 @@ class Scheduler {
         std::fill(cover_.begin(), cover_.end(), 0);
         cover_gen_ = 1;
       }
-      for (std::size_t step = 0; step < open.size(); ++step) {
-        std::size_t ti = open.size(), first = open.size();
-        for (std::size_t k : order) {
-          if (taken[k]) continue;
-          if (first == open.size()) first = k;
-          if (!opts.order_conflicts || !needs_agent(open[k])) { ti = k; break; }
-          int r;
-          earliest(open[k], r);
-          if (r < 0 || !spoils(k, r)) { ti = k; break; }
-        }
-        if (ti == open.size()) ti = first;
-        taken[ti] = 1;
-        OpenGoal &t = open[ti];
+      for (std::size_t ti : order) {
+        const OpenGoal &t = open[ti];
         double done_at;
         if (t.finish_fixed >= 0.0) {
           done_at = t.finish_fixed;

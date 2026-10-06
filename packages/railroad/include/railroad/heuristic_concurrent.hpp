@@ -21,7 +21,10 @@
 //                                          [heuristic_concurrent_relaxation.hpp]
 //   3. Goal plans -- a "goal" is one fact of the goal (of its best DNF
 //      branch), e.g. `at mug L`; each needs one or more actions. A goal's
-//      relaxed plan on each agent, and its duration on that agent.
+//      relaxed plan on each agent, and its duration on that agent. Goals are
+//      planned independently, so one goal's plan may use what another's
+//      relies on (the delete relaxation sets a full hand's object down
+//      anywhere to fetch another).
 //                                          [heuristic_concurrent_plans.hpp]
 //   4. List schedule -- each goal goes to the agent that would finish it
 //      earliest; the value is computed from the completion times C_g:
@@ -46,8 +49,6 @@
 //     costed as an expected route over them, attempts already in flight
 //     included, and the rest of the goal from wherever it succeeds.
 //                                          [heuristic_concurrent_search.hpp]
-//   - Goal ordering: on one agent, a goal whose plan destroys a fact (true
-//     now) that another goal relies on waits for it.   [schedule]
 //
 // Object-search convention (the core's name-keyed `at`/`found` machinery): a
 // goal `at X L` also needs `found X`, and the two are planned together.

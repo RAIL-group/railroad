@@ -36,10 +36,6 @@ struct ConcurrentHeuristicOptions {
   // Re-cost an agent's moves as a route through the locations its goal
   // needs (false: the relaxed plan's own move durations).
   bool route_chaining = true;
-  // On one agent, do a goal before any goal whose plan would destroy a fact
-  // (true now) that it relies on -- e.g. deliver the object in hand before
-  // fetching another, which needs the hand free.
-  bool order_conflicts = true;
   // Cost a goal's uncertain search as an expected route over its candidate
   // places (and the rest of the goal from wherever the object turns up),
   // instead of a plan through one place plus a retry delta.
