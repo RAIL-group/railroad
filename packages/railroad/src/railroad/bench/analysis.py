@@ -6,7 +6,7 @@ Provides utilities to read MLflow experiments and compute statistics.
 
 import mlflow
 import pandas as pd
-from typing import Optional
+from typing import Any, Optional
 from datetime import datetime
 
 
@@ -49,7 +49,10 @@ class BenchmarkAnalyzer:
             {
                 "name": exp.name,
                 "experiment_id": exp.experiment_id,
-                "creation_time": datetime.fromtimestamp(int(exp.creation_time) / 1000),
+                "creation_time": (
+                    datetime.fromtimestamp(exp.creation_time / 1000)
+                    if exp.creation_time is not None else None
+                ),
                 "tags": exp.tags if exp.tags else {},
             }
             for exp in experiments
@@ -78,7 +81,7 @@ class BenchmarkAnalyzer:
         if not experiment:
             raise ValueError(f"Experiment '{experiment_name}' not found")
 
-        metadata = dict(experiment.tags) if experiment.tags else {}
+        metadata: dict[str, Any] = dict(experiment.tags) if experiment.tags else {}
 
         # Extract benchmark descriptions from tags
         benchmark_descriptions = {}
