@@ -21,15 +21,15 @@ namespace railroad {
 namespace concurrent {
 
 // An attempt at uncertain fluent f, as agent r sees it: either one r can
-// still start (one per attempt group, the nearest in the relaxation), or one
-// already in flight, whoever started it. Planned and in-flight attempts are
-// the same thing at different times, and everything below treats them alike,
-// so starting an attempt does not change how the search is costed.
+// still start, or one already in flight, whoever started it. Planned and
+// in-flight attempts are the same thing at different times, and everything
+// below treats them alike, so starting an attempt does not change how the
+// search is costed.
 struct SearchAttempt {
-  int group, loc;   // loc: r's location fluent where it happens (-1: none)
+  int loc;          // r's location fluent where it happens (-1: none)
   double exec, prob;
   double fallback;  // relaxed time it could start (in flight: when it ends)
-  bool achieves;    // succeeding also achieves the task goal (in place)
+  bool achieves;    // succeeding also achieves the goal (in place)
   int in_flight;    // >= 0: the in-flight attempt (TimedState::in_flight)
 };
 
@@ -39,34 +39,18 @@ inline std::vector<SearchAttempt> attempts_for(const Problem &pb, const TimedSta
   for (const auto &pd : ts.pending) {
     if (pd.fluent != f) continue;
     int loc = pb.as_agent_loc(r, ts.in_flight[pd.attempt].loc);
-    out.push_back({pd.group, loc, 0.0, pd.prob, pd.time, ts.reveals(pd.attempt, goal), pd.attempt});
+    out.push_back({loc, 0.0, pd.prob, pd.time, ts.reveals(pd.attempt, goal), pd.attempt});
   }
-  const std::size_t n_in_flight = out.size();
   for (const auto &ach : pb.achievers[f]) {
-    if (!P.allowed(pb, ach.action) || P.unmet[ach.action] != 0) continue;
+    if (!P.allowed(pb, ach.action) || P.unmet[ach.action] != 0 || ts.spent(pb, ach.action)) continue;
     const CompiledAction &a = pb.acts[ach.action];
     double p = a.adds[ach.add].prob;
     if (p <= 1e-9) continue;
-    // A group with an attempt in flight is spent.
-    bool spent = false;
-    for (std::size_t i = 0; i < n_in_flight; ++i) {
-      if (out[i].group >= 0 && out[i].group == ach.group) { spent = true; break; }
-    }
-    if (spent) continue;
     int loc = -1;
     for (int q : a.pre) {
       if (pb.loc_agent[q] == r) { loc = q; break; }
     }
-    SearchAttempt at{ach.group, loc, a.dur, p, P.wait[ach.action], pb.adds(ach.action, goal), -1};
-    bool merged = false;
-    for (std::size_t i = n_in_flight; i < out.size(); ++i) {
-      if (out[i].group == at.group) {
-        if (at.fallback < out[i].fallback) out[i] = at;
-        merged = true;
-        break;
-      }
-    }
-    if (!merged) out.push_back(at);
+    out.push_back({loc, a.dur, p, P.wait[ach.action], pb.adds(ach.action, goal), -1});
   }
   return out;
 }
@@ -93,7 +77,7 @@ inline bool attempt_reveals(const Problem &pb, const TimedState &ts, int att, in
 
 // Where a search may succeed (as r's location fluent), with the
 // unconditional probability that it succeeds there, and whether that
-// success already achieves the task goal.
+// success already achieves the goal.
 struct Found {
   int loc;
   double prob;

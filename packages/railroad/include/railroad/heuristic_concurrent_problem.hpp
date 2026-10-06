@@ -14,9 +14,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
-#include <numeric>
 #include <string>
-#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -28,47 +26,33 @@ struct ConcurrentHeuristicOptions {
   // Value = lambda_add * sum of goal completion times + lambda_ms * makespan.
   double lambda_add = 0.5;
   double lambda_ms = 0.5;
-  // Object-search convention: a goal `at X L` also needs `found X`.
-  bool at_implies_found = true;
   // Schedule goals onto agents (true) or onto one serial "team" agent (false).
   bool agent_aware = true;
   // Make in-flight effects available when they are scheduled (true) or at
   // time 0, as the FF heuristic's relaxed transition does (false).
   bool timed_init = true;
-  // Plan a goal `at X L` together with the `found X` it implies, as one task.
+  // Plan a goal `at X L` together with the `found X` it implies.
   bool joint_found = true;
-  // Re-cost an agent's moves as a route through the locations its task
+  // Re-cost an agent's moves as a route through the locations its goal
   // needs (false: the relaxed plan's own move durations).
   bool route_chaining = true;
-  // Treat achievers that consume the same precondition as one attempt.
-  bool group_attempts = true;
-  // On one agent, do a task before any task whose plan would destroy a fact
+  // On one agent, do a goal before any goal whose plan would destroy a fact
   // (true now) that it relies on -- e.g. deliver the object in hand before
   // fetching another, which needs the hand free.
   bool order_conflicts = true;
-  // Cost a task's uncertain search as an expected route over its candidate
-  // places (and the rest of the task from wherever the object turns up),
+  // Cost a goal's uncertain search as an expected route over its candidate
+  // places (and the rest of the goal from wherever the object turns up),
   // instead of a plan through one place plus a retry delta.
   bool expected_search = true;
-  // The lambda_add term: the scheduled goals' summed completion times (true)
-  // or the contention-blind h_add + delta of the unrestricted relaxation.
-  bool sum_completion = true;
 };
 
-// Per-branch components of the most recent evaluation (for introspection).
+// The schedule behind the most recent evaluation's best goal branch.
 struct ConcurrentHeuristicBreakdown {
   double value = 0.0;
-  double h_add = 0.0;
-  double delta = 0.0;
   double makespan = 0.0;
   double completion_sum = 0.0;
-  double h_ff = 0.0;
-  std::vector<std::pair<std::string, double>> goal_finish;  // fluent, finish
-  std::vector<std::pair<std::string, std::string>> assignment;  // fluent, agent
-  std::vector<std::pair<std::string, double>> deltas;  // fluent, retry delta
-  std::vector<std::pair<std::string, double>> plan;    // action, duration
-  // task, agent index, serial duration, critical-path time, retry delta
-  std::vector<std::tuple<std::string, int, double, double, double>> loads;
+  std::vector<std::pair<std::string, double>> goal_finish;      // goal, finish
+  std::vector<std::pair<std::string, std::string>> assignment;  // goal, agent
 };
 
 namespace concurrent {
@@ -94,15 +78,12 @@ struct CompiledAction {
 
 struct AchieverRef {
   int action;
-  int add;    // index into CompiledAction::adds
-  int group;  // achievers sharing a group are one attempt
+  int add;  // index into CompiledAction::adds
 };
 
 struct Problem {
-  Problem(const std::vector<Action> &actions, const GoalBase *goal,
-          const ConcurrentHeuristicOptions &opts) {
+  Problem(const std::vector<Action> &actions, const GoalBase *goal) {
     compile_actions(actions, goal);
-    compile_attempt_groups(opts);
     compile_routes();
     compile_found();
     compile_goal(goal);
@@ -143,12 +124,7 @@ struct Problem {
   std::vector<std::vector<int>> agent_acts;  // agent -> its actions
   std::size_t num_agents() const { return agent_free.size(); }
 
-  // -- Attempt groups [search]: achievers of a fluent that consume the
-  //    same precondition are one attempt (whichever runs first uses it up).
-  //    fluent -> (consumed fluent, group), for grouping pending outcomes.
-  std::vector<std::vector<std::pair<int, int>>> group_by_consumed;
-
-  // -- Routes [tasks]: each agent's location fluents -- the mutex group its
+  // -- Routes [plans]: each agent's location fluents -- the mutex group its
   //    moves switch between -- and the places they name.
   std::vector<int> loc_agent;                // location fluent -> its agent (or -1)
   std::vector<std::vector<int>> loc_fluents;  // agent -> its location fluents
@@ -192,7 +168,7 @@ struct Problem {
     return best;
   }
 
-  // -- Object-search convention [tasks]: `at X L` -> `found X` (or -1) ----
+  // -- Object-search convention [plans]: `at X L` -> `found X` (or -1) ----
   std::vector<int> found_of;
 
   // -- Goal: DNF branches (fluent ids, -1 = in no action or state) --------
@@ -309,39 +285,7 @@ struct Problem {
     for (int ai = 0; ai < static_cast<int>(acts.size()); ++ai) {
       for (int p : acts[ai].pre) consumers[p].push_back(ai);
       for (int k = 0; k < static_cast<int>(acts[ai].adds.size()); ++k) {
-        achievers[acts[ai].adds[k].fluent].push_back({ai, k, 0});
-      }
-    }
-  }
-
-  // Group each fluent's achievers by shared consumed preconditions.
-  void compile_attempt_groups(const ConcurrentHeuristicOptions &opts) {
-    std::size_t nf = fluents_.size();
-    group_by_consumed.assign(nf, {});
-    for (std::size_t f = 0; f < nf; ++f) {
-      auto &achs = achievers[f];
-      std::vector<int> parent(achs.size());
-      std::iota(parent.begin(), parent.end(), 0);
-      auto find = [&parent](int x) {
-        while (parent[x] != x) x = parent[x] = parent[parent[x]];
-        return x;
-      };
-      std::unordered_map<int, int> first_with;
-      for (int i = 0; i < static_cast<int>(achs.size()); ++i) {
-        for (int c : acts[achs[i].action].consumes) {
-          auto [it, inserted] = first_with.emplace(c, i);
-          if (!inserted) parent[find(i)] = find(it->second);
-        }
-      }
-      for (int i = 0; i < static_cast<int>(achs.size()); ++i) {
-        achs[i].group = opts.group_attempts ? find(i) : i;
-      }
-      bool any_prob = false;
-      for (const auto &r : achs) {
-        if (acts[r.action].adds[r.add].uncertain()) any_prob = true;
-      }
-      if (any_prob && opts.group_attempts) {
-        for (const auto &[c, i] : first_with) group_by_consumed[f].push_back({c, find(i)});
+        achievers[acts[ai].adds[k].fluent].push_back({ai, k});
       }
     }
   }

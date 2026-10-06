@@ -1,23 +1,25 @@
 #pragma once
 
-// Core of the concurrent heuristic: list-scheduling goal tasks onto agents.
+// Core of the concurrent heuristic: list-scheduling goals onto agents.
 //
-// Each goal fluent not yet true is a task (a goal `at X L` together with the
-// `found X` it implies, under the object-search convention). In priority
-// order, each task goes to the agent that would finish it earliest from that
+// Each goal fact not yet true is scheduled as one unit (with the `found X` an
+// `at X L` implies, under the object-search convention). In priority
+// order, each goal goes to the agent that would finish it earliest from that
 // agent's ready time and position (earliest finish time), and the schedule
-// yields every task's completion time. Longest-first (LPT) suits the
+// yields every goal's completion time. Longest-first (LPT) suits the
 // makespan, shortest-first (SPT) the sum of completion times; both orders are
 // tried and the one the value prefers is kept.
 //
-// Task ordering (order_conflicts): tasks are planned independently, so one
-// task's relaxed plan may destroy a fact another relies on -- fetching a
+// Goal ordering (order_conflicts): goals are planned independently, so one
+// goal's relaxed plan may destroy a fact another relies on -- fetching a
 // second object "frees" the hand by setting down the one being delivered,
-// whose own delivery then still finds it in hand. On one agent such a task
-// waits for the tasks it would spoil: a threat between causal links from the
+// whose own delivery then still finds it in hand. On one agent such a goal
+// waits for the goals it would spoil: a threat between causal links from the
 // state, resolved by ordering.
 
-#include "railroad/heuristic_concurrent_tasks.hpp"
+#include "railroad/heuristic_concurrent_plans.hpp"
+
+#include <numeric>
 
 namespace railroad {
 namespace concurrent {
@@ -48,17 +50,17 @@ class Scheduler {
       if (agent_of(r) >= 0) start_loc[r] = agent_location(pb, P, agent_of(r));
     }
 
-    // Tasks: goal fluents that are not already true now.
-    struct Task {
+    // Open goals: goal facts not already true now.
+    struct OpenGoal {
       int fluent;
       double finish_fixed;  // >= 0: needs no agent (in-flight)
-      std::vector<TaskPlan> plans;  // per agent
+      std::vector<GoalPlan> plans;  // per agent
       double key;
     };
     // `at X L` and the `found X` it implies are one job -- whoever brings X
-    // to L must find it first -- so they are planned as one task. Planned
+    // to L must find it first -- so they are planned together. Planned
     // apart, `at X L` can be "achieved" by searching L in the hope that X is
-    // already there, while finding X becomes a second task for another agent.
+    // already there, while finding X goes to another agent.
     auto companion_of = [&](int g) {
       if (!opts.joint_found) return -1;
       int fx = pb.found_of[g];
@@ -71,11 +73,11 @@ class Scheduler {
       int fx = companion_of(g);
       if (fx >= 0) paired.push_back(fx);
     }
-    std::vector<Task> tasks;
+    std::vector<OpenGoal> open;
     for (int g : goals) {
       if (U.best[g] == Pass::AVAIL && U.cost[g] <= 1e-9) continue;
       if (std::find(paired.begin(), paired.end(), g) != paired.end()) continue;
-      Task t;
+      OpenGoal t;
       t.fluent = g;
       t.finish_fixed = (U.best[g] == Pass::AVAIL) ? U.cost[g] : -1.0;
       t.key = -1.0;
@@ -85,33 +87,32 @@ class Scheduler {
         for (std::size_t r = 0; r < n_agents; ++r) {
           if (!std::isfinite(ready[r])) continue;
           Pass &P = pass_of(r);
-          t.plans[r] = plan_task(cx, P, g, companion_of(g), agent_of(r), ready[r]);
+          t.plans[r] = plan_goal(cx, P, g, companion_of(g), agent_of(r), ready[r]);
           if (!t.plans[r].ok) continue;
-          const TaskPlan &tp = t.plans[r];
+          const GoalPlan &tp = t.plans[r];
           double dl = 0.0;
-          double serial = task_serial(cx, P, agent_of(r), start_loc[r], ready[r], tp, dl);
+          double serial = goal_duration(cx, P, agent_of(r), start_loc[r], ready[r], tp, dl);
           double load = std::max(serial, bound(tp)) + dl;
           m = std::min(m, load);
-          if (bd) bd->loads.push_back({pb.str(g), static_cast<int>(r), serial, tp.critical, dl});
         }
         t.key = m;
       }
-      tasks.push_back(std::move(t));
+      open.push_back(std::move(t));
     }
 
     std::vector<double> finish;
     std::vector<int> end_loc;
     std::vector<int> n_assigned;
-    // The agent that would finish task t earliest (earliest finish time).
-    auto earliest = [&](const Task &t, int &best_r) {
+    // The agent that would finish goal t earliest (earliest finish time).
+    auto earliest = [&](const OpenGoal &t, int &best_r) {
       best_r = -1;
       double best_f = INF;
       for (std::size_t r = 0; r < n_agents; ++r) {
         if (!t.plans[r].ok || !std::isfinite(finish[r])) continue;
-        const TaskPlan &tp = t.plans[r];
+        const GoalPlan &tp = t.plans[r];
         double dl = 0.0;
-        double serial = task_serial(cx, pass_of(r), agent_of(r), end_loc[r], finish[r], tp, dl);
-        // The relaxed critical path only bounds an agent's first task.
+        double serial = goal_duration(cx, pass_of(r), agent_of(r), end_loc[r], finish[r], tp, dl);
+        // The relaxed critical path only bounds an agent's first goal.
         double load = (n_assigned[r] == 0 ? std::max(serial, bound(tp)) : serial) + dl;
         double f = finish[r] + load;
         if (f < best_f) { best_f = f; best_r = static_cast<int>(r); }
@@ -125,7 +126,7 @@ class Scheduler {
     auto has = [](const std::vector<int> &v, int x) {
       return std::find(v.begin(), v.end(), x) != v.end();
     };
-    auto clobbers = [&has](const TaskPlan &a, const TaskPlan &b) {
+    auto clobbers = [&has](const GoalPlan &a, const GoalPlan &b) {
       bool hit = false;
       for (int c : a.destroys) hit = hit || has(b.relies, c);
       if (!hit) return false;
@@ -135,23 +136,23 @@ class Scheduler {
       return true;
     };
     std::vector<char> taken;
-    auto needs_agent = [&](const Task &t) {
+    auto needs_agent = [&](const OpenGoal &t) {
       return t.finish_fixed < 0.0 && cover_[t.fluent] != cover_gen_;
     };
-    // Would doing task ti on agent r now spoil a task still to be scheduled?
+    // Would doing goal ti on agent r now spoil a goal still to be scheduled?
     auto spoils = [&](std::size_t ti, int r) {
-      for (std::size_t tj = 0; tj < tasks.size(); ++tj) {
-        if (tj == ti || taken[tj] || !needs_agent(tasks[tj])) continue;
-        if (tasks[tj].plans[r].ok && clobbers(tasks[ti].plans[r], tasks[tj].plans[r])) return true;
+      for (std::size_t tj = 0; tj < open.size(); ++tj) {
+        if (tj == ti || taken[tj] || !needs_agent(open[tj])) continue;
+        if (open[tj].plans[r].ok && clobbers(open[ti].plans[r], open[tj].plans[r])) return true;
       }
       return false;
     };
 
-    // List-schedule the tasks in the given priority order: each goes to the
-    // agent that would finish it earliest, deferring a task whose best agent
-    // would spoil another (unless every remaining task would).
+    // List-schedule the goals in the given priority order: each goes to the
+    // agent that would finish it earliest, deferring a goal whose best agent
+    // would spoil another (unless every remaining goal would).
     struct Done {
-      int task;  // index into tasks
+      int goal;  // index into open
       double at;
     };
     std::vector<Done> done;
@@ -159,33 +160,33 @@ class Scheduler {
       finish = ready;
       end_loc = start_loc;
       n_assigned.assign(n_agents, 0);
-      taken.assign(tasks.size(), 0);
+      taken.assign(open.size(), 0);
       done.clear();
-      // Fluents achieved along an assigned task's plan (e.g. `found X` on the
-      // way to `at X L`) need no task of their own.
+      // Fluents achieved along an assigned goal's plan (e.g. `found X` on the
+      // way to `at X L`) need no goal of their own.
       if (cover_.size() != pb.num_fluents()) cover_.assign(pb.num_fluents(), 0);
       if (++cover_gen_ == 0) {
         std::fill(cover_.begin(), cover_.end(), 0);
         cover_gen_ = 1;
       }
-      for (std::size_t step = 0; step < tasks.size(); ++step) {
-        std::size_t ti = tasks.size(), first = tasks.size();
+      for (std::size_t step = 0; step < open.size(); ++step) {
+        std::size_t ti = open.size(), first = open.size();
         for (std::size_t k : order) {
           if (taken[k]) continue;
-          if (first == tasks.size()) first = k;
-          if (!opts.order_conflicts || !needs_agent(tasks[k])) { ti = k; break; }
+          if (first == open.size()) first = k;
+          if (!opts.order_conflicts || !needs_agent(open[k])) { ti = k; break; }
           int r;
-          earliest(tasks[k], r);
+          earliest(open[k], r);
           if (r < 0 || !spoils(k, r)) { ti = k; break; }
         }
-        if (ti == tasks.size()) ti = first;
+        if (ti == open.size()) ti = first;
         taken[ti] = 1;
-        Task &t = tasks[ti];
+        OpenGoal &t = open[ti];
         double done_at;
         if (t.finish_fixed >= 0.0) {
           done_at = t.finish_fixed;
         } else if (cover_[t.fluent] == cover_gen_) {
-          continue;  // achieved along another task's plan
+          continue;  // achieved along another goal's plan
         } else {
           int best_r = -1;
           double best_f = earliest(t, best_r);
@@ -193,10 +194,10 @@ class Scheduler {
             // No single agent can do it: fall back to the team relaxation.
             cx.ex.next_stamp(pb);
             Extraction ex;
-            cx.ex.extract(pb, opts, cx.ts, U, {t.fluent}, ex);
+            cx.ex.extract(pb, cx.ts, U, {t.fluent}, ex);
             done_at = U.cost[t.fluent] + ex.delta;
           } else {
-            const TaskPlan &tp = t.plans[best_r];
+            const GoalPlan &tp = t.plans[best_r];
             finish[best_r] = best_f;
             n_assigned[best_r] += 1;
             if (!tp.locs.empty()) end_loc[best_r] = tp.locs.back();
@@ -214,21 +215,21 @@ class Scheduler {
       for (const auto &dn : done) {
         ms = std::max(ms, dn.at);
         sum += dn.at;
-        if (record) bd->goal_finish.push_back({pb.str(tasks[dn.task].fluent), dn.at});
+        if (record) bd->goal_finish.push_back({pb.str(open[dn.goal].fluent), dn.at});
       }
       return std::make_pair(ms, sum);
     };
 
-    std::vector<std::size_t> lpt(tasks.size());
+    std::vector<std::size_t> lpt(open.size());
     std::iota(lpt.begin(), lpt.end(), 0);
     std::stable_sort(lpt.begin(), lpt.end(),
-                     [&tasks](std::size_t a, std::size_t b) { return tasks[a].key > tasks[b].key; });
+                     [&open](std::size_t a, std::size_t b) { return open[a].key > open[b].key; });
     std::vector<std::size_t> best_order = lpt;
     auto [makespan, sum] = run(lpt, false);
-    if (tasks.size() > 1) {
+    if (open.size() > 1) {
       std::vector<std::size_t> spt = lpt;
       std::stable_sort(spt.begin(), spt.end(),
-                       [&tasks](std::size_t a, std::size_t b) { return tasks[a].key < tasks[b].key; });
+                       [&open](std::size_t a, std::size_t b) { return open[a].key < open[b].key; });
       if (spt != lpt) {
         auto [ms2, sum2] = run(spt, false);
         if (opts.lambda_add * sum2 + opts.lambda_ms * ms2 <

@@ -1,4 +1,4 @@
-from typing import List, Dict, TypedDict, Union, SupportsFloat, SupportsInt
+from typing import Any, List, Dict, Mapping, Union, SupportsFloat, SupportsInt
 from collections.abc import Set
 from railroad._bindings import get_usable_actions, seed_planner_rng
 from railroad._action_pruning import prune_probabilistic_achievers
@@ -12,7 +12,7 @@ __all__ = [
 ]
 from railroad._bindings import MCTSPlanner as _MCTSPlannerCpp
 from railroad._bindings import ConcurrentHeuristic as _ConcurrentHeuristicCpp
-from railroad._bindings import ConcurrentHeuristicOptions as _ConcurrentHeuristicOptionsCpp
+from railroad._bindings import ConcurrentHeuristicOptions
 from railroad._bindings import Action, State, Fluent
 from railroad._bindings import Goal, LiteralGoal
 from railroad.core import (
@@ -27,32 +27,6 @@ from railroad.core import (
     project_state,
     relevant_predicates,
 )
-
-
-class ConcurrentHeuristicOptions(TypedDict, total=False):
-    """Switches for ``MCTSPlanner(heuristic="concurrent", heuristic_options=...)``.
-
-    Mirrors ``ConcurrentHeuristicOptions`` in heuristic_concurrent.hpp; the
-    defaults (in brackets) are the configuration to use. The switches exist
-    mainly for ablations.
-    """
-
-    #: Schedule goals onto the individual agents; False: one serial agent. [True]
-    agent_aware: bool
-    #: In-flight effects become available when scheduled; False: at t=0. [True]
-    timed_init: bool
-    #: lambda_add weights summed completion times; False: h_add + retry delta. [True]
-    sum_completion: bool
-    #: Plan `at X L` together with the `found X` it implies, as one task. [True]
-    joint_found: bool
-    #: Cost an agent's moves as one route; False: the relaxed plan's moves. [True]
-    route_chaining: bool
-    #: Achievers consuming the same precondition count as one attempt. [True]
-    group_attempts: bool
-    #: Cost an uncertain search as an expected route over its candidate places. [True]
-    expected_search: bool
-    #: On one agent, order tasks so none destroys a fact another relies on. [True]
-    order_conflicts: bool
 
 
 def _normalize_goal(goal: Union[Goal, Fluent]) -> Goal:
@@ -105,7 +79,7 @@ class MCTSPlanner:
         dead_end_penalty: SupportsFloat | None = None,
         heuristic: str = "concurrent",
         backup: str = "max",
-        heuristic_options: ConcurrentHeuristicOptions | None = None,
+        heuristic_options: Mapping[str, Any] | None = None,
     ):
         """Initialize MCTSPlanner with automatic preprocessing.
 
@@ -163,8 +137,9 @@ class MCTSPlanner:
                 decision node by its best child and a chance node by the
                 probability-weighted mean of its outcomes; ``"mean"`` averages
                 the rewards below a node.
-            heuristic_options: switches for ``heuristic="concurrent"``, mainly
-                for ablations (see ``ConcurrentHeuristicOptions``).
+            heuristic_options: switches of ``ConcurrentHeuristicOptions`` for
+                ``heuristic="concurrent"`` (e.g. ``{"expected_search": False}``),
+                for ablations; the defaults are the configuration to use.
 
         Lambda defaults are an even split (0.5, 0.0, 0.5). Weights are
         free-form (not normalized); with ``heuristic="ff"`` the heuristic used
@@ -188,18 +163,15 @@ class MCTSPlanner:
             raise ValueError(f"backup must be 'mean' or 'max', got {backup!r}")
         self._heuristic = heuristic
         self._backup = backup
-        self._heuristic_options: ConcurrentHeuristicOptions = (
-            heuristic_options.copy() if heuristic_options else {}
-        )
-        unknown = set(self._heuristic_options) - set(ConcurrentHeuristicOptions.__annotations__)
-        if unknown:
-            raise ValueError(f"unknown heuristic_options: {sorted(unknown)}")
+        self._heuristic_options = dict(heuristic_options or {})
         if self._heuristic_options and heuristic != "concurrent":
             raise ValueError("heuristic_options only apply to heuristic='concurrent'")
-        self._concurrent_options = _ConcurrentHeuristicOptionsCpp()
+        self._concurrent_options = ConcurrentHeuristicOptions()
         self._concurrent_options.lambda_add = self._lambda_add
         self._concurrent_options.lambda_ms = self._lambda_ff
         for key, value in self._heuristic_options.items():
+            if key.startswith("lambda") or not hasattr(self._concurrent_options, key):
+                raise ValueError(f"unknown heuristic_options: {key!r}")
             setattr(self._concurrent_options, key, value)
         # Compiled heuristic evaluators for heuristic(), per goal, valid for
         # the action list they were compiled from.

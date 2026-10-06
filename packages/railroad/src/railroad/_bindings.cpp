@@ -757,17 +757,22 @@ PYBIND11_MODULE(_bindings, m) {
       "Settings of the concurrent heuristic (heuristic_concurrent.hpp). The "
       "defaults are the configuration to use; the switches exist for ablations.")
       .def(py::init<>())
-      .def_readwrite("lambda_add", &ConcurrentHeuristicOptions::lambda_add)
-      .def_readwrite("lambda_ms", &ConcurrentHeuristicOptions::lambda_ms)
-      .def_readwrite("at_implies_found", &ConcurrentHeuristicOptions::at_implies_found)
-      .def_readwrite("agent_aware", &ConcurrentHeuristicOptions::agent_aware)
-      .def_readwrite("timed_init", &ConcurrentHeuristicOptions::timed_init)
-      .def_readwrite("joint_found", &ConcurrentHeuristicOptions::joint_found)
-      .def_readwrite("route_chaining", &ConcurrentHeuristicOptions::route_chaining)
-      .def_readwrite("group_attempts", &ConcurrentHeuristicOptions::group_attempts)
-      .def_readwrite("order_conflicts", &ConcurrentHeuristicOptions::order_conflicts)
-      .def_readwrite("expected_search", &ConcurrentHeuristicOptions::expected_search)
-      .def_readwrite("sum_completion", &ConcurrentHeuristicOptions::sum_completion);
+      .def_readwrite("lambda_add", &ConcurrentHeuristicOptions::lambda_add,
+                     "Weight of the sum of goal completion times (a shaping term).")
+      .def_readwrite("lambda_ms", &ConcurrentHeuristicOptions::lambda_ms,
+                     "Weight of the makespan.")
+      .def_readwrite("agent_aware", &ConcurrentHeuristicOptions::agent_aware,
+                     "Schedule goals onto the individual agents; False: one serial agent.")
+      .def_readwrite("timed_init", &ConcurrentHeuristicOptions::timed_init,
+                     "In-flight effects count when they fire; False: at t = 0.")
+      .def_readwrite("joint_found", &ConcurrentHeuristicOptions::joint_found,
+                     "Plan `at X L` together with the `found X` it implies.")
+      .def_readwrite("route_chaining", &ConcurrentHeuristicOptions::route_chaining,
+                     "Cost an agent's moves as one route; False: relaxed-plan moves.")
+      .def_readwrite("order_conflicts", &ConcurrentHeuristicOptions::order_conflicts,
+                     "On one agent, order goals so none destroys a fact another relies on.")
+      .def_readwrite("expected_search", &ConcurrentHeuristicOptions::expected_search,
+                     "Cost an uncertain search as an expected route over its attempts.");
 
   py::class_<PyConcurrentHeuristic>(m, "ConcurrentHeuristic",
       "The concurrency-aware heuristic compiled for one action set and goal; "
@@ -790,22 +795,15 @@ PYBIND11_MODULE(_bindings, m) {
              self.h->evaluate(s, &bd);
              py::dict d;
              d["value"] = bd.value;
-             d["h_add"] = bd.h_add;
-             d["delta"] = bd.delta;
              d["makespan"] = bd.makespan;
              d["completion_sum"] = bd.completion_sum;
-             d["h_ff"] = bd.h_ff;
              d["goal_finish"] = bd.goal_finish;
              d["assignment"] = bd.assignment;
-             d["deltas"] = bd.deltas;
-             d["plan"] = bd.plan;
-             d["loads"] = bd.loads;
              return d;
            },
            py::arg("state"),
-           "The value and its components: value, h_add, delta, makespan, "
-           "completion_sum, h_ff, per-goal finish times, the goal-to-agent "
-           "assignment, retry deltas, the relaxed plan and per-agent loads.");
+           "The value and the schedule behind it: makespan, completion_sum, "
+           "each goal's finish time and the agent it is assigned to.");
 
   // ff_heuristic with Goal object
   m.def("ff_heuristic",

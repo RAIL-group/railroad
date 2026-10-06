@@ -7,11 +7,12 @@
 //               available at time 0; an in-flight effect's fluents become
 //               available when it fires. An in-flight probabilistic effect is
 //               an *attempt* already under way: its uncertain outcomes are
-//               pending achievers that keep their probability, and the
-//               attempt is recorded so that expected search treats it like
-//               one an agent could still start. A free agent must act at
-//               once, so its own pending effects count only after the
-//               shortest action it can start now.
+//               pending achievers that keep their probability, and it uses
+//               up the planned attempts that consume what it deletes (another
+//               robot's search of the same place), so that expected search
+//               counts it once, like the attempt it was before it started. A
+//               free agent must act at once, so its own pending effects count
+//               only after the shortest action it can start now.
 //   Pass        One relaxation over the timed state, restricted to one
 //               agent's actions (plus agent-free ones) or unrestricted. Each
 //               fluent gets a cost and the probability rho that its relaxed
@@ -37,13 +38,13 @@ struct Pending {
   int fluent;
   double time;
   double prob;
-  int group;    // achiever group of `fluent` it belongs to (-1: its own)
   int attempt;  // the in-flight attempt it is an outcome of
 };
 
 // An in-flight probabilistic effect: an attempt already under way.
 struct InFlight {
   std::vector<int> outcomes;  // its uncertain outcomes (indices into pending)
+  std::vector<int> dels;      // fluents it deletes
   int loc;  // a location fluent of where it happens (any agent's; -1: unknown)
 };
 
@@ -57,6 +58,17 @@ class TimedState {
   bool reveals(int k, int q) const {
     for (int i : in_flight[k].outcomes) {
       if (pending[i].fluent == q) return true;
+    }
+    return false;
+  }
+
+  // Is planned action a used up by an attempt in flight (it consumes a fluent
+  // that attempt deletes)?
+  bool spent(const Problem &pb, int a) const {
+    for (const auto &fl : in_flight) {
+      for (int c : pb.acts[a].consumes) {
+        if (std::find(fl.dels.begin(), fl.dels.end(), c) != fl.dels.end()) return true;
+      }
     }
     return false;
   }
@@ -78,7 +90,7 @@ class TimedState {
       prob_times.clear();
       walk_effect(pb, *e, trel, 1.0, prob_adds, prob_times);
       const int attempt = static_cast<int>(in_flight.size());
-      InFlight fl{{}, -1};
+      InFlight fl{{}, {}, -1};
       for (std::size_t i = 0; i < prob_adds.size(); ++i) {
         int f = prob_adds[i].first;
         double p = std::min(prob_adds[i].second, 1.0);
@@ -87,31 +99,26 @@ class TimedState {
           avail.push_back({f, t});
           continue;
         }
-        // Which achiever group of f does this pending outcome belong to?
-        int group = -1;
-        for (const auto &df : e->flipped_neg_fluents()) {
-          int c = pb.lookup(df);
-          if (c < 0) continue;
-          for (const auto &[cf, g] : pb.group_by_consumed[f]) {
-            if (cf == c) { group = g; break; }
-          }
-          if (group >= 0) break;
-        }
-        // Where the attempt happens: the location precondition of an
-        // achiever in the same group (the action that was started).
-        if (fl.loc < 0 && group >= 0) {
-          for (const auto &ach : pb.achievers[f]) {
-            if (ach.group != group) continue;
-            for (int q : pb.acts[ach.action].pre) {
-              if (pb.loc_agent[q] >= 0) { fl.loc = q; break; }
-            }
-            if (fl.loc >= 0) break;
-          }
-        }
         fl.outcomes.push_back(static_cast<int>(pending.size()));
-        pending.push_back({f, t, p, group, attempt});
+        pending.push_back({f, t, p, attempt});
       }
-      if (!fl.outcomes.empty()) in_flight.push_back(std::move(fl));
+      if (fl.outcomes.empty()) continue;
+      for (const auto &df : e->flipped_neg_fluents()) {
+        int c = pb.lookup(df);
+        if (c >= 0) fl.dels.push_back(c);
+      }
+      in_flight.push_back(std::move(fl));
+      // Where it happens: the location precondition of a planned attempt it
+      // uses up (the action that was started, or the same search by another
+      // agent).
+      for (int i : in_flight.back().outcomes) {
+        for (const auto &ach : pb.achievers[pending[i].fluent]) {
+          if (in_flight.back().loc >= 0 || !spent(pb, ach.action)) continue;
+          for (int q : pb.acts[ach.action].pre) {
+            if (pb.loc_agent[q] >= 0) { in_flight.back().loc = q; break; }
+          }
+        }
+      }
     }
 
     // `waiting a b`: a becomes free when b does (transition() resolves it).
@@ -279,7 +286,7 @@ struct Pass {
   }
 
   // Expected extra time over the optimistic cost of f from trying its
-  // achievers (one per attempt group) in the best of three orderings.
+  // achievers in the best of three orderings.
   double delta(const Problem &pb, const TimedState &ts, int f) {
     if (delta_memo[f] >= 0.0) return delta_memo[f];
     double d = uncertain(pb, f) ? compute_delta(pb, ts, f) : 0.0;
@@ -321,37 +328,15 @@ struct Pass {
   };
 
   double compute_delta(const Problem &pb, const TimedState &ts, int f) const {
-    // Representative per group: the cheapest attempt.
-    std::vector<Try> reps;
-    std::vector<int> rep_group;
-    auto add_rep = [&](int group, const Try &at) {
-      if (group >= 0) {
-        for (std::size_t i = 0; i < rep_group.size(); ++i) {
-          if (rep_group[i] == group) {
-            if (at.attempt() < reps[i].attempt()) reps[i] = at;
-            return;
-          }
-        }
-      }
-      reps.push_back(at);
-      rep_group.push_back(group);
-    };
     // Pending outcomes first: once in flight, an attempt is not repeatable.
+    std::vector<Try> reps;
     for (const auto &pd : ts.pending) {
-      if (pd.fluent != f) continue;
-      add_rep(pd.group, {0.0, pd.time, pd.prob});
+      if (pd.fluent == f) reps.push_back({0.0, pd.time, pd.prob});
     }
     for (const auto &r : pb.achievers[f]) {
-      if (!allowed(pb, r.action) || unmet[r.action] != 0) continue;
+      if (!allowed(pb, r.action) || unmet[r.action] != 0 || ts.spent(pb, r.action)) continue;
       const auto &ad = pb.acts[r.action].adds[r.add];
-      if (ad.prob <= 1e-9) continue;
-      // A group already holding a pending attempt is spent.
-      bool spent = false;
-      for (const auto &pd : ts.pending) {
-        if (pd.fluent == f && pd.group >= 0 && pd.group == r.group) { spent = true; break; }
-      }
-      if (spent) continue;
-      add_rep(r.group, {wait[r.action], pb.acts[r.action].dur, ad.prob});
+      if (ad.prob > 1e-9) reps.push_back({wait[r.action], pb.acts[r.action].dur, ad.prob});
     }
     if (reps.empty()) return 0.0;
 
@@ -403,16 +388,13 @@ class Extractor {
     }
   }
 
-  // Is action a on the current plan?
-  bool on_plan(int a) const { return act_stamp_[a] == stamp_; }
-
   // Walk back from `roots` via the pass's chosen achievers, costliest subgoal
   // first (as FF does): every fluent an action on the plan adds counts as
   // achieved, so a later, cheaper subgoal it covers as a side effect (e.g. the
   // `hand-full` that a pick also adds) does not pull in an achiever of its
   // own. Probabilistic subgoals still pay their retry delta.
-  void extract(const Problem &pb, const ConcurrentHeuristicOptions &opts, const TimedState &ts,
-               Pass &P, const std::vector<int> &roots, Extraction &ex) {
+  void extract(const Problem &pb, const TimedState &ts, Pass &P, const std::vector<int> &roots,
+               Extraction &ex) {
     std::priority_queue<std::pair<double, int>> heap;  // (cost, fluent), max first
     for (int f : roots) {
       if (f >= 0) heap.push({P.cost[f], f});
@@ -437,7 +419,7 @@ class Extractor {
       }
       for (int p : pb.acts[b].pre) {
         heap.push({P.cost[p], p});
-        if (opts.at_implies_found && pb.found_of[p] >= 0) {
+        if (pb.found_of[p] >= 0) {
           heap.push({P.cost[pb.found_of[p]], pb.found_of[p]});
         }
       }
