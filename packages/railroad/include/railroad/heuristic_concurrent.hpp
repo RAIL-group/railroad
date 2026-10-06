@@ -35,9 +35,7 @@
 //      3-22% longer with 2-3 robots, 12% on average). The price is
 //      consistency: with n goals open the value falls at
 //      lambda_ms + lambda_add * n per unit of time while MCTS charges 1, as
-//      if h were multiplied by (n + 1) / 2 at the default weights. Charging
-//      MCTS that rate instead (makespan plus flowtime) is consistent but
-//      planned no better, and optimises a proxy.
+//      if h were multiplied by (n + 1) / 2 at the default weights.
 //                                          [heuristic_concurrent_schedule.hpp]
 //
 // Refinements that apply only where the domain has the structure they need:
