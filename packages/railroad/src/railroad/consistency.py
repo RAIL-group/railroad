@@ -119,9 +119,6 @@ class ConsistencyReport:
             "max_abs_rel_gap": rel[-1],
         }
 
-    def worst(self, n: int = 5) -> List[Residual]:
-        return sorted(self.residuals, key=lambda r: -abs(r.rel_gap))[:n]
-
     def __str__(self) -> str:
         lines = [f"{'steps':<10}{'n':>6}{'consistent':>12}{'optimistic':>12}"
                  f"{'pessimistic':>13}{'mean |gap|':>12}{'p90 |gap|':>11}{'max |gap|':>11}"]

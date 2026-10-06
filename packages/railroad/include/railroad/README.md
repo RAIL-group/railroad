@@ -35,17 +35,17 @@ Probabilistic PDDL planning system.
   which are refinements, and the class ties the parts together. The parts, in
   dependency order:
   - **heuristic_concurrent_problem.hpp**: options, breakdown, and the
-    compiled problem (fluent ids, actions, agents, attempt groups, agent
-    location groups, `at`->`found`, goal branches).
+    compiled problem (fluent ids, actions, agents, agent location groups,
+    `at`->`found`, goal branches).
   - **heuristic_concurrent_relaxation.hpp** (core): the timed relaxed state,
     the cost/rho relaxation passes with retry deltas, and relaxed-plan
     extraction.
   - **heuristic_concurrent_search.hpp**: expected search over a subgoal's
     attempts, planned and in flight.
-  - **heuristic_concurrent_tasks.hpp**: per-agent task plans, route chaining,
-    and splitting a task around its search.
-  - **heuristic_concurrent_schedule.hpp** (core): list scheduling of tasks
-    onto agents, with task ordering.
+  - **heuristic_concurrent_plans.hpp** (core): per-agent goal plans, route
+    chaining, and splitting a goal plan around its search.
+  - **heuristic_concurrent_schedule.hpp** (core): list scheduling of goals
+    onto agents, with goal ordering.
 - **planner.hpp**: MCTS planner implementation
 - **constants.hpp**: Global constants
 
@@ -118,67 +118,43 @@ split between `h_add` and `h_ff` (`0.5, 0.0, 0.5`).
 
 ### concurrent_heuristic
 
-`MCTSPlanner(...)`'s default (`heuristic="concurrent"`). Estimates the
-remaining time of the *team* rather than of one sequential agent; the design notes at the top of
-`heuristic_concurrent.hpp` and its part headers explain each step. In brief:
+`MCTSPlanner(...)`'s default (`heuristic="concurrent"`): the *team's* expected
+remaining time. The opening comment of `heuristic_concurrent.hpp` names the
+core and the refinements; each part header explains its step. In brief:
 
-1. **Timed relaxed state.** In-flight effects become available when they are
-   scheduled; in-flight probabilistic outcomes are *pending achievers* with
-   their branch probability (the FF heuristic applies all upcoming effects at
-   time 0 and keeps one branch of each probabilistic effect, picked by hash
-   order). A free agent cannot idle, so its own pending effects count only
-   after the shortest action it can start now.
-2. **Probability-aware costs.** Achievers ranked by `cost / rho`, `rho` the
-   probability that the relaxed support succeeds -- the expected cost of
-   retrying an independent attempt until it succeeds; one Dijkstra-style
-   pass.
-3. **Per-agent relaxations** (agents = arguments of `free`), **route
-   chaining** over each agent's location fluents (no teleporting between the
-   places a task needs), and **LPT/EFT list scheduling** of goal tasks
-   (`at X L` together with its implied `found X`) onto agents. On one agent,
-   a task whose relaxed plan destroys a fact (true now) that another relies
-   on waits for it (`order_conflicts`): delivering the object in hand comes
-   before fetching another, which the relaxation would otherwise do by
-   setting the first down anywhere while still "holding" it.
-4. **Expected search** (`expected_search`, default on): a task's uncertain
-   search is costed as an expected route over its candidate places (greedy
-   by probability per unit travel + search time), with the rest of the task
-   costed from wherever the object turns up -- nothing more where finding it
-   already achieves the goal (it was on the target place all along). With it
-   off, a plan through one place plus a retry delta, with achievers that
-   consume the same precondition counted as one attempt.
+1. **Timed relaxed state.** In-flight effects count when they fire;
+   in-flight uncertain outcomes are pending achievers that keep their
+   probability. A free agent cannot idle.
+2. **Probability-aware relaxation**, per agent (agents are the arguments of
+   `free`): achievers ranked by `cost / rho`, the expected cost of retrying
+   an independent attempt until it succeeds.
+3. **Goal plans.** A *goal* is one fact of the goal, e.g. `at mug L` (with
+   the `found mug` it implies); each needs one or more actions. Each goal's
+   relaxed plan on each agent, with its moves re-costed as one route (route
+   chaining) and an uncertain search costed as an expected route over its
+   candidate places, planned or in flight (expected search).
+4. **List schedule.** Each goal goes to the agent that would finish it
+   earliest; on one agent, a goal whose plan destroys a fact another relies
+   on waits for it (deliver the object in hand before fetching another).
 5. **Value** `lambda_add * sum_g C_g + lambda_ms * max_g C_g` over the
-   scheduled completion times. The planner's objective is the makespan; the
-   sum is a shaping term that gives a task off the critical path a gradient
-   (without it, ProcTHOR plans are 3-22% longer with 2-3 robots, 12% on average). With `n`
-   tasks open it makes the value fall at `lambda_ms + lambda_add * n` per
-   unit of time while MCTS charges 1. `railroad.consistency` (and `railroad
-   example <name> --check-heuristic`) measures how far the value is from its
-   own one-step lookahead on any problem.
+   scheduled completion times. The objective is the makespan; the sum is a
+   shaping term that gives a goal off the critical path a gradient (without
+   it, ProcTHOR plans are 3-22% longer with 2-3 robots), at the price of
+   falling at `lambda_ms + lambda_add * n` per unit of time with `n` goals
+   open while MCTS charges 1.
 
-Compiled once per search into integer-indexed arrays, so evaluations are
-several times faster than `ff_heuristic` on large grounded problems. Options
-(`ConcurrentHeuristicOptions`) switch each component off for ablations.
+`ConcurrentHeuristicOptions` switches the refinements off for ablations.
+`railroad.consistency` (or `railroad example <name> --check-heuristic`)
+measures how far the value is from its own one-step lookahead on any problem.
 
-Since this heuristic is calibrated (h tracks the remaining time), the planner
-defaults to `heuristic_multiplier=1` and `backup="max"`: the leaf value is `-(t + w h)`, which for `w > 1`
-improves with elapsed time along any decent path, so whichever branch is
-searched deepest looks best. `backup="max"` (MaxUCT: decision nodes take their
-best child, chance nodes the probability-weighted mean) keeps a few bad
-coordination choices below a node from swamping its value. Every outcome of a
-chance node is valued from the heuristic when it is created, so the mean is
-over all outcomes from the start: otherwise a lucky low-probability outcome
-(an unlikely search succeeding) that happens to be sampled first stands in for
-the whole action. And until each of a decision node's actions has been tried,
-its own heuristic value stands in for the untried ones: chance outcomes are
-visited rarely, and valued by their one expanded child they inherit that
-arbitrary action's value (the likely outcome of a good search valued as a
-detour). Goal states are terminal in selection (checked before untried
-actions, so a goal node is never expanded and valued by continuations past
-the goal). Under max backup the root action recommended is the one with the
-best estimate (ties to visits): visits are only a proxy, and a child that
-stays optimistic while its actions are untried can gather the most visits
-and still turn out worse.
+With this heuristic the planner defaults to `heuristic_multiplier=1` and
+`backup="max"`. The leaf value is `-(t + w h)`; with a calibrated h and
+`w > 1` it improves with elapsed time along any decent path, so the
+most-deepened branch looks best. Under MaxUCT a decision node takes its best
+child and a chance node the probability-weighted mean of its outcomes; every
+outcome is valued from h when created, a node's own value stands in for its
+untried actions, and the root recommends the best estimate. Goal states are
+terminal in selection under either backup.
 
 ### "at implies found" augmentation
 

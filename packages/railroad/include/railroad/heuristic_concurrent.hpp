@@ -19,37 +19,38 @@
 //   2. Probability-aware relaxation -- per agent, each fluent's cost and the
 //      probability rho its support succeeds; achievers ranked by cost / rho.
 //                                          [heuristic_concurrent_relaxation.hpp]
-//   3. Task plans -- each goal task's relaxed plan on each agent and its
-//      duration.                           [heuristic_concurrent_tasks.hpp]
-//   4. List schedule -- tasks go to the agent that would finish them
+//   3. Goal plans -- a "goal" is one fact of the goal (of its best DNF
+//      branch), e.g. `at mug L`; each needs one or more actions. A goal's
+//      relaxed plan on each agent, and its duration on that agent.
+//                                          [heuristic_concurrent_plans.hpp]
+//   4. List schedule -- each goal goes to the agent that would finish it
 //      earliest; the value is computed from the completion times C_g:
 //          lambda_add * sum_g C_g + lambda_ms * max_g C_g
 //      minimised over goal DNF branches. The objective is the makespan; the
-//      sum is a shaping term. The makespan alone leaves an agent whose task
+//      sum is a shaping term. The makespan alone leaves an agent whose goal
 //      is off the critical path without a gradient (in ProcTHOR, plans
-//      3-22% longer with 2-3 robots, 12% on average). The price is consistency: with n
-//      tasks open the value falls at lambda_ms + lambda_add * n per unit of
-//      time while MCTS charges 1, as if h were multiplied by (n + 1) / 2 at
-//      the default weights. Charging MCTS that rate instead (makespan plus
-//      flowtime) is consistent but planned no better, and optimises a proxy.
+//      3-22% longer with 2-3 robots, 12% on average). The price is
+//      consistency: with n goals open the value falls at
+//      lambda_ms + lambda_add * n per unit of time while MCTS charges 1, as
+//      if h were multiplied by (n + 1) / 2 at the default weights. Charging
+//      MCTS that rate instead (makespan plus flowtime) is consistent but
+//      planned no better, and optimises a proxy.
 //                                          [heuristic_concurrent_schedule.hpp]
 //
 // Refinements that apply only where the domain has the structure they need:
 //
 //   - Route chaining: an agent with location fluents (a mutex group its moves
-//     switch between) visits the places its task needs in order, each leg
-//     costed from the previous one.        [tasks; compiled in problem]
+//     switch between) visits the places its goal needs in order, each leg
+//     costed from the previous one.        [plans; compiled in problem]
 //   - Expected search: a subgoal with several probabilistic attempts is
 //     costed as an expected route over them, attempts already in flight
-//     included, and the rest of the task from wherever it succeeds.
+//     included, and the rest of the goal from wherever it succeeds.
 //                                          [heuristic_concurrent_search.hpp]
-//   - Attempt grouping: achievers that consume the same precondition are one
-//     attempt, not independent retries.   [problem; relaxation, search]
-//   - Task ordering: on one agent, a task whose plan destroys a fact (true
-//     now) that another task relies on waits for it.   [schedule]
+//   - Goal ordering: on one agent, a goal whose plan destroys a fact (true
+//     now) that another goal relies on waits for it.   [schedule]
 //
 // Object-search convention (the core's name-keyed `at`/`found` machinery): a
-// goal `at X L` also needs `found X`, and the two are planned as one task.
+// goal `at X L` also needs `found X`, and the two are planned together.
 //
 // The estimate aims to be consistent with its own one-step lookahead: for an
 // action the estimate's plan starts with, h(s) = dt + sum_o p_o h(o) over its
@@ -75,7 +76,7 @@ class ConcurrentHeuristic {
 
   ConcurrentHeuristic(const std::vector<Action> &actions, const GoalBase *goal,
                       ConcurrentHeuristicOptions opts = {})
-      : opts_(opts), goal_(goal), pb_(actions, goal, opts_) {
+      : opts_(opts), goal_(goal), pb_(actions, goal) {
     // One unrestricted pass, plus one per agent when there is a choice of
     // agents to schedule onto.
     const bool per_agent = opts_.agent_aware && pb_.num_agents() > 1;
@@ -104,8 +105,8 @@ class ConcurrentHeuristic {
     if (goal_->get_type() == GoalType::FALSE_GOAL || pb_.branches.empty()) return INF;
 
     ts_.load(pb_, opts_, s);
-    // The unrestricted pass is always needed (h_add, reachability, fallback);
-    // the per-agent passes feed the schedule.
+    // The unrestricted pass gives reachability and the team fallback; the
+    // per-agent passes feed the schedule.
     for (auto &P : passes_) P.run(pb_, ts_);
 
     double best = INF;
@@ -152,41 +153,19 @@ class ConcurrentHeuristic {
   }
 
   double evaluate_branch(const std::vector<int> &branch, ConcurrentHeuristicBreakdown *bd) {
-    using concurrent::Pass;
-    Pass &U = passes_[0];
+    const concurrent::Pass &U = passes_[0];
+    // The branch's goals, plus the `found X` each `at X L` implies.
     std::vector<int> goals;
     goals.reserve(branch.size() * 2);
     for (int g : branch) {
       if (g < 0 || !U.reachable(g)) return INF;
       goals.push_back(g);
     }
-    if (opts_.at_implies_found) {
-      std::size_t n = goals.size();
-      for (std::size_t i = 0; i < n; ++i) {
-        int fg = pb_.found_of[goals[i]];
-        if (fg >= 0 && U.reachable(fg) && std::find(goals.begin(), goals.end(), fg) == goals.end()) {
-          goals.push_back(fg);
-        }
+    for (std::size_t i = 0, n = goals.size(); i < n; ++i) {
+      int fg = pb_.found_of[goals[i]];
+      if (fg >= 0 && U.reachable(fg) && std::find(goals.begin(), goals.end(), fg) == goals.end()) {
+        goals.push_back(fg);
       }
-    }
-
-    // h_add and the shared (unrestricted) relaxed plan.
-    double h_add = 0.0;
-    for (int g : goals) h_add += U.cost[g];
-    extractor_.next_stamp(pb_);
-    concurrent::Extraction ux;
-    extractor_.extract(pb_, opts_, ts_, U, goals, ux);
-
-    if (bd) {
-      for (int f : ux.fluents) {
-        if (U.uncertain(pb_, f)) bd->deltas.push_back({pb_.str(f), U.delta(pb_, ts_, f)});
-      }
-      for (int a = 0; a < static_cast<int>(pb_.acts.size()); ++a) {
-        if (extractor_.on_plan(a)) bd->plan.push_back({pb_.acts[a].src->name(), pb_.acts[a].dur});
-      }
-      bd->h_add = h_add;
-      bd->delta = ux.delta;
-      bd->h_ff = ux.dur;
     }
     concurrent::Context cx{pb_, opts_, ts_, extractor_};
     double completion_sum = 0.0;
@@ -195,8 +174,7 @@ class ConcurrentHeuristic {
       bd->makespan = makespan;
       bd->completion_sum = completion_sum;
     }
-    double additive = opts_.sum_completion ? completion_sum : h_add + ux.delta;
-    return opts_.lambda_add * additive + opts_.lambda_ms * makespan;
+    return opts_.lambda_add * completion_sum + opts_.lambda_ms * makespan;
   }
 };
 
