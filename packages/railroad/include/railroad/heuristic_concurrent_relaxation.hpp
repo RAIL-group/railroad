@@ -370,7 +370,6 @@ struct Extraction {
   double delta = 0.0;   // sum of retry deltas over probabilistic fluents
   std::vector<int> fluents;  // fluents visited (for coverage)
   std::vector<int> actions;  // actions on the plan
-  std::vector<int> avail;    // subgoals already available in the state
 };
 
 class Extractor {
@@ -405,7 +404,6 @@ class Extractor {
       if (fl_stamp_[f] == stamp_) continue;
       fl_stamp_[f] = stamp_;
       int b = P.best[f];
-      if (b == Pass::AVAIL) ex.avail.push_back(f);
       if (b == Pass::AVAIL || b == Pass::NONE) continue;
       ex.fluents.push_back(f);
       if (P.uncertain(pb, f)) ex.delta += P.delta(pb, ts, f);

@@ -45,7 +45,7 @@ Probabilistic PDDL planning system.
   - **heuristic_concurrent_plans.hpp** (core): per-agent goal plans, route
     chaining, and splitting a goal plan around its search.
   - **heuristic_concurrent_schedule.hpp** (core): list scheduling of goals
-    onto agents, with goal ordering.
+    onto agents.
 - **planner.hpp**: MCTS planner implementation
 - **constants.hpp**: Global constants
 
@@ -134,8 +134,9 @@ core and the refinements; each part header explains its step. In brief:
    chaining) and an uncertain search costed as an expected route over its
    candidate places, planned or in flight (expected search).
 4. **List schedule.** Each goal goes to the agent that would finish it
-   earliest; on one agent, a goal whose plan destroys a fact another relies
-   on waits for it (deliver the object in hand before fetching another).
+   earliest. Goals are planned independently, so one goal's plan may use
+   what another's relies on (a full hand's object set down anywhere to fetch
+   another).
 5. **Value** `lambda_add * sum_g C_g + lambda_ms * max_g C_g` over the
    scheduled completion times. The objective is the makespan; the sum is a
    shaping term that gives a goal off the critical path a gradient (without

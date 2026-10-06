@@ -172,19 +172,6 @@ def test_a_free_robot_cannot_idle_until_its_own_flag_clears():
     assert _breakdown(actions, held, F("at box goal"), timed_init=False)["makespan"] == pytest.approx(2.1)
 
 
-def test_object_in_hand_is_delivered_before_fetching_another():
-    """The relaxation frees a full hand by setting its object down anywhere:
-    the cup's plan drops the box, which is then "placed" at `goal` for free
-    (16 in all). That plan destroys the holding the box's delivery relies on,
-    so the box goes first (10 + 2), then the cup from `goal` (24): 36."""
-    actions = _actions(["r1"], ["box", "cup"])
-    state = _state({"r1": "a"}, extra={F("holding r1 box"), F("hand-full r1"), F("at cup a"),
-                                       F("found box"), F("found cup"), F("revealed goal")})
-    goal = F("at box goal") & F("at cup goal")
-    assert _breakdown(actions, state, goal)["makespan"] == pytest.approx(36.0)
-    assert _breakdown(actions, state, goal, order_conflicts=False)["makespan"] == pytest.approx(16.0)
-
-
 def test_goal_already_true_is_zero_and_unreachable_is_inf():
     planner = MCTSPlanner(_actions(["r1"], ["box"]))
     done = _state({"r1": "start"}, extra={F("at box goal"), F("found box")})
