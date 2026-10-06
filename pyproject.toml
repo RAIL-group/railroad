@@ -22,7 +22,7 @@ dependencies = [
     # new ty release cannot break main on an unrelated commit; bump deliberately.
     # Everything else still floats: mlflow 3.16 adding annotations surfaced new
     # diagnostics with ty unchanged.
-    "ty==0.0.75",
+    "ty==0.0.84",
 ]
 
 [tool.uv.sources]

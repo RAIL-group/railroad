@@ -90,7 +90,9 @@ if __name__ == '__main__':
     host = '192.168.0.16'
     client = roslibpy.Ros(host=host, port=9090)
     client.run()
-    env = RealEnvironment(client)
+    # Stale: RealEnvironment predates AbstractEnvironment's skill API and does
+    # not implement it, so this raises TypeError until the script is ported.
+    env = RealEnvironment(client)  # ty: ignore[call-non-callable]
 
     robot_locations = {"r1": "r1_loc", "r2": "r2_loc"}
     objects_by_type = {
