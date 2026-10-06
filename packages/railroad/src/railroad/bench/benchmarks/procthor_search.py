@@ -31,6 +31,12 @@ from railroad.bench.benchmarks._helpers import capture_timeout_log
 
 
 def _sample_objects_and_location(scene, num_objects: int, seed: int | None):
+    """Draw the target objects and the location they must be brought to.
+
+    Targets are nested across `num_objects` and share one location, so a sweep
+    over the count changes nothing else. The location is drawn after the first
+    two targets, which keeps the two-object problems as they were.
+    """
     rng = random.Random(seed)
     all_objects = sorted({
         obj
@@ -38,10 +44,11 @@ def _sample_objects_and_location(scene, num_objects: int, seed: int | None):
         for obj in objs
     })
     all_locations = sorted(scene.object_locations.keys())
-    return (
-        rng.sample(all_objects, k=min(num_objects, len(all_objects))),
-        rng.choice(all_locations),
-    )
+    objects = rng.sample(all_objects, k=min(2, len(all_objects)))
+    location = rng.choice(all_locations)
+    rest = [obj for obj in all_objects if obj not in objects]
+    objects += rng.sample(rest, k=min(max(num_objects - 2, 0), len(rest)))
+    return objects[:num_objects], location
 
 
 def _run_procthor_search(case: BenchmarkCase, **planner_kwargs):
@@ -222,7 +229,7 @@ def _cases(h_mult: float) -> list[dict]:
             [1, 2, 3],                # num_robots
             ["oracle", "learned"],    # find_prob: ground-truth-backed 0.8/0.1, or the learned estimator
             [4000],                   # mcts.iterations
-            [2],                      # num_objects
+            [1, 2, 4],                # num_objects
         )
     ]
 
