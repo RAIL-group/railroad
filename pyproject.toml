@@ -18,9 +18,11 @@ dependencies = [
     # Ruff runs on defaults (there is no [tool.ruff] config); 0.16's wider
     # default rule set surfaces ~1400 findings. Lift once rules are configured.
     "ruff>=0.15.10,<0.16",
-    # uv.lock is gitignored, so CI re-resolves every run. The ceiling stops a
-    # new ty release from breaking main on an unrelated commit; bump deliberately.
-    "ty>=0.0.75,<0.0.76",
+    # uv.lock is gitignored, so CI re-resolves every run. Pinned exactly so a
+    # new ty release cannot break main on an unrelated commit; bump deliberately.
+    # Everything else still floats: mlflow 3.16 adding annotations surfaced new
+    # diagnostics with ty unchanged.
+    "ty==0.0.75",
 ]
 
 [tool.uv.sources]
