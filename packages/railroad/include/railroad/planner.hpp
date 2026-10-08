@@ -184,13 +184,11 @@ inline void backpropagate(MCTSDecisionNode *leaf, double reward) {
 
 
 // Max backup (Keller & Helmert's MaxUCT): a decision node is worth its best
-// child, a chance node the probability-weighted mean of its outcomes (each
-// valued from the heuristic when the chance node is created, then refined).
-// Under mean backup a node is worth the average of everything the tree policy
-// tried below it, so with broad exploration an action whose continuations
-// are mostly bad is undervalued even when one is the best on offer -- and in
-// multi-robot problems most coordination choices below a node are bad.
-// Visit counts (and the plain value sums) are kept as for mean backup.
+// child, a chance node the probability-weighted mean of its outcomes. Under
+// mean backup a node is worth the average of everything tried below it, so an
+// action whose continuations are mostly bad is undervalued even when one is
+// the best on offer -- and in multi-robot problems most coordination choices
+// are bad. Visit counts and value sums are kept as for mean backup.
 inline void backpropagate_max(MCTSDecisionNode *leaf, double reward) {
   if (!leaf->evaluated) {
     leaf->evaluated = true;
@@ -207,9 +205,8 @@ inline void backpropagate_max(MCTSDecisionNode *leaf, double reward) {
       any = true;
       best = std::max(best, kv.second->estimate);
     }
-    // Until every action has been tried, the node's own evaluation stands in
-    // for the untried ones; otherwise one arbitrary first child would decide
-    // the estimate of every rarely visited node (most chance outcomes).
+    // The node's own evaluation stands in for its untried actions; otherwise
+    // one arbitrary first child would decide every rarely visited node.
     if (!d->untried_actions.empty() && d->evaluated)
       best = std::max(best, d->leaf_value);
     d->estimate = any ? best : d->leaf_value;
@@ -433,11 +430,10 @@ inline std::string mcts(const State &root_state,
         if (chance_raw->children.empty())
           continue;
 
-        // Under max backup a chance node is the expectation over *all* its
-        // outcomes, so each is valued now from the heuristic; otherwise the
-        // first sampled outcome stands in for all of them, and a lucky
-        // low-probability branch (an unlikely search succeeding) makes its
-        // action look like a sure thing.
+        // Under max backup a chance node averages *all* its outcomes, so each
+        // is valued from the heuristic now; otherwise the first sampled one
+        // stands in for all, and a lucky unlikely outcome (a long-shot search
+        // succeeding) makes its action look like a sure thing.
         if (max_backup) {
           for (auto &child : chance_raw->children) {
             child->leaf_value = leaf_reward(child.get(), accumulated_extra_cost);
@@ -482,9 +478,9 @@ inline std::string mcts(const State &root_state,
     const Action *best_action = nullptr;
     int most_visits = 0;
 
-    // Under max backup the estimate is the value; visits are only a proxy,
-    // and a child that stays optimistic while its actions are untried can
-    // gather the most visits and still end up worse. Ties go to visits.
+    // Under max backup recommend the best estimate (ties to visits): a child
+    // that stays optimistic while its actions are untried can gather the most
+    // visits and still be worse.
     double best_est = -std::numeric_limits<double>::infinity();
     for (auto &kv : result.root->children) {
       MCTSChanceNode *cn = kv.second.get();

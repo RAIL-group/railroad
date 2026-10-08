@@ -1,11 +1,9 @@
 #pragma once
 
 // The concurrent heuristic's compiled problem: everything that depends only on
-// the action set and the goal, compiled once into integer-indexed arrays so
-// that a per-state evaluation touches flat arrays only. Also the heuristic's
-// public option and breakdown types. See heuristic_concurrent.hpp for the
-// overview; the bracketed tags below name the part of the heuristic that
-// reads each block.
+// the action set and the goal, as integer-indexed arrays, so that an
+// evaluation touches flat arrays only. Also the public option and breakdown
+// types.
 
 #include "railroad/core.hpp"
 #include "railroad/goal.hpp"
@@ -28,17 +26,16 @@ struct ConcurrentHeuristicOptions {
   double lambda_ms = 0.5;
   // Schedule goals onto agents (true) or onto one serial "team" agent (false).
   bool agent_aware = true;
-  // Make in-flight effects available when they are scheduled (true) or at
-  // time 0, as the FF heuristic's relaxed transition does (false).
+  // In-flight effects become available when they fire (true) or at time 0,
+  // as in the FF heuristic (false).
   bool timed_init = true;
   // Plan a goal `at X L` together with the `found X` it implies.
   bool joint_found = true;
-  // Re-cost an agent's moves as a route through the locations its goal
-  // needs (false: the relaxed plan's own move durations).
+  // Cost an agent's moves as one route through the places its goal needs
+  // (false: the relaxed plan's own moves).
   bool route_chaining = true;
-  // Cost a goal's uncertain search as an expected route over its candidate
-  // places (and the rest of the goal from wherever the object turns up),
-  // instead of a plan through one place plus a retry delta.
+  // Cost an uncertain search as an expected route over its candidate places
+  // (false: a plan through one place plus a retry delta).
   bool expected_search = true;
 };
 
@@ -102,7 +99,7 @@ struct Problem {
     return s;
   }
 
-  // -- Actions [relaxation] ----------------------------------------------
+  // -- Actions -----------------------------------------------------------
   std::vector<CompiledAction> acts;
   std::vector<std::vector<int>> consumers;          // fluent -> actions needing it
   std::vector<std::vector<AchieverRef>> achievers;  // fluent -> achievers
@@ -114,14 +111,13 @@ struct Problem {
     return false;
   }
 
-  // -- Agents [schedule]: the arguments of `free` preconditions ----------
+  // -- Agents: the arguments of `free` preconditions ----------------------
   std::vector<int> agent_free;  // agent -> fid of `free <agent>`
   std::vector<std::string> agent_names;
   std::vector<std::vector<int>> agent_acts;  // agent -> its actions
   std::size_t num_agents() const { return agent_free.size(); }
 
-  // -- Routes [plans]: each agent's location fluents -- the mutex group its
-  //    moves switch between -- and the places they name.
+  // -- Routes: each agent's location fluents and the places they name -----
   std::vector<int> loc_agent;                // location fluent -> its agent (or -1)
   std::vector<std::vector<int>> loc_fluents;  // agent -> its location fluents
   std::vector<int> loc_place;                // location fluent -> place (or -1)
@@ -164,7 +160,7 @@ struct Problem {
     return best;
   }
 
-  // -- Object-search convention [plans]: `at X L` -> `found X` (or -1) ----
+  // -- Object-search convention: `at X L` -> `found X` (or -1) -----------
   std::vector<int> found_of;
 
   // -- Goal: DNF branches (fluent ids, -1 = in no action or state) --------
@@ -223,8 +219,8 @@ struct Problem {
         }
       }
       ca.dur = duration + a.extra_cost();
-      // Branch probabilities may come from single-precision estimates; a
-      // fluent every branch adds is certain whenever they sum to one.
+      // A fluent every branch adds is certain when the branches sum to one
+      // (within a tolerance that admits float32 probabilities).
       double total = 0.0;
       for (const auto &sp : succs) total += std::max(sp.second, 0.0);
       const bool complete = std::abs(total - 1.0) < 1e-6;
@@ -269,8 +265,7 @@ struct Problem {
       if (acts[ai].agent >= 0) agent_acts[acts[ai].agent].push_back(ai);
     }
 
-    // Goal fluents may be absent from every action; intern them too so that
-    // they can at least be satisfied by the state.
+    // Intern goal fluents too: the state may satisfy one no action touches.
     if (goal) {
       for (const auto &f : goal->get_all_literals()) intern(f);
     }
@@ -286,11 +281,10 @@ struct Problem {
     }
   }
 
-  // Agent location fluents: an action run by agent r that, through its
-  // top-level effects, adds P(r, y, ...) and deletes P(r, x, ...) moves r
-  // between two values of one mutex group (e.g. `at r x` -> `at r y`).
-  // Places: a location fluent with its agent argument removed, so that
-  // `at robot1 L` and `at robot2 L` name the same place.
+  // Location fluents: an action of agent r whose top-level effects add
+  // P(r, y, ...) and delete P(r, x, ...) moves r within one mutex group
+  // (e.g. `at r x` -> `at r y`). A place is a location fluent without its
+  // agent argument, so `at robot1 L` and `at robot2 L` name the same place.
   void compile_routes() {
     std::size_t nf = fluents_.size();
     loc_agent.assign(nf, -1);
@@ -348,8 +342,8 @@ struct Problem {
     if (!goal) return;
     GoalType type = goal->get_type();
     if (type == GoalType::TRUE_GOAL || type == GoalType::FALSE_GOAL) return;
-    // Large DNFs are rare; cap enumeration like ff_heuristic does and fall
-    // back to the literal union (an over-constrained but finite estimate).
+    // Cap DNF enumeration as ff_heuristic does; past the cap, use the union
+    // of the literals (over-constrained but finite).
     constexpr std::size_t kMaxBranches = 1024;
     if (goal->dnf_branch_count() == 0) return;
     if (goal->dnf_branch_count() > kMaxBranches) {

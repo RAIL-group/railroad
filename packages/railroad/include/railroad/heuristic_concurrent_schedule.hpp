@@ -2,13 +2,11 @@
 
 // Core of the concurrent heuristic: list-scheduling goals onto agents.
 //
-// Each goal fact not yet true is scheduled as one unit (with the `found X` an
-// `at X L` implies, under the object-search convention). In priority
-// order, each goal goes to the agent that would finish it earliest from that
-// agent's ready time and position (earliest finish time), and the schedule
-// yields every goal's completion time. Longest-first (LPT) suits the
-// makespan, shortest-first (SPT) the sum of completion times; both orders are
-// tried and the one the value prefers is kept.
+// Each goal fact not yet true is one unit (with the `found X` an `at X L`
+// implies). In priority order, each goes to the agent that would finish it
+// earliest from that agent's ready time and position. Longest-first (LPT)
+// suits the makespan and shortest-first (SPT) the sum of completion times;
+// both are tried and the one the value prefers is kept.
 
 #include "railroad/heuristic_concurrent_plans.hpp"
 
@@ -50,10 +48,9 @@ class Scheduler {
       std::vector<GoalPlan> plans;  // per agent
       double key;
     };
-    // `at X L` and the `found X` it implies are one job -- whoever brings X
-    // to L must find it first -- so they are planned together. Planned
-    // apart, `at X L` can be "achieved" by searching L in the hope that X is
-    // already there, while finding X goes to another agent.
+    // `at X L` and the `found X` it implies are one job: whoever brings X to
+    // L must find it first. Planned apart, `at X L` could be "achieved" by
+    // searching L in the hope X is there while another agent finds X.
     auto companion_of = [&](int g) {
       if (!opts.joint_found) return -1;
       int fx = pb.found_of[g];
@@ -96,7 +93,7 @@ class Scheduler {
     std::vector<double> finish;
     std::vector<int> end_loc;
     std::vector<int> n_assigned;
-    // The agent that would finish goal t earliest (earliest finish time).
+    // The agent that would finish goal t earliest.
     auto earliest = [&](const OpenGoal &t, int &best_r) {
       best_r = -1;
       double best_f = INF;
@@ -112,8 +109,7 @@ class Scheduler {
       }
       return best_f;
     };
-    // List-schedule the goals in the given priority order: each goes to the
-    // agent that would finish it earliest.
+    // One list-scheduling pass in the given priority order.
     struct Done {
       int goal;  // index into open
       double at;

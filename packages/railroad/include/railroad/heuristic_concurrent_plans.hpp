@@ -2,20 +2,18 @@
 
 // Goal plans: one agent's relaxed plan for one goal, and its duration.
 //
-// Core: the plan is read off the agent's relaxation pass, and its duration is
-// the sum of its actions (plus retry deltas), bounded below by the relaxed
-// critical path.
+// Core: the plan is read off the agent's pass; its duration is the sum of its
+// actions plus retry deltas, bounded below by the relaxed critical path.
 //
-// Route chaining (when the agent has location fluents): a delete relaxation
+// Route chaining (when the agent has location fluents): the delete relaxation
 // lets an agent be in several places at once -- a fetch costs start->object +
 // start->target, and an agent standing at the target never has to come back.
-// Instead the locations the plan needs are visited in the order they are
-// needed, each leg costed from the previous one.
+// Instead the places the plan needs are visited in the order they are needed,
+// each leg costed from the previous one.
 //
-// Expected search (when the goal has an uncertain subgoal; see
-// heuristic_concurrent_search.hpp): the plan is split around the search, the
-// search is costed as an expected route, and the rest of the goal is costed
-// from wherever the search succeeds.
+// Expected search (when the goal has an uncertain subgoal): the plan is split
+// around the search, the search is costed as an expected route, and the rest
+// of the goal from wherever the search succeeds.
 
 #include "railroad/heuristic_concurrent_search.hpp"
 
@@ -39,16 +37,14 @@ struct GoalPlan {
   std::vector<int> locs;  // locations to visit, in order
   std::vector<double> leg_fallback;  // relaxed-plan cost of each leg
   std::vector<int> covers;
-  // Expected-search costing: the uncertain subgoal, the places needed before
-  // and after it (after it, from wherever it succeeds), the non-move
-  // durations before and after it (the search's own is inside the expected
-  // search time), and the retry deltas of everything else.
+  // Expected search: the uncertain subgoal, and the places and non-move
+  // durations before and after it (the search's own is in its expected time).
   int search_f = -1;
   int goal = -1;  // the goal fluent
   std::vector<int> pre_locs, post_locs;
   std::vector<double> pre_fb, post_fb;
   double other_pre = 0.0, other_post = 0.0;
-  double delta_rest = 0.0;
+  double delta_rest = 0.0;  // retry deltas the expected search does not cover
 };
 
 // Where agent r is (or will be once its current action ends): its location
@@ -94,15 +90,13 @@ inline int deterministic_achiever(const Problem &pb, const Pass &P, int g) {
   return best;
 }
 
-// Identify the goal's uncertain search -- the implied `found X` when the
-// goal has one (even with a single attempt left, so that the estimate does
-// not switch costing schemes when the second-last place fails), else the
-// probabilistic subgoal with the most attempts -- and split the plan into
-// what comes before it and what comes after. Attempts count whether planned
-// or in flight. After the search, an action that needs something the search
-// reveals (picking the object up where it is) happens wherever the search
-// succeeds, so only the other actions' places (where to bring it) are on the
-// route from there.
+// Find the goal's uncertain search and split the plan around it. The search
+// is the implied `found X` when the goal has one -- even with one attempt
+// left, so the costing does not switch schemes when the second-last place
+// fails -- else the probabilistic subgoal with the most attempts. After the
+// search, an action that needs what the search reveals (picking the object
+// up) happens wherever it succeeds, so only the other actions' places (where
+// to bring it) are on the route from there.
 inline void split_search(Context &cx, Pass &P, int r, int g, int companion,
                          const std::vector<int> &plan, const std::vector<int> &move_dests,
                          GoalPlan &tp) {
@@ -116,8 +110,7 @@ inline void split_search(Context &cx, Pass &P, int r, int g, int companion,
     if (n > best_n) { best_n = n; f_star = f; }
   }
   if (f_star < 0) return;
-  // The attempt the plan's search is (an action to start, or one in flight
-  // that the plan relies on), when it needs to start, and what it reveals.
+  // The plan's search attempt (planned or in flight) and when it must start.
   const int b = P.best[f_star];
   const int att = support_attempt(cx.ts, P, f_star);
   double search_need = (b >= 0) ? P.wait[b] : 0.0;
@@ -162,9 +155,8 @@ inline void split_search(Context &cx, Pass &P, int r, int g, int companion,
   order(after, tp.post_locs, tp.post_fb);
   tp.search_f = f_star;
   tp.goal = g;
-  // The retry deltas of the search outcome (and of anything else the same
-  // attempt reveals, e.g. `at X place`) are superseded by the expected search
-  // time.
+  // The expected search time supersedes the retry deltas of what the search
+  // attempt reveals (e.g. `found X` and `at X place`).
   tp.delta_rest = 0.0;
   for (int f : tp.covers) {
     if (!P.uncertain(pb, f)) continue;
@@ -180,11 +172,11 @@ inline GoalPlan plan_goal(Context &cx, Pass &P, int g, int companion, int r, dou
   GoalPlan tp;
   if (!P.reachable(g)) return tp;
   if (companion >= 0 && !P.reachable(companion)) companion = -1;
-  // Under expected search, a goal whose cheapest support is itself an
-  // uncertain search (searching the target place, which would reveal the
-  // object already there) is planned through its deterministic achiever:
-  // wherever else the object turns up it still has to be brought over. The
-  // search outcomes that achieve the goal in place cost no delivery.
+  // Under expected search, a goal whose cheapest support is an uncertain
+  // search (searching the target place, hoping the object is already there)
+  // is planned through its deterministic achiever: wherever else the object
+  // turns up, it must be brought over. Outcomes that achieve the goal in
+  // place cost no delivery (goal_duration).
   int forced_from = Pass::NONE;
   if (cx.opts.expected_search && cx.opts.route_chaining && r >= 0 && P.uncertain(pb, g)) {
     int d = deterministic_achiever(pb, P, g);
@@ -254,8 +246,6 @@ inline GoalPlan plan_goal(Context &cx, Pass &P, int g, int companion, int r, dou
   }
   for (const auto &v : uniq) {
     tp.locs.push_back(v.second);
-    // If no single move reaches it from the previous stop, fall back to the
-    // relaxed plan's own cost of getting there.
     int b = P.best[v.second];
     tp.leg_fallback.push_back(b >= 0 ? pb.acts[b].dur : 0.0);
   }

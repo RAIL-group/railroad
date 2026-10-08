@@ -2,64 +2,54 @@
 
 // Concurrency-aware heuristic ("h_conc"): the team's expected remaining time.
 //
-// The FF heuristic (heuristic.hpp) estimates the cost of a *sequential* plan:
-// it sums the durations of every relaxed-plan action whichever robot runs it,
-// and its relaxed initial state treats every in-flight effect as already done.
-// With several robots the objective (time until the goal holds) is a makespan,
+// The FF heuristic (heuristic.hpp) estimates a *sequential* plan: it sums
+// every relaxed-plan action whichever robot runs it, and treats in-flight
+// effects as already done. With several robots the objective is a makespan,
 // and MCTS leaves are reached while other robots are mid-action. This
 // heuristic instead estimates how long the *team* needs to finish, in
 // expectation over the outcomes of uncertain actions.
 //
-// Core (general to any railroad domain whose agents are the arguments of
-// `free`):
+// Core (any domain whose agents are the arguments of `free`):
 //
-//   1. Timed relaxed state -- in-flight effects become available when they
-//      fire; in-flight uncertain outcomes are pending achievers that keep
-//      their probability.                  [heuristic_concurrent_relaxation.hpp]
-//   2. Probability-aware relaxation -- per agent, each fluent's cost and the
+//   1. Timed relaxed state: in-flight effects become available when they
+//      fire; in-flight uncertain outcomes keep their probability.
+//                                          [heuristic_concurrent_relaxation.hpp]
+//   2. Probability-aware relaxation: per agent, each fluent's cost and the
 //      probability rho its support succeeds; achievers ranked by cost / rho.
 //                                          [heuristic_concurrent_relaxation.hpp]
-//   3. Goal plans -- a "goal" is one fact of the goal (of its best DNF
-//      branch), e.g. `at mug L`; each needs one or more actions. A goal's
-//      relaxed plan on each agent, and its duration on that agent. Goals are
-//      planned independently, so one goal's plan may use what another's
-//      relies on (the delete relaxation sets a full hand's object down
-//      anywhere to fetch another).
-//                                          [heuristic_concurrent_plans.hpp]
-//   4. List schedule -- each goal goes to the agent that would finish it
-//      earliest; the value is computed from the completion times C_g:
+//   3. Goal plans: a "goal" is one fact of the goal (of its best DNF branch),
+//      e.g. `at mug L`. Each gets a relaxed plan and a duration on each
+//      agent. Goals are planned independently, so one goal's plan may use
+//      what another's relies on.          [heuristic_concurrent_plans.hpp]
+//   4. List schedule: each goal goes to the agent that would finish it
+//      earliest, giving completion times C_g and the value
 //          lambda_add * sum_g C_g + lambda_ms * max_g C_g
-//      minimised over goal DNF branches. The objective is the makespan; the
-//      sum is a shaping term. The makespan alone leaves an agent whose goal
-//      is off the critical path without a gradient (in ProcTHOR, plans
-//      3-22% longer with 2-3 robots, 12% on average). The price: with n
-//      goals open the value falls at lambda_ms + lambda_add * n per unit of
-//      time while MCTS charges 1, as if h were multiplied by (n + 1) / 2 at
-//      the default weights.
+//      minimised over DNF branches. The objective is the makespan; the sum
+//      is a shaping term that gives an agent off the critical path a
+//      gradient. The price: with n goals open the value falls at
+//      lambda_ms + lambda_add * n per unit of time while MCTS charges 1.
 //                                          [heuristic_concurrent_schedule.hpp]
 //
-// Refinements that apply only where the domain has the structure they need:
+// Refinements, where the domain has the structure they need:
 //
-//   - Route chaining: an agent with location fluents (a mutex group its moves
-//     switch between) visits the places its goal needs in order, each leg
-//     costed from the previous one.        [plans; compiled in problem]
+//   - Route chaining: an agent with location fluents visits the places its
+//     goal needs in order, each leg costed from the previous one.
+//                                          [heuristic_concurrent_plans.hpp]
 //   - Expected search: a subgoal with several probabilistic attempts is
-//     costed as an expected route over them, attempts already in flight
-//     included, and the rest of the goal from wherever it succeeds.
+//     costed as an expected route over them, in-flight attempts included,
+//     and the rest of the goal from wherever it succeeds.
 //                                          [heuristic_concurrent_search.hpp]
 //
-// Object-search convention (the core's name-keyed `at`/`found` machinery): a
-// goal `at X L` also needs `found X`, and the two are planned together.
+// Object-search convention: a goal `at X L` also needs `found X`, and the two
+// are planned together.
 //
-// The estimate aims to agree with its own one-step lookahead: for an action
-// the estimate's plan starts with, h(s) = dt + sum_o p_o h(o) over its
-// outcomes, so starting an action, or an outcome arriving, does not move the
-// value MCTS sees.
+// The estimate aims to agree with its own one-step lookahead: for the action
+// its plan starts with, h(s) = dt + sum_o p_o h(o), so starting an action or
+// an outcome arriving does not move the value MCTS sees.
 //
-// With one agent and no in-flight effects it is a sequential, route-aware
-// h_ff. Problem-dependent structure is compiled once per search
-// (heuristic_concurrent_problem.hpp), so an evaluation touches flat arrays
-// only.
+// With one agent and no in-flight effects it reduces to a sequential,
+// route-aware h_ff. Everything that depends only on the actions and the goal
+// is compiled once per search (heuristic_concurrent_problem.hpp).
 
 #include "railroad/heuristic_concurrent_schedule.hpp"
 #include "railroad/state.hpp"

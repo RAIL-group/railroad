@@ -1,30 +1,26 @@
 #pragma once
 
-// Expected search: costing an uncertain subgoal -- one with several
+// Expected search: cost an uncertain subgoal -- one with several
 // probabilistic attempts, such as the places an object may be found -- as an
-// expected route over its attempts instead of a plan through one of them plus
-// a retry delta.
+// expected route over its attempts.
 //
-// From where the agent is, it walks to the unused attempt with the most
-// probability per unit of travel + execution (a greedy route). Attempts
-// already in flight complete at their scheduled times regardless. With all
-// events in time order, the expected time to the first success is
-// E = sum_i (T_i - T_{i-1}) P(no success before T_i), and the search reports
-// where it may succeed, weighted by the *unconditional* probability of
-// succeeding there: independent attempts may all fail, and conditioning on
-// success would re-weight the remaining places after every failure, so the
-// estimate would jump whenever a search fails.
+// The agent walks greedily to the unused attempt with the most probability
+// per unit of travel + execution; attempts already in flight complete at
+// their scheduled times. With all events in time order, the expected time to
+// the first success is E = sum_i (T_i - T_{i-1}) P(no success before T_i).
+// Where the search may succeed is weighted by the *unconditional* probability
+// of succeeding there: conditioning on success would re-weight the remaining
+// places after every failure, so the estimate would jump whenever a search
+// fails.
 
 #include "railroad/heuristic_concurrent_relaxation.hpp"
 
 namespace railroad {
 namespace concurrent {
 
-// An attempt at uncertain fluent f, as agent r sees it: either one r can
-// still start, or one already in flight, whoever started it. Planned and
-// in-flight attempts are the same thing at different times, and everything
-// below treats them alike, so starting an attempt does not change how the
-// search is costed.
+// An attempt at uncertain fluent f, as agent r sees it: one r can still
+// start, or one already in flight, whoever started it. The two are treated
+// alike, so starting an attempt does not change how the search is costed.
 struct SearchAttempt {
   int loc;          // r's location fluent where it happens (-1: none)
   double exec, prob;

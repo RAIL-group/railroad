@@ -706,10 +706,12 @@ PYBIND11_MODULE(_bindings, m) {
            py::arg("heuristic") = "concurrent",
            py::arg("backup") = "max",
            py::arg("heuristic_options") = py::none(),
-           "Construct an MCTSPlanner. The lambda_* weights mix the additive "
-           "(h_add), max (h_max), and relaxed-plan-cost (h_ff) heuristic "
-           "components used during search; defaults are an even split between "
-           "h_add and h_ff (0.5, 0.0, 0.5).\n\n"
+           "Construct an MCTSPlanner. heuristic='concurrent' (the default) is "
+           "the concurrency-aware heuristic: lambda_add weights the sum of goal "
+           "completion times and lambda_ff the makespan. heuristic='ff' mixes "
+           "the additive (h_add), max (h_max), and relaxed-plan-cost (h_ff) "
+           "components by the lambda_* weights. backup is 'max' (MaxUCT, the "
+           "default) or 'mean'.\n\n"
            "dead_end_penalty: reward charged for a branch the relaxation "
            "proves cannot reach the goal (h = inf), as a flat cost -- the "
            "time and extra_cost the branch already spent are not added, so a "

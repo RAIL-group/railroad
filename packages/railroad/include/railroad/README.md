@@ -31,9 +31,7 @@ Probabilistic PDDL planning system.
 - **heuristic_concurrent.hpp**: the concurrency-aware heuristic
   (`ConcurrentHeuristic`) -- the planner's default leaf evaluator, a
   self-contained alternative to `ff_heuristic` (see "concurrent_heuristic"
-  below). Umbrella header: its opening comment says which parts are core and
-  which are refinements, and the class ties the parts together. The parts, in
-  dependency order:
+  below). Umbrella header for its parts, in dependency order:
   - **heuristic_concurrent_problem.hpp**: options, breakdown, and the
     compiled problem (fluent ids, actions, agents, agent location groups,
     `at`->`found`, goal branches).
