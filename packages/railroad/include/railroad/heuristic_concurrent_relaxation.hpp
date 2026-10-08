@@ -4,24 +4,20 @@
 // probability-aware relaxation over it.
 //
 //   TimedState  The state as the relaxation sees it. Fluents true now are
-//               available at time 0; an in-flight effect's fluents become
-//               available when it fires. An in-flight probabilistic effect is
-//               an *attempt* already under way: its uncertain outcomes are
-//               pending achievers that keep their probability, and it uses
-//               up the planned attempts that consume what it deletes (another
-//               robot's search of the same place), so that expected search
-//               counts it once, like the attempt it was before it started. A
-//               free agent must act at once, so its own pending effects count
-//               only after the shortest action it can start now.
-//   Pass        One relaxation over the timed state, restricted to one
-//               agent's actions (plus agent-free ones) or unrestricted. Each
-//               fluent gets a cost and the probability rho that its relaxed
-//               support succeeds; achievers are ranked by cost / rho, the
-//               expected cost of retrying an independent attempt until it
-//               succeeds, which is monotone along supports, so one
-//               Dijkstra-style pass computes all of them. Retry deltas price
-//               a probabilistic subgoal's expected extra time over its
-//               optimistic cost.
+//               available at time 0, an in-flight effect's fluents when it
+//               fires. An in-flight probabilistic effect is an *attempt*
+//               under way: its uncertain outcomes are pending achievers that
+//               keep their probability, and it uses up the planned attempts
+//               that consume what it deletes (e.g. another robot's search of
+//               the same place), so it is counted once.
+//   Pass        One relaxation, restricted to one agent's actions (plus
+//               agent-free ones) or unrestricted. Each fluent gets a cost and
+//               the probability rho that its support succeeds; achievers are
+//               ranked by cost / rho, the expected cost of retrying an
+//               independent attempt until it succeeds. The ranking is
+//               monotone along supports, so one Dijkstra-style pass computes
+//               it. Retry deltas price a probabilistic subgoal's expected
+//               extra time over its optimistic cost.
 //   Extractor   Relaxed-plan extraction from a pass, FF style.
 
 #include "railroad/heuristic_concurrent_problem.hpp"
@@ -109,8 +105,7 @@ class TimedState {
       }
       in_flight.push_back(std::move(fl));
       // Where it happens: the location precondition of a planned attempt it
-      // uses up (the action that was started, or the same search by another
-      // agent).
+      // uses up.
       for (int i : in_flight.back().outcomes) {
         for (const auto &ach : pb.achievers[pending[i].fluent]) {
           if (in_flight.back().loc >= 0 || !spent(pb, ach.action)) continue;
@@ -178,10 +173,10 @@ class TimedState {
     }
   }
 
-  // A free agent acts now; it cannot idle until one of its own pending
-  // effects fires (e.g. a "just picked" flag that clears 0.1 s after the
-  // pick, which forbids putting the object straight back). Such effects are
-  // usable by the agent only after the shortest action it can start now.
+  // A free agent must act now: it cannot idle until one of its own pending
+  // effects fires (e.g. a "just picked" flag that clears 0.1 s after a pick,
+  // so the object cannot go straight back down). Such effects count for the
+  // agent only after the shortest action it can start now.
   void defer_own_effects(const Problem &pb) {
     if (now_.size() != pb.num_fluents()) now_.assign(pb.num_fluents(), 0);
     std::fill(now_.begin(), now_.end(), 0);
@@ -328,7 +323,7 @@ struct Pass {
   };
 
   double compute_delta(const Problem &pb, const TimedState &ts, int f) const {
-    // Pending outcomes first: once in flight, an attempt is not repeatable.
+    // In-flight outcomes are attempts with no wait that end when they fire.
     std::vector<Try> reps;
     for (const auto &pd : ts.pending) {
       if (pd.fluent == f) reps.push_back({0.0, pd.time, pd.prob});
@@ -388,10 +383,10 @@ class Extractor {
   }
 
   // Walk back from `roots` via the pass's chosen achievers, costliest subgoal
-  // first (as FF does): every fluent an action on the plan adds counts as
-  // achieved, so a later, cheaper subgoal it covers as a side effect (e.g. the
-  // `hand-full` that a pick also adds) does not pull in an achiever of its
-  // own. Probabilistic subgoals still pay their retry delta.
+  // first (as FF does). A fluent added by an action already on the plan
+  // counts as achieved, so a cheaper subgoal covered as a side effect (the
+  // `hand-full` a pick adds) pulls in no achiever of its own; probabilistic
+  // subgoals still pay their retry delta.
   void extract(const Problem &pb, const TimedState &ts, Pass &P, const std::vector<int> &roots,
                Extraction &ex) {
     std::priority_queue<std::pair<double, int>> heap;  // (cost, fluent), max first
