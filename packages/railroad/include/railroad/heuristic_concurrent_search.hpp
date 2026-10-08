@@ -71,28 +71,28 @@ inline bool attempt_reveals(const Problem &pb, const TimedState &ts, int att, in
   return att <= -2 && ts.reveals(-2 - att, q);
 }
 
-// Where a search may succeed (as r's location fluent), with the
-// unconditional probability that it succeeds there, and whether that
-// success already achieves the goal.
+// A place a search may succeed, with the unconditional probability that it
+// succeeds there and the time left from there (`rest`).
 struct Found {
-  int loc;
   double prob;
-  bool achieves;
+  double rest;
 };
 
 // Expected time, from t_start, until f holds when agent r, starting at
-// location fluent `pos`, works through f's attempts in pass P.
+// location fluent `pos`, works through f's attempts in pass P. rest(loc,
+// achieves) is the time left after succeeding at `loc`.
+template <class Rest>
 inline double expected_search(const Problem &pb, const TimedState &ts, const Pass &P, int f,
-                              int goal, int r, int pos, double t_start,
+                              int goal, int r, int pos, double t_start, const Rest &rest,
                               std::vector<Found> &where) {
   where.clear();
-  struct Event { double t, p; int loc; bool achieves; };
+  struct Event { double t, p, rest; };
   std::vector<Event> events;
   std::vector<SearchAttempt> cands;
   double fail = 1.0;
   for (const auto &at : attempts_for(pb, ts, P, r, f, goal)) {
     if (at.in_flight >= 0) {
-      events.push_back({at.fallback, at.prob, at.loc, at.achieves});
+      events.push_back({at.fallback, at.prob, rest(at.loc, at.achieves)});
       fail *= 1.0 - at.prob;
     } else {
       cands.push_back(at);
@@ -120,18 +120,22 @@ inline double expected_search(const Problem &pb, const TimedState &ts, const Pas
     used[best] = 1;
     t += best_dt;
     if (c.loc >= 0) pos = c.loc;
-    events.push_back({t, c.prob, pb.as_agent_loc(r, c.loc), c.achieves});
+    events.push_back({t, c.prob, rest(c.loc, c.achieves)});
     fail *= 1.0 - c.prob;
   }
   if (events.empty()) return INF;
-  std::sort(events.begin(), events.end(), [](const Event &a, const Event &b) { return a.t < b.t; });
+  // Outcomes at the same time are credited cheapest-rest first: if several
+  // succeed, the agent goes on from the best of them.
+  std::sort(events.begin(), events.end(), [](const Event &a, const Event &b) {
+    return a.t < b.t || (a.t == b.t && a.rest < b.rest);
+  });
   double expected = 0.0, prev = t_start, still = 1.0;
   for (const auto &e : events) {
     double tt = std::max(e.t, prev);
     expected += (tt - prev) * still;
     prev = tt;
     double here = still * e.p;
-    if (here > 0.0) where.push_back({e.loc, here, e.achieves});
+    if (here > 0.0) where.push_back({here, e.rest});
     still *= 1.0 - e.p;
   }
   return expected;

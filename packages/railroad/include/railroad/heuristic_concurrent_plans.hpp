@@ -269,20 +269,22 @@ inline double goal_duration(Context &cx, const Pass &P, int r, int start, double
   }
   int pos = start;
   double pre = route_through(pb, r, start, tp.pre_locs, tp.pre_fb, pos);
+  // The rest of the goal from wherever the object turns up; nothing if
+  // finding it there already achieves the goal.
+  auto rest = [&](int loc, bool achieves) {
+    if (achieves) return 0.0;
+    int e;
+    return route_through(pb, r, loc >= 0 ? loc : pos, tp.post_locs, tp.post_fb, e) + tp.other_post;
+  };
   std::vector<Found> where;
-  double search = expected_search(pb, cx.ts, P, tp.search_f, tp.goal, r, pos, t_start + pre, where);
+  double search =
+      expected_search(pb, cx.ts, P, tp.search_f, tp.goal, r, pos, t_start + pre, rest, where);
   if (!std::isfinite(search)) {
     delta_out = tp.delta;
     return tp.other + route_through(pb, r, start, tp.locs, tp.leg_fallback, end);
   }
-  // The rest of the goal from wherever the object turns up; nothing if
-  // finding it there already achieves the goal.
   double post = 0.0;
-  for (const auto &w : where) {
-    if (w.achieves) continue;
-    post += w.prob * (route_through(pb, r, w.loc >= 0 ? w.loc : pos, tp.post_locs, tp.post_fb, end) +
-                      tp.other_post);
-  }
+  for (const auto &w : where) post += w.prob * w.rest;
   delta_out = tp.delta_rest;
   return pre + search + post + tp.other_pre;
 }

@@ -130,20 +130,24 @@ def test_expected_search_is_a_route_over_the_candidate_places(probs, revealed, e
 
 @pytest.mark.parametrize("order", [("search r1 a box", "search r2 c box"),
                                    ("search r2 c box", "search r1 a box")])
-def test_in_flight_searches_are_costed_where_they_happen(order):
-    """r1 searches `a` (done at 5) and r2 searches `c` (done at 6) while r3 is
-    free, in either order. r1 is ready at 5 and waits for `c` with probability
-    0.5: 5.5. Delivery from `a` (0.5) takes 2 + 10 + 2, from `c` alone (0.25)
-    2 + 60 + 2: 5.5 + 7 + 16 = 28.5. Costing `c` at `a` would give 16."""
+@pytest.mark.parametrize("c_time, expected", [
+    (6.0, 5.5 + 7 + 16),  # r1, ready at 5, waits for `c` with probability 0.5
+    (5.0, 5.0 + 7 + 16),  # both end at 5; if both succeed, deliver from `a`
+])
+def test_in_flight_searches_are_costed_where_they_happen(order, c_time, expected):
+    """r1 searches `a` (done at 5) and r2 searches `c` while r3 is free, in
+    either order. Delivery from `a` (0.5) takes 2 + 10 + 2 = 14 and from `c`
+    alone (0.25) 2 + 60 + 2 = 64, so 7 + 16 after the searches. Costing `c`
+    at `a`, or crediting `c` first when both end together, changes it."""
     actions = _actions(["r1", "r2", "r3"], ["box"],
                        find_prob=lambda r, l, o: {"a": 0.5, "c": 0.5}.get(l, 0.0),
-                       search_time=lambda r, l, o: 6.0 if l == "c" else 5.0)
+                       search_time=lambda r, l, o: c_time if l == "c" else 5.0)
     state = _state({"r1": "a", "r2": "c", "r3": "start"},
                    extra={F("revealed goal"), F("revealed b")})
     for name in order:
         state = _apply(actions, state, name)
     assert state.time == 0.0 and len(state.upcoming_effects) >= 2
-    assert _breakdown(actions, state, F("at box goal"))["value"] == pytest.approx(28.5)
+    assert _breakdown(actions, state, F("at box goal"))["value"] == pytest.approx(expected)
 
 
 @pytest.mark.parametrize("probs", [{"a": 0.5, "b": 0.3, "c": 0.4},
