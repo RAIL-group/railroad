@@ -14,7 +14,7 @@ dependencies = [
     # gui.world_canvas, gui.options and navigation.visualization, which
     # environments/pyrobosim.py imports. Ceiling until it is ported.
     "pyrobosim>=4.3.3,<5",
-    "imageio[ffmpeg]>=2.37.2",
+    "imageio[ffmpeg]>=2.38.1",
 ]
 
 [project.entry-points."railroad.benchmarks"]
