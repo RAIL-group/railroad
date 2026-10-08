@@ -23,7 +23,7 @@ def _move_time(robot, frm, to):
     return abs(POSITION[frm] - POSITION[to])
 
 
-def _actions(robots, objects, find_prob=None, blocking=False):
+def _actions(robots, objects, find_prob=None, blocking=False, search_time=5.0):
     """Ground move / pick / place (and optionally search) for the line world."""
     objects_by_type = {"robot": set(robots), "location": set(POSITION), "object": set(objects)}
     if blocking:
@@ -35,7 +35,7 @@ def _actions(robots, objects, find_prob=None, blocking=False):
                operators.construct_pick_operator(2.0),
                operators.construct_place_operator(2.0)]
     if find_prob is not None:
-        ops.append(operators.construct_search_operator(find_prob, 5.0))
+        ops.append(operators.construct_search_operator(find_prob, search_time))
     # Grounding iterates sets, whose order follows Python's per-process string
     # hashing; fix it so MCTS tie-breaking is reproducible.
     return sorted((a for op in ops for a in op.instantiate(objects_by_type)), key=lambda a: a.name)
@@ -126,6 +126,24 @@ def test_expected_search_is_a_route_over_the_candidate_places(probs, revealed, e
     actions = _actions(["r1"], ["box"], find_prob=lambda r, l, o: probs.get(l, 0.0))
     state = _state({"r1": "start"}, extra={F(f"revealed {p}") for p in revealed})
     assert _breakdown(actions, state, F("at box goal"))["makespan"] == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("order", [("search r1 a box", "search r2 c box"),
+                                   ("search r2 c box", "search r1 a box")])
+def test_in_flight_searches_are_costed_where_they_happen(order):
+    """r1 searches `a` (done at 5) and r2 searches `c` (done at 6) while r3 is
+    free, in either order. r1 is ready at 5 and waits for `c` with probability
+    0.5: 5.5. Delivery from `a` (0.5) takes 2 + 10 + 2, from `c` alone (0.25)
+    2 + 60 + 2: 5.5 + 7 + 16 = 28.5. Costing `c` at `a` would give 16."""
+    actions = _actions(["r1", "r2", "r3"], ["box"],
+                       find_prob=lambda r, l, o: {"a": 0.5, "c": 0.5}.get(l, 0.0),
+                       search_time=lambda r, l, o: 6.0 if l == "c" else 5.0)
+    state = _state({"r1": "a", "r2": "c", "r3": "start"},
+                   extra={F("revealed goal"), F("revealed b")})
+    for name in order:
+        state = _apply(actions, state, name)
+    assert state.time == 0.0 and len(state.upcoming_effects) >= 2
+    assert _breakdown(actions, state, F("at box goal"))["value"] == pytest.approx(28.5)
 
 
 @pytest.mark.parametrize("probs", [{"a": 0.5, "b": 0.3, "c": 0.4},

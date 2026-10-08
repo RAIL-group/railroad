@@ -62,9 +62,7 @@ class TimedState {
   // that attempt deletes)?
   bool spent(const Problem &pb, int a) const {
     for (const auto &fl : in_flight) {
-      for (int c : pb.acts[a].consumes) {
-        if (std::find(fl.dels.begin(), fl.dels.end(), c) != fl.dels.end()) return true;
-      }
+      if (uses_up(pb, fl, a)) return true;
     }
     return false;
   }
@@ -103,17 +101,17 @@ class TimedState {
         int c = pb.lookup(df);
         if (c >= 0) fl.dels.push_back(c);
       }
-      in_flight.push_back(std::move(fl));
       // Where it happens: the location precondition of a planned attempt it
       // uses up.
-      for (int i : in_flight.back().outcomes) {
+      for (int i : fl.outcomes) {
         for (const auto &ach : pb.achievers[pending[i].fluent]) {
-          if (in_flight.back().loc >= 0 || !spent(pb, ach.action)) continue;
+          if (fl.loc >= 0 || !uses_up(pb, fl, ach.action)) continue;
           for (int q : pb.acts[ach.action].pre) {
-            if (pb.loc_agent[q] >= 0) { in_flight.back().loc = q; break; }
+            if (pb.loc_agent[q] >= 0) { fl.loc = q; break; }
           }
         }
       }
+      in_flight.push_back(std::move(fl));
     }
 
     // `waiting a b`: a becomes free when b does (transition() resolves it).
@@ -133,6 +131,13 @@ class TimedState {
 
  private:
   std::vector<uint8_t> now_;  // scratch: fluent available now
+
+  static bool uses_up(const Problem &pb, const InFlight &fl, int a) {
+    for (int c : pb.acts[a].consumes) {
+      if (std::find(fl.dels.begin(), fl.dels.end(), c) != fl.dels.end()) return true;
+    }
+    return false;
+  }
 
   void walk_effect(const Problem &pb, const GroundedEffect &e, double trel, double prob,
                    std::vector<std::pair<int, double>> &prob_adds,
