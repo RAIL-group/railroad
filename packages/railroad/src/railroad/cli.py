@@ -605,23 +605,14 @@ def _make_example_command(name: str, info: ExampleInfo) -> None:
 
     @example.command(name, help=description)
     @click.pass_context
-    def _run(ctx: click.Context, check_heuristic: bool = False, **kwargs: object) -> None:
+    def _run(ctx: click.Context, **kwargs: object) -> None:
         from railroad.examples import EXAMPLES
 
         example_info = EXAMPLES[name]
         click.echo(f"Running example: {name}")
         click.echo(f"  {example_info['description']}\n")
         example_fn = example_info["main"]
-        if not check_heuristic:
-            example_fn(**kwargs)
-            return
-        from railroad.consistency import record_consistency
-
-        with record_consistency() as report:
-            example_fn(**kwargs)
-        click.echo("\nHeuristic consistency at each planning step "
-                   "(one-step lookahead vs. the heuristic):")
-        click.echo(str(report))
+        example_fn(**kwargs)
 
     # Add example-specific options dynamically
     for opt in reversed(options):
@@ -635,10 +626,7 @@ def _make_example_command(name: str, info: ExampleInfo) -> None:
                 extra_kwargs["type"] = opt["type"]
             _run = click.option(option_name, param_name, default=opt.get("default"), show_default=True, help=opt.get("help", ""), **extra_kwargs)(_run)
 
-    # Global options for every example command
-    _run = click.option("--check-heuristic", "check_heuristic", is_flag=True, default=False,
-                        help="Compare the heuristic with its one-step lookahead at every "
-                             "planning step and report the gaps (railroad.consistency)")(_run)
+    # Global plot/video options for every example command
     _run = click.option("--video-dpi", "video_dpi", type=int, default=150, show_default=True, help="Video resolution in dots per inch")(_run)
     _run = click.option("--video-fps", "video_fps", type=int, default=60, show_default=True, help="Video frames per second")(_run)
     _run = click.option("--video-time", "video_time", default=None, callback=_check_video_time, help="Video length in seconds (e.g. 15 or 15s), or a speed to play the plan at (e.g. 100x). Default: 10s")(_run)
@@ -646,7 +634,7 @@ def _make_example_command(name: str, info: ExampleInfo) -> None:
     _run = click.option("--show-plot", "show_plot", is_flag=True, default=False, help="Show trajectory plot interactively")(_run)
     _run = click.option("--save-plot", "save_plot", default=None, help="Save trajectory plot to file (e.g. out.png)")(_run)
     # Option group panels (last applied = displayed first)
-    _run = click.option_panel("Options", options=[opt["name"] for opt in options] + ["--check-heuristic", "--help"])(_run)
+    _run = click.option_panel("Options", options=[opt["name"] for opt in options] + ["--help"])(_run)
     _run = click.option_panel("Plot/video options", options=["--save-plot", "--show-plot", "--save-video", "--video-time", "--video-fps", "--video-dpi"])(_run)
 
 

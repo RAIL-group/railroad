@@ -32,10 +32,10 @@
 //      minimised over goal DNF branches. The objective is the makespan; the
 //      sum is a shaping term. The makespan alone leaves an agent whose goal
 //      is off the critical path without a gradient (in ProcTHOR, plans
-//      3-22% longer with 2-3 robots, 12% on average). The price is
-//      consistency: with n goals open the value falls at
-//      lambda_ms + lambda_add * n per unit of time while MCTS charges 1, as
-//      if h were multiplied by (n + 1) / 2 at the default weights.
+//      3-22% longer with 2-3 robots, 12% on average). The price: with n
+//      goals open the value falls at lambda_ms + lambda_add * n per unit of
+//      time while MCTS charges 1, as if h were multiplied by (n + 1) / 2 at
+//      the default weights.
 //                                          [heuristic_concurrent_schedule.hpp]
 //
 // Refinements that apply only where the domain has the structure they need:
@@ -51,10 +51,10 @@
 // Object-search convention (the core's name-keyed `at`/`found` machinery): a
 // goal `at X L` also needs `found X`, and the two are planned together.
 //
-// The estimate aims to be consistent with its own one-step lookahead: for an
-// action the estimate's plan starts with, h(s) = dt + sum_o p_o h(o) over its
+// The estimate aims to agree with its own one-step lookahead: for an action
+// the estimate's plan starts with, h(s) = dt + sum_o p_o h(o) over its
 // outcomes, so starting an action, or an outcome arriving, does not move the
-// value MCTS sees. railroad.consistency measures this on any problem.
+// value MCTS sees.
 //
 // With one agent and no in-flight effects it is a sequential, route-aware
 // h_ff. Problem-dependent structure is compiled once per search

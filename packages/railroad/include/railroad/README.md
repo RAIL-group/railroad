@@ -145,8 +145,6 @@ core and the refinements; each part header explains its step. In brief:
    open while MCTS charges 1.
 
 `ConcurrentHeuristicOptions` switches the refinements off for ablations.
-`railroad.consistency` (or `railroad example <name> --check-heuristic`)
-measures how far the value is from its own one-step lookahead on any problem.
 
 With this heuristic the planner defaults to `heuristic_multiplier=1` and
 `backup="max"`. The leaf value is `-(t + w h)`; with a calibrated h and
