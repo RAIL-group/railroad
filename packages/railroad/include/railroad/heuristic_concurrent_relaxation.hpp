@@ -399,9 +399,12 @@ class Extractor {
       if (f >= 0) heap.push({P.cost[f], f});
     }
     while (!heap.empty()) {
-      int f = heap.top().second;
+      auto [c, f] = heap.top();
       heap.pop();
       if (fl_stamp_[f] == stamp_) continue;
+      if (!heap.empty() && heap.top().first >= c - 1e-9) {
+        f = take_tied(pb, P, f, c, heap);
+      }
       fl_stamp_[f] = stamp_;
       int b = P.best[f];
       if (b == Pass::AVAIL || b == Pass::NONE) continue;
@@ -429,6 +432,45 @@ class Extractor {
   // action already on the plan; act_stamp_: action on the plan.
   std::vector<uint32_t> fl_stamp_, ach_stamp_, act_stamp_;
   uint32_t stamp_ = 0;
+  std::vector<int> tied_;
+
+  // Of the subgoals tied with f at cost c, the one to extract first: the one
+  // whose support adds the most of the others, so `holding r X` comes before
+  // the `hand-full r` its pick also adds. Fluent ids (hash order) would
+  // otherwise decide, and when `hand-full r` came first it pulled in a pick of
+  // whichever object fills the hand best, making the value depend on which
+  // robot is called what. Ids still break what remains. The rest go back.
+  int take_tied(const Problem &pb, const Pass &P, int f, double c,
+                std::priority_queue<std::pair<double, int>> &heap) {
+    tied_.assign(1, f);
+    while (!heap.empty() && heap.top().first >= c - 1e-9) {
+      int g = heap.top().second;
+      heap.pop();
+      if (fl_stamp_[g] != stamp_ && std::find(tied_.begin(), tied_.end(), g) == tied_.end()) {
+        tied_.push_back(g);
+      }
+    }
+    int pick = f, most = -1;
+    for (int g : tied_) {
+      int n = 0, b = P.best[g];
+      if (b >= 0 && ach_stamp_[g] != stamp_ && act_stamp_[b] != stamp_) {
+        for (const auto &ad : pb.acts[b].adds) {
+          if (ad.prob > 1e-9 && ad.fluent != g &&
+              std::find(tied_.begin(), tied_.end(), ad.fluent) != tied_.end()) {
+            ++n;
+          }
+        }
+      }
+      if (n > most) {
+        most = n;
+        pick = g;
+      }
+    }
+    for (int g : tied_) {
+      if (g != pick) heap.push({P.cost[g], g});
+    }
+    return pick;
+  }
 };
 
 }  // namespace concurrent
