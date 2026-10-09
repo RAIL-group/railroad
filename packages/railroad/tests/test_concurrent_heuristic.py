@@ -166,6 +166,21 @@ def test_a_search_is_valued_by_its_outcomes(probs):
     assert planner.heuristic(state, goal) == pytest.approx(expected)
 
 
+@pytest.mark.parametrize("robot", ["r1", "r2", "r3", "robot1", "robot2", "robot3"])
+def test_the_value_does_not_depend_on_the_robots_name(robot):
+    """The box and the cup may both be at `a`. Holding the box and filling the
+    hand then tie in cost (17), and the cup, likelier there, is the better way
+    to fill the hand by c / rho. Extracted first, `hand-full` pulled picking up
+    the cup into the box's plan, and the fluents' hash order decided which came
+    first, so the value depended on the robot's name. Search `a` (done at 15);
+    with probability 0.5 the box is there: pick, move 10, place = 14.
+    15 + 0.5 * 14 = 22."""
+    actions = _actions([robot], ["box", "cup"],
+                       find_prob=lambda r, l, o: {("a", "box"): 0.5, ("a", "cup"): 0.8}.get((l, o), 0.0))
+    state = _state({robot: "start"})
+    assert MCTSPlanner(actions).heuristic(state, F("at box goal")) == pytest.approx(22.0)
+
+
 def test_single_precision_find_probabilities_are_handled_like_doubles():
     """Learned estimators return float32, and `1 - p` rounds in float32, so a
     search's branches sum to just under one. What every branch adds (the robot
