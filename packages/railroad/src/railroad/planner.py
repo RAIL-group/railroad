@@ -127,12 +127,16 @@ class MCTSPlanner:
             heuristic: leaf evaluator. ``"concurrent"`` (the default) is the
                 concurrency-aware heuristic of ``heuristic_concurrent.hpp``,
                 which estimates the team's expected remaining time by
-                list-scheduling the goals onto the robots: ``lambda_add``
-                weights the summed goal completion times and ``lambda_ff`` the
-                makespan (``lambda_max`` is unused). It is calibrated (h tracks
-                the remaining time), hence the default
-                ``heuristic_multiplier=1``. ``"ff"`` is the FF/additive mix of
-                ``heuristic.hpp``, which was tuned with multipliers of 2-5.
+                list-scheduling the goals onto the robots: ``lambda_ff``
+                weights the makespan and ``lambda_add`` the summed goal
+                completion times (``lambda_max`` is unused). The makespan
+                estimates the remaining time; the sum is a shaping term, so
+                with ``n > 1`` goals open h overestimates the remaining time
+                and falls at ``lambda_ff + lambda_add * n`` per second of
+                progress while MCTS charges 1. A ``heuristic_multiplier``
+                above 1 (the default is 1) steepens that further. ``"ff"`` is the
+                FF/additive mix of ``heuristic.hpp``, which was tuned with
+                multipliers of 2-5.
             backup: MCTS value backup. ``"max"`` (the default, MaxUCT) values a
                 decision node by its best child and a chance node by the
                 probability-weighted mean of its outcomes; ``"mean"`` averages
@@ -163,13 +167,12 @@ class MCTSPlanner:
             raise ValueError(f"backup must be 'mean' or 'max', got {backup!r}")
         self._heuristic = heuristic
         self._backup = backup
-        self._heuristic_options = dict(heuristic_options or {})
-        if self._heuristic_options and heuristic != "concurrent":
+        if heuristic_options and heuristic != "concurrent":
             raise ValueError("heuristic_options only apply to heuristic='concurrent'")
         self._concurrent_options = ConcurrentHeuristicOptions()
         self._concurrent_options.lambda_add = self._lambda_add
         self._concurrent_options.lambda_ms = self._lambda_ff
-        for key, value in self._heuristic_options.items():
+        for key, value in (heuristic_options or {}).items():
             if key.startswith("lambda") or not hasattr(self._concurrent_options, key):
                 raise ValueError(f"unknown heuristic_options: {key!r}")
             setattr(self._concurrent_options, key, value)
@@ -333,8 +336,10 @@ class MCTSPlanner:
             max_depth: Maximum depth for rollouts
             c: Exploration constant for UCB1
             heuristic_multiplier: Multiplier for heuristic in reward calculation
-                (leaf value -(t + w h)). 1 suits the default calibrated
-                heuristic; larger values make deeper branches look better.
+                (leaf value -(t + w h)). 1 suits the default concurrent
+                heuristic, which already falls faster than time while several
+                goals are open; larger values make deeper branches look
+                better.
 
         Returns:
             Name of the selected action as a string

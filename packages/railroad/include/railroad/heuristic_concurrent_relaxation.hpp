@@ -76,25 +76,20 @@ class TimedState {
       if (id >= 0) avail.push_back({id, 0.0});
     }
     const double t0 = s.time();
-    std::vector<std::pair<int, double>> prob_adds;
-    std::vector<double> prob_times;
+    std::vector<ProbAdd> prob_adds;
     for (const auto &[t_abs, e] : s.upcoming_effects()) {
-      double trel = opts.timed_init ? std::max(0.0, t_abs - t0) : 0.0;
       prob_adds.clear();
-      prob_times.clear();
-      walk_effect(pb, *e, trel, 1.0, prob_adds, prob_times);
+      walk_effect(pb, *e, std::max(0.0, t_abs - t0), 1.0, prob_adds);
       const int attempt = static_cast<int>(in_flight.size());
       InFlight fl{{}, {}, -1};
-      for (std::size_t i = 0; i < prob_adds.size(); ++i) {
-        int f = prob_adds[i].first;
-        double p = std::min(prob_adds[i].second, 1.0);
-        double t = opts.timed_init ? prob_times[i] : 0.0;
+      for (const auto &pa : prob_adds) {
+        double p = std::min(pa.prob, 1.0);
         if (p >= 1.0 - 1e-9) {
-          avail.push_back({f, t});
+          avail.push_back({pa.fluent, pa.time});
           continue;
         }
         fl.outcomes.push_back(static_cast<int>(pending.size()));
-        pending.push_back({f, t, p, attempt});
+        pending.push_back({pa.fluent, pa.time, p, attempt});
       }
       if (fl.outcomes.empty()) continue;
       for (const auto &df : e->flipped_neg_fluents()) {
@@ -126,11 +121,22 @@ class TimedState {
       }
       if (std::isfinite(tb)) avail.push_back({fa, tb});
     }
-    if (opts.timed_init) defer_own_effects(pb);
+    if (opts.timed_init) {
+      defer_own_effects(pb);
+    } else {
+      for (auto &a : avail) a.second = 0.0;
+      for (auto &pd : pending) pd.time = 0.0;
+    }
   }
 
  private:
   std::vector<uint8_t> now_;  // scratch: fluent available now
+
+  // An uncertain add of one in-flight effect, summed over its branches.
+  struct ProbAdd {
+    int fluent;
+    double prob, time;
+  };
 
   static bool uses_up(const Problem &pb, const InFlight &fl, int a) {
     for (int c : pb.acts[a].consumes) {
@@ -140,40 +146,34 @@ class TimedState {
   }
 
   void walk_effect(const Problem &pb, const GroundedEffect &e, double trel, double prob,
-                   std::vector<std::pair<int, double>> &prob_adds,
-                   std::vector<double> &prob_times) {
+                   std::vector<ProbAdd> &prob_adds) {
     for (const auto &f : e.pos_fluents()) {
       int id = pb.lookup(f);
       if (id < 0) continue;
       if (prob >= 1.0 - 1e-9) {
         avail.push_back({id, trel});
+        continue;
+      }
+      // Accumulate across mutually exclusive branches of this root effect.
+      auto it = std::find_if(prob_adds.begin(), prob_adds.end(),
+                             [id](const ProbAdd &pa) { return pa.fluent == id; });
+      if (it == prob_adds.end()) {
+        prob_adds.push_back({id, prob, trel});
       } else {
-        // Accumulate across mutually exclusive branches of this root effect.
-        bool merged = false;
-        for (std::size_t i = 0; i < prob_adds.size(); ++i) {
-          if (prob_adds[i].first == id) {
-            prob_adds[i].second += prob;
-            prob_times[i] = std::min(prob_times[i], trel);
-            merged = true;
-            break;
-          }
-        }
-        if (!merged) {
-          prob_adds.push_back({id, prob});
-          prob_times.push_back(trel);
-        }
+        it->prob += prob;
+        it->time = std::min(it->time, trel);
       }
     }
     // Relaxed: conditional branches are assumed to fire.
     for (const auto &cb : e.cond_effects()) {
       for (const auto &sub : cb.effects()) {
-        walk_effect(pb, *sub, trel + sub->time(), prob, prob_adds, prob_times);
+        walk_effect(pb, *sub, trel + sub->time(), prob, prob_adds);
       }
     }
     for (const auto &pb_ : e.prob_effects()) {
       if (pb_.prob() <= 0.0) continue;
       for (const auto &sub : pb_.effects()) {
-        walk_effect(pb, *sub, trel + sub->time(), prob * pb_.prob(), prob_adds, prob_times);
+        walk_effect(pb, *sub, trel + sub->time(), prob * pb_.prob(), prob_adds);
       }
     }
   }
@@ -237,10 +237,8 @@ struct Pass {
     int b = best[f];
     if (is_pending(b)) return true;
     if (b < 0) return false;
-    for (const auto &ad : pb.acts[b].adds) {
-      if (ad.fluent == f) return ad.uncertain();
-    }
-    return false;
+    const Add *ad = pb.add(b, f);
+    return ad && ad->uncertain();
   }
 
   void run(const Problem &pb, const TimedState &ts) {
@@ -378,11 +376,9 @@ class Extractor {
   void next_stamp(const Problem &pb) {
     if (fl_stamp_.size() != pb.num_fluents()) fl_stamp_.assign(pb.num_fluents(), 0);
     if (ach_stamp_.size() != pb.num_fluents()) ach_stamp_.assign(pb.num_fluents(), 0);
-    if (act_stamp_.size() != pb.acts.size()) act_stamp_.assign(pb.acts.size(), 0);
     if (++stamp_ == 0) {
       std::fill(fl_stamp_.begin(), fl_stamp_.end(), 0);
       std::fill(ach_stamp_.begin(), ach_stamp_.end(), 0);
-      std::fill(act_stamp_.begin(), act_stamp_.end(), 0);
       stamp_ = 1;
     }
   }
@@ -411,8 +407,6 @@ class Extractor {
       ex.fluents.push_back(f);
       if (P.uncertain(pb, f)) ex.delta += P.delta(pb, ts, f);
       if (Pass::is_pending(b) || ach_stamp_[f] == stamp_) continue;
-      if (act_stamp_[b] == stamp_) continue;
-      act_stamp_[b] = stamp_;
       ex.dur += pb.acts[b].dur;
       ex.actions.push_back(b);
       for (const auto &ad : pb.acts[b].adds) {
@@ -428,9 +422,10 @@ class Extractor {
   }
 
  private:
-  // fl_stamp_: required subgoal already processed; ach_stamp_: achieved by an
-  // action already on the plan; act_stamp_: action on the plan.
-  std::vector<uint32_t> fl_stamp_, ach_stamp_, act_stamp_;
+  // fl_stamp_: required subgoal already processed; ach_stamp_: added by an
+  // action already on the plan. A fluent's support is an action that adds it,
+  // so this also keeps each action on the plan once.
+  std::vector<uint32_t> fl_stamp_, ach_stamp_;
   uint32_t stamp_ = 0;
   std::vector<int> tied_;
 
@@ -453,7 +448,7 @@ class Extractor {
     int pick = f, most = -1;
     for (int g : tied_) {
       int n = 0, b = P.best[g];
-      if (b >= 0 && ach_stamp_[g] != stamp_ && act_stamp_[b] != stamp_) {
+      if (b >= 0 && ach_stamp_[g] != stamp_) {
         for (const auto &ad : pb.acts[b].adds) {
           if (ad.prob > 1e-9 && ad.fluent != g &&
               std::find(tied_.begin(), tied_.end(), ad.fluent) != tied_.end()) {

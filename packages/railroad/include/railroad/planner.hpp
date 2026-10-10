@@ -119,7 +119,8 @@ struct MCTSChanceNode {
 
   int visits = 0;
   double value = 0.0;
-  // Max backup: probability-weighted mean of the visited outcomes' estimates.
+  // Max backup: probability-weighted mean of its outcomes' estimates (each
+  // is valued from the heuristic when it is created).
   double estimate = 0.0;
 
   MCTSChanceNode(const Action *a, MCTSDecisionNode *p) : action(a), parent(p) {}
@@ -217,12 +218,10 @@ inline void backpropagate_max(MCTSDecisionNode *leaf, double reward) {
     c->value += reward;
     double num = 0.0, den = 0.0;
     for (std::size_t i = 0; i < c->children.size(); ++i) {
-      const auto &o = c->children[i];
-      if (o->visits == 0 && !o->evaluated) continue;
-      num += c->outcome_weights[i] * o->estimate;
+      num += c->outcome_weights[i] * c->children[i]->estimate;
       den += c->outcome_weights[i];
     }
-    c->estimate = den > 0.0 ? num / den : d->estimate;
+    c->estimate = num / den;
     d = c->parent;
   }
 }

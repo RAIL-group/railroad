@@ -32,6 +32,13 @@ class Scheduler {
     const int solo = (!per_agent && pb.num_agents() == 1) ? 0 : -1;
     auto pass_of = [&](std::size_t r) -> Pass & { return per_agent ? passes[r + 1] : U; };
     auto agent_of = [&](std::size_t r) { return per_agent ? static_cast<int>(r) : solo; };
+    // Agent r's time for goal plan tp from location `at` at time t. The
+    // relaxed critical path only bounds an agent's first goal.
+    auto load = [&](std::size_t r, const GoalPlan &tp, int at, double t, bool first) {
+      double dl = 0.0;
+      double serial = goal_duration(cx, pass_of(r), agent_of(r), at, t, tp, dl);
+      return (first ? std::max(serial, bound(tp)) : serial) + dl;
+    };
 
     std::vector<double> ready(n_agents, 0.0);
     std::vector<int> start_loc(n_agents, -1);
@@ -76,14 +83,9 @@ class Scheduler {
         double m = INF;
         for (std::size_t r = 0; r < n_agents; ++r) {
           if (!std::isfinite(ready[r])) continue;
-          Pass &P = pass_of(r);
-          t.plans[r] = plan_goal(cx, P, g, companion_of(g), agent_of(r), ready[r]);
+          t.plans[r] = plan_goal(cx, pass_of(r), g, companion_of(g), agent_of(r), ready[r]);
           if (!t.plans[r].ok) continue;
-          const GoalPlan &tp = t.plans[r];
-          double dl = 0.0;
-          double serial = goal_duration(cx, P, agent_of(r), start_loc[r], ready[r], tp, dl);
-          double load = std::max(serial, bound(tp)) + dl;
-          m = std::min(m, load);
+          m = std::min(m, load(r, t.plans[r], start_loc[r], ready[r], true));
         }
         t.key = m;
       }
@@ -99,27 +101,18 @@ class Scheduler {
       double best_f = INF;
       for (std::size_t r = 0; r < n_agents; ++r) {
         if (!t.plans[r].ok || !std::isfinite(finish[r])) continue;
-        const GoalPlan &tp = t.plans[r];
-        double dl = 0.0;
-        double serial = goal_duration(cx, pass_of(r), agent_of(r), end_loc[r], finish[r], tp, dl);
-        // The relaxed critical path only bounds an agent's first goal.
-        double load = (n_assigned[r] == 0 ? std::max(serial, bound(tp)) : serial) + dl;
-        double f = finish[r] + load;
+        double f = finish[r] + load(r, t.plans[r], end_loc[r], finish[r], n_assigned[r] == 0);
         if (f < best_f) { best_f = f; best_r = static_cast<int>(r); }
       }
       return best_f;
     };
-    // One list-scheduling pass in the given priority order.
-    struct Done {
-      int goal;  // index into open
-      double at;
-    };
-    std::vector<Done> done;
+    // One list-scheduling pass in the given priority order: the makespan and
+    // the sum of completion times.
     auto run = [&](const std::vector<std::size_t> &order, bool record) {
       finish = ready;
       end_loc = start_loc;
       n_assigned.assign(n_agents, 0);
-      done.clear();
+      double ms = 0.0, sum = 0.0;
       // Fluents achieved along an assigned goal's plan (e.g. `found X` on the
       // way to `at X L`) need no goal of their own.
       if (cover_.size() != pb.num_fluents()) cover_.assign(pb.num_fluents(), 0);
@@ -147,7 +140,7 @@ class Scheduler {
             const GoalPlan &tp = t.plans[best_r];
             finish[best_r] = best_f;
             n_assigned[best_r] += 1;
-            if (!tp.locs.empty()) end_loc[best_r] = tp.locs.back();
+            if (!tp.route.locs.empty()) end_loc[best_r] = tp.route.locs.back();
             done_at = best_f;
             for (int f : tp.covers) cover_[f] = cover_gen_;
             if (record) {
@@ -156,13 +149,9 @@ class Scheduler {
             }
           }
         }
-        done.push_back({static_cast<int>(ti), done_at});
-      }
-      double ms = 0.0, sum = 0.0;
-      for (const auto &dn : done) {
-        ms = std::max(ms, dn.at);
-        sum += dn.at;
-        if (record) bd->goal_finish.push_back({pb.str(open[dn.goal].fluent), dn.at});
+        ms = std::max(ms, done_at);
+        sum += done_at;
+        if (record) bd->goal_finish.push_back({pb.str(t.fluent), done_at});
       }
       return std::make_pair(ms, sum);
     };

@@ -29,20 +29,26 @@ struct Context {
   Extractor &ex;
 };
 
+// Locations to visit in order, and the relaxed-plan cost of each leg (its
+// fallback where no single move covers it).
+struct Route {
+  std::vector<int> locs;
+  std::vector<double> fallback;
+};
+
 struct GoalPlan {
   bool ok = false;
-  double other = 0.0;     // durations of the plan's non-move actions
+  double other = 0.0;     // durations of the plan's non-move actions (of all
+                          // its actions when it is not routed)
   double critical = 0.0;  // relaxed time to the goal after the agent is ready
   double delta = 0.0;
-  std::vector<int> locs;  // locations to visit, in order
-  std::vector<double> leg_fallback;  // relaxed-plan cost of each leg
+  Route route;
   std::vector<int> covers;
-  // Expected search: the uncertain subgoal, and the places and non-move
+  // Expected search: the uncertain subgoal, and the routes and non-move
   // durations before and after it (the search's own is in its expected time).
   int search_f = -1;
   int goal = -1;  // the goal fluent
-  std::vector<int> pre_locs, post_locs;
-  std::vector<double> pre_fb, post_fb;
+  Route pre, post;
   double other_pre = 0.0, other_post = 0.0;
   double delta_rest = 0.0;  // retry deltas the expected search does not cover
 };
@@ -58,21 +64,20 @@ inline int agent_location(const Problem &pb, const Pass &P, int r) {
   return loc;
 }
 
-// Travel time for agent r from `start` through `locs` in order; a leg no
-// single move covers costs its relaxed-plan fallback. `end` receives the
-// last location.
-inline double route_through(const Problem &pb, int r, int start, const std::vector<int> &locs,
-                            const std::vector<double> &fb, int &end) {
+// Travel time for agent r from `start` along `route`; a leg no single move
+// covers costs its fallback. `end`, if given, receives the last location.
+inline double route_through(const Problem &pb, int r, int start, const Route &route,
+                            int *end = nullptr) {
   double total = 0.0;
   int prev = start;
-  for (std::size_t i = 0; i < locs.size(); ++i) {
-    int y = locs[i];
+  for (std::size_t i = 0; i < route.locs.size(); ++i) {
+    int y = route.locs[i];
     if (y == prev) continue;
     double d = (prev >= 0) ? pb.move_dur(r, prev, y) : INF;
-    total += std::isfinite(d) ? d : fb[i];
+    total += std::isfinite(d) ? d : route.fallback[i];
     prev = y;
   }
-  end = prev;
+  if (end) *end = prev;
   return total;
 }
 
@@ -117,6 +122,29 @@ inline std::vector<double> need_times(const Problem &pb, const Pass &P, int r,
   return need;
 }
 
+// A location the plan needs agent r at: when, and the plan action that needs
+// it (-1: a waypoint or the goal itself).
+struct Visit {
+  double t;
+  int loc;
+  int action;
+};
+
+// The locations of `visits`, each once, in the order they are first needed.
+inline Route ordered_route(const Problem &pb, const Pass &P, std::vector<Visit> visits) {
+  std::sort(visits.begin(), visits.end(), [](const Visit &a, const Visit &b) {
+    return a.t < b.t || (a.t == b.t && a.loc < b.loc);
+  });
+  Route route;
+  for (const Visit &v : visits) {
+    if (std::find(route.locs.begin(), route.locs.end(), v.loc) != route.locs.end()) continue;
+    route.locs.push_back(v.loc);
+    int b = P.best[v.loc];
+    route.fallback.push_back(b >= 0 ? pb.acts[b].dur : 0.0);
+  }
+  return route;
+}
+
 // Find the goal's uncertain search and split the plan around it. The search
 // is the implied `found X` when the goal has one -- even with one attempt
 // left, so the costing does not switch schemes when the second-last place
@@ -126,7 +154,7 @@ inline std::vector<double> need_times(const Problem &pb, const Pass &P, int r,
 // to bring it) are on the route from there.
 inline void split_search(Context &cx, Pass &P, int r, int g, int companion,
                          const std::vector<int> &plan, const std::vector<double> &need,
-                         const std::vector<int> &move_dests, GoalPlan &tp) {
+                         const std::vector<Visit> &visits, GoalPlan &tp) {
   const Problem &pb = cx.pb;
   int f_star = -1;
   std::size_t best_n = 1;
@@ -139,48 +167,29 @@ inline void split_search(Context &cx, Pass &P, int r, int g, int companion,
   if (f_star < 0) return;
   // The plan's search attempt (planned or in flight) and when it must start.
   const int b = P.best[f_star];
-  const int att = support_attempt(cx.ts, P, f_star);
+  const Attempt att = support_attempt(cx.ts, P, f_star);
   double search_need = (b >= 0) ? P.wait[b] : 0.0;
+  for (std::size_t i = 0; i < plan.size(); ++i) {
+    const int a = plan[i];
+    if (a == b || pb.move_dest(a, r) >= 0) continue;
+    (need[i] >= search_need ? tp.other_post : tp.other_pre) += pb.acts[a].dur;
+  }
   auto anchored = [&](int a) {
     for (int q : pb.acts[a].pre) {
       if (attempt_reveals(pb, cx.ts, att, q)) return true;
     }
     return false;
   };
-  std::vector<std::pair<double, int>> before, after;  // (need time, location)
-  for (std::size_t i = 0; i < plan.size(); ++i) {
-    const int a = plan[i];
-    if (a == b || pb.move_dest(a, r) >= 0) continue;
-    bool post = need[i] >= search_need;
-    (post ? tp.other_post : tp.other_pre) += pb.acts[a].dur;
-    if (post && anchored(a)) continue;
-    for (int q : pb.acts[a].pre) {
-      if (pb.loc_agent[q] == r) (post ? after : before).push_back({need[i], q});
-    }
+  std::vector<Visit> before, after;
+  for (const Visit &v : visits) {
+    const bool post = v.t >= search_need;
+    // Off the route: the search's own place, and after it the places of
+    // actions done wherever the search succeeds.
+    if (v.action >= 0 && (v.action == b || (post && anchored(v.action)))) continue;
+    (post ? after : before).push_back(v);
   }
-  // Waypoints and location goals, as in plan_goal.
-  for (int d : move_dests) {
-    bool consumed = false;
-    for (int a : plan) {
-      if (pb.move_dest(a, r) >= 0) continue;
-      const auto &pre = pb.acts[a].pre;
-      consumed = consumed || std::find(pre.begin(), pre.end(), d) != pre.end();
-    }
-    if (!consumed) (P.cost[d] >= search_need ? after : before).push_back({P.cost[d], d});
-  }
-  if (pb.loc_agent[g] == r) (P.cost[g] >= search_need ? after : before).push_back({P.cost[g], g});
-  auto order = [&](std::vector<std::pair<double, int>> &v, std::vector<int> &locs,
-                   std::vector<double> &fb) {
-    std::sort(v.begin(), v.end());
-    for (const auto &[t, loc] : v) {
-      if (std::find(locs.begin(), locs.end(), loc) != locs.end()) continue;
-      locs.push_back(loc);
-      int bb = P.best[loc];
-      fb.push_back(bb >= 0 ? pb.acts[bb].dur : 0.0);
-    }
-  };
-  order(before, tp.pre_locs, tp.pre_fb);
-  order(after, tp.post_locs, tp.post_fb);
+  tp.pre = ordered_route(pb, P, std::move(before));
+  tp.post = ordered_route(pb, P, std::move(after));
   tp.search_f = f_star;
   tp.goal = g;
   // The expected search time supersedes the retry deltas of what the search
@@ -188,7 +197,7 @@ inline void split_search(Context &cx, Pass &P, int r, int g, int companion,
   tp.delta_rest = 0.0;
   for (int f : tp.covers) {
     if (!P.uncertain(pb, f)) continue;
-    if (f == f_star || (att != -1 && support_attempt(cx.ts, P, f) == att)) continue;
+    if (f == f_star || (att.any() && support_attempt(cx.ts, P, f) == att)) continue;
     tp.delta_rest += P.delta(pb, cx.ts, f);
   }
 }
@@ -245,7 +254,7 @@ inline GoalPlan plan_goal(Context &cx, Pass &P, int g, int companion, int r, dou
   // never makes it walk back), plus move destinations nothing else on the
   // plan consumes (waypoints, or location goals). Each is needed when the
   // earliest plan action requiring it could start.
-  std::vector<std::pair<double, int>> visits;  // (need time, location)
+  std::vector<Visit> visits;
   std::vector<int> move_dests;
   const std::vector<double> need = need_times(pb, P, r, ex.actions);
   for (std::size_t i = 0; i < ex.actions.size(); ++i) {
@@ -257,29 +266,17 @@ inline GoalPlan plan_goal(Context &cx, Pass &P, int g, int companion, int r, dou
     }
     tp.other += pb.acts[a].dur;
     for (int p : pb.acts[a].pre) {
-      if (pb.loc_agent[p] == r) visits.push_back({need[i], p});
+      if (pb.loc_agent[p] == r) visits.push_back({need[i], p, a});
     }
   }
   for (int d : move_dests) {
     bool consumed = false;
-    for (const auto &v : visits) consumed = consumed || v.second == d;
-    if (!consumed) visits.push_back({P.cost[d], d});
+    for (const auto &v : visits) consumed = consumed || v.loc == d;
+    if (!consumed) visits.push_back({P.cost[d], d, -1});
   }
-  if (pb.loc_agent[g] == r) visits.push_back({P.cost[g], g});
-  // Keep the earliest need per location.
-  std::sort(visits.begin(), visits.end());
-  std::vector<std::pair<double, int>> uniq;
-  for (const auto &v : visits) {
-    bool seen = false;
-    for (const auto &u : uniq) seen = seen || u.second == v.second;
-    if (!seen) uniq.push_back(v);
-  }
-  for (const auto &v : uniq) {
-    tp.locs.push_back(v.second);
-    int b = P.best[v.second];
-    tp.leg_fallback.push_back(b >= 0 ? pb.acts[b].dur : 0.0);
-  }
-  if (cx.opts.expected_search) split_search(cx, P, r, g, companion, ex.actions, need, move_dests, tp);
+  if (pb.loc_agent[g] == r) visits.push_back({P.cost[g], g, -1});
+  tp.route = ordered_route(pb, P, visits);
+  if (cx.opts.expected_search) split_search(cx, P, r, g, companion, ex.actions, need, visits, tp);
   return tp;
 }
 
@@ -288,35 +285,28 @@ inline GoalPlan plan_goal(Context &cx, Pass &P, int g, int companion, int r, dou
 inline double goal_duration(Context &cx, const Pass &P, int r, int start, double t_start,
                           const GoalPlan &tp, double &delta_out) {
   const Problem &pb = cx.pb;
-  int end;
-  if (r < 0) {
-    delta_out = tp.delta;
-    return tp.other;
+  if (tp.search_f >= 0) {
+    int pos = start;
+    double pre = route_through(pb, r, start, tp.pre, &pos);
+    // The rest of the goal from wherever the object turns up; nothing if
+    // finding it there already achieves the goal.
+    auto rest = [&](int loc, bool achieves) {
+      if (achieves) return 0.0;
+      return route_through(pb, r, loc >= 0 ? loc : pos, tp.post) + tp.other_post;
+    };
+    std::vector<Found> where;
+    double search =
+        expected_search(pb, cx.ts, P, tp.search_f, tp.goal, r, pos, t_start + pre, rest, where);
+    if (std::isfinite(search)) {
+      double post = 0.0;
+      for (const auto &w : where) post += w.prob * w.rest;
+      delta_out = tp.delta_rest;
+      return pre + search + post + tp.other_pre;
+    }
   }
-  if (tp.search_f < 0) {
-    delta_out = tp.delta;
-    return tp.other + route_through(pb, r, start, tp.locs, tp.leg_fallback, end);
-  }
-  int pos = start;
-  double pre = route_through(pb, r, start, tp.pre_locs, tp.pre_fb, pos);
-  // The rest of the goal from wherever the object turns up; nothing if
-  // finding it there already achieves the goal.
-  auto rest = [&](int loc, bool achieves) {
-    if (achieves) return 0.0;
-    int e;
-    return route_through(pb, r, loc >= 0 ? loc : pos, tp.post_locs, tp.post_fb, e) + tp.other_post;
-  };
-  std::vector<Found> where;
-  double search =
-      expected_search(pb, cx.ts, P, tp.search_f, tp.goal, r, pos, t_start + pre, rest, where);
-  if (!std::isfinite(search)) {
-    delta_out = tp.delta;
-    return tp.other + route_through(pb, r, start, tp.locs, tp.leg_fallback, end);
-  }
-  double post = 0.0;
-  for (const auto &w : where) post += w.prob * w.rest;
-  delta_out = tp.delta_rest;
-  return pre + search + post + tp.other_pre;
+  // An unrouted plan has an empty route.
+  delta_out = tp.delta;
+  return tp.other + route_through(pb, r, start, tp.route);
 }
 
 // Lower bound on a goal's duration from the relaxed critical path. Not for an
