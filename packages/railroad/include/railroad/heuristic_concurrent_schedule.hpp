@@ -20,30 +20,27 @@ class Scheduler {
   // passes[0] is the unrestricted pass; passes[r + 1] agent r's, when the
   // schedule is per agent. Returns the makespan; completion_sum receives the
   // sum of completion times.
-  double schedule(Context &cx, std::vector<Pass> &passes, const std::vector<int> &goals,
+  double schedule(Context &cx, const std::vector<Pass> &passes, const std::vector<int> &goals,
                   ConcurrentHeuristicBreakdown *bd, double &completion_sum) {
     const Problem &pb = cx.pb;
     const ConcurrentHeuristicOptions &opts = cx.opts;
     completion_sum = 0.0;
-    Pass &U = passes[0];
+    const Pass &U = passes[0];
     const bool per_agent = opts.agent_aware && pb.num_agents() > 1;
     const std::size_t n_agents = per_agent ? pb.num_agents() : 1;
     // With a single agent its route can still be chained.
     const int solo = (!per_agent && pb.num_agents() == 1) ? 0 : -1;
-    auto pass_of = [&](std::size_t r) -> Pass & { return per_agent ? passes[r + 1] : U; };
+    auto pass_of = [&](std::size_t r) -> const Pass & { return per_agent ? passes[r + 1] : U; };
     auto agent_of = [&](std::size_t r) { return per_agent ? static_cast<int>(r) : solo; };
-    // Agent r's time for goal plan tp from location `at` at time t. The
-    // relaxed critical path only bounds an agent's first goal.
-    auto load = [&](std::size_t r, const GoalPlan &tp, int at, double t, bool first) {
-      double dl = 0.0;
-      double serial = goal_duration(cx, pass_of(r), agent_of(r), at, t, tp, dl);
-      return (first ? std::max(serial, bound(tp)) : serial) + dl;
+    // When agent r, at location `at` from time t, would finish goal plan tp.
+    auto finish_at = [&](std::size_t r, const GoalPlan &tp, int at, double t) {
+      return goal_finish(cx, pass_of(r), agent_of(r), at, t, tp);
     };
 
     std::vector<double> ready(n_agents, 0.0);
     std::vector<int> start_loc(n_agents, -1);
     for (std::size_t r = 0; r < n_agents; ++r) {
-      Pass &P = pass_of(r);
+      const Pass &P = pass_of(r);
       ready[r] = per_agent ? P.cost[pb.agent_free[r]] : team_ready(pb, U);
       if (agent_of(r) >= 0) start_loc[r] = agent_location(pb, P, agent_of(r));
     }
@@ -83,9 +80,9 @@ class Scheduler {
         double m = INF;
         for (std::size_t r = 0; r < n_agents; ++r) {
           if (!std::isfinite(ready[r])) continue;
-          t.plans[r] = plan_goal(cx, pass_of(r), g, companion_of(g), agent_of(r), ready[r]);
+          t.plans[r] = plan_goal(cx, pass_of(r), g, companion_of(g), agent_of(r));
           if (!t.plans[r].ok) continue;
-          m = std::min(m, load(r, t.plans[r], start_loc[r], ready[r], true));
+          m = std::min(m, finish_at(r, t.plans[r], start_loc[r], ready[r]) - ready[r]);
         }
         t.key = m;
       }
@@ -94,14 +91,13 @@ class Scheduler {
 
     std::vector<double> finish;
     std::vector<int> end_loc;
-    std::vector<int> n_assigned;
     // The agent that would finish goal t earliest.
-    auto earliest = [&](const OpenGoal &t, int &best_r) {
+    auto best_agent = [&](const OpenGoal &t, int &best_r) {
       best_r = -1;
       double best_f = INF;
       for (std::size_t r = 0; r < n_agents; ++r) {
         if (!t.plans[r].ok || !std::isfinite(finish[r])) continue;
-        double f = finish[r] + load(r, t.plans[r], end_loc[r], finish[r], n_assigned[r] == 0);
+        double f = finish_at(r, t.plans[r], end_loc[r], finish[r]);
         if (f < best_f) { best_f = f; best_r = static_cast<int>(r); }
       }
       return best_f;
@@ -111,7 +107,6 @@ class Scheduler {
     auto run = [&](const std::vector<std::size_t> &order, bool record) {
       finish = ready;
       end_loc = start_loc;
-      n_assigned.assign(n_agents, 0);
       double ms = 0.0, sum = 0.0;
       // Fluents achieved along an assigned goal's plan (e.g. `found X` on the
       // way to `at X L`) need no goal of their own.
@@ -129,17 +124,13 @@ class Scheduler {
           continue;  // achieved along another goal's plan
         } else {
           int best_r = -1;
-          double best_f = earliest(t, best_r);
+          double best_f = best_agent(t, best_r);
           if (best_r < 0) {
-            // No single agent can do it: fall back to the team relaxation.
-            cx.ex.next_stamp(pb);
-            Extraction ex;
-            cx.ex.extract(pb, cx.ts, U, {t.fluent}, ex);
-            done_at = U.cost[t.fluent] + ex.delta;
+            // No single agent can do it: the team relaxation's time.
+            done_at = U.cost[t.fluent];
           } else {
             const GoalPlan &tp = t.plans[best_r];
             finish[best_r] = best_f;
-            n_assigned[best_r] += 1;
             if (!tp.route.locs.empty()) end_loc[best_r] = tp.route.locs.back();
             done_at = best_f;
             for (int f : tp.covers) cover_[f] = cover_gen_;

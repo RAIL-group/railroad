@@ -16,8 +16,7 @@
 //               ranked by cost / rho, the expected cost of retrying an
 //               independent attempt until it succeeds. The ranking is
 //               monotone along supports, so one Dijkstra-style pass computes
-//               it. Retry deltas price a probabilistic subgoal's expected
-//               extra time over its optimistic cost.
+//               it.
 //   Extractor   Relaxed-plan extraction from a pass, FF style.
 
 #include "railroad/heuristic_concurrent_problem.hpp"
@@ -221,7 +220,7 @@ struct Pass {
   static bool is_pending(int code) { return code <= -3; }
 
   int agent = -1;  // -1: unrestricted
-  std::vector<double> cost, rho, score, wait, act_rho, delta_memo;
+  std::vector<double> cost, rho, score, wait, act_rho;
   std::vector<int> best;
   std::vector<int> unmet;
   std::vector<uint8_t> done;
@@ -249,7 +248,6 @@ struct Pass {
     score.assign(nf, INF);
     best.assign(nf, NONE);
     done.assign(nf, 0);
-    delta_memo.assign(nf, -1.0);
     wait.assign(na, 0.0);
     act_rho.assign(na, 1.0);
     unmet.assign(na, 0);
@@ -283,15 +281,6 @@ struct Pass {
     }
   }
 
-  // Expected extra time over the optimistic cost of f from trying its
-  // achievers in the best of three orderings.
-  double delta(const Problem &pb, const TimedState &ts, int f) {
-    if (delta_memo[f] >= 0.0) return delta_memo[f];
-    double d = uncertain(pb, f) ? compute_delta(pb, ts, f) : 0.0;
-    delta_memo[f] = d;
-    return d;
-  }
-
  private:
   using QItem = std::pair<double, int>;  // (score, fluent)
   using Queue = std::priority_queue<QItem, std::vector<QItem>, std::greater<QItem>>;
@@ -318,54 +307,11 @@ struct Pass {
       offer(ad.fluent, w + ca.dur, act_rho[a] * ad.prob, a, pq);
     }
   }
-
-  struct Try {
-    double wait, exec, prob;
-    double attempt() const { return wait + exec; }
-    double efficiency() const { return exec > 1e-9 ? prob / exec : prob * 1e9; }
-  };
-
-  double compute_delta(const Problem &pb, const TimedState &ts, int f) const {
-    // In-flight outcomes are attempts with no wait that end when they fire.
-    std::vector<Try> reps;
-    for (const auto &pd : ts.pending) {
-      if (pd.fluent == f) reps.push_back({0.0, pd.time, pd.prob});
-    }
-    for (const auto &r : pb.achievers[f]) {
-      if (!allowed(pb, r.action) || unmet[r.action] != 0 || ts.spent(pb, r.action)) continue;
-      const auto &ad = pb.acts[r.action].adds[r.add];
-      if (ad.prob > 1e-9) reps.push_back({wait[r.action], pb.acts[r.action].dur, ad.prob});
-    }
-    if (reps.empty()) return 0.0;
-
-    auto expected = [](const std::vector<Try> &ordered) {
-      double total = 0.0, fail = 1.0, time = 0.0;
-      for (const auto &a : ordered) {
-        double dwait = std::max(a.wait - time, 0.0);
-        total += fail * (dwait + a.exec);
-        fail *= (1.0 - a.prob);
-        time = std::max(time, a.wait);
-      }
-      return total;
-    };
-    double best_E = INF;
-    std::sort(reps.begin(), reps.end(),
-              [](const Try &a, const Try &b) { return a.efficiency() > b.efficiency(); });
-    best_E = std::min(best_E, expected(reps));
-    std::sort(reps.begin(), reps.end(), [](const Try &a, const Try &b) { return a.prob > b.prob; });
-    best_E = std::min(best_E, expected(reps));
-    std::sort(reps.begin(), reps.end(),
-              [](const Try &a, const Try &b) { return a.attempt() < b.attempt(); });
-    best_E = std::min(best_E, expected(reps));
-    double d = best_E - cost[f];
-    return d > 1e-9 ? d : 0.0;
-  }
 };
 
 // A relaxed plan read off a pass.
 struct Extraction {
   double dur = 0.0;     // sum of action durations
-  double delta = 0.0;   // sum of retry deltas over probabilistic fluents
   std::vector<int> fluents;  // fluents visited (for coverage)
   std::vector<int> actions;  // actions on the plan
 };
@@ -386,38 +332,30 @@ class Extractor {
   // Walk back from `roots` via the pass's chosen achievers, costliest subgoal
   // first (as FF does). A fluent added by an action already on the plan
   // counts as achieved, so a cheaper subgoal covered as a side effect (the
-  // `hand-full` a pick adds) pulls in no achiever of its own; probabilistic
-  // subgoals still pay their retry delta.
-  void extract(const Problem &pb, const TimedState &ts, Pass &P, const std::vector<int> &roots,
-               Extraction &ex) {
+  // `hand-full` a pick adds) pulls in no achiever of its own. `via`, if
+  // given, achieves roots[0] in place of the pass's choice.
+  void extract(const Problem &pb, const Pass &P, const std::vector<int> &roots, Extraction &ex,
+               int via = Pass::NONE) {
     std::priority_queue<std::pair<double, int>> heap;  // (cost, fluent), max first
     for (int f : roots) {
       if (f >= 0) heap.push({P.cost[f], f});
     }
     while (!heap.empty()) {
-      auto [c, f] = heap.top();
+      auto [key, f] = heap.top();
       heap.pop();
       if (fl_stamp_[f] == stamp_) continue;
-      if (!heap.empty() && heap.top().first >= c - 1e-9) {
-        f = take_tied(pb, P, f, c, heap);
-      }
+      if (!heap.empty() && heap.top().first >= key - 1e-9) f = take_tied(pb, P, f, key, heap);
       fl_stamp_[f] = stamp_;
-      int b = P.best[f];
+      int b = (via != Pass::NONE && f == roots[0]) ? via : P.best[f];
       if (b == Pass::AVAIL || b == Pass::NONE) continue;
       ex.fluents.push_back(f);
-      if (P.uncertain(pb, f)) ex.delta += P.delta(pb, ts, f);
       if (Pass::is_pending(b) || ach_stamp_[f] == stamp_) continue;
       ex.dur += pb.acts[b].dur;
       ex.actions.push_back(b);
       for (const auto &ad : pb.acts[b].adds) {
         if (ad.prob > 1e-9) ach_stamp_[ad.fluent] = stamp_;
       }
-      for (int p : pb.acts[b].pre) {
-        heap.push({P.cost[p], p});
-        if (pb.found_of[p] >= 0) {
-          heap.push({P.cost[pb.found_of[p]], pb.found_of[p]});
-        }
-      }
+      for (int p : pb.acts[b].pre) heap.push({P.cost[p], p});
     }
   }
 
@@ -429,16 +367,17 @@ class Extractor {
   uint32_t stamp_ = 0;
   std::vector<int> tied_;
 
-  // Of the subgoals tied with f at cost c, the one to extract first: the one
-  // whose support adds the most of the others, so `holding r X` comes before
-  // the `hand-full r` its pick also adds. Fluent ids (hash order) would
-  // otherwise decide, and when `hand-full r` came first it pulled in a pick of
-  // whichever object fills the hand best, making the value depend on which
-  // robot is called what. Ids still break what remains. The rest go back.
-  int take_tied(const Problem &pb, const Pass &P, int f, double c,
+  // Of the subgoals tied with f at cost `key`, the one to extract first: the
+  // one whose support adds the most of the others, so `holding r X` comes
+  // before the `hand-full r` its pick also adds. Fluent ids (hash order)
+  // would otherwise decide, and when `hand-full r` came first it pulled in a
+  // pick of whichever object fills the hand best, making the value depend on
+  // which robot is called what. Ids still break what remains. The rest go
+  // back.
+  int take_tied(const Problem &pb, const Pass &P, int f, double key,
                 std::priority_queue<std::pair<double, int>> &heap) {
     tied_.assign(1, f);
-    while (!heap.empty() && heap.top().first >= c - 1e-9) {
+    while (!heap.empty() && heap.top().first >= key - 1e-9) {
       int g = heap.top().second;
       heap.pop();
       if (fl_stamp_[g] != stamp_ && std::find(tied_.begin(), tied_.end(), g) == tied_.end()) {

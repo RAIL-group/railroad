@@ -35,7 +35,7 @@ struct ConcurrentHeuristicOptions {
   // (false: the relaxed plan's own moves).
   bool route_chaining = true;
   // Cost an uncertain search as an expected route over its candidate places
-  // (false: a plan through one place plus a retry delta).
+  // (false: a plan through the place the relaxation chose).
   bool expected_search = true;
 };
 
