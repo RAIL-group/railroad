@@ -124,7 +124,9 @@ core and the refinements; each part header explains its step. In brief:
    probability. A free agent cannot idle.
 2. **Probability-aware relaxation**, per agent (agents are the arguments of
    `free`): achievers ranked by `cost / rho`, the expected cost of retrying
-   an independent attempt until it succeeds.
+   an independent attempt until it succeeds. Relaxed plans are read off in
+   the same ranking; read off by cost alone, a goal's plan would fill a
+   robot's hand with a likelier object than its own.
 3. **Goal plans.** A *goal* is one fact of the goal, e.g. `at mug L` (with
    the `found mug` it implies); each needs one or more actions. Each goal's
    relaxed plan on each agent, with its moves re-costed as one route (route
