@@ -18,9 +18,11 @@
 //      probability rho its support succeeds; achievers ranked by cost / rho.
 //                                          [heuristic_concurrent_relaxation.hpp]
 //   3. Goal plans: a "goal" is one fact of the goal (of its best DNF branch),
-//      e.g. `at mug L`. Each gets a relaxed plan and a duration on each
-//      agent. Goals are planned independently, so one goal's plan may use
-//      what another's relies on.          [heuristic_concurrent_plans.hpp]
+//      e.g. `at mug L`. Each gets a relaxed plan on each agent, which the
+//      agent finishes after the plan's actions but not before the relaxation
+//      could achieve the goal -- the one place waiting for in-flight effects
+//      is charged. Goals are planned independently, so one goal's plan may
+//      use what another's relies on.      [heuristic_concurrent_plans.hpp]
 //   4. List schedule: each goal goes to the agent that would finish it
 //      earliest, giving completion times C_g and the value
 //          lambda_add * sum_g C_g + lambda_ms * max_g C_g
@@ -37,8 +39,14 @@
 //                                          [heuristic_concurrent_plans.hpp]
 //   - Expected search: a subgoal with several probabilistic attempts is
 //     costed as an expected route over them, in-flight attempts included,
-//     and the rest of the goal from wherever it succeeds.
+//     and the rest of the goal from wherever it succeeds. A goal whose
+//     cheapest support is itself such an attempt (searching its target place
+//     in the hope the object is there) is planned through its deterministic
+//     achiever, so that bringing the object from elsewhere is costed.
 //                                          [heuristic_concurrent_search.hpp]
+//
+// Probability thus enters twice: the ranking decides which attempt a plan
+// goes through, and the expected search what the attempts cost.
 //
 // Object-search convention: a goal `at X L` also needs `found X`, and the two
 // are planned together.

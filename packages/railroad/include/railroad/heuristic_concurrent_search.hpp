@@ -51,33 +51,15 @@ inline std::vector<SearchAttempt> attempts_for(const Problem &pb, const TimedSta
   return out;
 }
 
-// A planned action or an in-flight attempt (TimedState::in_flight); neither
-// when both are -1.
-struct Attempt {
-  int action = -1;
-  int in_flight = -1;
-  bool any() const { return action >= 0 || in_flight >= 0; }
-  bool operator==(const Attempt &o) const {
-    return action == o.action && in_flight == o.in_flight;
-  }
-};
-
-// The attempt behind f's chosen support in P. The outcomes of one attempt
-// share it, so it says which fluents one attempt reveals together.
-inline Attempt support_attempt(const TimedState &ts, const Pass &P, int f) {
+// Is q an uncertain outcome of the attempt behind f's chosen support in P,
+// planned or in flight (as `at X place` is of the search that finds X there)?
+inline bool revealed_with(const Problem &pb, const TimedState &ts, const Pass &P, int f, int q) {
   int b = P.best[f];
-  if (b >= 0) return {b, -1};
-  if (Pass::is_pending(b)) return {-1, ts.pending[Pass::pending_index(b)].attempt};
-  return {};
-}
-
-// Is q an uncertain outcome of attempt `att`?
-inline bool attempt_reveals(const Problem &pb, const TimedState &ts, const Attempt &att, int q) {
-  if (att.action >= 0) {
-    const Add *ad = pb.add(att.action, q);
+  if (b >= 0) {
+    const Add *ad = pb.add(b, q);
     return ad && ad->uncertain();
   }
-  return att.in_flight >= 0 && ts.reveals(att.in_flight, q);
+  return Pass::is_pending(b) && ts.reveals(ts.pending[Pass::pending_index(b)].attempt, q);
 }
 
 // A place a search may succeed, with the unconditional probability that it

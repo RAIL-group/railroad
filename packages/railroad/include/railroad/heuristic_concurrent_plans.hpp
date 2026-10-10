@@ -1,9 +1,10 @@
 #pragma once
 
-// Goal plans: one agent's relaxed plan for one goal, and its duration.
+// Goal plans: one agent's relaxed plan for one goal, and when it finishes.
 //
-// Core: the plan is read off the agent's pass; its duration is the sum of its
-// actions plus retry deltas, bounded below by the relaxed critical path.
+// Core: the plan is read off the agent's pass; the agent finishes it after
+// the sum of its actions, but not before the relaxation could achieve the
+// goal (which accounts for waiting on in-flight effects).
 //
 // Route chaining (when the agent has location fluents): the delete relaxation
 // lets an agent be in several places at once -- a fetch costs start->object +
@@ -40,8 +41,7 @@ struct GoalPlan {
   bool ok = false;
   double other = 0.0;     // durations of the plan's non-move actions (of all
                           // its actions when it is not routed)
-  double critical = 0.0;  // relaxed time to the goal after the agent is ready
-  double delta = 0.0;
+  double earliest = 0.0;  // relaxed time to the goal (and its companion)
   Route route;
   std::vector<int> covers;
   // Expected search: the uncertain subgoal, and the routes and non-move
@@ -50,7 +50,6 @@ struct GoalPlan {
   int goal = -1;  // the goal fluent
   Route pre, post;
   double other_pre = 0.0, other_post = 0.0;
-  double delta_rest = 0.0;  // retry deltas the expected search does not cover
 };
 
 // Where agent r is (or will be once its current action ends): its location
@@ -152,7 +151,7 @@ inline Route ordered_route(const Problem &pb, const Pass &P, std::vector<Visit> 
 // search, an action that needs what the search reveals (picking the object
 // up) happens wherever it succeeds, so only the other actions' places (where
 // to bring it) are on the route from there.
-inline void split_search(Context &cx, Pass &P, int r, int g, int companion,
+inline void split_search(Context &cx, const Pass &P, int r, int g, int companion,
                          const std::vector<int> &plan, const std::vector<double> &need,
                          const std::vector<Visit> &visits, GoalPlan &tp) {
   const Problem &pb = cx.pb;
@@ -167,7 +166,6 @@ inline void split_search(Context &cx, Pass &P, int r, int g, int companion,
   if (f_star < 0) return;
   // The plan's search attempt (planned or in flight) and when it must start.
   const int b = P.best[f_star];
-  const Attempt att = support_attempt(cx.ts, P, f_star);
   double search_need = (b >= 0) ? P.wait[b] : 0.0;
   for (std::size_t i = 0; i < plan.size(); ++i) {
     const int a = plan[i];
@@ -176,7 +174,7 @@ inline void split_search(Context &cx, Pass &P, int r, int g, int companion,
   }
   auto anchored = [&](int a) {
     for (int q : pb.acts[a].pre) {
-      if (attempt_reveals(pb, cx.ts, att, q)) return true;
+      if (revealed_with(pb, cx.ts, P, f_star, q)) return true;
     }
     return false;
   };
@@ -192,19 +190,11 @@ inline void split_search(Context &cx, Pass &P, int r, int g, int companion,
   tp.post = ordered_route(pb, P, std::move(after));
   tp.search_f = f_star;
   tp.goal = g;
-  // The expected search time supersedes the retry deltas of what the search
-  // attempt reveals (e.g. `found X` and `at X place`).
-  tp.delta_rest = 0.0;
-  for (int f : tp.covers) {
-    if (!P.uncertain(pb, f)) continue;
-    if (f == f_star || (att.any() && support_attempt(cx.ts, P, f) == att)) continue;
-    tp.delta_rest += P.delta(pb, cx.ts, f);
-  }
 }
 
-// Agent r's plan for goal g (with its companion `found X`, if any), ready to
-// start at `ready`. r < 0: no single agent (the team relaxation).
-inline GoalPlan plan_goal(Context &cx, Pass &P, int g, int companion, int r, double ready) {
+// Agent r's plan for goal g (with its companion `found X`, if any). r < 0: no
+// single agent (the team relaxation).
+inline GoalPlan plan_goal(Context &cx, const Pass &P, int g, int companion, int r) {
   const Problem &pb = cx.pb;
   GoalPlan tp;
   if (!P.reachable(g)) return tp;
@@ -213,37 +203,26 @@ inline GoalPlan plan_goal(Context &cx, Pass &P, int g, int companion, int r, dou
   // search (searching the target place, hoping the object is already there)
   // is planned through its deterministic achiever: wherever else the object
   // turns up, it must be brought over. Outcomes that achieve the goal in
-  // place cost no delivery (goal_duration).
-  int forced_from = Pass::NONE;
+  // place cost no delivery (goal_finish).
+  int via = Pass::NONE;
   if (cx.opts.expected_search && cx.opts.route_chaining && r >= 0 && P.uncertain(pb, g)) {
-    int d = deterministic_achiever(pb, P, g);
-    if (d >= 0) {
-      forced_from = P.best[g];
-      P.best[g] = d;
-    }
+    via = deterministic_achiever(pb, P, g);
   }
-  struct Restore {
-    Pass &P;
-    int g, from;
-    ~Restore() { if (from != Pass::NONE) P.best[g] = from; }
-  } restore{P, g, forced_from};
   cx.ex.next_stamp(pb);
   Extraction ex;
-  if (forced_from != Pass::NONE) {
-    // The goal first, so that the search on its forced plan does not count
-    // as achieving it in passing.
-    cx.ex.extract(pb, cx.ts, P, {g}, ex);
-    if (companion >= 0) cx.ex.extract(pb, cx.ts, P, {companion}, ex);
+  if (via != Pass::NONE) {
+    // The goal first, so that the search on its plan does not count as
+    // achieving it in passing.
+    cx.ex.extract(pb, P, {g}, ex, via);
+    if (companion >= 0) cx.ex.extract(pb, P, {companion}, ex);
   } else {
     std::vector<int> roots{g};
     if (companion >= 0) roots.push_back(companion);
-    cx.ex.extract(pb, cx.ts, P, roots, ex);
+    cx.ex.extract(pb, P, roots, ex);
   }
   tp.ok = true;
-  tp.delta = ex.delta;
-  double goal_cost = P.cost[g];
-  if (companion >= 0) goal_cost = std::max(goal_cost, P.cost[companion]);
-  tp.critical = std::max(0.0, goal_cost - ready);
+  tp.earliest = P.cost[g];
+  if (companion >= 0) tp.earliest = std::max(tp.earliest, P.cost[companion]);
   tp.covers = std::move(ex.fluents);
   if (r < 0 || !cx.opts.route_chaining) {
     tp.other = ex.dur;  // no single agent to route, or routing disabled
@@ -280,10 +259,12 @@ inline GoalPlan plan_goal(Context &cx, Pass &P, int g, int companion, int r, dou
   return tp;
 }
 
-// Serial duration of goal tp for agent r starting at `start` at time
-// t_start, and the retry delta to add on top.
-inline double goal_duration(Context &cx, const Pass &P, int r, int start, double t_start,
-                          const GoalPlan &tp, double &delta_out) {
+// When agent r, starting at `start` at time t_start, finishes goal tp: after
+// its actions, but not before the goal's relaxed time -- except under an
+// expected search, an expectation over outcomes some of which end sooner than
+// the relaxed time to success.
+inline double goal_finish(Context &cx, const Pass &P, int r, int start, double t_start,
+                          const GoalPlan &tp) {
   const Problem &pb = cx.pb;
   if (tp.search_f >= 0) {
     int pos = start;
@@ -300,19 +281,12 @@ inline double goal_duration(Context &cx, const Pass &P, int r, int start, double
     if (std::isfinite(search)) {
       double post = 0.0;
       for (const auto &w : where) post += w.prob * w.rest;
-      delta_out = tp.delta_rest;
-      return pre + search + post + tp.other_pre;
+      return t_start + pre + search + post + tp.other_pre;
     }
   }
   // An unrouted plan has an empty route.
-  delta_out = tp.delta;
-  return tp.other + route_through(pb, r, start, tp.route);
+  return std::max(t_start + tp.other + route_through(pb, r, start, tp.route), tp.earliest);
 }
-
-// Lower bound on a goal's duration from the relaxed critical path. Not for an
-// expected search: that is an expectation over outcomes, some of which end
-// sooner than the relaxed time to success.
-inline double bound(const GoalPlan &tp) { return tp.search_f >= 0 ? 0.0 : tp.critical; }
 
 }  // namespace concurrent
 }  // namespace railroad

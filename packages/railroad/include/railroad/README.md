@@ -36,8 +36,7 @@ Probabilistic PDDL planning system.
     compiled problem (fluent ids, actions, agents, agent location groups,
     `at`->`found`, goal branches).
   - **heuristic_concurrent_relaxation.hpp** (core): the timed relaxed state,
-    the cost/rho relaxation passes with retry deltas, and relaxed-plan
-    extraction.
+    the cost/rho relaxation passes, and relaxed-plan extraction.
   - **heuristic_concurrent_search.hpp**: expected search over a subgoal's
     attempts, planned and in flight.
   - **heuristic_concurrent_plans.hpp** (core): per-agent goal plans, route
@@ -133,7 +132,11 @@ core and the refinements; each part header explains its step. In brief:
    candidate places, planned or in flight (expected search). The route visits
    each action's place when the relaxation could start it, but after any
    action needing what it uses up (the relaxation has no deletes: boil the
-   egg before putting it in the bowl).
+   egg before putting it in the bowl). A goal whose cheapest support is a
+   search of its target place is planned through its deterministic achiever,
+   so that bringing the object from elsewhere is costed. The agent finishes
+   the plan after its actions, but not before the relaxation could achieve
+   the goal: this is where waiting for in-flight effects is charged.
 4. **List schedule.** Each goal goes to the agent that would finish it
    earliest. Goals are planned independently, so one goal's plan may use
    what another's relies on (a full hand's object set down anywhere to fetch
