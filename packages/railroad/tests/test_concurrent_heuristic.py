@@ -198,18 +198,32 @@ def test_a_search_is_valued_by_its_outcomes(probs):
 
 @pytest.mark.parametrize("robot", ["r1", "r2", "r3", "robot1", "robot2", "robot3"])
 def test_the_value_does_not_depend_on_the_robots_name(robot):
-    """The box and the cup may both be at `a`. Holding the box and filling the
-    hand then tie in cost (17), and the cup, likelier there, is the better way
-    to fill the hand by c / rho. Extracted first, `hand-full` pulled picking up
-    the cup into the box's plan, and the fluents' hash order decided which came
-    first, so the value depended on the robot's name. Search `a` (done at 15);
-    with probability 0.5 the box is there: pick, move 10, place = 14.
-    15 + 0.5 * 14 = 22."""
+    """The box and the cup may both be at `a`, and the cup, likelier there,
+    is the better way to fill the hand by c / rho. The box's plan fills the
+    hand by picking the box, whatever order the fluents' ids would put them in.
+    Search `a` (done at 15); with probability 0.5 the box is there: pick,
+    move 10, place = 14. 15 + 0.5 * 14 = 22."""
     actions = _actions([robot], ["box", "cup"],
                        find_prob=lambda r, l, o: {("a", "box"): 0.5, ("a", "cup"): 0.8}.get((l, o), 0.0))
     state = _state({robot: "start"})
     assert MCTSPlanner(actions).heuristic(state, F("at box goal")) == pytest.approx(22.0)
 
+
+
+def test_a_goal_does_not_fetch_another_object_to_fill_the_hand():
+    """Placing the box needs a full hand. Picking the cup, likelier to be found,
+    fills it more reliably by c / rho though at a higher cost; the box's plan
+    fills it by picking the box, so the cup does not change the box's value."""
+    probs = {("a", "box"): 0.3, ("b", "cup"): 0.9}
+
+    def find(robot, loc, obj):
+        return probs.get((loc, obj), 0.0)
+
+    state = _state({"r1": "start"})
+    goal = F("at box goal")
+    with_cup = MCTSPlanner(_actions(["r1"], ["box", "cup"], find_prob=find)).heuristic(state, goal)
+    alone = MCTSPlanner(_actions(["r1"], ["box"], find_prob=find)).heuristic(state, goal)
+    assert with_cup == pytest.approx(alone)
 
 def test_single_precision_find_probabilities_are_handled_like_doubles():
     """Learned estimators return float32, and `1 - p` rounds in float32, so a

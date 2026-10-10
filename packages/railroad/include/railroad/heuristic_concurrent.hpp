@@ -15,7 +15,8 @@
 //      fire; in-flight uncertain outcomes keep their probability.
 //                                          [heuristic_concurrent_relaxation.hpp]
 //   2. Probability-aware relaxation: per agent, each fluent's cost and the
-//      probability rho its support succeeds; achievers ranked by cost / rho.
+//      probability rho its support succeeds; achievers ranked by cost / rho,
+//      and relaxed plans read off in that ranking.
 //                                          [heuristic_concurrent_relaxation.hpp]
 //   3. Goal plans: a "goal" is one fact of the goal (of its best DNF branch),
 //      e.g. `at mug L`. Each gets a relaxed plan on each agent, which the

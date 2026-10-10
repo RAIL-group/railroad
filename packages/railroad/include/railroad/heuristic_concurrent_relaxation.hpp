@@ -329,16 +329,20 @@ class Extractor {
     }
   }
 
-  // Walk back from `roots` via the pass's chosen achievers, costliest subgoal
-  // first (as FF does). A fluent added by an action already on the plan
-  // counts as achieved, so a cheaper subgoal covered as a side effect (the
-  // `hand-full` a pick adds) pulls in no achiever of its own. `via`, if
-  // given, achieves roots[0] in place of the pass's choice.
+  // Walk back from `roots` via the pass's chosen achievers, highest-ranked
+  // (cost / rho) subgoal first, as FF takes the costliest first. A fluent
+  // added by an action already on the plan counts as achieved, so a subgoal
+  // covered as a side effect pulls in no achiever of its own. The order must
+  // be the pass's ranking: by cost alone, the `hand-full r` that a reliable
+  // pick of another object fills more cheaply would come before the
+  // `holding r X` whose pick fills it anyway, and the plan would fetch that
+  // other object too. `via`, if given, achieves roots[0] in place of the
+  // pass's choice.
   void extract(const Problem &pb, const Pass &P, const std::vector<int> &roots, Extraction &ex,
                int via = Pass::NONE) {
-    std::priority_queue<std::pair<double, int>> heap;  // (cost, fluent), max first
+    std::priority_queue<std::pair<double, int>> heap;  // (score, fluent), max first
     for (int f : roots) {
-      if (f >= 0) heap.push({P.cost[f], f});
+      if (f >= 0) heap.push({P.score[f], f});
     }
     while (!heap.empty()) {
       auto [key, f] = heap.top();
@@ -355,7 +359,7 @@ class Extractor {
       for (const auto &ad : pb.acts[b].adds) {
         if (ad.prob > 1e-9) ach_stamp_[ad.fluent] = stamp_;
       }
-      for (int p : pb.acts[b].pre) heap.push({P.cost[p], p});
+      for (int p : pb.acts[b].pre) heap.push({P.score[p], p});
     }
   }
 
@@ -367,13 +371,10 @@ class Extractor {
   uint32_t stamp_ = 0;
   std::vector<int> tied_;
 
-  // Of the subgoals tied with f at cost `key`, the one to extract first: the
+  // Of the subgoals tied with f at rank `key`, the one to extract first: the
   // one whose support adds the most of the others, so `holding r X` comes
   // before the `hand-full r` its pick also adds. Fluent ids (hash order)
-  // would otherwise decide, and when `hand-full r` came first it pulled in a
-  // pick of whichever object fills the hand best, making the value depend on
-  // which robot is called what. Ids still break what remains. The rest go
-  // back.
+  // break what remains. The rest go back.
   int take_tied(const Problem &pb, const Pass &P, int f, double key,
                 std::priority_queue<std::pair<double, int>> &heap) {
     tied_.assign(1, f);
@@ -401,7 +402,7 @@ class Extractor {
       }
     }
     for (int g : tied_) {
-      if (g != pick) heap.push({P.cost[g], g});
+      if (g != pick) heap.push({P.score[g], g});
     }
     return pick;
   }
