@@ -9,7 +9,7 @@ import math
 import pytest
 
 from railroad import operators
-from railroad.core import Fluent, State, get_action_by_name, transition
+from railroad.core import Effect, Fluent, Operator, State, get_action_by_name, transition
 from railroad.planner import MCTSPlanner
 
 F = Fluent
@@ -73,6 +73,36 @@ def test_a_fetch_is_costed_as_one_route(start, options, expected):
     d = _breakdown(actions, state, F("at box goal"), **options)
     assert d["makespan"] == pytest.approx(expected)
     assert d["value"] == pytest.approx(expected)  # one goal: sum == max
+
+
+def _timed(name, params, pre, adds, duration, dels=()):
+    """An operator that holds its agent (the first parameter) for `duration`."""
+    agent = params[0][0]
+    return Operator(name=name, parameters=params, preconditions=pre,
+                    effects=[Effect(time=0, resulting_fluents={F(f"not free {agent}"), *dels}),
+                             Effect(time=duration, resulting_fluents={F(f"free {agent}"), *adds})])
+
+
+def test_a_route_does_last_what_uses_up_another_actions_precondition():
+    """Serving needs the egg boiled (at the pot, b) and in the bowl (at the
+    goal). The relaxation has no deletes, so it may put the egg in the bowl
+    (10 from a) before boiling it (20 from a); but putting it in ends holding
+    it, which boiling needs. The route boils first: pick the egg up at a (2),
+    boil it at b (20 + 10), put it in at the goal (10 + 2), serve (1): 45 --
+    not 2 + 10 + 2 + 10 + 10 + 1 = 35."""
+    objects = {"robot": {"r1"}, "location": set(POSITION), "object": {"egg"}}
+    holds = [F("free ?r"), F("holding ?r egg")]
+    ops = [operators.construct_move_operator(_move_time), operators.construct_pick_operator(2.0),
+           _timed("boil", [("?r", "robot"), ("?l", "location")],
+                  [F("at ?r ?l"), F("at pot ?l"), *holds], [F("boiled egg")], 10.0),
+           _timed("put-in", [("?r", "robot"), ("?l", "location")],
+                  [F("at ?r ?l"), F("at bowl ?l"), *holds], [F("in egg bowl"), F("not hand-full ?r")],
+                  2.0, dels={F("not holding ?r egg")}),
+           _timed("serve", [("?r", "robot")], [F("free ?r"), F("boiled egg"), F("in egg bowl")],
+                  [F("served")], 1.0)]
+    actions = sorted((a for op in ops for a in op.instantiate(objects)), key=lambda a: a.name)
+    state = _state({"r1": "a"}, extra={F("at egg a"), F("found egg"), F("at pot b"), F("at bowl goal")})
+    assert _breakdown(actions, state, F("served"))["makespan"] == pytest.approx(45.0)
 
 
 def test_fetches_are_split_across_robots_and_sequenced_on_one():

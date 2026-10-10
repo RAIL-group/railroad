@@ -90,6 +90,33 @@ inline int deterministic_achiever(const Problem &pb, const Pass &P, int g) {
   return best;
 }
 
+// When agent r needs to do each of the plan's actions: when it could start
+// in the relaxation, but after any other action that needs what it uses up --
+// the relaxation has no deletes to order them (putting an egg into a bowl, no
+// longer holding it, comes after boiling it).
+inline std::vector<double> need_times(const Problem &pb, const Pass &P, int r,
+                                      const std::vector<int> &plan) {
+  std::vector<double> need(plan.size());
+  for (std::size_t i = 0; i < plan.size(); ++i) need[i] = P.wait[plan[i]];
+  for (std::size_t round = 0; round < plan.size(); ++round) {
+    bool changed = false;
+    for (std::size_t i = 0; i < plan.size(); ++i) {
+      if (pb.move_dest(plan[i], r) >= 0) continue;
+      for (int q : pb.acts[plan[i]].consumes) {
+        for (std::size_t k = 0; k < plan.size(); ++k) {
+          if (k == i || need[i] > need[k] || pb.move_dest(plan[k], r) >= 0) continue;
+          const std::vector<int> &pre = pb.acts[plan[k]].pre;
+          if (std::find(pre.begin(), pre.end(), q) == pre.end()) continue;
+          need[i] = need[k] + 1e-6;
+          changed = true;
+        }
+      }
+    }
+    if (!changed) break;
+  }
+  return need;
+}
+
 // Find the goal's uncertain search and split the plan around it. The search
 // is the implied `found X` when the goal has one -- even with one attempt
 // left, so the costing does not switch schemes when the second-last place
@@ -98,8 +125,8 @@ inline int deterministic_achiever(const Problem &pb, const Pass &P, int g) {
 // up) happens wherever it succeeds, so only the other actions' places (where
 // to bring it) are on the route from there.
 inline void split_search(Context &cx, Pass &P, int r, int g, int companion,
-                         const std::vector<int> &plan, const std::vector<int> &move_dests,
-                         GoalPlan &tp) {
+                         const std::vector<int> &plan, const std::vector<double> &need,
+                         const std::vector<int> &move_dests, GoalPlan &tp) {
   const Problem &pb = cx.pb;
   int f_star = -1;
   std::size_t best_n = 1;
@@ -121,13 +148,14 @@ inline void split_search(Context &cx, Pass &P, int r, int g, int companion,
     return false;
   };
   std::vector<std::pair<double, int>> before, after;  // (need time, location)
-  for (int a : plan) {
+  for (std::size_t i = 0; i < plan.size(); ++i) {
+    const int a = plan[i];
     if (a == b || pb.move_dest(a, r) >= 0) continue;
-    bool post = P.wait[a] >= search_need;
+    bool post = need[i] >= search_need;
     (post ? tp.other_post : tp.other_pre) += pb.acts[a].dur;
     if (post && anchored(a)) continue;
     for (int q : pb.acts[a].pre) {
-      if (pb.loc_agent[q] == r) (post ? after : before).push_back({P.wait[a], q});
+      if (pb.loc_agent[q] == r) (post ? after : before).push_back({need[i], q});
     }
   }
   // Waypoints and location goals, as in plan_goal.
@@ -219,7 +247,9 @@ inline GoalPlan plan_goal(Context &cx, Pass &P, int g, int companion, int r, dou
   // earliest plan action requiring it could start.
   std::vector<std::pair<double, int>> visits;  // (need time, location)
   std::vector<int> move_dests;
-  for (int a : ex.actions) {
+  const std::vector<double> need = need_times(pb, P, r, ex.actions);
+  for (std::size_t i = 0; i < ex.actions.size(); ++i) {
+    const int a = ex.actions[i];
     int dest = pb.move_dest(a, r);
     if (dest >= 0) {
       move_dests.push_back(dest);
@@ -227,7 +257,7 @@ inline GoalPlan plan_goal(Context &cx, Pass &P, int g, int companion, int r, dou
     }
     tp.other += pb.acts[a].dur;
     for (int p : pb.acts[a].pre) {
-      if (pb.loc_agent[p] == r) visits.push_back({P.wait[a], p});
+      if (pb.loc_agent[p] == r) visits.push_back({need[i], p});
     }
   }
   for (int d : move_dests) {
@@ -249,7 +279,7 @@ inline GoalPlan plan_goal(Context &cx, Pass &P, int g, int companion, int r, dou
     int b = P.best[v.second];
     tp.leg_fallback.push_back(b >= 0 ? pb.acts[b].dur : 0.0);
   }
-  if (cx.opts.expected_search) split_search(cx, P, r, g, companion, ex.actions, move_dests, tp);
+  if (cx.opts.expected_search) split_search(cx, P, r, g, companion, ex.actions, need, move_dests, tp);
   return tp;
 }
 

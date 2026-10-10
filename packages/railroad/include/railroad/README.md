@@ -130,7 +130,10 @@ core and the refinements; each part header explains its step. In brief:
    the `found mug` it implies); each needs one or more actions. Each goal's
    relaxed plan on each agent, with its moves re-costed as one route (route
    chaining) and an uncertain search costed as an expected route over its
-   candidate places, planned or in flight (expected search).
+   candidate places, planned or in flight (expected search). The route visits
+   each action's place when the relaxation could start it, but after any
+   action needing what it uses up (the relaxation has no deletes: boil the
+   egg before putting it in the bowl).
 4. **List schedule.** Each goal goes to the agent that would finish it
    earliest. Goals are planned independently, so one goal's plan may use
    what another's relies on (a full hand's object set down anywhere to fetch
