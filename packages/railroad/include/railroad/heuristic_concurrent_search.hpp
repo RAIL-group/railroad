@@ -71,28 +71,34 @@ inline bool attempt_reveals(const Problem &pb, const TimedState &ts, int att, in
   return att <= -2 && ts.reveals(-2 - att, q);
 }
 
-// A place a search may succeed, with the unconditional probability that it
-// succeeds there and the time left from there (`rest`).
+// A place a search may succeed: the unconditional probability that it first
+// succeeds there, the time left from there (`rest`), the agent's location
+// fluent for it (-1: unknown) and when the search there ends.
 struct Found {
   double prob;
   double rest;
+  int loc;
+  double t;
 };
 
 // Expected time, from t_start, until f holds when agent r, starting at
 // location fluent `pos`, works through f's attempts in pass P. rest(loc,
-// achieves) is the time left after succeeding at `loc`.
+// achieves, t) is the time left after succeeding at `loc` at time t. `where`
+// receives each place with a chance of being the first success; with the
+// probability they leave (the walk can end without one), `t_last` receives
+// when its last search ends.
 template <class Rest>
 inline double expected_search(const Problem &pb, const TimedState &ts, const Pass &P, int f,
                               int goal, int r, int pos, double t_start, const Rest &rest,
-                              std::vector<Found> &where) {
+                              std::vector<Found> &where, double *t_last = nullptr) {
   where.clear();
-  struct Event { double t, p, rest; };
+  struct Event { double t, p, rest; int loc; };
   std::vector<Event> events;
   std::vector<SearchAttempt> cands;
   double fail = 1.0;
   for (const auto &at : attempts_for(pb, ts, P, r, f, goal)) {
     if (at.in_flight >= 0) {
-      events.push_back({at.fallback, at.prob, rest(at.loc, at.achieves)});
+      events.push_back({at.fallback, at.prob, rest(at.loc, at.achieves, at.fallback), at.loc});
       fail *= 1.0 - at.prob;
     } else {
       cands.push_back(at);
@@ -120,7 +126,7 @@ inline double expected_search(const Problem &pb, const TimedState &ts, const Pas
     used[best] = 1;
     t += best_dt;
     if (c.loc >= 0) pos = c.loc;
-    events.push_back({t, c.prob, rest(c.loc, c.achieves)});
+    events.push_back({t, c.prob, rest(c.loc, c.achieves, t), c.loc});
     fail *= 1.0 - c.prob;
   }
   if (events.empty()) return INF;
@@ -135,9 +141,10 @@ inline double expected_search(const Problem &pb, const TimedState &ts, const Pas
     expected += (tt - prev) * still;
     prev = tt;
     double here = still * e.p;
-    if (here > 0.0) where.push_back({here, e.rest});
+    if (here > 0.0) where.push_back({here, e.rest, e.loc, tt});
     still *= 1.0 - e.p;
   }
+  if (t_last) *t_last = prev;
   return expected;
 }
 

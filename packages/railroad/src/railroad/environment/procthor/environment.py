@@ -1,7 +1,7 @@
 """ProcTHOR environment for PDDL planning."""
 
 from abc import ABC, abstractmethod
-from typing import Dict, List, Set
+from typing import Dict, List, Sequence, Set, Tuple
 
 import numpy as np
 
@@ -52,6 +52,7 @@ class ProcTHOREnvironment(OccupancyGridPathingMixin, ObjectSearchEnvironment, AB
         operators: List[Operator] | None = None,
         resolution: float = 0.05,
         validate: bool = True,
+        extra_objects: Sequence[Tuple[str, str]] | None = None,
     ) -> None:
         """Initialize ProcTHOR environment.
 
@@ -63,8 +64,10 @@ class ProcTHOREnvironment(OccupancyGridPathingMixin, ObjectSearchEnvironment, AB
                 resolves operators from ``define_operators()``.
             resolution: Grid resolution in meters
             validate: Whether to validate objects/locations exist in scene
+            extra_objects: (container type, object type) pairs to add to the
+                scene (see ``ThorInterface``).
         """
-        self.scene = ProcTHORScene(seed=seed, resolution=resolution)
+        self.scene = ProcTHORScene(seed=seed, resolution=resolution, extra_objects=extra_objects)
 
         location_registry = LocationRegistry(
             {

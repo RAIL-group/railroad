@@ -34,16 +34,17 @@ Probabilistic PDDL planning system.
   below). Umbrella header for its parts, in dependency order:
   - **heuristic_concurrent_problem.hpp**: options, breakdown, and the
     compiled problem (fluent ids, actions, agents, agent location groups,
-    `at`->`found`, goal branches).
+    `at`->`found`, objects and the places they can be, goal branches).
   - **heuristic_concurrent_relaxation.hpp** (core): the timed relaxed state,
     the cost/rho relaxation passes with retry deltas, and relaxed-plan
     extraction.
   - **heuristic_concurrent_search.hpp**: expected search over a subgoal's
     attempts, planned and in flight.
   - **heuristic_concurrent_plans.hpp** (core): per-agent goal plans, route
-    chaining, and splitting a goal plan around its search.
-  - **heuristic_concurrent_schedule.hpp** (core): list scheduling of goals
-    onto agents.
+    chaining, splitting a goal plan around its search, and routes that wait
+    for what other jobs provide.
+  - **heuristic_concurrent_schedule.hpp** (core): cutting the team's relaxed
+    plan into jobs, and list scheduling them onto agents.
 - **planner.hpp**: MCTS planner implementation
 - **constants.hpp**: Global constants
 
@@ -126,24 +127,48 @@ core and the refinements; each part header explains its step. In brief:
 2. **Probability-aware relaxation**, per agent (agents are the arguments of
    `free`): achievers ranked by `cost / rho`, the expected cost of retrying
    an independent attempt until it succeeds.
-3. **Goal plans.** A *goal* is one fact of the goal, e.g. `at mug L` (with
-   the `found mug` it implies); each needs one or more actions. Each goal's
-   relaxed plan on each agent, with its moves re-costed as one route (route
-   chaining) and an uncertain search costed as an expected route over its
-   candidate places, planned or in flight (expected search). The route visits
-   each action's place when the relaxation could start it, but after any
-   action needing what it uses up (the relaxation has no deletes: boil the
-   egg before putting it in the bowl).
-4. **List schedule.** Each goal goes to the agent that would finish it
-   earliest. Goals are planned independently, so one goal's plan may use
-   what another's relies on (a full hand's object set down anywhere to fetch
-   another).
-5. **Value** `lambda_add * sum_g C_g + lambda_ms * max_g C_g` over the
-   scheduled completion times. The objective is the makespan; the sum is a
-   shaping term that gives a goal off the critical path a gradient (without
-   it, ProcTHOR plans are 3-22% longer with 2-3 robots), at the price of
-   falling at `lambda_ms + lambda_add * n` per unit of time with `n` goals
-   open while MCTS charges 1.
+3. **Jobs.** The team's relaxed plan for every goal fact at once is cut into
+   jobs. Actions linked through a fluent naming an agent and something else
+   (`holding r X`), or needing the same such fluent, are one agent's work,
+   and so is establishing what that agent then handles (finding X); moves and
+   an agent's own state
+   (`hand-full r`) are re-planned by whoever does the job. Any other link
+   between two jobs (`at pot L`, a door opened) makes the consumer wait for
+   the provider. Goal facts in one job (`boiled egg`, `in egg bowl`) are one
+   unit; work no goal fact needs directly is a provider job. With nothing to
+   split, each goal fact (with the `found mug` an `at mug L` implies) is its
+   own job.
+4. **Job plans.** Each job's relaxed plan on each agent, stopping at what
+   other jobs provide, with its moves re-costed as one route (route
+   chaining) that waits for those provisions, and an uncertain search
+   costed as an expected route over its candidate places, planned or in
+   flight (expected search). The route visits each action's stops when the
+   relaxation could start it, but after any action needing what it uses up
+   (the relaxation has no deletes: boil the egg, then put it in the bowl). An
+   object a job only searches for is a search job, leaving it wherever it
+   turns up. An object a goal delivers that another job uses where it is now
+   is either used where it is delivered (the user waits for the delivery) or
+   used first and then delivered (the delivery waits for the user): both are
+   scheduled and the better kept -- one robot fills the bowl where it is and
+   carries it, two bring the bowl while the egg boils.
+5. **List schedule.** In priority order, once its providers are scheduled,
+   each job goes to the agent that would finish it earliest -- or, for a job
+   others then wait on, the agent that lets them finish earliest (HEFT's
+   one-step lookahead), so a provider does not take the agent its consumer
+   needs. Jobs are
+   planned independently, so one job's plan may use what another's relies
+   on (a full hand's object set down anywhere to fetch another).
+6. **Value** `lambda_add * sum_g C_g + lambda_ms * max_g C_g` over the
+   scheduled completion times of the goal facts. The objective is the
+   makespan; the sum is a shaping term that gives a goal off the critical
+   path a gradient (without it, ProcTHOR plans are 3-22% longer with 2-3
+   robots), at the price of falling at `lambda_ms + lambda_add * n` per unit
+   of time with `n` goals open while MCTS charges 1. When the goal can be
+   reached several ways (DNF branches), the best way's value is taken, and
+   agents done with their part of it before it is finished go on to the
+   second-best: the value is lowered by `lambda_ms * (E[MS_1] - E[min(MS_1,
+   MS_2)])`, from the completion-time distributions of the two schedules
+   (hedging).
 
 `ConcurrentHeuristicOptions` switches the refinements off for ablations.
 

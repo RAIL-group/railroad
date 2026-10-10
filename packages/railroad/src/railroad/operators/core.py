@@ -150,7 +150,7 @@ def construct_move_visited_operator_constrained(move_time: OptNumeric) -> Operat
 
 
 def construct_search_operator(
-    object_find_prob: OptNumeric, search_time: OptNumeric
+    object_find_prob: OptNumeric, search_time: OptNumeric, object_type: str = "object"
 ) -> Operator:
     """Construct a search-only operator.
 
@@ -161,6 +161,7 @@ def construct_search_operator(
             Function signature: (robot, location, object) -> float
         search_time: Time or function for search duration.
             Function signature: (robot, location, object) -> float
+        object_type: Type of the objects it searches for.
 
     Returns:
         Operator for searching a location.
@@ -169,7 +170,7 @@ def construct_search_operator(
     search_time_fn = _to_numeric(search_time)
     return Operator(
         name="search",
-        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
+        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", object_type)],
         preconditions=[
             F("at ?r ?loc"),
             F("free ?r"),
@@ -303,7 +304,7 @@ def construct_pick_operator(pick_time: OptNumeric) -> Operator:
     )
 
 
-def construct_pick_operator_blocking(pick_time: OptNumeric) -> Operator:
+def construct_pick_operator_blocking(pick_time: OptNumeric, object_type: str = "object") -> Operator:
     """Construct a pick operator with just-placed blocking precondition.
 
     Prevents immediately picking up an object that was just placed.
@@ -311,6 +312,7 @@ def construct_pick_operator_blocking(pick_time: OptNumeric) -> Operator:
     Args:
         pick_time: Time or function for pick duration.
             Function signature: (robot, location, object) -> float
+        object_type: Type of the objects it picks.
 
     Returns:
         Operator for picking with blocking precondition.
@@ -318,7 +320,7 @@ def construct_pick_operator_blocking(pick_time: OptNumeric) -> Operator:
     pick_time_fn = _to_numeric(pick_time)
     return Operator(
         name="pick",
-        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
+        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", object_type)],
         preconditions=[
             F("at ?r ?loc"),
             F("free ?r"),
@@ -375,7 +377,7 @@ def construct_place_operator(place_time: OptNumeric) -> Operator:
     )
 
 
-def construct_place_operator_blocking(place_time: OptNumeric) -> Operator:
+def construct_place_operator_blocking(place_time: OptNumeric, object_type: str = "object") -> Operator:
     """Construct a place operator with just-picked blocking precondition.
 
     Prevents immediately placing an object that was just picked up.
@@ -383,6 +385,7 @@ def construct_place_operator_blocking(place_time: OptNumeric) -> Operator:
     Args:
         place_time: Time or function for place duration.
             Function signature: (robot, location, object) -> float
+        object_type: Type of the objects it places.
 
     Returns:
         Operator for placing with blocking precondition.
@@ -390,7 +393,7 @@ def construct_place_operator_blocking(place_time: OptNumeric) -> Operator:
     place_time_fn = _to_numeric(place_time)
     return Operator(
         name="place",
-        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
+        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", object_type)],
         preconditions=[
             F("at ?r ?loc"),
             F("free ?r"),

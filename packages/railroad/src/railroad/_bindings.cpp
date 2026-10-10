@@ -799,11 +799,16 @@ PYBIND11_MODULE(_bindings, m) {
              d["completion_sum"] = bd.completion_sum;
              d["goal_finish"] = bd.goal_finish;
              d["assignment"] = bd.assignment;
+             d["searches"] = bd.searches;
+             d["hedge"] = bd.hedge;
+             d["hedge_gain"] = bd.hedge_gain;
              return d;
            },
            py::arg("state"),
            "The value and the schedule behind it: makespan, completion_sum, "
-           "each goal's finish time and the agent it is assigned to.");
+           "each goal's finish time and the agent it is assigned to, the search "
+           "jobs (object, agent), and any hedge (the second way's goals and "
+           "agents, and how much it lowered the expected makespan).");
 
   // ff_heuristic with Goal object
   m.def("ff_heuristic",

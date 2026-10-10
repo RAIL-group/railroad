@@ -364,6 +364,22 @@ struct Pass {
   }
 };
 
+// Items a plan leaves to others: a fluent (its id), or everything about where
+// an object is (object_item(object)).
+inline int object_item(int object) { return -2 - object; }
+inline int item_object(int item) { return item <= -2 ? -2 - item : -1; }
+
+// Is fluent f one of `items`, itself or as part of an object? The index in
+// `items`, or -1.
+inline int item_index(const Problem &pb, const std::vector<int> &items, int f) {
+  if (items.empty() || f < 0) return -1;
+  auto it = std::find(items.begin(), items.end(), f);
+  if (it == items.end() && pb.obj_of[f] >= 0) {
+    it = std::find(items.begin(), items.end(), object_item(pb.obj_of[f]));
+  }
+  return it == items.end() ? -1 : static_cast<int>(it - items.begin());
+}
+
 // A relaxed plan read off a pass.
 struct Extraction {
   double dur = 0.0;     // sum of action durations
@@ -391,9 +407,10 @@ class Extractor {
   // first (as FF does). A fluent added by an action already on the plan
   // counts as achieved, so a cheaper subgoal covered as a side effect (the
   // `hand-full` a pick adds) pulls in no achiever of its own; probabilistic
-  // subgoals still pay their retry delta.
+  // subgoals still pay their retry delta. Subgoals in `stop` (see item_index)
+  // are left to others: the plan neither achieves nor waits for them here.
   void extract(const Problem &pb, const TimedState &ts, Pass &P, const std::vector<int> &roots,
-               Extraction &ex) {
+               Extraction &ex, const std::vector<int> &stop = {}) {
     std::priority_queue<std::pair<double, int>> heap;  // (cost, fluent), max first
     for (int f : roots) {
       if (f >= 0) heap.push({P.cost[f], f});
@@ -408,6 +425,7 @@ class Extractor {
       fl_stamp_[f] = stamp_;
       int b = P.best[f];
       if (b == Pass::AVAIL || b == Pass::NONE) continue;
+      if (item_index(pb, stop, f) >= 0) continue;
       ex.fluents.push_back(f);
       if (P.uncertain(pb, f)) ex.delta += P.delta(pb, ts, f);
       if (Pass::is_pending(b) || ach_stamp_[f] == stamp_) continue;

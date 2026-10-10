@@ -10,6 +10,7 @@ from . import basic_planning
 from . import feature_examples
 from . import movie_night
 from . import multi_object_search
+from . import procthor_breakfast
 from . import procthor_search
 
 __all__ = [
@@ -17,5 +18,6 @@ __all__ = [
     "feature_examples",
     "movie_night",
     "multi_object_search",
+    "procthor_breakfast",
     "procthor_search",
 ]

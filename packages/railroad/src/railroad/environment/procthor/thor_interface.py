@@ -105,6 +105,12 @@ class ThorInterface:
         resolution: Grid resolution in meters
         preprocess: Whether to filter containers
         use_cache: Whether to use cached data
+        extra_objects: Objects to add to the scene, as (container type,
+            object type) pairs: each goes on the first container of that type,
+            preferring one in a kitchen. They are numbered after every object
+            the scene has, so existing names do not change, and they do not
+            touch the cache (small objects change neither the reachable
+            positions nor, at this scale, the overhead image).
     """
 
     def __init__(
@@ -113,9 +119,11 @@ class ThorInterface:
         resolution: float = 0.05,
         preprocess: bool = True,
         use_cache: bool = True,
+        extra_objects: Optional[Sequence[Tuple[str, str]]] = None,
     ) -> None:
         self.seed = seed
         self.grid_resolution = resolution
+        self.extra_objects = list(extra_objects or [])
         random.seed(seed)
 
         self.scene = self._load_scene()
@@ -445,6 +453,18 @@ class ThorInterface:
                     })
                     graph.add_edge(cnt_idx, obj_idx)
 
+        for k, (container_type, object_type) in enumerate(self.extra_objects):
+            container = self._container_for(container_type)
+            cnt_idx = graph.asset_id_to_node_idx_map[container['id']]
+            obj_id = f"{object_type}|{utils.get_room_id(container['id'])}|extra|{k}"
+            obj_idx = graph.add_node({
+                'id': obj_id,
+                'name': utils.get_generic_name(obj_id),
+                'position': container['position'],
+                'type': [0, 0, 0, 1]
+            })
+            graph.add_edge(cnt_idx, obj_idx)
+
         # Ensure connectivity
         graph.edges.extend(utils.get_edges_for_connected_graph(
             self.occupancy_grid,
@@ -459,6 +479,15 @@ class ThorInterface:
         ))
 
         return graph
+
+    def _container_for(self, container_type: str) -> Dict[str, Any]:
+        """The first container of a type, preferring one in a kitchen."""
+        kitchens = {utils.get_room_id(r['id']) for r in self.rooms if r['roomType'] == 'Kitchen'}
+        matches = [c for c in self.containers if utils.get_generic_name(c['id']) == container_type.lower()]
+        if not matches:
+            raise ValueError(f"Scene {self.seed} has no '{container_type}' to add objects to")
+        in_kitchen = [c for c in matches if utils.get_room_id(c['id']) in kitchens]
+        return (in_kitchen or matches)[0]
 
     def _get_known_costs(self) -> Dict[str, Dict[str, float]]:
         """Pre-compute costs between all containers."""

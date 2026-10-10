@@ -312,3 +312,120 @@ def test_mcts_does_not_expand_past_the_goal(backup):
 def test_invalid_planner_settings_are_rejected(kwargs):
     with pytest.raises(ValueError):
         MCTSPlanner(_actions(["r1"], ["box"]), **kwargs)
+
+
+# -- Jobs: one goal's work shared between agents --------------------------------
+
+def test_a_job_waits_for_what_another_agent_provides():
+    """Lighting the lamp needs the power on, which another agent can switch on
+    at the panel: one walks to the panel (30) and switches it on (5) while the
+    other walks to the lamp (10), waits for the power (35) and lights it (5):
+    40. On its own an agent goes on from the panel: 35 + 20 + 5 = 60."""
+    where = {"start": 0.0, "panel": 30.0, "lamp": 10.0}
+    ops = [operators.construct_move_operator(lambda r, a, b: abs(where[a] - where[b])),
+           _timed("switch-on", [("?r", "robot")], [F("at ?r panel"), F("free ?r")], [F("powered")], 5.0),
+           _timed("light", [("?r", "robot")], [F("at ?r lamp"), F("free ?r"), F("powered")], [F("lit")], 5.0)]
+
+    def value(robots):
+        objects = {"robot": set(robots), "location": set(where)}
+        actions = sorted((a for op in ops for a in op.instantiate(objects)), key=lambda a: a.name)
+        state = State(0.0, {F(f"at {r} start") for r in robots} | {F(f"free {r}") for r in robots}, [])
+        return MCTSPlanner(actions).heuristic(state, F("lit"))
+
+    assert value(["r1", "r2"]) == pytest.approx(40.0)
+    assert value(["r1"]) == pytest.approx(60.0)
+
+
+def _dish_actions(robots):
+    """Line world with boiling and serving: the egg at `a`, the pot at `b`, the
+    bowl at `c`, all already found; serve at `goal`."""
+    objects = {"robot": set(robots), "location": set(POSITION), "object": {"egg", "pot", "bowl"},
+               "egg": {"egg"}, "vessel": {"pot"}, "bowl": {"bowl"}}
+    ops = [operators.construct_move_operator(_move_time),
+           operators.construct_pick_operator(2.0), operators.construct_place_operator(2.0),
+           _timed("boil", [("?r", "robot"), ("?l", "location"), ("?e", "egg"), ("?v", "vessel")],
+                  [F("at ?r ?l"), F("free ?r"), F("holding ?r ?e"), F("at ?v ?l")], [F("boiled ?e")], 10.0),
+           _timed("put-in", [("?r", "robot"), ("?l", "location"), ("?e", "egg"), ("?b", "bowl")],
+                  [F("at ?r ?l"), F("free ?r"), F("holding ?r ?e"), F("at ?b ?l")],
+                  [F("in ?e ?b"), F("not hand-full ?r")], 2.0, dels={F("not holding ?r ?e")})]
+    return sorted((a for op in ops for a in op.instantiate(objects)), key=lambda a: a.name)
+
+
+def test_a_dish_is_shared_between_two_robots():
+    """Boiling the egg and putting it in the bowl are one robot's job (it holds
+    the egg throughout); bringing the bowl to the goal is another's, which the
+    first waits for. Bowl: 40 + 2 + 60 + 2 = 104. Egg: 10 + 2 to pick it up,
+    20 + 10 to boil it at the pot, 10 to the goal (52), the bowl there at 104,
+    then 2 to put it in: 106. h = 0.5 * (104 + 106 + 106) + 0.5 * 106."""
+    robots = ["r1", "r2"]
+    state = _state({r: "start" for r in robots},
+                   extra={F("at egg a"), F("at pot b"), F("at bowl c"),
+                          F("found egg"), F("found pot"), F("found bowl")})
+    goal = F("boiled egg") & F("in egg bowl") & F("at bowl goal")
+    d = MCTSPlanner(_dish_actions(robots)).heuristic_breakdown(state, goal)
+    finish = dict(d["goal_finish"])
+    assert finish["at bowl goal"] == pytest.approx(104.0)
+    assert finish["in egg bowl"] == pytest.approx(106.0)
+    assert d["makespan"] == pytest.approx(106.0)
+    assert d["value"] == pytest.approx(0.5 * (104 + 106 + 106) + 0.5 * 106)
+    assigned = dict(d["assignment"])
+    assert assigned["boiled egg"] == assigned["in egg bowl"] != assigned["at bowl goal"]
+
+
+@pytest.mark.parametrize("held, makespan", [(False, 44.0), (True, 42.0)])
+def test_the_egg_is_boiled_before_it_goes_in_the_bowl(held, makespan):
+    """The relaxation has no deletes, so it may put the egg in the bowl (at the
+    goal, 10 from a) before boiling it (at b, 20 from a). Putting it in ends
+    holding it, which boiling needs, so that comes last: pick the egg up (2),
+    boil it at b (20 + 10), put it in at the goal (10 + 2): 44, or 42 when it
+    is already held. Either way both facts are one job, for whoever holds it."""
+    extra = {F("at pot b"), F("at bowl goal"), F("found egg"), F("found pot"), F("found bowl")}
+    extra |= {F("holding r1 egg"), F("hand-full r1")} if held else {F("at egg a")}
+    state = _state({"r1": "a", "r2": "c"}, extra=extra)
+    d = MCTSPlanner(_dish_actions(["r1", "r2"])).heuristic_breakdown(state, F("boiled egg") & F("in egg bowl"))
+    finish = dict(d["goal_finish"])
+    assert finish["boiled egg"] == finish["in egg bowl"] == pytest.approx(makespan)
+    assert dict(d["assignment"]) == {"boiled egg": "r1", "in egg bowl": "r1"}
+
+
+def test_a_provider_leaves_the_robot_its_consumer_needs():
+    """Bringing the bowl to the goal is a job the egg job waits for. r1, at the
+    bowl, would bring it soonest (2 + 20 + 2 = 24), but then the egg job, for
+    r1 or for r2 far off at c, ends at 78. Looking ahead, the bowl goes to r2
+    (40 + 2 + 20 + 2 = 64) while r1 picks up the egg (10 + 2), boils it at b
+    (20 + 10) and waits for the bowl at the goal (10, then 64): 66."""
+    extra = {F("at egg a"), F("at pot b"), F("at bowl start"), F("found egg"), F("found pot"), F("found bowl")}
+    state = _state({"r1": "start", "r2": "c"}, extra=extra)
+    goal = F("boiled egg") & F("in egg bowl") & F("at bowl goal")
+    d = MCTSPlanner(_dish_actions(["r1", "r2"])).heuristic_breakdown(state, goal)
+    assert dict(d["assignment"]) == {"boiled egg": "r1", "in egg bowl": "r1", "at bowl goal": "r2"}
+    assert d["makespan"] == pytest.approx(66.0)
+
+
+@pytest.mark.parametrize("robots, makespan", [(["r1"], 58.0), (["r1", "r2"], 46.0)])
+def test_a_bowl_is_filled_where_it_is_or_where_it_goes(robots, makespan):
+    """The egg and the pot are at a, the bowl at b, past the goal. Alone, a
+    robot boils the egg (10 + 2 + 10), puts it into the bowl at b (20 + 2) and
+    carries the bowl to the goal (2 + 10 + 2): 58 -- not the bowl first (44)
+    and then the egg (10 + 2 + 10 + 10 + 2): 78. With two, one brings the bowl
+    (44) while the other boils the egg and waits for it at the goal: 46."""
+    extra = {F("at egg a"), F("at pot a"), F("at bowl b"), F("found egg"), F("found pot"), F("found bowl")}
+    state = _state({r: "start" for r in robots}, extra=extra)
+    goal = F("boiled egg") & F("in egg bowl") & F("at bowl goal")
+    d = MCTSPlanner(_dish_actions(robots)).heuristic_breakdown(state, goal)
+    assert d["makespan"] == pytest.approx(makespan)
+
+
+def test_a_spare_robot_hedges_on_a_second_way():
+    """Either object at the goal will do. Each is at one of two places with
+    probability 0.5. One robot brings the box; the other, with nothing to do
+    for that, goes for the cup, which shortens the expected time. With one
+    robot there is no one to spare."""
+    probs = {("a", "box"): 0.5, ("b", "box"): 0.5, ("c", "cup"): 0.5, ("goal", "cup"): 0.5}
+    goal = F("at box goal") | F("at cup goal")
+    two = MCTSPlanner(_actions(["r1", "r2"], ["box", "cup"], find_prob=lambda r, l, o: probs.get((l, o), 0.0)))
+    d = two.heuristic_breakdown(_state({"r1": "start", "r2": "start"}), goal)
+    assert d["hedge_gain"] > 0.0 and d["hedge"]
+    assert d["value"] == pytest.approx(0.5 * d["completion_sum"] + 0.5 * (d["makespan"] - d["hedge_gain"]))
+    one = MCTSPlanner(_actions(["r1"], ["box", "cup"], find_prob=lambda r, l, o: probs.get((l, o), 0.0)))
+    assert one.heuristic_breakdown(_state({"r1": "start"}), goal)["hedge_gain"] == 0.0

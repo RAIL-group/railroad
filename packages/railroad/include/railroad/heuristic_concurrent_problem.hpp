@@ -46,6 +46,9 @@ struct ConcurrentHeuristicBreakdown {
   double completion_sum = 0.0;
   std::vector<std::pair<std::string, double>> goal_finish;      // goal, finish
   std::vector<std::pair<std::string, std::string>> assignment;  // goal, agent
+  std::vector<std::pair<std::string, std::string>> searches;    // searched-for object, agent
+  std::vector<std::pair<std::string, std::string>> hedge;       // second option's goal, agent
+  double hedge_gain = 0.0;
 };
 
 namespace concurrent {
@@ -79,6 +82,7 @@ struct Problem {
     compile_actions(actions, goal);
     compile_routes();
     compile_found();
+    compile_objects();
     compile_goal(goal);
   }
   Problem(const Problem &) = delete;
@@ -160,8 +164,42 @@ struct Problem {
     return best;
   }
 
+  // Agent r's location fluent for place `place` (-1 if none).
+  int place_loc_of(int r, int place) const {
+    if (r < 0 || place < 0) return -1;
+    auto it = place_loc[r].find(place);
+    return it == place_loc[r].end() ? -1 : it->second;
+  }
+
   // -- Object-search convention: `at X L` -> `found X` (or -1) -----------
   std::vector<int> found_of;
+  std::vector<char> is_found;  // is f some object's `found X`?
+
+  // -- Objects: what a fluent says where something is ----------------------
+  // A fluent naming a place the way agents' location fluents do (`at bowl L`
+  // like `at r L`), about something that is not an agent, says where that
+  // object is. obj_of: such a fluent, or the object's `found`, -> the object
+  // (-1); obj_place: such a fluent -> the place (-1).
+  std::vector<int> obj_of;
+  std::vector<int> obj_place;
+  std::vector<std::string> obj_names;
+  // Does fluent f name an agent and something besides (`holding r X`)?
+  bool names_agent_and_more(int f) const {
+    bool agent = false, other = false;
+    for (const auto &a : fluents_[f].args()) {
+      bool is_agent = std::find(agent_names.begin(), agent_names.end(), a) != agent_names.end();
+      (is_agent ? agent : other) = true;
+    }
+    return agent && other;
+  }
+  // Does fluent f name an agent?
+  bool names_agent(int f) const {
+    for (const auto &a : fluents_[f].args()) {
+      if (std::find(agent_names.begin(), agent_names.end(), a) != agent_names.end()) return true;
+    }
+    return false;
+  }
+  const std::vector<std::string> &args(int f) const { return fluents_[f].args(); }
 
   // -- Goal: DNF branches (fluent ids, -1 = in no action or state) --------
   std::vector<std::vector<int>> branches;
@@ -169,6 +207,7 @@ struct Problem {
  private:
   std::unordered_map<Fluent, int> fid_;
   std::vector<Fluent> fluents_;
+  std::unordered_map<std::string, int> place_id_;  // "at L" -> place
   mutable std::unordered_map<uint64_t, double> move_cache_;
 
   int intern(const Fluent &f) {
@@ -315,7 +354,7 @@ struct Problem {
 
     loc_place.assign(nf, -1);
     place_loc.assign(agent_free.size(), {});
-    std::unordered_map<std::string, int> place_id;
+    auto &place_id = place_id_;
     for (std::size_t ag = 0; ag < agent_free.size(); ++ag) {
       for (int f : loc_fluents[ag]) {
         const Fluent &fl = fluents_[f];
@@ -331,10 +370,38 @@ struct Problem {
   void compile_found() {
     std::size_t nf = fluents_.size();
     found_of.assign(nf, -1);
+    is_found.assign(nf, 0);
     for (std::size_t f = 0; f < nf; ++f) {
       const Fluent &fl = fluents_[f];
       if (fl.is_negated() || fl.name() != "at" || fl.args().empty()) continue;
       found_of[f] = lookup(Fluent("found", {fl.args()[0]}));
+      if (found_of[f] >= 0) is_found[found_of[f]] = 1;
+    }
+  }
+
+  void compile_objects() {
+    std::size_t nf = fluents_.size();
+    obj_of.assign(nf, -1);
+    obj_place.assign(nf, -1);
+    std::unordered_map<std::string, int> obj_id;
+    auto id = [&](const std::string &name) {
+      auto [it, inserted] = obj_id.emplace(name, static_cast<int>(obj_names.size()));
+      if (inserted) obj_names.push_back(name);
+      return it->second;
+    };
+    for (std::size_t f = 0; f < nf; ++f) {
+      const Fluent &fl = fluents_[f];
+      if (fl.is_negated() || fl.args().size() < 2 || loc_agent[f] >= 0) continue;
+      if (std::find(agent_names.begin(), agent_names.end(), fl.args()[0]) != agent_names.end()) continue;
+      std::string key = fl.name();
+      for (std::size_t i = 1; i < fl.args().size(); ++i) key += " " + fl.args()[i];
+      auto it = place_id_.find(key);
+      if (it == place_id_.end()) continue;
+      obj_place[f] = it->second;
+      obj_of[f] = id(fl.args()[0]);
+    }
+    for (std::size_t f = 0; f < nf; ++f) {
+      if (is_found[f] && !fluents_[f].args().empty()) obj_of[f] = id(fluents_[f].args()[0]);
     }
   }
 

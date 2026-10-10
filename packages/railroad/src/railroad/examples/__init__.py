@@ -251,3 +251,30 @@ if _procthor_available():
             }
         ],
     }
+    EXAMPLES["procthor-breakfast"] = {
+        "main": _lazy_import("procthor_breakfast"),
+        "description": "Serve breakfast any of three ways in a ProcTHOR house",
+        "options": [
+            {
+                "name": "--map",
+                "type": str,
+                "default": "8614",
+                "help": "Breakfast map (2627, 3594, 3984, 7005, 8611, 8614, 8615, 1089)",
+                "param_name": "map_name",
+            },
+            {
+                "name": "--num-robots",
+                "type": int,
+                "default": 2,
+                "help": "Number of robots",
+                "param_name": "num_robots",
+            },
+            {
+                "name": "--estimate-object-find-prob",
+                "is_flag": True,
+                "default": False,
+                "help": "Use the learned model for find probabilities (default: oracle 0.8/0.1)",
+                "param_name": "estimate_object_find_prob",
+            },
+        ],
+    }

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Callable, Dict, Set, Tuple
+from typing import Callable, Dict, Sequence, Set, Tuple
 
 import numpy as np
 
@@ -23,14 +23,21 @@ class ProcTHORScene:
         print(scene.objects)    # All objects in scene
     """
 
-    def __init__(self, seed: int, resolution: float = 0.05) -> None:
+    def __init__(
+        self,
+        seed: int,
+        resolution: float = 0.05,
+        extra_objects: Sequence[Tuple[str, str]] | None = None,
+    ) -> None:
         """Initialize ProcTHOR scene.
 
         Args:
             seed: Random seed for scene selection (0-9999 for ProcTHOR-10k)
             resolution: Grid resolution in meters
+            extra_objects: (container type, object type) pairs to add to the
+                scene (see ``ThorInterface``).
         """
-        self._thor = ThorInterface(seed=seed, resolution=resolution)
+        self._thor = ThorInterface(seed=seed, resolution=resolution, extra_objects=extra_objects)
 
         # Build location registry
         self._locations = self._build_locations()
