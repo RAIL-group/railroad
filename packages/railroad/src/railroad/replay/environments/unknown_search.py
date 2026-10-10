@@ -56,7 +56,7 @@ class ReplayUnknownSearchEnvironment(
 ):
     """Replay an object-search policy over a recorded unknown-map deployment."""
 
-    default_mcts = MctsConfig(iterations=4000, c=300.0, max_depth=20, heuristic_multiplier=2.0)
+    default_mcts = MctsConfig(iterations=4000, c=300.0, max_depth=20)
     default_max_planning_iterations = 80
     dashboard_fluent_keywords = ("at", "found", "searched")
 

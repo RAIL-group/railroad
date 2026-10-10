@@ -28,12 +28,27 @@ Probabilistic PDDL planning system.
 - **heuristic.hpp**: umbrella header — includes the four above plus
   `goal.hpp`, and provides the public introspection helpers and the
   top-level `ff_heuristic` orchestrator (see "Header split" below).
+- **heuristic_concurrent.hpp**: the concurrency-aware heuristic
+  (`ConcurrentHeuristic`) -- the planner's default leaf evaluator, a
+  self-contained alternative to `ff_heuristic` (see "concurrent_heuristic"
+  below). Umbrella header for its parts, in dependency order:
+  - **heuristic_concurrent_problem.hpp**: options, breakdown, and the
+    compiled problem (fluent ids, actions, agents, agent location groups,
+    `at`->`found`, goal branches).
+  - **heuristic_concurrent_relaxation.hpp** (core): the timed relaxed state,
+    the cost/rho relaxation passes, and relaxed-plan extraction.
+  - **heuristic_concurrent_search.hpp**: expected search over a subgoal's
+    attempts, planned and in flight.
+  - **heuristic_concurrent_plans.hpp** (core): per-agent goal plans, route
+    chaining, and splitting a goal plan around its search.
+  - **heuristic_concurrent_schedule.hpp** (core): list scheduling of goals
+    onto agents.
 - **planner.hpp**: MCTS planner implementation
 - **constants.hpp**: Global constants
 
 ## Heuristic Functions
 
-### ff_heuristic (default)
+### ff_heuristic (`heuristic="ff"`)
 
 The primary heuristic for guiding MCTS search. Located in `heuristic.hpp`.
 
@@ -97,6 +112,55 @@ h = ff_heuristic(state, goal, all_actions,
 
 The `lambda_*` weights are free-form (not normalized); defaults are an even
 split between `h_add` and `h_ff` (`0.5, 0.0, 0.5`).
+
+### concurrent_heuristic
+
+`MCTSPlanner(...)`'s default (`heuristic="concurrent"`): the *team's* expected
+remaining time. The opening comment of `heuristic_concurrent.hpp` names the
+core and the refinements; each part header explains its step. In brief:
+
+1. **Timed relaxed state.** In-flight effects count when they fire;
+   in-flight uncertain outcomes are pending achievers that keep their
+   probability. A free agent cannot idle.
+2. **Probability-aware relaxation**, per agent (agents are the arguments of
+   `free`): achievers ranked by `cost / rho`, the expected cost of retrying
+   an independent attempt until it succeeds. Relaxed plans are read off in
+   the same ranking, so a goal's plan fills the robot's hand with its own
+   object rather than a likelier one.
+3. **Goal plans.** A *goal* is one fact of the goal, e.g. `at mug L` (with
+   the `found mug` it implies). On each agent it gets a relaxed plan:
+   - *Route chaining*: its moves are re-costed as one route, visiting each
+     place when the plan needs it, but after any action needing what it uses
+     up (the relaxation has no deletes: boil the egg before putting it in
+     the bowl).
+   - *Expected search*: an uncertain search is costed as an expected route
+     over its candidate places, planned or in flight. A goal whose cheapest
+     support is a search of its own target place is planned through its
+     deterministic achiever, so that bringing the object from elsewhere is
+     costed.
+   - The agent finishes the plan after its actions, but not before the
+     relaxation could achieve the goal (so it waits for in-flight effects).
+4. **List schedule.** Each goal goes to the agent that would finish it
+   earliest. Goals are planned independently, so one goal's plan may use
+   what another's relies on (a full hand's object set down anywhere to fetch
+   another).
+5. **Value** `lambda_add * sum_g C_g + lambda_ms * max_g C_g` over the
+   scheduled completion times. The objective is the makespan; the sum is a
+   shaping term that gives a goal off the critical path a gradient (without
+   it, ProcTHOR plans are 3-22% longer with 2-3 robots), at the price of
+   falling at `lambda_ms + lambda_add * n` per unit of time with `n` goals
+   open while MCTS charges 1.
+
+`ConcurrentHeuristicOptions` switches the refinements off for ablations.
+
+With this heuristic the planner defaults to `heuristic_multiplier=1` and
+`backup="max"`. The leaf value is `-(t + w h)`; with `w > 1`, h falls faster
+than time along any decent path, so the most-deepened branch looks best.
+Under MaxUCT a decision node takes its best
+child and a chance node the probability-weighted mean of its outcomes; every
+outcome is valued from h when created, a node's own value stands in for its
+untried actions, and the root recommends the best estimate. Goal states are
+terminal in selection under either backup.
 
 ### "at implies found" augmentation
 
@@ -167,8 +231,8 @@ action sets.
 
 ## Usage in MCTS
 
-`MCTSPlanner` in `planner.hpp` uses `ff_heuristic` to estimate the
-remaining cost-to-go at leaf nodes during simulation. The lambda mixing
+`MCTSPlanner` in `planner.hpp` values leaf nodes with `ConcurrentHeuristic`
+by default, or with `ff_heuristic` under `heuristic="ff"`. The lambda mixing
 weights are configurable on the planner wrapper
 (`MCTSPlanner(..., lambda_add=, lambda_max=, lambda_ff=)`).
 

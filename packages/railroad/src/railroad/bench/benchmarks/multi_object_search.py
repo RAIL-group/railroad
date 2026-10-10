@@ -95,8 +95,7 @@ def bench_multi_object_search_base(case: BenchmarkCase, do_plot=False):
     )
 
     no_op = operators.construct_no_op_operator(
-        no_op_time=env.get_skills_time_fn('no_op'),
-        extra_cost=10
+        no_op_time=env.get_skills_time_fn('no_op')
     )
 
     # Create simulator
@@ -209,7 +208,7 @@ def bench_multi_object_search_varied_goals(case: BenchmarkCase):
     # Add fixed parameters to the case (won't show in case name)
     case.params["mcts.c"] = 100
     case.params["mcts.iterations"] = 1000
-    case.params["mcts.h_mult"] = 2
+    case.params["mcts.h_mult"] = 1
     case.params["num_robots"] = 2
     return bench_multi_object_search_base(case, do_plot=True)
 

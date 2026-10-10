@@ -5,6 +5,11 @@ Wraps the procthor_search example as a benchmark case. Robots must search
 a ProcTHOR-generated household scene to find target objects and bring them
 to a designated room.
 
+Registered once per planner configuration, so each benchmark's cases vary
+only in the problem: `procthor_search` runs the planner's defaults (the
+concurrent heuristic with MaxUCT backup), and `procthor_search_ff` the FF
+heuristic with mean backup, the original setup.
+
 Modeled on movie_night.py for benchmark plumbing and on
 railroad.examples.procthor_search for the environment / operator setup.
 """
@@ -26,6 +31,12 @@ from railroad.bench.benchmarks._helpers import capture_timeout_log
 
 
 def _sample_objects_and_location(scene, num_objects: int, seed: int | None):
+    """Draw the target objects and the location they must be brought to.
+
+    Targets are nested across `num_objects` and share one location, so a sweep
+    over the count changes nothing else. The location is drawn after the first
+    two targets, which keeps the two-object problems as they were.
+    """
     rng = random.Random(seed)
     all_objects = sorted({
         obj
@@ -33,20 +44,14 @@ def _sample_objects_and_location(scene, num_objects: int, seed: int | None):
         for obj in objs
     })
     all_locations = sorted(scene.object_locations.keys())
-    return (
-        rng.sample(all_objects, k=min(num_objects, len(all_objects))),
-        rng.choice(all_locations),
-    )
+    objects = rng.sample(all_objects, k=min(2, len(all_objects)))
+    location = rng.choice(all_locations)
+    rest = [obj for obj in all_objects if obj not in objects]
+    objects += rng.sample(rest, k=min(max(num_objects - 2, 0), len(rest)))
+    return objects[:num_objects], location
 
 
-@benchmark(
-    name="procthor_search",
-    description="Multi-robot search in a ProcTHOR-generated household scene.",
-    tags=["multi-agent", "search", "procthor"],
-    timeout=600.0,
-    repeat=15,
-)
-def bench_procthor_search(case: BenchmarkCase):
+def _run_procthor_search(case: BenchmarkCase, **planner_kwargs):
     from railroad.environment.procthor import ProcTHOREnvironment
 
     num_robots = case.params["num_robots"]
@@ -63,18 +68,28 @@ def bench_procthor_search(case: BenchmarkCase):
             self._operators = self.define_operators()
 
         def define_operators(self) -> list[Operator]:
-            def object_find_prob_fn(robot: str, location: str, obj: str) -> float:
-                del robot
-                for loc, objs in self.scene.object_locations.items():
-                    if obj in objs:
-                        return 0.8 if loc == location else 0.1
-                return 0.1
+            if case.params.get("find_prob", "oracle") == "learned":
+                # The packaged ProcTHOR model, as `railroad example procthor-search
+                # --estimate-object-find-prob`; loaded once per environment.
+                if not hasattr(self, "_learned_find_prob_fn"):
+                    from railroad.environment.procthor.learning.utils import get_default_fcnn_model_path
+                    self._learned_find_prob_fn = self.scene.get_object_find_prob_fn(
+                        nn_model_path=str(get_default_fcnn_model_path()),
+                    )
+                object_find_prob_fn = self._learned_find_prob_fn
+            else:
+                def object_find_prob_fn(robot: str, location: str, obj: str) -> float:
+                    del robot
+                    for loc, objs in self.scene.object_locations.items():
+                        if obj in objs:
+                            return 0.8 if loc == location else 0.1
+                    return 0.1
 
             move_op = operators.construct_move_operator_blocking(self.estimate_move_time)
             search_op = operators.construct_search_operator(object_find_prob_fn, 10.0)
             pick_op = operators.construct_pick_operator_blocking(10.0)
             place_op = operators.construct_place_operator_blocking(10.0)
-            no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
+            no_op = operators.construct_no_op_operator(no_op_time=5.0)
             return [no_op, pick_op, place_op, move_op, search_op]
 
     robot_names = [f"robot{i + 1}" for i in range(num_robots)]
@@ -102,7 +117,7 @@ def bench_procthor_search(case: BenchmarkCase):
     )
     env.set_target_objects(target_objects)
 
-    # `found {obj}` is intentionally left implicit: the FF heuristic's
+    # `found {obj}` is intentionally left implicit: the heuristics'
     # "at implies found" augmentation infers that an object's location can
     # only be established by finding it.
     goal = reduce(and_, [
@@ -131,7 +146,7 @@ def bench_procthor_search(case: BenchmarkCase):
                 break
 
             all_actions = env.get_actions()
-            mcts = MCTSPlanner(all_actions)
+            mcts = MCTSPlanner(all_actions, **planner_kwargs)
             action_name = mcts(
                 env.state, goal,
                 max_iterations=case.mcts.iterations,
@@ -175,21 +190,50 @@ def bench_procthor_search(case: BenchmarkCase):
     return result
 
 
-bench_procthor_search.add_cases([
-    {
-        "mcts.iterations": iterations,
-        "mcts.c": c,
-        "mcts.h_mult": h_mult,
-        "num_robots": num_robots,
-        "num_objects": num_objects,
-        "scene_seed": scene_seed,
-    }
-    for scene_seed, c, num_robots, h_mult, iterations, num_objects in itertools.product(
-        list(range(8610, 8620)),  # scene_seed
-        [400],               # mcts.c
-        [1, 2, 3],           # num_robots
-        [4],                 # mcts.h_mult
-        [4000],              # mcts.iterations
-        [2],                 # num_objects
-    )
-])
+@benchmark(
+    name="procthor_search",
+    description="Multi-robot search in a ProcTHOR-generated household scene.",
+    tags=["multi-agent", "search", "procthor"],
+    timeout=600.0,
+    repeat=15,
+)
+def bench_procthor_search(case: BenchmarkCase):
+    return _run_procthor_search(case)
+
+
+@benchmark(
+    name="procthor_search_ff",
+    description="procthor_search planned with the FF heuristic and mean backup.",
+    tags=["multi-agent", "search", "procthor"],
+    timeout=600.0,
+    repeat=15,
+)
+def bench_procthor_search_ff(case: BenchmarkCase):
+    return _run_procthor_search(case, heuristic="ff", backup="mean")
+
+
+def _cases(h_mult: float) -> list[dict]:
+    return [
+        {
+            "mcts.iterations": iterations,
+            "mcts.c": c,
+            "mcts.h_mult": h_mult,
+            "find_prob": find_prob,
+            "num_robots": num_robots,
+            "num_objects": num_objects,
+            "scene_seed": scene_seed,
+        }
+        for scene_seed, c, num_robots, find_prob, iterations, num_objects in itertools.product(
+            list(range(8610, 8620)),  # scene_seed
+            [400],                    # mcts.c
+            [1, 2, 3],                # num_robots
+            ["oracle", "learned"],    # find_prob: ground-truth-backed 0.8/0.1, or the learned estimator
+            [4000],                   # mcts.iterations
+            [1, 2, 4],                # num_objects
+        )
+    ]
+
+
+# MaxUCT wants multiplier 1; the FF heuristic with mean backup, 4.
+bench_procthor_search.add_cases(_cases(h_mult=1))
+bench_procthor_search_ff.add_cases(_cases(h_mult=4))

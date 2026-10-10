@@ -99,7 +99,7 @@ def main(
     search_op = operators.construct_search_operator(object_find_prob, SEARCH_TIME)
     pick_op = operators.construct_pick_operator_blocking(PICK_TIME)
     place_op = operators.construct_place_operator_blocking(PLACE_TIME)
-    no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
+    no_op = operators.construct_no_op_operator(no_op_time=5.0)
 
     # Initialize symbolic environment with initial state
     initial_state = State(0.0, initial_fluents, [])

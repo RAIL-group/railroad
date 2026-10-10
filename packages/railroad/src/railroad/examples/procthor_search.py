@@ -90,7 +90,7 @@ def main(
             search_op = operators.construct_search_operator(object_find_prob_fn, 10.0)
             pick_op = operators.construct_pick_operator_blocking(10.0)
             place_op = operators.construct_place_operator_blocking(10.0)
-            no_op = operators.construct_no_op_operator(no_op_time=5.0, extra_cost=100.0)
+            no_op = operators.construct_no_op_operator(no_op_time=5.0)
             return [no_op, pick_op, place_op, move_op, search_op]
 
     robot_names = [f"robot{i + 1}" for i in range(num_robots)]
@@ -126,7 +126,7 @@ def main(
     from functools import reduce
     from operator import and_
 
-    # `found {obj}` is left implicit: the FF heuristic's "at implies found"
+    # `found {obj}` is left implicit: the heuristics' "at implies found"
     # augmentation infers that an object's location can only be established
     # by finding it.
     goal = reduce(and_, [
@@ -153,7 +153,6 @@ def main(
                 max_iterations=10000,
                 c=300,
                 max_depth=20,
-                heuristic_multiplier=2,
             )
 
             if action_name == "NONE":

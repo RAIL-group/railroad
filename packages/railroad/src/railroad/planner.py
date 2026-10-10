@@ -1,15 +1,18 @@
-from typing import List, Dict, Union, SupportsFloat, SupportsInt
+from typing import Any, List, Dict, Mapping, Union, SupportsFloat, SupportsInt
 from collections.abc import Set
 from railroad._bindings import get_usable_actions, seed_planner_rng
 from railroad._action_pruning import prune_probabilistic_achievers
 
 __all__ = [
+    "ConcurrentHeuristicOptions",
     "MCTSPlanner",
     "get_usable_actions",
     "prune_probabilistic_achievers",
     "seed_planner_rng",
 ]
 from railroad._bindings import MCTSPlanner as _MCTSPlannerCpp
+from railroad._bindings import ConcurrentHeuristic as _ConcurrentHeuristicCpp
+from railroad._bindings import ConcurrentHeuristicOptions
 from railroad._bindings import Action, State, Fluent
 from railroad._bindings import Goal, LiteralGoal
 from railroad.core import (
@@ -74,6 +77,9 @@ class MCTSPlanner:
         frontier_objects: set[str] | None = None,
         project_irrelevant: bool = True,
         dead_end_penalty: SupportsFloat | None = None,
+        heuristic: str = "concurrent",
+        backup: str = "max",
+        heuristic_options: Mapping[str, Any] | None = None,
     ):
         """Initialize MCTSPlanner with automatic preprocessing.
 
@@ -118,10 +124,32 @@ class MCTSPlanner:
                 perturbs multi-robot search-ordering ties, which is why it is
                 opt-in rather than the default.
 
-        Defaults are an even split between h_add and h_ff (0.5, 0.0, 0.5).
-        Weights are free-form (not normalized); the heuristic used during MCTS
-        search is `lambda_add * h_add + lambda_max * h_max + lambda_ff * h_ff`
-        plus the probabilistic-retry delta.
+            heuristic: leaf evaluator. ``"concurrent"`` (the default) is the
+                concurrency-aware heuristic of ``heuristic_concurrent.hpp``,
+                which estimates the team's expected remaining time by
+                list-scheduling the goals onto the robots: ``lambda_ff``
+                weights the makespan and ``lambda_add`` the summed goal
+                completion times (``lambda_max`` is unused). The makespan
+                estimates the remaining time; the sum is a shaping term, so
+                with ``n > 1`` goals open h overestimates the remaining time
+                and falls at ``lambda_ff + lambda_add * n`` per second of
+                progress while MCTS charges 1. A ``heuristic_multiplier``
+                above 1 (the default is 1) steepens that further. ``"ff"`` is the
+                FF/additive mix of ``heuristic.hpp``, which was tuned with
+                multipliers of 2-5.
+            backup: MCTS value backup. ``"max"`` (the default, MaxUCT) values a
+                decision node by its best child and a chance node by the
+                probability-weighted mean of its outcomes; ``"mean"`` averages
+                the rewards below a node.
+            heuristic_options: switches of ``ConcurrentHeuristicOptions`` for
+                ``heuristic="concurrent"`` (e.g. ``{"expected_search": False}``),
+                for ablations; the defaults are the configuration to use.
+
+        Lambda defaults are an even split (0.5, 0.0, 0.5). Weights are
+        free-form (not normalized); with ``heuristic="ff"`` the heuristic used
+        during MCTS search is
+        `lambda_add * h_add + lambda_max * h_max + lambda_ff * h_ff` plus the
+        probabilistic-retry delta.
         """
         # Store original actions for later re-conversion if needed
         self._original_actions = actions
@@ -133,6 +161,25 @@ class MCTSPlanner:
         self._dead_end_penalty = (
             None if dead_end_penalty is None else float(dead_end_penalty)
         )
+        if heuristic not in ("ff", "concurrent"):
+            raise ValueError(f"heuristic must be 'ff' or 'concurrent', got {heuristic!r}")
+        if backup not in ("mean", "max"):
+            raise ValueError(f"backup must be 'mean' or 'max', got {backup!r}")
+        self._heuristic = heuristic
+        self._backup = backup
+        if heuristic_options and heuristic != "concurrent":
+            raise ValueError("heuristic_options only apply to heuristic='concurrent'")
+        self._concurrent_options = ConcurrentHeuristicOptions()
+        self._concurrent_options.lambda_add = self._lambda_add
+        self._concurrent_options.lambda_ms = self._lambda_ff
+        for key, value in (heuristic_options or {}).items():
+            if key.startswith("lambda") or not hasattr(self._concurrent_options, key):
+                raise ValueError(f"unknown heuristic_options: {key!r}")
+            setattr(self._concurrent_options, key, value)
+        # Compiled heuristic evaluators for heuristic(), per goal, valid for
+        # the action list they were compiled from.
+        self._evaluators: Dict[str, _ConcurrentHeuristicCpp] = {}
+        self._evaluators_for: List[Action] | None = None
 
         # Action-pruning configuration (applied per-call in __call__). Pruning
         # is enabled only when a keep-count is given; both None => off, so
@@ -165,18 +212,24 @@ class MCTSPlanner:
         self._actions_relevant: Set[str] | None = None
         self._search_actions = self._converted_actions
 
-        self._cpp_planner = _MCTSPlannerCpp(
-            self._search_actions,
-            lambda_add=self._lambda_add,
-            lambda_max=self._lambda_max,
-            lambda_ff=self._lambda_ff,
-            dead_end_penalty=self._dead_end_penalty,
-        )
+        self._cpp_planner = self._make_cpp_planner(self._search_actions)
 
         # Action counts from the most recent search, for introspection/display:
         # how many actions MCTS actually considered vs. the unpruned total.
         self.num_actions_total: int = len(self._converted_actions)
         self.num_actions_considered: int = len(self._converted_actions)
+
+    def _make_cpp_planner(self, actions: List[Action]) -> _MCTSPlannerCpp:
+        return _MCTSPlannerCpp(
+            actions,
+            lambda_add=self._lambda_add,
+            lambda_max=self._lambda_max,
+            lambda_ff=self._lambda_ff,
+            dead_end_penalty=self._dead_end_penalty,
+            heuristic=self._heuristic,
+            backup=self._backup,
+            heuristic_options=self._concurrent_options if self._heuristic == "concurrent" else None,
+        )
 
     def _convert_actions(
         self, actions: List[Action], mapping: Dict[Fluent, Fluent]
@@ -229,13 +282,7 @@ class MCTSPlanner:
             self._search_actions = self._converted_actions
 
             # Create new C++ planner with re-converted actions
-            self._cpp_planner = _MCTSPlannerCpp(
-                self._search_actions,
-                lambda_add=self._lambda_add,
-                lambda_max=self._lambda_max,
-                lambda_ff=self._lambda_ff,
-                dead_end_penalty=self._dead_end_penalty,
-            )
+            self._cpp_planner = self._make_cpp_planner(self._search_actions)
 
     def _project_for(self, goal: Goal, state: State) -> State:
         """Project `state`, rebuilding the projected action set if needed.
@@ -266,13 +313,7 @@ class MCTSPlanner:
             self._search_actions = [
                 project_action(a, needed) for a in self._converted_actions
             ]
-            self._cpp_planner = _MCTSPlannerCpp(
-                self._search_actions,
-                lambda_add=self._lambda_add,
-                lambda_max=self._lambda_max,
-                lambda_ff=self._lambda_ff,
-                dead_end_penalty=self._dead_end_penalty,
-            )
+            self._cpp_planner = self._make_cpp_planner(self._search_actions)
         return project_state(state, self._relevant)
 
     def __call__(
@@ -282,7 +323,7 @@ class MCTSPlanner:
         max_iterations: SupportsInt = 1000,
         max_depth: SupportsInt = 100,
         c: SupportsFloat = 1.414,
-        heuristic_multiplier: SupportsFloat = 5.0,
+        heuristic_multiplier: SupportsFloat = 1.0,
     ) -> str:
         """Run MCTS planning to find the next action.
 
@@ -295,6 +336,10 @@ class MCTSPlanner:
             max_depth: Maximum depth for rollouts
             c: Exploration constant for UCB1
             heuristic_multiplier: Multiplier for heuristic in reward calculation
+                (leaf value -(t + w h)). 1 suits the default concurrent
+                heuristic, which already falls faster than time while several
+                goals are open; larger values make deeper branches look
+                better.
 
         Returns:
             Name of the selected action as a string
@@ -341,13 +386,7 @@ class MCTSPlanner:
                 frontier_objects=self._frontier_objects,
             )
             self.num_actions_considered = len(pruned_actions)
-            self._cpp_planner = _MCTSPlannerCpp(
-                pruned_actions,
-                lambda_add=self._lambda_add,
-                lambda_max=self._lambda_max,
-                lambda_ff=self._lambda_ff,
-                dead_end_penalty=self._dead_end_penalty,
-            )
+            self._cpp_planner = self._make_cpp_planner(pruned_actions)
 
         return self._cpp_planner(
             converted_state, converted_goal, max_iterations, max_depth, c,
@@ -358,50 +397,52 @@ class MCTSPlanner:
         """Get trace from the last MCTS tree (delegates to C++ planner)."""
         return self._cpp_planner.get_trace_from_last_mcts_tree()
 
+    def _prepare(self, state: State, goal: Union[Goal, Fluent]) -> tuple[State, Goal]:
+        """The state and goal as MCTS searches them: positive preconditions only,
+        projected onto the predicates that can influence the search."""
+        goal = _normalize_goal(goal)
+        self._ensure_mapping_includes_goal(goal)
+        converted_state = convert_state_to_positive_preconditions(state, self._current_mapping)
+        converted_goal = convert_goal_to_positive_preconditions(goal, self._current_mapping)
+        return self._project_for(converted_goal, converted_state), converted_goal
+
+    def _evaluator(self, goal: Goal) -> _ConcurrentHeuristicCpp:
+        """The concurrent heuristic compiled for the current search actions and
+        ``goal`` (already converted), reused across calls."""
+        if self._evaluators_for is not self._search_actions:
+            self._evaluators = {}
+            self._evaluators_for = self._search_actions
+        key = str(goal)
+        if key not in self._evaluators:
+            self._evaluators[key] = _ConcurrentHeuristicCpp(
+                self._search_actions, goal, self._concurrent_options)
+        return self._evaluators[key]
+
     def heuristic(self, state: State, goal: Union[Goal, Fluent]) -> float:
-        """Compute FF heuristic using converted state/goal/actions.
+        """The heuristic MCTS uses at leaves, for ``state`` and ``goal``.
 
-        This method computes the FF heuristic with proper conversion of
-        negative preconditions to positive equivalents, matching the
-        internal heuristic used by the MCTS planner.
-
-        Args:
-            state: Current state (will be automatically converted)
-            goal: Goal to achieve. Can be:
-                - A Goal object: F("a") & F("b"), AndGoal([...]), etc.
-                - A single Fluent: F("visited a") (auto-wrapped to LiteralGoal)
-
-        Returns:
-            Heuristic value (estimated cost to reach goal)
+        The state and goal are converted and projected as the search does, so
+        the value matches the planner's own (``inf`` when the relaxation proves
+        the goal unreachable; ``dead_end_penalty`` only shapes MCTS rewards).
         """
+        converted_state, converted_goal = self._prepare(state, goal)
+        if self._heuristic == "concurrent":
+            return self._evaluator(converted_goal)(converted_state)
         from railroad._bindings import ff_heuristic as _ff_heuristic_cpp
 
-        # Normalize goal (wrap Fluent in LiteralGoal if needed)
-        goal = _normalize_goal(goal)
-
-        # Ensure mapping includes goal's negative fluents
-        self._ensure_mapping_includes_goal(goal)
-
-        # Convert state with (possibly extended) mapping
-        converted_state = convert_state_to_positive_preconditions(
-            state, self._current_mapping
-        )
-
-        # Convert goal with (possibly extended) mapping
-        converted_goal = convert_goal_to_positive_preconditions(
-            goal, self._current_mapping
-        )
-
-        # Same projection MCTS searches under, so the two agree.
-        converted_state = self._project_for(converted_goal, converted_state)
-
-        # No dead_end_penalty here: that shapes the MCTS *reward*, while this
-        # reports the raw heuristic, inf included.
         return _ff_heuristic_cpp(
             converted_state, converted_goal, self._search_actions,
             lambda_add=self._lambda_add,
             lambda_max=self._lambda_max,
             lambda_ff=self._lambda_ff,
         )
+
+    def heuristic_breakdown(self, state: State, goal: Union[Goal, Fluent]) -> dict:
+        """The concurrent heuristic's value at ``state`` and its components
+        (see ``ConcurrentHeuristic.breakdown``)."""
+        if self._heuristic != "concurrent":
+            raise ValueError("heuristic_breakdown needs heuristic='concurrent'")
+        converted_state, converted_goal = self._prepare(state, goal)
+        return self._evaluator(converted_goal).breakdown(converted_state)
 
 

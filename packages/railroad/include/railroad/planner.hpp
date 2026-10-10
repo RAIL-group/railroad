@@ -7,6 +7,7 @@
 
 #include "railroad/core.hpp"
 #include "railroad/heuristic.hpp"
+#include "railroad/heuristic_concurrent.hpp"
 #include "railroad/goal.hpp"
 #include "railroad/state.hpp"
 #include "railroad/constants.hpp"
@@ -98,6 +99,12 @@ struct MCTSDecisionNode {
 
   int visits = 0;
   double value = 0.0;
+  // Max backup (THTS MaxUCT): the reward of this node's own evaluation, and
+  // the current estimate -- that reward until a child exists, then the best
+  // child's estimate.
+  bool evaluated = false;
+  double leaf_value = 0.0;
+  double estimate = 0.0;
 
   explicit MCTSDecisionNode(const State &s, MCTSChanceNode *p = nullptr)
       : state(s), parent(p) {}
@@ -112,6 +119,9 @@ struct MCTSChanceNode {
 
   int visits = 0;
   double value = 0.0;
+  // Max backup: probability-weighted mean of its outcomes' estimates (each
+  // is valued from the heuristic when it is created).
+  double estimate = 0.0;
 
   MCTSChanceNode(const Action *a, MCTSDecisionNode *p) : action(a), parent(p) {}
 };
@@ -126,10 +136,11 @@ struct MCTSResult {
 // ---------------------- helpers ----------------------
 
 inline double ucb_score(int parent_visits, const MCTSChanceNode &child,
-                        double c = std::sqrt(2.0)) {
+                        double c = std::sqrt(2.0), bool max_backup = false) {
   if (child.visits == 0)
     return std::numeric_limits<double>::infinity();
-  const double exploitation = child.value / static_cast<double>(child.visits);
+  const double exploitation =
+      max_backup ? child.estimate : child.value / static_cast<double>(child.visits);
   const double exploration =
       c * std::sqrt(std::log(static_cast<double>(parent_visits)) /
                     static_cast<double>(child.visits));
@@ -172,6 +183,48 @@ inline void backpropagate(MCTSDecisionNode *leaf, double reward) {
   }
 }
 
+
+// Max backup (Keller & Helmert's MaxUCT): a decision node is worth its best
+// child, a chance node the probability-weighted mean of its outcomes. Under
+// mean backup a node is worth the average of everything tried below it, so an
+// action whose continuations are mostly bad is undervalued even when one is
+// the best on offer -- and in multi-robot problems most coordination choices
+// are bad. Visit counts and value sums are kept as for mean backup.
+inline void backpropagate_max(MCTSDecisionNode *leaf, double reward) {
+  if (!leaf->evaluated) {
+    leaf->evaluated = true;
+    leaf->leaf_value = reward;
+  }
+  MCTSDecisionNode *d = leaf;
+  while (d) {
+    d->visits += 1;
+    d->value += reward;
+    bool any = false;
+    double best = -std::numeric_limits<double>::infinity();
+    for (const auto &kv : d->children) {
+      if (kv.second->visits == 0) continue;
+      any = true;
+      best = std::max(best, kv.second->estimate);
+    }
+    // The node's own evaluation stands in for its untried actions; otherwise
+    // one arbitrary first child would decide every rarely visited node.
+    if (!d->untried_actions.empty() && d->evaluated)
+      best = std::max(best, d->leaf_value);
+    d->estimate = any ? best : d->leaf_value;
+
+    MCTSChanceNode *c = d->parent;
+    if (!c) break;
+    c->visits += 1;
+    c->value += reward;
+    double num = 0.0, den = 0.0;
+    for (std::size_t i = 0; i < c->children.size(); ++i) {
+      num += c->outcome_weights[i] * c->children[i]->estimate;
+      den += c->outcome_weights[i];
+    }
+    c->estimate = num / den;
+    d = c->parent;
+  }
+}
 
 void print_best_path(std::ostream& os, const MCTSDecisionNode* node, HeuristicFn& heuristic_fn, int max_print_depth, int current_depth = 0) {
     if (!node || current_depth > max_print_depth) {
@@ -255,7 +308,9 @@ inline std::string mcts(const State &root_state,
                         double lambda_add = 0.5,
                         double lambda_max = 0.0,
                         double lambda_ff  = 0.5,
-                        std::optional<double> dead_end_penalty = std::nullopt) {
+                        std::optional<double> dead_end_penalty = std::nullopt,
+                        std::optional<ConcurrentHeuristicOptions> concurrent = std::nullopt,
+                        bool max_backup = false) {
   // RNG
   std::mt19937 &rng = mcts_rng();
 
@@ -265,15 +320,41 @@ inline std::string mcts(const State &root_state,
   auto root = std::make_unique<MCTSDecisionNode>(root_state.copy_and_zero_out_time());
   root->untried_actions = get_next_actions(root_state, all_actions);
 
-  HeuristicFn heuristic_fn = [goal, all_actions, ff_memory,
-                              lambda_add, lambda_max, lambda_ff](const State& s) -> double {
-    return ff_heuristic(s, goal, all_actions, ff_memory,
-                        lambda_add, lambda_max, lambda_ff);
+  HeuristicFn heuristic_fn;
+  std::unique_ptr<ConcurrentHeuristic> concurrent_h;
+  if (concurrent) {
+    // Compiled once per search over this call's (usable) action set.
+    concurrent_h = std::make_unique<ConcurrentHeuristic>(all_actions, goal, *concurrent);
+    heuristic_fn = [h = concurrent_h.get()](const State &s) -> double { return (*h)(s); };
+  } else {
+    heuristic_fn = [goal, all_actions, ff_memory,
+                    lambda_add, lambda_max, lambda_ff](const State& s) -> double {
+      return ff_heuristic(s, goal, all_actions, ff_memory,
+                          lambda_add, lambda_max, lambda_ff);
+    };
+  }
+
+  // Reward of evaluating `n` as a leaf (goal reward or the heuristic value).
+  auto leaf_reward = [&](const MCTSDecisionNode *n, double extra_cost) -> double {
+    if (goal->evaluate(n->state.fluents())) {
+      return -n->state.time() + SUCCESS_REWARD - extra_cost;
+    }
+    double h = heuristic_fn ? heuristic_fn(n->state) : 0.0;
+    if (h > 1e10 && dead_end_penalty) {
+      // The relaxation proved the goal unreachable from here. Charge a
+      // *flat* cost: what this branch spent getting here is irrelevant,
+      // because no continuation of it can reach the goal. Folding the
+      // elapsed time and accumulated cost in would rank a slow failure
+      // below a fast one and push the search toward failing quickly,
+      // which is not a preference we want to express.
+      return -*dead_end_penalty;
+    }
+    if (h > 1e10) h = HEURISTIC_CANNOT_FIND_GOAL_PENALTY;
+    return -n->state.time() - h * heuristic_multiplier - extra_cost;
   };
 
   for (int it = 0; it < max_iterations; ++it) {
     bool is_node_goal = false;
-    bool did_need_relaxed_transition = false;
 
     #ifdef RAILROAD_USE_PYBIND
     if (PyErr_CheckSignals() != 0) {
@@ -286,22 +367,23 @@ inline std::string mcts(const State &root_state,
 
     // ---------------- Selection ----------------
     while (depth < max_depth) {
-      if (!node->untried_actions.empty())
-        break;
-      if (node->children.empty())
-        break;
-      // Use GoalBase::evaluate for goal check
+      // A goal state ends the episode: check it before untried actions, or
+      // a goal node gets expanded and valued by continuations past the goal.
       if (goal->evaluate(node->state.fluents())) {
         is_node_goal = true;
         break;
       }
+      if (!node->untried_actions.empty())
+        break;
+      if (node->children.empty())
+        break;
 
       MCTSChanceNode *best_chance = nullptr;
       double best_score = -std::numeric_limits<double>::infinity();
 
       for (auto &kv : node->children) {
         MCTSChanceNode *cn = kv.second.get();
-        double score = ucb_score(node->visits, *cn, c);
+        double score = ucb_score(node->visits, *cn, c, max_backup);
         if (score > best_score) {
           best_score = score;
           best_chance = cn;
@@ -347,6 +429,18 @@ inline std::string mcts(const State &root_state,
         if (chance_raw->children.empty())
           continue;
 
+        // Under max backup a chance node averages *all* its outcomes, so each
+        // is valued from the heuristic now; otherwise the first sampled one
+        // stands in for all, and a lucky unlikely outcome (a long-shot search
+        // succeeding) makes its action look like a sure thing.
+        if (max_backup) {
+          for (auto &child : chance_raw->children) {
+            child->leaf_value = leaf_reward(child.get(), accumulated_extra_cost);
+            child->estimate = child->leaf_value;
+            child->evaluated = true;
+          }
+        }
+
         std::size_t idx = sample_index(chance_raw->outcome_weights, rng);
         node = chance_raw->children[idx].get();
         ++depth;
@@ -354,34 +448,16 @@ inline std::string mcts(const State &root_state,
     }
 
     // ---------------- Simulation / Evaluation ----------------
-    double reward;
-    double h = 0.0;
-    int goal_count_val = goal->goal_count(node->state.fluents());
-    if (goal->evaluate(node->state.fluents())) {
-      reward = -node->state.time() + SUCCESS_REWARD + 0 * goal_count_val - accumulated_extra_cost;
-    } else {
-      h = heuristic_fn ? heuristic_fn(node->state) : 0.0;
-      if (h > 1e10 && dead_end_penalty) {
-        // The relaxation proved the goal unreachable from here. Charge a
-        // *flat* cost: what this branch spent getting here is irrelevant,
-        // because no continuation of it can reach the goal. Folding the
-        // elapsed time and accumulated cost in would rank a slow failure
-        // below a fast one and push the search toward failing quickly,
-        // which is not a preference we want to express.
-        reward = -*dead_end_penalty;
-      } else {
-        if (h > 1e10) {
-          h = HEURISTIC_CANNOT_FIND_GOAL_PENALTY;
-        }
-        if (did_need_relaxed_transition)
-          h += 100;
-
-        reward = -node->state.time() - h * heuristic_multiplier + 0 * goal_count_val - accumulated_extra_cost;
-      }
-    }
+    double reward = (max_backup && node->evaluated)
+                        ? node->leaf_value
+                        : leaf_reward(node, accumulated_extra_cost);
 
     // ---------------- Backpropagation ----------------
-    backpropagate(node, reward);
+    if (max_backup) {
+      backpropagate_max(node, reward);
+    } else {
+      backpropagate(node, reward);
+    }
   }
 
   // Generate tree trace
@@ -401,11 +477,20 @@ inline std::string mcts(const State &root_state,
     const Action *best_action = nullptr;
     int most_visits = 0;
 
+    // Under max backup recommend the best estimate (ties to visits): a child
+    // that stays optimistic while its actions are untried can gather the most
+    // visits and still be worse.
+    double best_est = -std::numeric_limits<double>::infinity();
     for (auto &kv : result.root->children) {
       MCTSChanceNode *cn = kv.second.get();
       if (cn->visits == 0)
         continue;
-      if (cn->visits > most_visits) {
+      bool better = max_backup
+                        ? (cn->estimate > best_est ||
+                           (cn->estimate == best_est && cn->visits > most_visits))
+                        : cn->visits > most_visits;
+      if (better) {
+        best_est = cn->estimate;
         most_visits = cn->visits;
         best_action = kv.first;
       }
@@ -425,12 +510,16 @@ public:
                        double lambda_add = 0.5,
                        double lambda_max = 0.0,
                        double lambda_ff  = 0.5,
-                       std::optional<double> dead_end_penalty = std::nullopt)
+                       std::optional<double> dead_end_penalty = std::nullopt,
+                       std::optional<ConcurrentHeuristicOptions> concurrent = std::nullopt,
+                       bool max_backup = false)
       : all_actions_(std::move(all_actions)),
         lambda_add_(lambda_add),
         lambda_max_(lambda_max),
         lambda_ff_(lambda_ff),
-        dead_end_penalty_(dead_end_penalty) {}
+        dead_end_penalty_(dead_end_penalty),
+        concurrent_(concurrent),
+        max_backup_(max_backup) {}
 
   // Call operator: planner(initial_state, goal) → string
   std::string operator()(const State &root_state,
@@ -442,7 +531,8 @@ public:
     return mcts(root_state, all_actions_, goal.get(), &ff_memory_,
                 max_iterations, max_depth, c, heuristic_multiplier,
                 &last_mcts_tree_trace_,
-                lambda_add_, lambda_max_, lambda_ff_, dead_end_penalty_);
+                lambda_add_, lambda_max_, lambda_ff_, dead_end_penalty_,
+                concurrent_, max_backup_);
   }
 
   void clear_cache() { ff_memory_.clear(); }
@@ -466,6 +556,8 @@ private:
   double lambda_max_;
   double lambda_ff_;
   std::optional<double> dead_end_penalty_;
+  std::optional<ConcurrentHeuristicOptions> concurrent_;
+  bool max_backup_;
 };
 
 } // namespace railroad
