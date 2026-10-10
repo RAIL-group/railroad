@@ -8,7 +8,7 @@ to a designated room.
 Registered once per planner configuration, so each benchmark's cases vary
 only in the problem: `procthor_search` runs the planner's defaults (the
 concurrent heuristic with MaxUCT backup), and `procthor_search_ff` the FF
-heuristic with mean backup, the original setup.
+heuristic with mean backup and multiplier 4.
 
 Modeled on movie_night.py for benchmark plumbing and on
 railroad.examples.procthor_search for the environment / operator setup.
@@ -33,9 +33,9 @@ from railroad.bench.benchmarks._helpers import capture_timeout_log
 def _sample_objects_and_location(scene, num_objects: int, seed: int | None):
     """Draw the target objects and the location they must be brought to.
 
-    Targets are nested across `num_objects` and share one location, so a sweep
-    over the count changes nothing else. The location is drawn after the first
-    two targets, which keeps the two-object problems as they were.
+    Targets are nested across `num_objects` and share one location (drawn
+    after the first two targets), so a sweep over the count changes nothing
+    else.
     """
     rng = random.Random(seed)
     all_objects = sorted({
