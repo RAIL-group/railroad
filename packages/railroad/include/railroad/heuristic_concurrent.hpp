@@ -111,9 +111,6 @@ class ConcurrentHeuristic {
     return best;
   }
 
-  std::size_t num_agents() const { return pb_.num_agents(); }
-  std::size_t memo_size() const { return memo_.size(); }
-
  private:
   ConcurrentHeuristicOptions opts_;
   const GoalBase *goal_;

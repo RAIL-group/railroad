@@ -103,12 +103,12 @@ struct Problem {
   std::vector<CompiledAction> acts;
   std::vector<std::vector<int>> consumers;          // fluent -> actions needing it
   std::vector<std::vector<AchieverRef>> achievers;  // fluent -> achievers
-  bool adds(int a, int f) const {
-    if (f < 0) return false;
+  // Action a's add of fluent f (nullptr if it has none).
+  const Add *add(int a, int f) const {
     for (const auto &ad : acts[a].adds) {
-      if (ad.fluent == f) return true;
+      if (ad.fluent == f) return &ad;
     }
-    return false;
+    return nullptr;
   }
 
   // -- Agents: the arguments of `free` preconditions ----------------------
