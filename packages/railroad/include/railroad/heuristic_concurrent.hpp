@@ -19,11 +19,11 @@
 //      and relaxed plans read off in that ranking.
 //                                          [heuristic_concurrent_relaxation.hpp]
 //   3. Goal plans: a "goal" is one fact of the goal (of its best DNF branch),
-//      e.g. `at mug L`. Each gets a relaxed plan on each agent, which the
-//      agent finishes after the plan's actions but not before the relaxation
-//      could achieve the goal -- the one place waiting for in-flight effects
-//      is charged. Goals are planned independently, so one goal's plan may
-//      use what another's relies on.      [heuristic_concurrent_plans.hpp]
+//      e.g. `at mug L`. On each agent it gets a relaxed plan, which the agent
+//      finishes after the plan's actions but not before the relaxation could
+//      achieve the goal (so it waits for in-flight effects). Goals are
+//      planned independently, so one goal's plan may use what another's
+//      relies on.                         [heuristic_concurrent_plans.hpp]
 //   4. List schedule: each goal goes to the agent that would finish it
 //      earliest, giving completion times C_g and the value
 //          lambda_add * sum_g C_g + lambda_ms * max_g C_g
@@ -41,8 +41,8 @@
 //   - Expected search: a subgoal with several probabilistic attempts is
 //     costed as an expected route over them, in-flight attempts included,
 //     and the rest of the goal from wherever it succeeds. A goal whose
-//     cheapest support is itself such an attempt (searching its target place
-//     in the hope the object is there) is planned through its deterministic
+//     cheapest support is such an attempt (searching its target place in the
+//     hope the object is there) is planned through its deterministic
 //     achiever, so that bringing the object from elsewhere is costed.
 //                                          [heuristic_concurrent_search.hpp]
 //
@@ -56,8 +56,8 @@
 // its plan starts with, h(s) = dt + sum_o p_o h(o), so starting an action or
 // an outcome arriving does not move the value MCTS sees.
 //
-// With one agent and no in-flight effects it reduces to a sequential,
-// route-aware h_ff. Everything that depends only on the actions and the goal
+// With one agent, no in-flight effects and no uncertain actions it reduces to
+// a route-aware h_ff. Everything that depends only on the actions and the goal
 // is compiled once per search (heuristic_concurrent_problem.hpp).
 
 #include "railroad/heuristic_concurrent_schedule.hpp"

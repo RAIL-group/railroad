@@ -50,7 +50,7 @@ class Scheduler {
       int fluent;
       double finish_fixed;  // >= 0: needs no agent (in-flight)
       std::vector<GoalPlan> plans;  // per agent
-      double key;
+      double key;  // priority: its shortest time on any agent
     };
     // `at X L` and the `found X` it implies are one job: whoever brings X to
     // L must find it first. Planned apart, `at X L` could be "achieved" by
