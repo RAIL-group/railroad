@@ -17,7 +17,8 @@
 //               independent attempt until it succeeds. The ranking is
 //               monotone along supports, so one Dijkstra-style pass computes
 //               it.
-//   Extractor   Relaxed-plan extraction from a pass, FF style.
+//   Extractor   Relaxed-plan extraction from a pass, FF style, in the pass's
+//               ranking.
 
 #include "railroad/heuristic_concurrent_problem.hpp"
 #include "railroad/state.hpp"
@@ -332,12 +333,10 @@ class Extractor {
   // Walk back from `roots` via the pass's chosen achievers, highest-ranked
   // (cost / rho) subgoal first, as FF takes the costliest first. A fluent
   // added by an action already on the plan counts as achieved, so a subgoal
-  // covered as a side effect pulls in no achiever of its own. The order must
-  // be the pass's ranking: by cost alone, the `hand-full r` that a reliable
-  // pick of another object fills more cheaply would come before the
-  // `holding r X` whose pick fills it anyway, and the plan would fetch that
-  // other object too. `via`, if given, achieves roots[0] in place of the
-  // pass's choice.
+  // covered as a side effect pulls in no achiever of its own: in this order
+  // `holding r X` comes before the `hand-full r` its pick also adds, and the
+  // plan does not fill the hand with a likelier pick of another object.
+  // `via`, if given, achieves roots[0] in place of the pass's choice.
   void extract(const Problem &pb, const Pass &P, const std::vector<int> &roots, Extraction &ex,
                int via = Pass::NONE) {
     std::priority_queue<std::pair<double, int>> heap;  // (score, fluent), max first
@@ -372,9 +371,9 @@ class Extractor {
   std::vector<int> tied_;
 
   // Of the subgoals tied with f at rank `key`, the one to extract first: the
-  // one whose support adds the most of the others, so `holding r X` comes
-  // before the `hand-full r` its pick also adds. Fluent ids (hash order)
-  // break what remains. The rest go back.
+  // one whose support adds the most of the others, so `holding r X` still
+  // comes before the `hand-full r` its pick also adds. Fluent ids break any
+  // tie left. The rest go back.
   int take_tied(const Problem &pb, const Pass &P, int f, double key,
                 std::priority_queue<std::pair<double, int>> &heap) {
     tied_.assign(1, f);

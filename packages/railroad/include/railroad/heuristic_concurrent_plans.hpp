@@ -2,9 +2,9 @@
 
 // Goal plans: one agent's relaxed plan for one goal, and when it finishes.
 //
-// Core: the plan is read off the agent's pass; the agent finishes it after
-// the sum of its actions, but not before the relaxation could achieve the
-// goal (which accounts for waiting on in-flight effects).
+// Core: the plan is read off the agent's pass. The agent finishes it after
+// the plan's actions, but not before the relaxation could achieve the goal
+// (so it waits for in-flight effects).
 //
 // Route chaining (when the agent has location fluents): the delete relaxation
 // lets an agent be in several places at once -- a fetch costs start->object +
@@ -14,7 +14,10 @@
 //
 // Expected search (when the goal has an uncertain subgoal): the plan is split
 // around the search, the search is costed as an expected route, and the rest
-// of the goal from wherever the search succeeds.
+// of the goal from wherever the search succeeds. A goal whose cheapest
+// support is a search of its target place is planned through its
+// deterministic achiever, so that bringing the object from elsewhere is
+// costed.
 
 #include "railroad/heuristic_concurrent_search.hpp"
 
@@ -260,9 +263,9 @@ inline GoalPlan plan_goal(Context &cx, const Pass &P, int g, int companion, int 
 }
 
 // When agent r, starting at `start` at time t_start, finishes goal tp: after
-// its actions, but not before the goal's relaxed time -- except under an
-// expected search, an expectation over outcomes some of which end sooner than
-// the relaxed time to success.
+// its actions, but not before the relaxation could achieve the goal. An
+// expected search has no such floor: some of its outcomes end before the
+// relaxed time to success.
 inline double goal_finish(Context &cx, const Pass &P, int r, int start, double t_start,
                           const GoalPlan &tp) {
   const Problem &pb = cx.pb;

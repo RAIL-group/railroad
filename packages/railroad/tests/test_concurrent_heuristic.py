@@ -277,7 +277,7 @@ def test_mcts_splits_two_fetches_between_two_robots(backup):
     assert state.time < 104 + 24  # faster than one robot doing both
 
 
-def test_max_backup_values_a_rarely_visited_outcome_by_more_than_one_child():
+def test_max_backup_keeps_a_nodes_own_value_until_its_actions_are_tried():
     """A node keeps its own value until each of its actions has been tried.
 
     The robot stands at `x`, where the box is with probability 0.8; `y` (0.5)
@@ -305,8 +305,9 @@ def test_max_backup_values_a_rarely_visited_outcome_by_more_than_one_child():
 
 @pytest.mark.parametrize("backup", ["mean", "max"])
 def test_mcts_does_not_expand_past_the_goal(backup):
-    """A goal state ends the episode; expanded, it was valued by continuations
-    past the goal, which under max backup made reaching it look worse."""
+    """A goal state ends the episode: it is not expanded, so continuations past
+    the goal do not value it (under max backup they would make reaching it
+    look worse)."""
     actions = _actions(["r1"], ["box"])
     state = _state({"r1": "goal"}, extra={F("holding r1 box"), F("hand-full r1"), F("found box")})
     planner = MCTSPlanner(actions, backup=backup)

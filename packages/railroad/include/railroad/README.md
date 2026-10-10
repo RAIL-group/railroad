@@ -125,20 +125,21 @@ core and the refinements; each part header explains its step. In brief:
 2. **Probability-aware relaxation**, per agent (agents are the arguments of
    `free`): achievers ranked by `cost / rho`, the expected cost of retrying
    an independent attempt until it succeeds. Relaxed plans are read off in
-   the same ranking; read off by cost alone, a goal's plan would fill a
-   robot's hand with a likelier object than its own.
+   the same ranking, so a goal's plan fills the robot's hand with its own
+   object rather than a likelier one.
 3. **Goal plans.** A *goal* is one fact of the goal, e.g. `at mug L` (with
-   the `found mug` it implies); each needs one or more actions. Each goal's
-   relaxed plan on each agent, with its moves re-costed as one route (route
-   chaining) and an uncertain search costed as an expected route over its
-   candidate places, planned or in flight (expected search). The route visits
-   each action's place when the relaxation could start it, but after any
-   action needing what it uses up (the relaxation has no deletes: boil the
-   egg before putting it in the bowl). A goal whose cheapest support is a
-   search of its target place is planned through its deterministic achiever,
-   so that bringing the object from elsewhere is costed. The agent finishes
-   the plan after its actions, but not before the relaxation could achieve
-   the goal: this is where waiting for in-flight effects is charged.
+   the `found mug` it implies). On each agent it gets a relaxed plan:
+   - *Route chaining*: its moves are re-costed as one route, visiting each
+     place when the plan needs it, but after any action needing what it uses
+     up (the relaxation has no deletes: boil the egg before putting it in
+     the bowl).
+   - *Expected search*: an uncertain search is costed as an expected route
+     over its candidate places, planned or in flight. A goal whose cheapest
+     support is a search of its own target place is planned through its
+     deterministic achiever, so that bringing the object from elsewhere is
+     costed.
+   - The agent finishes the plan after its actions, but not before the
+     relaxation could achieve the goal (so it waits for in-flight effects).
 4. **List schedule.** Each goal goes to the agent that would finish it
    earliest. Goals are planned independently, so one goal's plan may use
    what another's relies on (a full hand's object set down anywhere to fetch
@@ -153,9 +154,9 @@ core and the refinements; each part header explains its step. In brief:
 `ConcurrentHeuristicOptions` switches the refinements off for ablations.
 
 With this heuristic the planner defaults to `heuristic_multiplier=1` and
-`backup="max"`. The leaf value is `-(t + w h)`; with a calibrated h and
-`w > 1` it improves with elapsed time along any decent path, so the
-most-deepened branch looks best. Under MaxUCT a decision node takes its best
+`backup="max"`. The leaf value is `-(t + w h)`; with `w > 1`, h falls faster
+than time along any decent path, so the most-deepened branch looks best.
+Under MaxUCT a decision node takes its best
 child and a chance node the probability-weighted mean of its outcomes; every
 outcome is valued from h when created, a node's own value stands in for its
 untried actions, and the root recommends the best estimate. Goal states are
@@ -230,8 +231,8 @@ action sets.
 
 ## Usage in MCTS
 
-`MCTSPlanner` in `planner.hpp` uses `ff_heuristic` to estimate the
-remaining cost-to-go at leaf nodes during simulation. The lambda mixing
+`MCTSPlanner` in `planner.hpp` values leaf nodes with `ConcurrentHeuristic`
+by default, or with `ff_heuristic` under `heuristic="ff"`. The lambda mixing
 weights are configurable on the planner wrapper
 (`MCTSPlanner(..., lambda_add=, lambda_max=, lambda_ff=)`).
 
