@@ -135,9 +135,8 @@ PDDL fixtures instead.
 
 The sweep pins *conversion*, not solving — whether MCTS reaches a goal is a
 planner property. With the FF heuristic (`heuristic="ff"`, mean backup,
-multiplier 5 -- the planner's defaults when this was measured), 4000
-iterations, seeds 0-2 and a 300-step cap, the converted domains solve 11/11,
-6/9, and 3/5 respectively.
+multiplier 5), 4000 iterations, seeds 0-2 and a 300-step cap, the converted
+domains solve 11/11, 6/9, and 3/5 respectively.
 A 10x iteration budget moved no domain in either direction, so the failures
 are heuristic and dead-end problems rather than search-effort ones.
 
@@ -157,5 +156,5 @@ Two known limitations account for most of them:
   heuristic picks one conjunction greedily instead of materialising the DNF.
   After folding, no domain above still exceeds the cap.
 
-Solve rates come from one fixed and fairly small budget. Read them as "what
-the current defaults do", not as a limit of the domains.
+Solve rates come from one fixed and fairly small budget. Read them as what
+this configuration does, not as a limit of the domains.
