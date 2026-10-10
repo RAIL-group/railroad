@@ -152,7 +152,8 @@ def bench_heterogeneous_robots(case: BenchmarkCase):
         action_name = mcts(env_interface.state, goal,
                            max_iterations=case.mcts.iterations,
                            c=case.mcts.c,
-                           max_depth=20)
+                           max_depth=20,
+                           heuristic_multiplier=case.mcts.h_mult)
 
         if action_name == 'NONE':
             dashboard.console.print("No more actions available. Goal may not be achievable.")
