@@ -74,8 +74,10 @@ inline const std::vector<Action> get_usable_actions(const State &input_state,
 
   std::vector<Action> feasible_actions;
   feasible_actions.reserve(feasible_action_set.size());
-  for (const Action* a : feasible_action_set) {
-    feasible_actions.push_back(*a);
+  // Preserve the caller's order: MCTS expands from this vector, so iterating
+  // the pointer set here makes seeded searches depend on allocation details.
+  for (const Action &a : all_actions) {
+    if (feasible_action_set.count(&a)) feasible_actions.push_back(a);
   }
   return feasible_actions;
 }

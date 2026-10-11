@@ -10,7 +10,7 @@ import pytest
 
 from railroad import operators
 from railroad.core import Effect, Fluent, Operator, State, get_action_by_name, transition
-from railroad.planner import MCTSPlanner
+from railroad.planner import MCTSPlanner, seed_planner_rng
 
 F = Fluent
 
@@ -103,6 +103,36 @@ def test_a_route_does_last_what_uses_up_another_actions_precondition():
     actions = sorted((a for op in ops for a in op.instantiate(objects)), key=lambda a: a.name)
     state = _state({"r1": "a"}, extra={F("at egg a"), F("found egg"), F("at pot b"), F("at bowl goal")})
     assert _breakdown(actions, state, F("served"))["makespan"] == pytest.approx(45.0)
+
+
+def test_a_route_can_return_to_a_place():
+    """Three dependent steps need the route a -> b -> a."""
+    objects = {"robot": {"r1"}, "location": {"a", "b"}}
+    free = [F("free ?r")]
+    ops = [
+        operators.construct_move_operator(lambda *_: 10.0),
+        _timed("first", [("?r", "robot")], [F("at ?r a"), *free], [F("first-done")], 1.0),
+        _timed("middle", [("?r", "robot")],
+               [F("at ?r b"), F("first-done"), *free], [F("middle-done")], 1.0),
+        _timed("last", [("?r", "robot")],
+               [F("at ?r a"), F("middle-done"), *free], [F("done")], 1.0),
+    ]
+    actions = [a for op in ops for a in op.instantiate(objects)]
+    state = _state({"r1": "a"})
+    assert _breakdown(actions, state, F("done"))["makespan"] == pytest.approx(23.0)
+
+
+def test_a_covered_goal_keeps_its_completion_time():
+    """A prerequisite goal needs no second plan, but still contributes C_g."""
+    objects = {"robot": {"r1"}}
+    make_b = _timed("make-b", [("?r", "robot")], [F("free ?r")], [F("b")], 2.0)
+    make_a = _timed("make-a", [("?r", "robot")],
+                    [F("free ?r"), F("b")], [F("a")], 3.0)
+    actions = make_b.instantiate(objects) + make_a.instantiate(objects)
+    d = _breakdown(actions, State(0.0, {F("free r1")}), F("a") & F("b"))
+    assert d["makespan"] == pytest.approx(5.0)
+    assert d["completion_sum"] == pytest.approx(7.0)
+    assert dict(d["goal_finish"]) == {"a": 5.0, "b": 2.0}
 
 
 def test_fetches_are_split_across_robots_and_sequenced_on_one():
@@ -263,6 +293,7 @@ def test_goal_already_true_is_zero_and_unreachable_is_inf():
 
 @pytest.mark.parametrize("backup", ["mean", "max"])
 def test_mcts_splits_two_fetches_between_two_robots(backup):
+    seed_planner_rng(0)
     actions = _actions(["r1", "r2"], ["box", "cup"])
     state = _state({"r1": "start", "r2": "start"}, KNOWN)
     goal = F("at box goal") & F("at cup goal")

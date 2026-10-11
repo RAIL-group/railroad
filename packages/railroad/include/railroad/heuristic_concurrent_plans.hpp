@@ -132,14 +132,15 @@ struct Visit {
   int action;
 };
 
-// The locations of `visits`, each once, in the order they are first needed.
+// The locations of `visits`, in the order they are first needed. Coalesce only
+// adjacent duplicates: a plan may need to leave a place and return to it.
 inline Route ordered_route(const Problem &pb, const Pass &P, std::vector<Visit> visits) {
   std::sort(visits.begin(), visits.end(), [](const Visit &a, const Visit &b) {
     return a.t < b.t || (a.t == b.t && a.loc < b.loc);
   });
   Route route;
   for (const Visit &v : visits) {
-    if (std::find(route.locs.begin(), route.locs.end(), v.loc) != route.locs.end()) continue;
+    if (!route.locs.empty() && route.locs.back() == v.loc) continue;
     route.locs.push_back(v.loc);
     int b = P.best[v.loc];
     route.fallback.push_back(b >= 0 ? pb.acts[b].dur : 0.0);

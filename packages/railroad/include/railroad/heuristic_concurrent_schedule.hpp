@@ -11,6 +11,7 @@
 #include "railroad/heuristic_concurrent_plans.hpp"
 
 #include <numeric>
+#include <unordered_map>
 
 namespace railroad {
 namespace concurrent {
@@ -109,19 +110,19 @@ class Scheduler {
       end_loc = start_loc;
       double ms = 0.0, sum = 0.0;
       // Fluents achieved along an assigned goal's plan (e.g. `found X` on the
-      // way to `at X L`) need no goal of their own.
-      if (cover_.size() != pb.num_fluents()) cover_.assign(pb.num_fluents(), 0);
-      if (++cover_gen_ == 0) {
-        std::fill(cover_.begin(), cover_.end(), 0);
-        cover_gen_ = 1;
-      }
+      // way to `at X L`) need no second plan, but still have a completion time.
+      std::unordered_map<int, std::pair<double, int>> covered;  // fluent -> (time, agent)
       for (std::size_t ti : order) {
         const OpenGoal &t = open[ti];
         double done_at;
         if (t.finish_fixed >= 0.0) {
           done_at = t.finish_fixed;
-        } else if (cover_[t.fluent] == cover_gen_) {
-          continue;  // achieved along another goal's plan
+        } else if (auto it = covered.find(t.fluent); it != covered.end()) {
+          done_at = it->second.first;
+          if (record) {
+            bd->assignment.push_back({pb.str(t.fluent),
+                                      per_agent ? pb.agent_names[it->second.second] : "team"});
+          }
         } else {
           int best_r = -1;
           double best_f = best_agent(t, best_r);
@@ -130,10 +131,16 @@ class Scheduler {
             done_at = U.cost[t.fluent];
           } else {
             const GoalPlan &tp = t.plans[best_r];
+            double delay = std::max(0.0, finish[best_r] - ready[best_r]);
             finish[best_r] = best_f;
             if (!tp.route.locs.empty()) end_loc[best_r] = tp.route.locs.back();
             done_at = best_f;
-            for (int f : tp.covers) cover_[f] = cover_gen_;
+            const Pass &P = pass_of(best_r);
+            for (int f : tp.covers) {
+              double at = std::min(best_f, P.cost[f] + delay);
+              auto [it, inserted] = covered.emplace(f, std::make_pair(at, best_r));
+              if (!inserted && at < it->second.first) it->second = {at, best_r};
+            }
             if (record) {
               bd->assignment.push_back({pb.str(t.fluent),
                                         per_agent ? pb.agent_names[best_r] : "team"});
@@ -173,9 +180,6 @@ class Scheduler {
   }
 
  private:
-  std::vector<uint32_t> cover_;
-  uint32_t cover_gen_ = 0;
-
   // Serial "team" agent: ready when the first agent is.
   static double team_ready(const Problem &pb, const Pass &U) {
     double r = INF;

@@ -309,8 +309,9 @@ inline std::string mcts(const State &root_state,
                         double lambda_max = 0.0,
                         double lambda_ff  = 0.5,
                         std::optional<double> dead_end_penalty = std::nullopt,
-                        std::optional<ConcurrentHeuristicOptions> concurrent = std::nullopt,
-                        bool max_backup = false) {
+                        std::optional<ConcurrentHeuristicOptions> concurrent =
+                            ConcurrentHeuristicOptions{},
+                        bool max_backup = true) {
   // RNG
   std::mt19937 &rng = mcts_rng();
 
@@ -384,7 +385,9 @@ inline std::string mcts(const State &root_state,
       for (auto &kv : node->children) {
         MCTSChanceNode *cn = kv.second.get();
         double score = ucb_score(node->visits, *cn, c, max_backup);
-        if (score > best_score) {
+        if (score > best_score ||
+            (score == best_score &&
+             (!best_chance || cn->action->name() < best_chance->action->name()))) {
           best_score = score;
           best_chance = cn;
         }
@@ -489,7 +492,10 @@ inline std::string mcts(const State &root_state,
                         ? (cn->estimate > best_est ||
                            (cn->estimate == best_est && cn->visits > most_visits))
                         : cn->visits > most_visits;
-      if (better) {
+      bool tied = max_backup
+                      ? cn->estimate == best_est && cn->visits == most_visits
+                      : cn->visits == most_visits;
+      if (better || (tied && best_action && kv.first->name() < best_action->name())) {
         best_est = cn->estimate;
         most_visits = cn->visits;
         best_action = kv.first;
@@ -511,8 +517,9 @@ public:
                        double lambda_max = 0.0,
                        double lambda_ff  = 0.5,
                        std::optional<double> dead_end_penalty = std::nullopt,
-                       std::optional<ConcurrentHeuristicOptions> concurrent = std::nullopt,
-                       bool max_backup = false)
+                       std::optional<ConcurrentHeuristicOptions> concurrent =
+                           ConcurrentHeuristicOptions{},
+                       bool max_backup = true)
       : all_actions_(std::move(all_actions)),
         lambda_add_(lambda_add),
         lambda_max_(lambda_max),
