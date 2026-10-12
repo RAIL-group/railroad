@@ -1,7 +1,8 @@
 from functools import partial
 from interruption.constants import (
     MODEL_NAME, ARRIVAL_EXCEEDANCE_FRACTIONS,
-    PROCTHOR_SEED, OBJ_PLACEMENT_SEED, FILTER_OBJECTS, REMAPPED_SCENES_HASH
+    PROCTHOR_SEED, OBJ_PLACEMENT_SEED, FILTER_OBJECTS, REMAPPED_SCENES_HASH,
+    INTERRUPTION_SEEDS
 )
 from interruption.environments import (
     get_scene_task_distribution,
@@ -24,7 +25,7 @@ from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 # constants
 MODEL_PATH = DEFAULT_RESOURCES_BASE / "models"
 RANDOMIZE_TASK_SEQUENCE = True
-RUN_IDX_SEED = 2
+RUN_IDX_SEED = 20
 
 def main(randomize_order: bool = False, filter_objects: bool = False):
     # evaluate on the scenes and task distribution of a data-generation run.
@@ -34,15 +35,15 @@ def main(randomize_order: bool = False, filter_objects: bool = False):
     )
     seeds = ExperimentSeeds(
         procthor_seed=PROCTHOR_SEED,
-        experiment_seed=140 + RUN_IDX_SEED,
+        experiment_seed=INTERRUPTION_SEEDS[-1] + RUN_IDX_SEED,
         # an object seed makes ThorInterface skip the remap, so a remapped
         # scene keeps the object placement it was generated with
         object_placement_seed=None if remap_dir else OBJ_PLACEMENT_SEED,
-        task_sample_seed=0
+        task_sample_seed=RUN_IDX_SEED
     )
     task_arrival_fn = partial(
         get_task_arrival_prob, RandomVariableType.CONTINUOUS,
-        -1, get_expected_time_next_arrival(ARRIVAL_EXCEEDANCE_FRACTIONS[0], REMAPPED_SCENES_HASH)
+        -1, get_expected_time_next_arrival(ARRIVAL_EXCEEDANCE_FRACTIONS[-1], REMAPPED_SCENES_HASH)
     )
 
     # get task distribution from alfred dataset used during training
@@ -75,14 +76,14 @@ def main(randomize_order: bool = False, filter_objects: bool = False):
         task_distribution,
         task_arrival_fn,
         MODEL_PATH / MODEL_NAME,
-        num_task_sequence=5,
+        num_task_sequence=2,
         augment_task=True,
         retry_with_subgoals=True
     )
 
     run_experiment(
         config,
-        PlannerMode.ANTICIPATORY_PLANNING,
+        PlannerMode.MYOPIC,
         show_plot=False,
         remove_duplicates=True,
         benchmark_flag=False,

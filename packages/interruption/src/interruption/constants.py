@@ -3,9 +3,9 @@ A module for keeping track of experiment related user-defined constants.
 """
 
 ## railroad heuristic related constants
-LAMBDA_ADD = 0
+LAMBDA_ADD = 0.5
 LAMBDA_MAX = 0
-LAMBDA_FF = 1
+LAMBDA_FF = 0.5
 
 ## debug related constants
 AP_DEBUG = False
@@ -49,7 +49,7 @@ REMAPPED_SCENES_HASH: str | None = "767821370226"
 
 # seeds
 # current: 2-room -> 64; 1-room -> 201
-PROCTHOR_SEED = 113
+PROCTHOR_SEED = 158
 # current: 2-room -> 2; 1-room -> 19
 OBJ_PLACEMENT_SEED = None
 
@@ -81,5 +81,5 @@ H_MULTIPLIER = 1
 PLANNER_FAILURE_COST = 500
 
 # A.P. related constants
-NUM_AUGMENTED_TASK_SAMPLES = 200 #8
+NUM_AUGMENTED_TASK_SAMPLES = 20
 AP_SEED = 12
