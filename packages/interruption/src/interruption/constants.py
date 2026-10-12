@@ -28,15 +28,15 @@ RETRY_WITH_SUBGOALS = True
 
 # number of tasks in the task distribution
 # current: 2-room -> 16; 1-room -> 11
-NUM_TASKS = 11
+NUM_TASKS = 15
 
 # scene filters for multi-scene data generation (see filter_procthor_scenes;
 # "num_scenes" only bounds how many matching scenes get remapped, it is not a
 # filter criterion). Shared by data generation and the experiments that must
 # rebuild the same task distribution (get_task_distribution_from_remap_dir).
-NUM_ROOMS_FILTER = {1}
+NUM_ROOMS_FILTER = {1, 2, 3}
 ONE_ROOM_FILTER = {
-    "num_scenes": 22, "num_pickupable_objects": 11, "num_valid_locations": 6,
+    "num_scenes": 700, "num_pickupable_objects": 15, "num_valid_locations": 8,
     "room_types": {"Kitchen"},
 }
 TWO_ROOM_FILTER = {"num_scenes": 10, "num_pickupable_objects": 20, "num_valid_locations": 10}
