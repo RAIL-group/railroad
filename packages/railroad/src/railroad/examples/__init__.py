@@ -46,6 +46,13 @@ def _procthor_available() -> bool:
     return is_available()
 
 
+def _pyrobosim_available() -> bool:
+    """Check if pyrobosim dependencies are installed."""
+    from railroad.environment.pyrobosim import is_available
+
+    return is_available()
+
+
 EXAMPLES: Dict[str, ExampleInfo] = {
     "clear-table": {
         "main": _lazy_import("clear_the_table"),
@@ -249,5 +256,35 @@ if _procthor_available():
                          "Defaults to the packaged ProcTHOR model if omitted."),
                 "param_name": "nn_model_path",
             }
+        ],
+    }
+
+# Only show pyrobosim example if dependencies are installed
+if _pyrobosim_available():
+    EXAMPLES["pyrobosim-search"] = {
+        "main": _lazy_import("pyrobosim_search"),
+        "description": "Multi-robot fetch on PyRoboSim robots (--show-plot shows and --save-video records the simulator)",
+        "options": [
+            {
+                "name": "--world-file",
+                "type": str,
+                "default": None,
+                "help": "PyRoboSim world YAML (default: the packaged test world)",
+                "param_name": "world_file",
+            },
+            {
+                "name": "--seed",
+                "type": int,
+                "default": 1,
+                "help": "World layout seed",
+                "param_name": "seed",
+            },
+            {
+                "name": "--realtime-factor",
+                "type": float,
+                "default": 1.0,
+                "help": "Simulation speed-up over real time",
+                "param_name": "realtime_factor",
+            },
         ],
     }

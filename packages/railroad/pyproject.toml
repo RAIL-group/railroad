@@ -44,8 +44,14 @@ railsim = [
     "moderngl",
     "shapely>=2.1.2",
 ]
+pyrobosim = [
+    # uv.lock is gitignored, so CI re-resolves every run; pyrobosim 5 moved
+    # gui.world_canvas, gui.options and navigation.visualization, which
+    # environment/pyrobosim/canvas.py imports. Ceiling until it is ported.
+    "pyrobosim>=4.3.3,<5",
+]
 all = [
-    "railroad[test,bench,procthor,railsim]",
+    "railroad[test,bench,procthor,railsim,pyrobosim]",
 ]
 
 [project.scripts]
@@ -66,6 +72,7 @@ where = ["src"]
 railroad = [
     "*.pyi",
     "environment/procthor/resources/models/*.pt",
+    "environment/pyrobosim/resources/worlds/*.yaml",
 ]
 
 [tool.uv]
