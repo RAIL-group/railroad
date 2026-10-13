@@ -12,6 +12,13 @@ Usage:
         SymbolicSkill,           # Symbolic skill implementation
     )
 
+Running actions on real robots or an external simulator:
+    from railroad.environment import (
+        PhysicalEnvironment,       # Subclass: define_operators, execute_skill,
+                                   #   get_skill_status, stop_robot
+        SkillStatus,               # RUNNING / DONE / FAILED
+    )
+
 Legacy classes have been moved to railroad.experimental.environment:
     from railroad.experimental.environment import (
         AbstractEnvironment, BaseEnvironment, SimpleEnvironment,
@@ -22,7 +29,13 @@ Unknown-space frontier search lives in railroad.experimental.unknown_search.
 """
 
 from .environment import ActiveSkill, Environment
-from .skill import InterruptibleNavigationMoveSkill, MotionSkill, NavigationMoveSkill
+from .skill import (
+    InterruptibleNavigationMoveSkill,
+    MotionSkill,
+    NavigationMoveSkill,
+    PhysicalSkill,
+    SkillStatus,
+)
 from .types import Pose, PoseLike, TopDownView
 from .symbolic import (
     LocationRegistry,
@@ -30,6 +43,7 @@ from .symbolic import (
     SymbolicSkill,
 )
 from .object_search import ObjectSearchEnvironment
+from .physical import PhysicalEnvironment
 
 __all__ = [
     # Core classes
@@ -42,6 +56,9 @@ __all__ = [
     "ObjectSearchEnvironment",
     "Pose",
     "PoseLike",
+    "PhysicalEnvironment",
+    "PhysicalSkill",
+    "SkillStatus",
     "SymbolicEnvironment",
     "SymbolicSkill",
     "TopDownView",
