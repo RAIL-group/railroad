@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Iterable, Tuple
 
 import numpy as np
 
-from railroad._bindings import Action, Fluent
+from railroad._bindings import Action, Fluent, GroundedEffect
 
 from railroad.navigation.pathing import get_coordinates_at_distance, path_total_length
 from ..symbolic import SymbolicSkill
@@ -105,17 +105,7 @@ class NavigationMoveSkill(SymbolicSkill, MotionSkill):
 
     def _destination_is_stale(self, env: Environment) -> bool:
         """Whether this move's destination is no longer planner-usable."""
-        # Prefer symbolic location typing when available.
-        locations = set(env.objects_by_type.get("location", set()))
-        if locations and self._move_destination not in locations:
-            return True
-
-        # Also respect registry removals when environments prune coordinates.
-        registry = getattr(env, "location_registry", None)
-        if registry is not None and self._move_destination not in registry:
-            return True
-
-        return False
+        return destination_is_stale(env, self._move_destination)
 
     def _interrupt_with_destination_rewrite(
         self,
@@ -129,52 +119,13 @@ class NavigationMoveSkill(SymbolicSkill, MotionSkill):
         if self._move_destination is None or self._robot is None:
             return
 
-        # Get current interpolated pose
-        pose = self._interpolate_pose(self._current_time)
-        new_target = f"{self._robot}_loc"
-        old_target = self._move_destination
-
-        # Register intermediate location in location_registry
-        registry = getattr(env, "location_registry", None)
-        if registry is not None:
-            registry.register(new_target, np.array([pose.x, pose.y]))
-
-        # Keep continuous pose state in sync at the interrupt instant.
-        env.set_robot_pose(self._robot, pose)
-
-        # Collect fluents from remaining effects, retargeting only
-        # positive ``at`` fluents to the intermediate location.  All
-        # other fluents keep their original args so they correctly undo
-        # state set with the original destination (e.g. a time-0 effect
-        # such as ``claimed ?to`` is cleared by its ``not claimed ?to``
-        # counterpart with the original ``?to``).
-        new_fluents: set[Fluent] = set()
-        for _, eff in self._upcoming_effects:
-            if eff.is_probabilistic:
-                # Drop probabilistic effects on interrupt per spec
-                continue
-            for fluent in eff.resulting_fluents:
-                if (~fluent) in new_fluents:
-                    new_fluents.remove(~fluent)
-                if not fluent.negated and fluent.name == "at":
-                    new_args = [
-                        arg if arg != old_target else new_target
-                        for arg in fluent.args
-                    ]
-                    new_fluents.add(
-                        Fluent(" ".join(["at"] + new_args), negated=False)
-                    )
-                else:
-                    new_fluents.add(fluent)
-
-        # Apply rewritten fluents to environment
-        for fluent in new_fluents:
-            if fluent.negated:
-                env.fluents.discard(~fluent)
-            else:
-                env.fluents.add(fluent)
-
-        # Clear remaining effects
+        retarget_remaining_effects(
+            env,
+            robot=self._robot,
+            old_target=self._move_destination,
+            pose=self._interpolate_pose(self._current_time),
+            remaining_effects=self._upcoming_effects,
+        )
         self._upcoming_effects = []
 
     def interrupt(self, env: Environment) -> None:
@@ -199,3 +150,70 @@ class InterruptibleNavigationMoveSkill(NavigationMoveSkill):
     def interrupt(self, env: Environment) -> None:
         """Interrupt move immediately when requested by the environment."""
         self._interrupt_with_destination_rewrite(env)
+
+
+def destination_is_stale(env: Environment, destination: str) -> bool:
+    """Whether a move destination is no longer planner-usable."""
+    # Prefer symbolic location typing when available.
+    locations = set(env.objects_by_type.get("location", set()))
+    if locations and destination not in locations:
+        return True
+
+    # Also respect registry removals when environments prune coordinates.
+    registry = getattr(env, "location_registry", None)
+    if registry is not None and destination not in registry:
+        return True
+
+    return False
+
+
+def retarget_remaining_effects(
+    env: Environment,
+    robot: str,
+    old_target: str,
+    pose: Pose | None,
+    remaining_effects: Iterable[Tuple[float, GroundedEffect]],
+) -> None:
+    """Apply a cut-short move's remaining effects at a robot-local anchor.
+
+    Registers ``{robot}_loc`` at ``pose`` (when the environment has a
+    location registry and the pose is known), then applies the fluents of
+    ``remaining_effects`` directly to ``env.fluents``, retargeting positive
+    ``at`` fluents from ``old_target`` to ``{robot}_loc``.  All other fluents
+    keep their original args so they correctly undo state set with the
+    original destination (e.g. a time-0 effect such as ``claimed ?to`` is
+    cleared by its ``not claimed ?to`` counterpart with the original ``?to``).
+    Probabilistic effects are dropped.
+    """
+    new_target = f"{robot}_loc"
+
+    if pose is not None:
+        registry = getattr(env, "location_registry", None)
+        if registry is not None:
+            registry.register(new_target, np.array([pose.x, pose.y]))
+        # Keep continuous pose state in sync at the interrupt instant.
+        env.set_robot_pose(robot, pose)
+
+    new_fluents: set[Fluent] = set()
+    for _, eff in remaining_effects:
+        if eff.is_probabilistic:
+            continue
+        for fluent in eff.resulting_fluents:
+            if (~fluent) in new_fluents:
+                new_fluents.remove(~fluent)
+            if not fluent.negated and fluent.name == "at":
+                new_args = [
+                    arg if arg != old_target else new_target
+                    for arg in fluent.args
+                ]
+                new_fluents.add(
+                    Fluent(" ".join(["at"] + new_args), negated=False)
+                )
+            else:
+                new_fluents.add(fluent)
+
+    for fluent in new_fluents:
+        if fluent.negated:
+            env.fluents.discard(~fluent)
+        else:
+            env.fluents.add(fluent)
