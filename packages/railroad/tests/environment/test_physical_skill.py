@@ -509,6 +509,23 @@ def test_stale_status_is_ignored_until_running_is_seen():
     assert F("at r1 bedroom") in state.fluents
 
 
+def test_idle_keeps_the_skill_waiting():
+    """IDLE -- the robot's initial state, nothing assigned or running -- is
+    not a failure: the command has not been picked up yet."""
+    env, _ = make_env(
+        env_cls=ScriptedEnvironment,
+        replies=[SkillStatus.IDLE, SkillStatus.IDLE, SkillStatus.RUNNING, SkillStatus.DONE],
+    )
+    env.stale_status_grace = 0.0
+
+    state = act(env, "move r1 kitchen bedroom")
+
+    # Polls at t=0, 1 (IDLE), 2 (RUNNING), 3 (DONE).
+    assert state.time == pytest.approx(3.0)
+    assert F("at r1 bedroom") in state.fluents
+    assert env.stopped == []
+
+
 def test_without_grace_an_immediate_done_is_trusted():
     env, _ = make_env(env_cls=ScriptedEnvironment, replies=[SkillStatus.DONE])
     env.stale_status_grace = 0.0

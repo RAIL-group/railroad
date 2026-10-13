@@ -14,7 +14,7 @@ Subclass :class:`PhysicalEnvironment` the way the example scripts subclass
                 loc_from, loc_to = args
                 ...
 
-        def get_skill_status(self, robot, skill):       # SkillStatus.RUNNING / DONE / FAILED
+        def get_skill_status(self, robot, skill):       # SkillStatus.IDLE / RUNNING / DONE / FAILED
             ...
 
         def stop_robot(self, robot):

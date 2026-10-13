@@ -24,8 +24,14 @@ _EPS = 1e-9
 
 
 class SkillStatus(IntEnum):
-    """What ``PhysicalEnvironment.get_skill_status`` reports for a robot's skill."""
+    """What ``PhysicalEnvironment.get_skill_status`` reports for a robot's skill.
 
+    IDLE is a robot's initial state, when nothing has been assigned to it or
+    is running; a skill that sees it keeps waiting (the command has not been
+    picked up yet). RUNNING keeps it waiting too; DONE and FAILED end it.
+    """
+
+    IDLE = -1
     RUNNING = 0
     DONE = 1
     FAILED = 2

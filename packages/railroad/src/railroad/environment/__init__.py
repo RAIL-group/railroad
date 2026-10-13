@@ -16,7 +16,7 @@ Running actions on real robots or an external simulator:
     from railroad.environment import (
         PhysicalEnvironment,       # Subclass: define_operators, execute_skill,
                                    #   get_skill_status, stop_robot
-        SkillStatus,               # RUNNING / DONE / FAILED
+        SkillStatus,               # IDLE / RUNNING / DONE / FAILED
     )
 
 Legacy classes have been moved to railroad.experimental.environment:
