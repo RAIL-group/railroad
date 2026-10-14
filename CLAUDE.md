@@ -66,6 +66,11 @@ Provides abstractions for planning execution:
   - Coordinates: railroad environments work in grid cells; railsim renders in meters (`meters = cells * map_data.resolution`)
   - Example: `uv run railroad example visual-frontier-search --env maze|office`; rendering requires a working GL context (`RAILSIM_GL_BACKEND` to pin one)
 
+- **`pyrobosim/`**: PyRoboSim simulator interface (optional dependency, `railroad[pyrobosim]`)
+  - `PyRoboSimScene`: Data provider for a PyRoboSim world (`.robots`, `.locations`, `.object_locations`, `.move_time`); `DEFAULT_WORLD_FILE` in `resources/worlds/`
+  - `PyRoboSimEnvironment`: `PhysicalEnvironment` subclass whose skills run on the PyRoboSim robots in (scaled) real time; subclasses must override `define_operators()`
+  - Example: `uv run railroad example pyrobosim-search` (`--show-plot` shows the simulator live, `--save-video out.mp4` records it, `--realtime-factor` speeds it up)
+
 #### Navigation Module (`packages/railroad/src/railroad/navigation/`)
 
 Reusable grid navigation primitives, independent of any specific environment:
@@ -87,7 +92,7 @@ Reusable grid navigation primitives, independent of any specific environment:
   - Specialized operators for navigable moves, site search, and frontier search
 
 #### External Packages
-- **`packages/environments/`**: Additional environment implementations (PyRoboSim)
+- **`packages/environments/`**: Additional, work-in-progress environment definitions
 
 ### Key Concepts
 
@@ -145,6 +150,7 @@ goal = ~F("at Knife table")  # NOT (knife must not be on table)
 Tests are organized by component:
 - `packages/railroad/tests/`: Core PDDL functionality, planners, environment
 - `packages/railroad/tests/environment/procthor/`: ProcTHOR integration tests (skipped if deps not installed)
+- `packages/railroad/tests/environment/pyrobosim/`: PyRoboSim integration tests (skipped if deps not installed)
 - `packages/environments/tests/`, `packages/gridmap/tests/`: Component-specific tests
 
 Key test patterns:

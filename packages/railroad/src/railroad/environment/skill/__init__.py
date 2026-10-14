@@ -3,6 +3,7 @@
 from .navigation import InterruptibleNavigationMoveSkill, NavigationMoveSkill
 from railroad.environment.environment import ActiveSkill
 
+from .physical import PhysicalSkill, SkillStatus
 from .protocols import MotionSkill, SupportsMovePathEnvironment
 
 __all__ = [
@@ -10,5 +11,7 @@ __all__ = [
     "InterruptibleNavigationMoveSkill",
     "MotionSkill",
     "NavigationMoveSkill",
+    "PhysicalSkill",
+    "SkillStatus",
     "SupportsMovePathEnvironment",
 ]

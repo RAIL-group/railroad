@@ -418,6 +418,22 @@ class Environment(ABC):
         """Optional hook invoked after skills advance and cleanup."""
         del advanced_to_time
 
+    def _check_preconditions(self, action: Action) -> None:
+        """Hook: raise ValueError if ``action`` cannot be dispatched now."""
+        if not self.state.satisfies_precondition(action):
+            raise ValueError(
+                f"Action preconditions not satisfied: {action.name}"
+            )
+
+    def _wait_until(self, time: float) -> float:
+        """Hook: let ``time`` arrive and return the time actually reached.
+
+        Symbolic execution jumps there at once; environments running in real
+        time wait for it, and may return early (when something they track
+        changed) or late.
+        """
+        return time
+
     def set_robot_pose(self, robot: str, pose: object) -> None:
         """Optional hook for environments that track continuous robot pose."""
         del robot, pose
@@ -439,10 +455,7 @@ class Environment(ABC):
         Raises:
             ValueError: If action preconditions are not satisfied.
         """
-        if not self.state.satisfies_precondition(action):
-            raise ValueError(
-                f"Action preconditions not satisfied: {action.name}"
-            )
+        self._check_preconditions(action)
 
         skill = self.create_skill(action, self._time)
         self._active_skills.append(skill)
@@ -474,6 +487,8 @@ class Environment(ABC):
                 )
                 if next_time == float("inf"):
                     break
+
+            next_time = self._wait_until(next_time)
 
             # Advance all skills to next event time
             for s in self._active_skills:

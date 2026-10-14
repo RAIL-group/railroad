@@ -1,7 +1,15 @@
 """
 Real-world robot planning demonstration.
 
-Uses the new Goal API for defining planning objectives.
+railroad plans; ROS robots (through rosbridge) act. As for ProcTHOR and
+PyRoboSim, a scene describes the world and an environment acts in it:
+
+- `RealScene` asks ROS what planning needs: the location names and the move
+  times between them.
+- `RealEnvironment` is a PhysicalEnvironment: besides its operators, it has
+  execute_skill(), get_skill_status() and stop_robot().
+
+The planning loop is written like the example scripts.
 """
 
 from functools import reduce
@@ -12,28 +20,29 @@ import roslibpy
 from railroad.core import Fluent as F, State, get_action_by_name
 
 
+from railroad.dashboard import PlannerDashboard
 from railroad.planner import MCTSPlanner
-from railroad.experimental.environment import BaseEnvironment, SkillStatus, EnvironmentInterface as PlanningLoop
+from railroad.environment import PhysicalEnvironment, SkillStatus
 from railroad.operators import construct_move_visited_operator
 
 
 
 
+# 'stopped' is the robot's initial state, with nothing assigned or running.
 STATUS_MAP = {'moving': SkillStatus.RUNNING, 'reached': SkillStatus.DONE, 'stopped': SkillStatus.IDLE}
 
 
-class RealEnvironment(BaseEnvironment):
+class RealScene:
+    """The world as ROS describes it: location names and move times."""
+
     def __init__(self, client):
-        super().__init__()
         self._get_locations_service = roslibpy.Service(client, '/get_locations', 'planner_msgs/GetLocations')
-        self._move_robot_service = roslibpy.Service(client, '/move_robot', 'planner_msgs/MoveRobot')
         self._get_distance_service = roslibpy.Service(client, '/get_distance', 'planner_msgs/GetDistance')
-        self._move_status_service = roslibpy.Service(client, '/get_move_status', 'planner_msgs/MoveStatus')
-        self._stop_robot_service = roslibpy.Service(client, '/stop_robot', 'planner_msgs/StopRobot')
-        self.locations = self._get_locations()
+        # Names only: ROS gives no coordinates (``locations`` would be read as them).
+        self.location_names = self._get_locations()
 
     def get_move_cost_fn(self):
-        locations = set(self.locations) - {'r1_loc', 'r2_loc'}
+        locations = set(self.location_names) - {'r1_loc', 'r2_loc'}
         location_distances = {}
         for loc1, loc2 in itertools.combinations(locations, 2):
             distance = self._get_distance(loc1, loc2)
@@ -61,6 +70,17 @@ class RealEnvironment(BaseEnvironment):
         result = self._get_locations_service.call(request)
         return result['locations']
 
+
+class RealEnvironment(PhysicalEnvironment):
+    """Runs the scene's actions on the ROS robots."""
+
+    def __init__(self, scene, client, state, objects_by_type):
+        self.scene = scene
+        self._move_robot_service = roslibpy.Service(client, '/move_robot', 'planner_msgs/MoveRobot')
+        self._move_status_service = roslibpy.Service(client, '/get_move_status', 'planner_msgs/MoveStatus')
+        self._stop_robot_service = roslibpy.Service(client, '/stop_robot', 'planner_msgs/StopRobot')
+        super().__init__(state=state, objects_by_type=objects_by_type)
+
     def move_robot(self, robot_name, location):
         request = roslibpy.ServiceRequest({'robot_id': robot_name, 'target': location})
         result = self._move_robot_service.call(request)
@@ -74,31 +94,39 @@ class RealEnvironment(BaseEnvironment):
         result = self._move_status_service.call(request)
         return STATUS_MAP.get(result['status'], None)
 
-    def stop_robot(self, robot_name):
-        print("Stopping robot", robot_name)
-        request = roslibpy.ServiceRequest({'robot_id': robot_name})
+    def stop_robot(self, robot):
+        print("Stopping robot", robot)
+        request = roslibpy.ServiceRequest({'robot_id': robot})
         result = self._stop_robot_service.call(request)
         return result['stopped']
 
-    def get_action_status(self, robot_name, action_name: str) -> str | None:
-        if action_name == 'move':
-            return self._get_move_status(robot_name)
+    # Start the skill and return; railroad polls get_skill_status() for the outcome.
+    def execute_skill(self, robot, skill, *args):
+        if skill == 'move':
+            loc_from, loc_to = args
+            self.move_robot(robot, loc_to)
+
+    def get_skill_status(self, robot, skill):
+        if skill == 'move':
+            return self._get_move_status(robot)
+        return SkillStatus.DONE  # skills the robots don't run complete at once
+
+    def define_operators(self):
+        return [construct_move_visited_operator(move_time=self.scene.get_move_cost_fn())]
 
 
-if __name__ == '__main__':
+def main(host: str = '192.168.0.16', port: int = 9090) -> None:
     # host = 'localhost'
-    host = '192.168.0.16'
-    client = roslibpy.Ros(host=host, port=9090)
+    client = roslibpy.Ros(host=host, port=port)
     client.run()
-    # Stale: RealEnvironment predates AbstractEnvironment's skill API and does
-    # not implement it, so this raises TypeError until the script is ported.
-    env = RealEnvironment(client)  # ty: ignore[call-non-callable]
+
+    scene = RealScene(client)
 
     robot_locations = {"r1": "r1_loc", "r2": "r2_loc"}
     objects_by_type = {
-        "robot": robot_locations.keys(),
+        "robot": set(robot_locations.keys()),
         # "robot": {"r1"},
-        "location": env.locations,
+        "location": set(scene.location_names),
     }
     initial_state = State(
         time=0.0,
@@ -110,27 +138,32 @@ if __name__ == '__main__':
         },
     )
 
-    move_op = construct_move_visited_operator(move_time=env.get_move_cost_fn())
-    planning_loop = PlanningLoop(initial_state, objects_by_type, [move_op], env)
+    env = RealEnvironment(scene, client, initial_state, objects_by_type)
     # Goal: Visit all target locations
     # Using Goal API: reduce(and_, [...]) creates an AndGoal
     goal = reduce(and_, [F("visited t1"), F("visited t2"), F("visited t3")])
 
-    actions_taken = []
-    for _ in range(1000):
-        all_actions = planning_loop.get_actions()
-        mcts = MCTSPlanner(all_actions)
-        action_name = mcts(planning_loop.state, goal, max_iterations=20000, c=10)
-        if action_name != 'NONE':
-            action = get_action_by_name(all_actions, action_name)
-            print(action_name)
-            planning_loop.advance(action)
-            print(planning_loop.state.fluents)
-            actions_taken.append(action_name)
-        else:
-            print("No action.")
+    # Planning loop
+    with PlannerDashboard(goal, env) as dashboard:
+        for _ in range(1000):
+            if goal.evaluate(env.state.fluents):
+                dashboard.console.print("[green]Goal reached![/green]")
+                break
 
-        if goal.evaluate(planning_loop.state.fluents):
-            print("Goal reached!")
-            break
+            all_actions = env.get_actions()
+            mcts = MCTSPlanner(all_actions)
+            action_name = mcts(env.state, goal, max_iterations=20000, c=10)
+
+            if action_name == 'NONE':
+                dashboard.console.print("No more actions available. Goal may not be achievable.")
+                break
+
+            action = get_action_by_name(all_actions, action_name)
+            env.act(action)
+            dashboard.update(mcts, action_name)
+
     client.terminate()
+
+
+if __name__ == '__main__':
+    main()
