@@ -114,3 +114,10 @@ class TestTheCacheSurvivesAnInterruptedWrite:
         (tmp_path / "scene_9.pkl").write_bytes(b"\x80\x04\x95 truncated garbage")
         with pytest.warns(RuntimeWarning, match="could not be read"):
             assert _interface(9)._load_cache(str(tmp_path)) is None
+
+
+def test_scene_cache_path_is_where_the_interface_reads_and_writes(cache_dir):
+    from railroad.environment.procthor.thor_interface import scene_cache_path
+
+    assert scene_cache_path(7) == _interface(7)._cache_dir() / "scene_7.pkl"
+    assert scene_cache_path(7, object_seed=3) == cache_dir / "scene_7_3.pkl"

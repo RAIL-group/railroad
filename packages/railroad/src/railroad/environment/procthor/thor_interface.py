@@ -68,6 +68,16 @@ Not left to ``warnings``' own deduplication, which is reset to "always" inside
 """
 
 
+def scene_cache_file_name(seed: int, object_seed: int | None = None) -> str:
+    """File name of a scene's cached navigation data and renders."""
+    return f"scene_{seed}.pkl" if object_seed is None else f"scene_{seed}_{object_seed}.pkl"
+
+
+def scene_cache_path(seed: int, object_seed: int | None = None) -> Path:
+    """Where ThorInterface caches a scene's navigation data and renders."""
+    return get_procthor_10k_dir() / "cache" / scene_cache_file_name(seed, object_seed)
+
+
 def _encode_image(image: np.ndarray) -> bytes:
     from PIL import Image
 
@@ -479,11 +489,7 @@ class ThorInterface:
         }
         save_dir = Path(path) if path is not None else self._cache_dir()
         save_dir.mkdir(parents=True, exist_ok=True)
-        filename = (
-            f'scene_{self.seed}.pkl'
-            if self.object_seed is None
-            else f'scene_{self.seed}_{self.object_seed}.pkl'
-        )
+        filename = scene_cache_file_name(self.seed, self.object_seed)
         self._write_cache_atomically(cache, save_dir / filename)
         return cache
 
@@ -518,11 +524,7 @@ class ThorInterface:
     def _load_cache(self, path: Optional[str] = None) -> Optional[Dict]:
         """Load cached scene data, treating an unreadable file as a miss."""
         base = Path(path) if path is not None else self._cache_dir()
-        cache_file = (
-            base / f'scene_{self.seed}.pkl'
-            if self.object_seed is None
-            else base / f'scene_{self.seed}_{self.object_seed}.pkl'
-        )
+        cache_file = base / scene_cache_file_name(self.seed, self.object_seed)
         if not cache_file.exists():
             return None
         try:

@@ -233,3 +233,54 @@ def test_slow_datums_are_logged(seconds, logged, monkeypatch, capsys, tmp_path):
         "all 2 searches 31200/60000 (52%)"
     )
     assert (expected in out) == logged
+
+
+def _prewarm_with(monkeypatch, tmp_path, present, failing=()):
+    """Stubs cache paths (present ones exist) and scene loading; returns the scenes built."""
+    datagen = _load_datagen()
+    for seed in present:
+        (tmp_path / f"scene_{seed}.pkl").touch()
+    monkeypatch.setattr(datagen, "scene_cache_path", lambda seed: tmp_path / f"scene_{seed}.pkl")
+    built = []
+
+    def build(seed, **kwargs):
+        if seed in failing:
+            raise RuntimeError(f"Unity failed on {seed}")
+        built.append(seed)
+
+    monkeypatch.setattr(datagen, "ThorInterface", build)
+    monkeypatch.setenv("DISPLAY", ":2")
+    return datagen, built
+
+
+def test_prewarm_builds_only_the_missing_caches(monkeypatch, tmp_path, capsys):
+    datagen, built = _prewarm_with(monkeypatch, tmp_path, present=[5])
+
+    datagen._prewarm_scene_caches([5, 9, 32], None)
+
+    assert built == [9, 32]
+    assert "Scene caches: 1/3 present, building 2" in capsys.readouterr().out
+
+
+def test_prewarm_lists_every_scene_whose_cache_fails(monkeypatch, tmp_path):
+    datagen, built = _prewarm_with(monkeypatch, tmp_path, present=[], failing=(9, 32))
+
+    with pytest.raises(RuntimeError, match=r"could not build 2 scene cache\(s\)") as error:
+        datagen._prewarm_scene_caches([5, 9, 32], None)
+
+    assert built == [5]
+    assert "Unity failed on 9" in str(error.value) and "Unity failed on 32" in str(error.value)
+
+
+def test_prewarm_needs_a_display_only_when_caches_are_missing(monkeypatch, tmp_path):
+    datagen, built = _prewarm_with(monkeypatch, tmp_path, present=[5])
+    monkeypatch.setattr(datagen.sys, "platform", "linux")
+    monkeypatch.delenv("DISPLAY")
+
+    datagen._prewarm_scene_caches([5], None)  # nothing to build: no display needed
+    with pytest.raises(RuntimeError, match="needs a display") as error:
+        datagen._prewarm_scene_caches([5, 9], None)
+    assert built == []
+    assert "ai2thor-xorg --height 4096 --width 4096 start 1" in str(error.value)
+    assert "export DISPLAY=:1" in str(error.value)
+    assert "ai2thor-xorg stop 1" in str(error.value)

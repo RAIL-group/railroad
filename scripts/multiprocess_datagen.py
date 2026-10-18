@@ -52,6 +52,7 @@ from railroad.core import (
 )
 from railroad.environment.procthor.resources import REMAP_DIR_ENV_VAR, get_procthor_10k_dir
 from railroad.environment.procthor.scenegraph import SceneGraph
+from railroad.environment.procthor.thor_interface import ThorInterface, scene_cache_path
 
 NUM_DATUM = 800  # datums to generate for each scene seed
 DATA_GENERATION_SEED = 37
@@ -120,10 +121,13 @@ class _SceneRun:
 # --------------------------------------------------------------------------- #
 # Pipeline (in the order main() drives them)
 # --------------------------------------------------------------------------- #
-def main():
+def main(prewarm_only: bool = False):
     """
     Data-generation entrypoint: select scenes -> build the task distribution ->
-    key each scene -> generate each scene's data in a pool of workers.
+    key each scene -> build any missing scene caches -> generate each scene's data
+    in a pool of workers. prewarm_only stops after the caches are built
+    (`python scripts/multiprocess_datagen.py --prewarm-only`), so they can be built
+    ahead of a run.
     """
     start = time.perf_counter()
 
@@ -146,6 +150,9 @@ def main():
     relevant_objects = extract_relevant_objects(task_distribution[0]) if FILTER_OBJECTS else None
 
     with _remaps_enabled(selection.remapped_scenes, scene_keys):
+        _prewarm_scene_caches(list(scene_keys), relevant_objects)
+        if prewarm_only:
+            return
         total_written, failures = _run_workers(scene_keys, task_distribution, relevant_objects)
 
     print(f"Data Generation took: {time.perf_counter() - start: .4f} seconds")
@@ -320,6 +327,50 @@ def _remaps_enabled(remapped_scenes: dict[int, dict], scene_keys: dict[int, int]
         yield
     finally:
         os.environ.pop(REMAP_DIR_ENV_VAR, None)
+
+
+def _prewarm_scene_caches(scene_seeds: list[int], relevant_objects: list[str] | None) -> None:
+    """
+    Builds the cached navigation data and renders for every scene that lacks
+    them, before any worker starts. Building one starts AI2-THOR and holds a
+    machine-wide lock, so workers that hit a missing cache would wait on each
+    other; doing it up front keeps that out of the worker pool. Built the same
+    way a worker loads a scene, so the cache is the one a worker would have made.
+    Raises, listing every scene, if any cache couldn't be built.
+    """
+    missing = [seed for seed in scene_seeds if not scene_cache_path(seed).exists()]
+    print(
+        f"Scene caches: {len(scene_seeds) - len(missing)}/{len(scene_seeds)} present, "
+        f"building {len(missing)}",
+        flush=True,
+    )
+    if missing and sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+        # the X server ai2thor ships, from this environment's own bin directory
+        xorg = Path(sys.executable).parent / "ai2thor-xorg"
+        raise RuntimeError(
+            f"{len(missing)} scene caches need AI2-THOR, which needs a display. Start one:\n"
+            f"  sudo {xorg} --height 4096 --width 4096 start 1\n"
+            "  export DISPLAY=:1\n"
+            "and stop it once data generation has finished:\n"
+            f"  sudo {xorg} stop 1"
+        )
+    failed: dict[int, str] = {}
+    for done, seed in enumerate(missing, start=1):
+        start = time.perf_counter()
+        try:
+            ThorInterface(
+                seed, relevant_objects=relevant_objects,
+                remove_duplicate_objects=REMOVE_DUPLICATE_OBJECTS,
+            )
+        except Exception as e:  # noqa: BLE001 - report every failing scene, not just the first
+            failed[seed] = f"{type(e).__name__}: {e}"
+            print(f"[cache {done}/{len(missing)}] scene {seed} failed: {failed[seed]}", flush=True)
+        else:
+            elapsed = time.perf_counter() - start
+            print(f"[cache {done}/{len(missing)}] scene {seed} built in {elapsed:.0f}s", flush=True)
+    if failed:
+        details = "\n".join(f"  scene {seed}: {error}" for seed, error in sorted(failed.items()))
+        raise RuntimeError(f"could not build {len(failed)} scene cache(s):\n{details}")
 
 
 def _run_workers(
@@ -841,4 +892,4 @@ def get_randomized_procthor_data(
 
 
 if __name__ == "__main__":
-    main()
+    main(prewarm_only="--prewarm-only" in sys.argv[1:])
