@@ -106,6 +106,8 @@ class ThorInterface:
         resolution: Grid resolution in meters
         preprocess: Whether to filter containers
         use_cache: Whether to use cached data
+        remove_duplicate_objects: Keep one object per object category, and every
+            container. Purely symbolic: navigation uses the full scene's cache.
     """
     def __init__(
         self,
@@ -113,7 +115,7 @@ class ThorInterface:
         object_seed: int | None = None,
         resolution: float = 0.05,
         relevant_objects: list[str] | None = None,
-        remove_duplicates: bool = False,
+        remove_duplicate_objects: bool = False,
         preprocess: bool = True,
         use_cache: bool = True,
     ) -> None:
@@ -139,15 +141,11 @@ class ThorInterface:
         self.containers = self.scene['objects']
         if preprocess:
             self._preprocess_containers(relevant_objects)
-        if remove_duplicates:
-            self._deduplicate_containers()
-            # update the scene to not include duplicate containers and children
-            self.scene['objects'] = copy.deepcopy(self.containers)
+        if remove_duplicate_objects:
+            # self.scene is left whole: it is what a cache is generated from
+            self._deduplicate_objects()
 
-        self.cached_data = (
-            self._load_cache(remove_duplicates=remove_duplicates) if use_cache
-            else None
-        )
+        self.cached_data = self._load_cache() if use_cache else None
         if self.cached_data is None:
             # Generating a scene starts a Unity controller. Several of those at
             # once will take a machine down, and benchmark workers are separate
@@ -157,12 +155,9 @@ class ThorInterface:
             from ._scene_lock import scene_generation_lock
 
             with scene_generation_lock():
-                self.cached_data = (
-                    self._load_cache(remove_duplicates=remove_duplicates) if use_cache
-                    else None
-                )
+                self.cached_data = self._load_cache() if use_cache else None
                 if self.cached_data is None:
-                    self.cached_data = self._generate_scene_cache(remove_duplicates)
+                    self.cached_data = self._generate_scene_cache()
                 else:
                     print("-----------Using cached procthor data-----------")
                     self.controller = None
@@ -175,7 +170,7 @@ class ThorInterface:
         self.scene_graph = self._get_scene_graph()
         self.known_cost = self._get_known_costs()
 
-    def _generate_scene_cache(self, remove_duplicates: bool) -> Dict:
+    def _generate_scene_cache(self) -> Dict:
         """Build this scene's cache, retrying a soft Unity failure.
 
         ``_save_and_get_cache`` starts a Controller and asks it for the
@@ -209,7 +204,7 @@ class ThorInterface:
                     height=render_px,
                 )
                 try:
-                    return self._save_and_get_cache(remove_duplicates=remove_duplicates)
+                    return self._save_and_get_cache()
                 except RuntimeError as error:
                     if attempt == attempts:
                         raise
@@ -355,31 +350,25 @@ class ThorInterface:
             if c['id'].split('|')[0].lower() not in IGNORE_CONTAINERS
         ]
 
-    def _deduplicate_containers(self) -> None:
-        """Deduplicates containers and their children."""
-        # keep the the container of each container type with the most children
-        keep_idxes = {}
-        for idx, container in enumerate(self.containers):
-            name = container['id'].split('|')[0].lower()
-            num_children = len(container.get("children", []))
-            more_children = name in keep_idxes and num_children > keep_idxes[name][0]
-            if more_children or name not in keep_idxes:
-                keep_idxes[name] = (num_children, idx)
-
-        deduped_containers = [self.containers[idx] for _, idx in keep_idxes.values()]
-
-        seen_children = set()
-        for container in deduped_containers:
+    def _deduplicate_objects(self) -> None:
+        """
+        Keeps the first object of each object category, in container order, and
+        every container. New container dicts, so the scene they came from is
+        untouched.
+        """
+        seen = set()
+        containers = []
+        for container in self.containers:
             if "children" in container:
-                deduped_children = []
+                children = []
                 for child in container["children"]:
-                    child_name = child["id"].split("|")[0].lower()
-                    if child_name not in seen_children:
-                        seen_children.add(child_name)
-                        deduped_children.append(child)
-                container["children"] = deduped_children
-
-        self.containers = deduped_containers
+                    name = child["id"].split("|")[0].lower()
+                    if name not in seen:
+                        seen.add(name)
+                        children.append(child)
+                container = {**container, "children": children}
+            containers.append(container)
+        self.containers = containers
 
     def _load_randomized_objects_scene(self) -> Dict[str, Any]:
         """
@@ -472,9 +461,7 @@ class ThorInterface:
         """
         return get_procthor_10k_dir() / 'cache'
 
-    def _save_and_get_cache(
-        self, path: Optional[str] = None, remove_duplicates: bool = False
-    ) -> Dict:
+    def _save_and_get_cache(self, path: Optional[str] = None) -> Dict:
         """Cache expensive computations."""
         image_ortho, extent_m = self._render_top_down_from_controller(orthographic=True)
         image_persp, _ = self._render_top_down_from_controller(orthographic=False)
@@ -491,8 +478,6 @@ class ThorInterface:
             'image_ortho_extent_m': extent_m,
         }
         save_dir = Path(path) if path is not None else self._cache_dir()
-        if remove_duplicates:
-            save_dir /= "deduped"
         save_dir.mkdir(parents=True, exist_ok=True)
         filename = (
             f'scene_{self.seed}.pkl'
@@ -530,13 +515,9 @@ class ThorInterface:
             Path(temp_name).unlink(missing_ok=True)
             raise
 
-    def _load_cache(
-        self, path: Optional[str] = None, remove_duplicates: bool = False
-    ) -> Optional[Dict]:
+    def _load_cache(self, path: Optional[str] = None) -> Optional[Dict]:
         """Load cached scene data, treating an unreadable file as a miss."""
         base = Path(path) if path is not None else self._cache_dir()
-        if remove_duplicates:
-            base /= "deduped"
         cache_file = (
             base / f'scene_{self.seed}.pkl'
             if self.object_seed is None

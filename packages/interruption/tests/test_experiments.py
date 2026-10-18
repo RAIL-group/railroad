@@ -17,14 +17,15 @@ from interruption.planning_framework import (
 from railroad.core import Fluent, LiteralGoal
 
 
-def test_map_goal_to_scene_maps_object_and_location():
+def test_map_goal_to_scene_maps_the_object_and_keeps_the_location_category():
+    # any shelving unit satisfies the task, not just the one the mapping names
     goal = LiteralGoal(Fluent("at spoon shelvingunit"))
     scene_objects = {"spoon": "spoon_14"}
     scene_locations = {"shelvingunit": "shelvingunit_2"}
 
     result = _map_goal_to_scene(goal, scene_objects, scene_locations)
 
-    assert result == LiteralGoal(Fluent("at spoon_14 shelvingunit_2"))
+    assert result == LiteralGoal(Fluent("at-category spoon_14 shelvingunit"))
 
 
 def test_map_goal_to_scene_preserves_negation():
@@ -35,7 +36,7 @@ def test_map_goal_to_scene_preserves_negation():
     result = _map_goal_to_scene(goal, scene_objects, scene_locations)
 
     if isinstance(result, LiteralGoal):
-        assert result == LiteralGoal(~Fluent("at spoon_14 shelvingunit_2"))
+        assert result == LiteralGoal(~Fluent("at-category spoon_14 shelvingunit"))
         assert result.fluent().negated
 
 

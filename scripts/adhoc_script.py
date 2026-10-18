@@ -8,7 +8,7 @@ remap_dir = (
     use_remapped_scenes(REMAPPED_SCENES_HASH, PROCTHOR_SEED) if REMAPPED_SCENES_HASH else None
 )
 
-scene = ProcTHORScene(seed=PROCTHOR_SEED, remove_duplicates=True)
+scene = ProcTHORScene(seed=PROCTHOR_SEED, remove_duplicate_objects=True)
 
 Image.fromarray(scene.get_top_down_image()).save("scene_image3.png")
 

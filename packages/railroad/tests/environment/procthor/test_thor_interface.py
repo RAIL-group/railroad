@@ -56,67 +56,9 @@ def test_thor_interface_target_objects(thor_interface):
 
 def _bare_thor_interface() -> ThorInterface:
     """Construct a ThorInterface without running __init__, so
-    _deduplicate_containers can be tested on synthetic containers without
+    _deduplicate_objects can be tested on synthetic containers without
     loading real scene data or spinning up a Controller."""
     return ThorInterface.__new__(ThorInterface)
-
-
-def test_deduplicate_containers_keeps_most_populated_and_dedupes_children():
-    """Duplicate containers of the same type should collapse to the instance
-    with the most children; child objects of a type already kept by an
-    earlier-processed container should be dropped, not just deduped within
-    their own container."""
-    ti = _bare_thor_interface()
-    ti.containers = [
-        {"id": "CounterTop|1", "children": [{"id": "Knife|1"}]},
-        {"id": "Fridge|1", "children": [{"id": "Knife|2"}, {"id": "Pan|1"}]},
-        {"id": "CounterTop|2", "children": [
-            {"id": "Knife|3"}, {"id": "Pan|2"}, {"id": "Egg|1"},
-        ]},
-    ]
-
-    ti._deduplicate_containers()
-
-    container_types = [c["id"].split("|")[0].lower() for c in ti.containers]
-    assert sorted(container_types) == ["countertop", "fridge"]
-
-    countertop = next(c for c in ti.containers if c["id"] == "CounterTop|2")
-    assert [child["id"] for child in countertop["children"]] == ["Knife|3", "Pan|2", "Egg|1"]
-
-    # Both of fridge's children ("knife", "pan") were already claimed by the
-    # countertop, which is processed first (its type appeared first in the
-    # original list) -- so fridge is left with no children of its own.
-    fridge = next(c for c in ti.containers if c["id"] == "Fridge|1")
-    assert fridge["children"] == []
-
-
-def test_deduplicate_containers_tie_keeps_first_seen():
-    """Equal child counts should keep the first-seen instance of a type."""
-    ti = _bare_thor_interface()
-    ti.containers = [
-        {"id": "Fridge|1", "children": [{"id": "Knife|1"}]},
-        {"id": "Fridge|2", "children": [{"id": "Pan|1"}]},
-    ]
-
-    ti._deduplicate_containers()
-
-    assert len(ti.containers) == 1
-    assert ti.containers[0]["id"] == "Fridge|1"
-
-
-def test_deduplicate_containers_leaves_childless_containers_untouched():
-    """Containers with no 'children' key (e.g. non-receptacle objects)
-    should survive dedup without gaining a spurious empty children list."""
-    ti = _bare_thor_interface()
-    ti.containers = [
-        {"id": "Painting|1"},
-        {"id": "Fridge|1", "children": [{"id": "Knife|1"}]},
-    ]
-
-    ti._deduplicate_containers()
-
-    painting = next(c for c in ti.containers if c["id"] == "Painting|1")
-    assert "children" not in painting
 
 
 def test_remap_lookup_is_disabled_when_env_var_unset(monkeypatch):
@@ -156,3 +98,36 @@ def test_remap_lookup_ignores_a_different_run_directory(monkeypatch, tmp_path):
     ti = _bare_thor_interface()
     ti.seed = 5
     assert ti._check_for_remapped_scene() is False
+
+
+def test_deduplicate_objects_keeps_every_container_and_first_object_per_category():
+    """Duplicate containers stay; an object category already seen in an
+    earlier container is dropped from later ones."""
+    ti = _bare_thor_interface()
+    ti.containers = [
+        {"id": "Chair|1", "children": [{"id": "Knife|1"}]},
+        {"id": "Chair|2", "children": [{"id": "Knife|2"}, {"id": "Pan|1"}]},
+        {"id": "Painting|1"},
+    ]
+
+    ti._deduplicate_objects()
+
+    assert [c["id"] for c in ti.containers] == ["Chair|1", "Chair|2", "Painting|1"]
+    assert [ch["id"] for ch in ti.containers[0]["children"]] == ["Knife|1"]
+    assert [ch["id"] for ch in ti.containers[1]["children"]] == ["Pan|1"]
+    assert "children" not in ti.containers[2]
+
+
+def test_deduplicate_objects_leaves_the_source_containers_untouched():
+    """The scene a cache is generated from must keep every object."""
+    ti = _bare_thor_interface()
+    source = [
+        {"id": "Chair|1", "children": [{"id": "Knife|1"}]},
+        {"id": "Chair|2", "children": [{"id": "Knife|2"}]},
+    ]
+    ti.containers = list(source)
+
+    ti._deduplicate_objects()
+
+    assert [ch["id"] for ch in source[1]["children"]] == ["Knife|2"]
+    assert ti.containers[1]["children"] == []

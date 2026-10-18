@@ -4,7 +4,11 @@ from collections import Counter
 
 import pytest
 
-from interruption.environments import KitchenProcTHOREnvironment, get_alfred_task_distribution
+from interruption.environments import (
+    KitchenProcTHOREnvironment,
+    get_alfred_task_distribution,
+    location_category,
+)
 from interruption.utilities import (
     _update_held_objects_position,
     get_object_container_slots,
@@ -590,7 +594,9 @@ def test_randomize_object_locations_keeps_every_placement_record_consistent():
 
     def fluents_for(locations: dict[str, set[str]]) -> set[F]:
         return {
-            F(f"at {obj} {loc}") for loc, objs in locations.items() for obj in objs
+            fluent
+            for loc, objs in locations.items() for obj in objs
+            for fluent in (F(f"at {obj} {loc}"), F(f"at-category {obj} {location_category(loc)}"))
         } | {F("free robot0")}
 
     slots = get_object_container_slots(sg)
@@ -695,6 +701,76 @@ def test_randomize_object_locations_keeps_hands_and_fluents_consistent_while_hol
         F(f"at {name(o)} {loc}")
         for loc, objs in by_location().items() for o in sg.object_indices if name(o) in objs
     }
+    assert {f for f in env.fluents if f.name == "at-category"} == {
+        F(f"at-category {name(o)} {location_category(loc)}")
+        for loc, objs in by_location().items() for o in sg.object_indices if name(o) in objs
+    }
     assert {F("free robot0"), F("left-hand-full robot0"), F("right-hand-full robot0")} <= env.fluents
     assert env.scene.object_locations == by_location()
     assert env.objects_at_locations == by_location()
+
+
+def _two_table_env():
+    """A symbolic scene with two dining tables, a counter, and a cup on the counter."""
+    from railroad.core import State
+    from railroad.environment.symbolic import SymbolicEnvironment
+    from railroad.operators.core import construct_move_operator
+    from interruption.environments import setup_procthor_initial_state
+    from interruption.operators import (
+        construct_pick_with_left_hand_operator,
+        construct_place_with_left_hand_operator,
+    )
+
+    class TwoTableEnv(SymbolicEnvironment):
+        def define_operators(self):
+            return [
+                construct_move_operator(1.0),
+                construct_pick_with_left_hand_operator(1.0),
+                construct_place_with_left_hand_operator(1.0),
+            ]
+
+    locations = {"countertop_1", "diningtable_6", "diningtable_9"}
+    fluents = {F("at robot1 countertop_1"), F("free robot1"), ~F("left-hand-full robot1")}
+    setup_procthor_initial_state(fluents, {"countertop_1": {"cup_3"}}, locations)
+    return TwoTableEnv(
+        State(0.0, fluents),
+        {
+            "robot": {"robot1"},
+            "location": locations,
+            "object": {"cup_3"},
+            "category": {location_category(loc) for loc in locations},
+        },
+    )
+
+
+def test_location_categories_add_no_actions():
+    # one pick per (location, object) and one place per (location, object):
+    # ?cat is pinned by the static category fact
+    env = _two_table_env()
+    names = [a.name for a in env.get_actions()]
+    assert sorted(n for n in names if n.startswith("pick-left")) == [
+        "pick-left robot1 countertop countertop_1 cup_3",
+        "pick-left robot1 diningtable diningtable_6 cup_3",
+        "pick-left robot1 diningtable diningtable_9 cup_3",
+    ]
+    assert len([n for n in names if n.startswith("place-left")]) == 3
+
+
+@pytest.mark.parametrize("table", ["diningtable_6", "diningtable_9"])
+def test_either_dining_table_satisfies_an_at_category_goal(table):
+    from railroad.core import LiteralGoal, get_action_by_name
+
+    env = _two_table_env()
+    goal = LiteralGoal(F("at-category cup_3 diningtable"))
+    assert F("at-category cup_3 countertop") in env.fluents
+    assert not goal.evaluate(env.fluents)
+
+    for name in (
+        "pick-left robot1 countertop countertop_1 cup_3",
+        f"move robot1 countertop_1 {table}",
+        f"place-left robot1 diningtable {table} cup_3",
+    ):
+        env.act(get_action_by_name(env.get_actions(), name))
+
+    assert goal.evaluate(env.fluents)
+    assert F("at-category cup_3 countertop") not in env.fluents

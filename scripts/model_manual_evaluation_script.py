@@ -42,7 +42,7 @@ def main():
         get_task_arrival_prob, RandomVariableType.CONTINUOUS, -1, 30
     )
 
-    env = construct_procthor_kitchen_environment(seeds.procthor_seed, remove_duplicates=True)
+    env = construct_procthor_kitchen_environment(seeds.procthor_seed, remove_duplicate_objects=True)
     task_distribution = get_alfred_task_distribution(
         env.scene.objects,
         set(env.scene.locations),
@@ -58,7 +58,7 @@ def main():
             MODEL_PATH / model_name
         ),
         PlannerMode.ANTICIPATORY_PLANNING, # using AP to get access to the model
-        remove_duplicates=True
+        remove_duplicate_objects=True
     )
     assert data.planner_parameters.interruption_value_fn is not None
     model = data.planner_parameters.interruption_value_fn

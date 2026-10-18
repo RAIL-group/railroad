@@ -116,11 +116,20 @@ class KitchenProcTHOREnvironment(ProcTHOREnvironment):
             self.fluents.remove(F(f"holding-in-{hand} {robot} {name(released_idx)}"))
             self.fluents.add(F(f"holding-in-{hand} {robot} {name(grasped_idx)}"))
 
+        # discard everything first: an object can move into a category another
+        # moved object is leaving
         for obj_idx, (old_idx, new_idx) in moves.items():
             if old_idx != robot_idx:
                 self.fluents.discard(F(f"at {name(obj_idx)} {name(old_idx)}"))
+                self.fluents.discard(
+                    F(f"at-category {name(obj_idx)} {location_category(name(old_idx))}")
+                )
+        for obj_idx, (old_idx, new_idx) in moves.items():
             if new_idx != robot_idx:
                 self.fluents.add(F(f"at {name(obj_idx)} {name(new_idx)}"))
+                self.fluents.add(
+                    F(f"at-category {name(obj_idx)} {location_category(name(new_idx))}")
+                )
 
         # The ground-truth maps are fixed at construction and never follow
         # pick/place, so they are stale by now: rebuild them from the graph,
@@ -258,25 +267,38 @@ def construct_procthor_kitchen_environment(
     # Fully populate symbolic environment now that scene is available internally.
     env.objects_by_type["location"] = set(env.scene.locations.keys())
     env.objects_by_type["object"] = env.scene.objects
-    setup_procthor_initial_state(env.fluents, env.scene.object_locations)
+    env.objects_by_type["category"] = {
+        location_category(loc) for loc in env.objects_by_type["location"]
+    }
+    setup_procthor_initial_state(
+        env.fluents, env.scene.object_locations, env.objects_by_type["location"]
+    )
     return env
+
+
+def location_category(location: str) -> str:
+    """The category of a scene location: diningtable_6 -> diningtable."""
+    return location.split("_")[0]
 
 
 def setup_procthor_initial_state(
     initial_fluents: set[F],
-    objects_by_location: dict[str, set]
+    objects_by_location: dict[str, set],
+    locations: set[str],
 ) -> None:
     """
     Helper function that adds fluents related to the location of 
     objects (e.g., at ?obj ?loc) to the initial fluents of a
-    KitchenProcTHOREnvironment.
+    KitchenProcTHOREnvironment: each location's category (category ?loc ?cat),
+    and each object's location and the category it is in (at-category ?obj ?cat).
     """
-    object_location_fluents = [
-        F(f"at {obj} {loc}")
+    initial_fluents.update(F(f"category {loc} {location_category(loc)}") for loc in locations)
+    initial_fluents.update(
+        fluent
         for loc in objects_by_location
         for obj in objects_by_location[loc]
-    ]
-    return initial_fluents.update(object_location_fluents)
+        for fluent in (F(f"at {obj} {loc}"), F(f"at-category {obj} {location_category(loc)}"))
+    )
 
 
 def get_example_procthor_task_distribution(index: int) -> tuple[Sequence[Goal], list[float]]:

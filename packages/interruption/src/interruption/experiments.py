@@ -583,7 +583,9 @@ def _map_goal_to_scene(
     """
     Helper function that converts the generic name objects/containers used in 
     goals (ex. at spoon shelvingunit) to actual names of objects/containers within
-    the scene (ex. spoon_14).
+    the scene (ex. spoon_14). An `at` goal keeps its location as a category
+    instead (at-category spoon_14 shelvingunit), so it is satisfied by any
+    shelving unit in the scene, not just one of them.
     """
     if isinstance(goal, LiteralGoal):
         fluent = goal.fluent()
@@ -599,11 +601,10 @@ def _map_goal_to_scene(
                 return goal
             args.append(scene_objects[arg] if arg in scene_objects else scene_locations[arg])
 
-        fluent_str = (
-            f"not {fluent.name} {' '.join(args)}"
-            if fluent.negated
-            else f"{fluent.name} {' '.join(args)}"
-        )
+        name = fluent.name
+        if name == "at" and len(fluent.args) == 2 and fluent.args[1] in scene_locations:
+            name, args = "at-category", [args[0], fluent.args[1]]
+        fluent_str = f"not {name} {' '.join(args)}" if fluent.negated else f"{name} {' '.join(args)}"
         return LiteralGoal(Fluent(fluent_str))
     return goal
 

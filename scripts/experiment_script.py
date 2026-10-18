@@ -85,7 +85,7 @@ def main(randomize_order: bool = False, filter_objects: bool = False):
         config,
         PlannerMode.MYOPIC,
         show_plot=False,
-        remove_duplicates=True,
+        remove_duplicate_objects=True,
         benchmark_flag=False,
         relevant_objects= extract_relevant_objects(task_distribution[0]) if filter_objects else None
     )

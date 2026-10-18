@@ -3,6 +3,14 @@ from railroad.core import Fluent as F
 from railroad.operators._utils import OptNumeric, _to_numeric
 
 
+# The hand-specific pick/place operators also keep `at-category ?obj ?cat` up to
+# date: the object is somewhere of category ?cat (e.g. diningtable), whichever
+# instance. Tasks are stated as at-category goals, so any instance of a location
+# category satisfies them. ?cat is pinned by the static fact `category ?loc ?cat`,
+# which grounding compiles away, so it adds no actions. It comes right after ?r so
+# the location and object stay the last two words of the action name, which
+# get_updated_scene_graph parses.
+
 # custom operator functions
 def construct_assemble_operator(assemble_time: int):
     """
@@ -90,14 +98,20 @@ def construct_pick_with_left_hand_operator(pick_time: OptNumeric) -> Operator:
 
     Returns:
         Operator for picking up an object with the robot's left hand.
+        See the note at the top of this module for ?cat.
     """
     pick_time_fn = _to_numeric(pick_time)
     return Operator(
         name="pick-left",
-        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
-        preconditions=[F("at ?r ?loc"), F("free ?r"), F("at ?obj ?loc"), ~F("left-hand-full ?r")],
+        parameters=[("?r", "robot"), ("?cat", "category"), ("?loc", "location"), ("?obj", "object")],
+        preconditions=[
+            F("at ?r ?loc"), F("free ?r"), F("at ?obj ?loc"), ~F("left-hand-full ?r"),
+            F("category ?loc ?cat"),
+        ],
         effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?obj ?loc")}),
+            Effect(time=0, resulting_fluents={
+                F("not free ?r"), F("not at ?obj ?loc"), F("not at-category ?obj ?cat")
+            }),
             Effect(
                 time=(pick_time_fn, ["?r", "?loc", "?obj"]),
                 resulting_fluents={
@@ -117,17 +131,20 @@ def construct_pick_with_right_hand_operator(pick_time: OptNumeric) -> Operator:
 
     Returns:
         Operator for picking up an object with the robot's right hand.
+        See the note at the top of this module for ?cat.
     """
     pick_time_fn = _to_numeric(pick_time)
     return Operator(
         name="pick-right",
-        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
+        parameters=[("?r", "robot"), ("?cat", "category"), ("?loc", "location"), ("?obj", "object")],
         preconditions=[
             F("at ?r ?loc"), F("free ?r"), F("at ?obj ?loc"), F("left-hand-full ?r"),
-            ~F("right-hand-full ?r")
+            ~F("right-hand-full ?r"), F("category ?loc ?cat"),
         ],
         effects=[
-            Effect(time=0, resulting_fluents={F("not free ?r"), F("not at ?obj ?loc")}),
+            Effect(time=0, resulting_fluents={
+                F("not free ?r"), F("not at ?obj ?loc"), F("not at-category ?obj ?cat")
+            }),
             Effect(
                 time=(pick_time_fn, ["?r", "?loc", "?obj"]),
                 resulting_fluents={
@@ -147,19 +164,24 @@ def construct_place_with_left_hand_operator(place_time: OptNumeric) -> Operator:
 
     Returns:
         Operator for placing an object that was in the robot's left hand.
+        See the note at the top of this module for ?cat.
     """
     place_time_fn = _to_numeric(place_time)
     return Operator(
         name="place-left",
-        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
+        parameters=[("?r", "robot"), ("?cat", "category"), ("?loc", "location"), ("?obj", "object")],
         preconditions=[
-            F("at ?r ?loc"), F("free ?r"), F("holding-in-left ?r ?obj"), F("left-hand-full ?r")
+            F("at ?r ?loc"), F("free ?r"), F("holding-in-left ?r ?obj"), F("left-hand-full ?r"),
+            F("category ?loc ?cat"),
         ],
         effects=[
             Effect(time=0, resulting_fluents={F("not free ?r"), F("not holding-in-left ?r ?obj")}),
             Effect(
                 time=(place_time_fn, ["?r", "?loc", "?obj"]),
-                resulting_fluents={F("free ?r"), F("at ?obj ?loc"), ~F("left-hand-full ?r")},
+                resulting_fluents={
+                    F("free ?r"), F("at ?obj ?loc"), F("at-category ?obj ?cat"),
+                    ~F("left-hand-full ?r"),
+                },
             ),
         ],
     )
@@ -174,19 +196,24 @@ def construct_place_with_right_hand_operator(place_time: OptNumeric) -> Operator
 
     Returns:
         Operator for placing an object that was in the robot's right hand.
+        See the note at the top of this module for ?cat.
     """
     place_time_fn = _to_numeric(place_time)
     return Operator(
         name="place-right",
-        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
+        parameters=[("?r", "robot"), ("?cat", "category"), ("?loc", "location"), ("?obj", "object")],
         preconditions=[
-            F("at ?r ?loc"), F("free ?r"), F("holding-in-right ?r ?obj"), F("right-hand-full ?r")
+            F("at ?r ?loc"), F("free ?r"), F("holding-in-right ?r ?obj"), F("right-hand-full ?r"),
+            F("category ?loc ?cat"),
         ],
         effects=[
             Effect(time=0, resulting_fluents={F("not free ?r"), F("not holding-in-right ?r ?obj")}),
             Effect(
                 time=(place_time_fn, ["?r", "?loc", "?obj"]),
-                resulting_fluents={F("free ?r"), F("at ?obj ?loc"), ~F("right-hand-full ?r")},
+                resulting_fluents={
+                    F("free ?r"), F("at ?obj ?loc"), F("at-category ?obj ?cat"),
+                    ~F("right-hand-full ?r"),
+                },
             ),
         ],
     )

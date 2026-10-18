@@ -139,22 +139,23 @@ def _scene_with_tasks(datagen, monkeypatch, tasks):
 
     config = SimpleNamespace(interrupting_task_dist=([LiteralGoal(Fluent(t)) for t in tasks], []))
     scene = SimpleNamespace(objects={"apple_27"}, locations={"fridge_5": (0, 0)})
-    data = SimpleNamespace(env=SimpleNamespace(scene=scene))
+    env = SimpleNamespace(scene=scene, objects_by_type={"category": {"fridge"}})
+    data = SimpleNamespace(env=env)
     monkeypatch.setattr(datagen, "initialize_experiment_config", lambda *args: config)
     monkeypatch.setattr(datagen, "initialize_experiment_data", lambda *args, **kwargs: data)
 
 
 def test_opening_a_scene_with_an_unmappable_task_fails_immediately(monkeypatch):
     datagen = _load_datagen()
-    _scene_with_tasks(datagen, monkeypatch, ["at apple_27 fridge_5", "at bowl fridge_5"])
+    _scene_with_tasks(datagen, monkeypatch, ["at-category apple_27 fridge", "at-category bowl fridge"])
 
-    with pytest.raises(RuntimeError, match=r"scene 5: tasks \[\(at bowl fridge_5\)\]"):
+    with pytest.raises(RuntimeError, match=r"scene 5: tasks \[\(at-category bowl fridge\)\]"):
         datagen._open_scene_run(5, ([], []), None)
 
 
 def test_opening_a_scene_whose_tasks_all_map_succeeds(monkeypatch):
     datagen = _load_datagen()
-    _scene_with_tasks(datagen, monkeypatch, ["at apple_27 fridge_5"])
+    _scene_with_tasks(datagen, monkeypatch, ["at-category apple_27 fridge"])
 
     run = datagen._open_scene_run(5, ([], []), None)
 
