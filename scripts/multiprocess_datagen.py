@@ -6,6 +6,7 @@ updated in datagen.py
 """
 from functools import partial
 from typing import Sequence
+import copy
 import ctypes
 import gc
 import hashlib
@@ -158,7 +159,10 @@ def main(prewarm_only: bool = False):
         _prewarm_scene_caches(list(scene_keys), relevant_objects)
         if prewarm_only:
             return
-        total_written, failures = _run_workers(scene_keys, task_distribution, relevant_objects)
+        scene_costs = _estimated_scene_costs(selection, relevant_objects)
+        total_written, failures = _run_workers(
+            scene_keys, task_distribution, relevant_objects, scene_costs
+        )
 
     print(f"Data Generation took: {time.perf_counter() - start: .4f} seconds")
     print(
@@ -385,31 +389,44 @@ def _run_workers(
     scene_keys: dict[int, int],
     task_distribution: tuple[Sequence[Goal], list[float]],
     relevant_objects: list[str] | None,
+    scene_costs: dict[int, float] | None = None,
 ) -> tuple[int, dict[int, str]]:
     """
     Generates NUM_DATUM data points for every scene, one task per scene in a
     pool of MAX_WORKERS processes: a free worker takes the next scene and
-    generates all of its data. A scene that fails doesn't stop the others.
+    generates all of its data. Scenes are submitted longest first (see
+    _longest_first), so a slow scene doesn't start last and leave the other
+    workers idle at the end of the run; each scene's duration is recorded for
+    the next run's ordering. A scene that fails doesn't stop the others.
     Returns the total data points written and the failed scenes' errors.
     """
     ctx = multiprocessing.get_context("spawn")
     num_workers = min(MAX_WORKERS, len(scene_keys))
     total_written = 0
     failures: dict[int, str] = {}
+    durations_path = _run_metadata_path("scene_durations", _run_key(scene_keys))
+    durations = _load_scene_durations(durations_path)
+    order = _longest_first(list(scene_keys), durations, scene_costs or {})
+    known = sum(seed in durations for seed in order)
+    print(
+        f"Scene order: longest first, by a previous run's duration for {known} scene(s) "
+        f"and by estimated size for {len(order) - known}",
+        flush=True,
+    )
     with ProcessPoolExecutor(
         max_workers=num_workers, mp_context=ctx, max_tasks_per_child=SCENES_PER_WORKER
     ) as executor:
         futures = {
             executor.submit(
-                _generate_scene_data, scene_seed, scene_key, task_distribution,
-                relevant_objects, NUM_DATUM,
+                _timed_generate_scene_data, scene_seed, scene_keys[scene_seed],
+                task_distribution, relevant_objects, NUM_DATUM,
             ): scene_seed
-            for scene_seed, scene_key in scene_keys.items()
+            for scene_seed in order
         }
         for done, future in enumerate(as_completed(futures), start=1):
             scene_seed = futures[future]
             try:
-                total_written += future.result()
+                written, seconds = future.result()
             except BrokenProcessPool as e:
                 # a worker died outright (often the out-of-memory killer), which
                 # takes the whole pool down with it
@@ -421,9 +438,75 @@ def _run_workers(
                 failures[scene_seed] = f"{type(e).__name__}: {e}"
                 print(f"[{done}/{len(futures)}] scene {scene_seed} failed: {failures[scene_seed]}")
             else:
+                total_written += written
+                durations[scene_seed] = seconds
+                _write_scene_durations(durations_path, durations)
                 index_csv = _csv_path("procthor_data", scene_seed, scene_keys[scene_seed])
-                print(f"[{done}/{len(futures)}] scene {scene_seed} done: {index_csv}")
+                print(
+                    f"[{done}/{len(futures)}] scene {scene_seed} done in {seconds:.0f}s: "
+                    f"{index_csv}"
+                )
     return total_written, failures
+
+
+def _timed_generate_scene_data(*args) -> tuple[int, float]:
+    """_generate_scene_data, also returning how long it took, in seconds."""
+    start = time.perf_counter()
+    written = _generate_scene_data(*args)
+    return written, time.perf_counter() - start
+
+
+def _longest_first(
+    scene_seeds: list[int], durations: dict[int, float], estimates: dict[int, float]
+) -> list[int]:
+    """
+    The scenes in the order to submit them: those without a recorded duration
+    first, largest estimated size first (an unfinished scene from an earlier run
+    is likely a long one), then those with one, longest first.
+    """
+    unknown = sorted(
+        (seed for seed in scene_seeds if seed not in durations),
+        key=lambda seed: -estimates.get(seed, 0.0),
+    )
+    known = sorted(
+        (seed for seed in scene_seeds if seed in durations), key=lambda seed: -durations[seed]
+    )
+    return unknown + known
+
+
+def _estimated_scene_costs(
+    selection: SceneSelection, relevant_objects: list[str] | None
+) -> dict[int, float]:
+    """
+    A rough size estimate per remapped scene: its grounded action count, about
+    L^2 moves plus 2*L*O picks and places for L locations (plus the start) and O
+    objects, as an environment loads them. Search time grows with it, but also
+    depends on distances and where objects start, so it only roughly ranks scenes.
+    """
+    costs = {}
+    for seed, scene in selection.remapped_scenes.items():
+        thor = ThorInterface.__new__(ThorInterface)  # just the loader's filtering
+        thor.containers = copy.deepcopy(scene["objects"])
+        thor._preprocess_containers(relevant_objects)
+        if REMOVE_DUPLICATE_OBJECTS:
+            thor._deduplicate_objects()
+        locations = len(thor.containers) + 1
+        objects = sum(len(container.get("children", [])) for container in thor.containers)
+        costs[seed] = float(locations ** 2 + 2 * locations * objects)
+    return costs
+
+
+def _load_scene_durations(path: Path) -> dict[int, float]:
+    """Seconds each scene took in earlier runs with these scenes; empty if none."""
+    if not path.exists():
+        return {}
+    return {int(seed): float(seconds) for seed, seconds in json.loads(path.read_text()).items()}
+
+
+def _write_scene_durations(path: Path, durations: dict[int, float]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    rounded = {str(seed): round(seconds, 1) for seed, seconds in durations.items()}
+    path.write_text(json.dumps(rounded))
 
 
 def _generate_scene_data(
@@ -447,6 +530,7 @@ def _generate_scene_data(
     own counters, so a scene's data doesn't depend on which worker generates it
     or when. Returns the number of data points written.
     """
+    scene_start = time.perf_counter()
     run = _open_scene_run(scene_seed, task_distribution, relevant_objects)
     data = run.data
     count = 0
@@ -483,7 +567,10 @@ def _generate_scene_data(
                         count += 1
                         failed_recordings = 0
                         if count % MEMORY_LOG_EVERY == 0 and count < target:
-                            _log_memory(scene_seed, "generating", count, target)
+                            _log_memory(
+                                scene_seed, "generating", count, target,
+                                time.perf_counter() - scene_start,
+                            )
                     else:
                         failed_recordings += 1
                         if failed_recordings >= MAX_FAILED_RECORDINGS:
@@ -506,9 +593,9 @@ def _generate_scene_data(
             run.start_state_recorded = second_state_recorded
     except BaseException:
         # a failing scene is the one whose memory you want to see
-        _log_memory(scene_seed, "failed", count, target)
+        _log_memory(scene_seed, "failed", count, target, time.perf_counter() - scene_start)
         raise
-    _log_memory(scene_seed, "finished", count, target)
+    _log_memory(scene_seed, "finished", count, target, time.perf_counter() - scene_start)
     return count
 
 
@@ -612,11 +699,14 @@ def _memory_usage_gb() -> tuple[float | None, float]:
     return current_gb, peak_gb
 
 
-def _log_memory(scene_seed: int, stage: str, count: int, target: int) -> None:
+def _log_memory(
+    scene_seed: int, stage: str, count: int, target: int, elapsed: float | None = None
+) -> None:
     current_gb, peak_gb = _memory_usage_gb()
     current = "n/a" if current_gb is None else f"{current_gb:.2f} GB"
+    after = "" if elapsed is None else f" after {elapsed:.0f}s"
     print(
-        f"[scene {scene_seed}] {stage} ({count}/{target} datums): "
+        f"[scene {scene_seed}] {stage} ({count}/{target} datums){after}: "
         f"memory {current}, peak {peak_gb:.2f} GB (pid {os.getpid()})",
         flush=True,
     )

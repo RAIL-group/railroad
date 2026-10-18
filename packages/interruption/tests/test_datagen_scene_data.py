@@ -34,9 +34,10 @@ def _load_datagen():
 
 
 @pytest.fixture
-def datagen(monkeypatch):
-    """The script, with scene opening and planning stubbed out."""
+def datagen(monkeypatch, tmp_path):
+    """The script, with scene opening and planning stubbed out, writing under tmp_path."""
     module = _load_datagen()
+    monkeypatch.setattr(module, "get_procthor_10k_dir", lambda: tmp_path)
     run = SimpleNamespace(data=SimpleNamespace(env=_Env()), start_state_recorded=False)
     plan = [SimpleNamespace(name=f"action{i}") for i in range(3)]
     monkeypatch.setattr(module, "_open_scene_run", lambda *args: run)
@@ -316,3 +317,51 @@ def test_memory_is_released_after_each_computed_datum(enabled, monkeypatch, tmp_
     )
 
     assert released == ([True] if enabled else [])
+
+
+def test_unfinished_scenes_go_first_by_size_then_finished_ones_by_duration(datagen):
+    order = datagen._longest_first(
+        [5, 9, 32, 33], durations={9: 448.0, 33: 20.0}, estimates={5: 1300.0, 32: 1100.0}
+    )
+    assert order == [5, 32, 9, 33]
+
+
+def test_scenes_are_submitted_longest_first_and_their_durations_recorded(datagen, monkeypatch):
+    monkeypatch.setattr(datagen, "ProcessPoolExecutor", _InlineExecutor)
+    started = []
+    monkeypatch.setattr(
+        datagen, "_generate_scene_data", lambda seed, *args: started.append(seed) or 2
+    )
+    scene_keys = {5: 1, 9: 2, 32: 3}
+
+    written, failures = datagen._run_workers(
+        scene_keys, ([], []), None, scene_costs={5: 10.0, 9: 30.0, 32: 20.0}
+    )
+
+    assert (written, failures, started) == (6, {}, [9, 32, 5])
+    path = datagen._run_metadata_path("scene_durations", datagen._run_key(scene_keys))
+    assert set(datagen._load_scene_durations(path)) == {5, 9, 32}
+
+
+def test_a_later_run_orders_scenes_by_their_recorded_durations(datagen, monkeypatch):
+    monkeypatch.setattr(datagen, "ProcessPoolExecutor", _InlineExecutor)
+    started = []
+    monkeypatch.setattr(
+        datagen, "_generate_scene_data", lambda seed, *args: started.append(seed) or 2
+    )
+    scene_keys = {5: 1, 9: 2}
+    path = datagen._run_metadata_path("scene_durations", datagen._run_key(scene_keys))
+    datagen._write_scene_durations(path, {5: 500.0, 9: 4.0})
+
+    datagen._run_workers(scene_keys, ([], []), None, scene_costs={5: 1.0, 9: 99.0})
+
+    assert started == [5, 9]  # the recorded durations win over the size estimate
+
+
+def test_scene_log_lines_include_the_elapsed_time(datagen, monkeypatch, capsys):
+    _recording_outcomes(datagen, monkeypatch, [True, True])
+
+    _generate(datagen, target=2)
+
+    finished = [line for line in capsys.readouterr().out.splitlines() if "finished" in line]
+    assert finished and " after " in finished[0] and finished[0].split(" after ")[1][0].isdigit()
