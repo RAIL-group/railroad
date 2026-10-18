@@ -87,8 +87,10 @@ def test_a_recorded_datum_resets_the_failure_count(datagen, monkeypatch):
 class _InlineExecutor:
     """Runs submitted work immediately, in-process, in place of the process pool."""
 
+    created_with: dict = {}
+
     def __init__(self, *args, **kwargs):
-        pass
+        _InlineExecutor.created_with = kwargs
 
     def __enter__(self):
         return self
@@ -147,7 +149,9 @@ def _scene_with_tasks(datagen, monkeypatch, tasks):
 
 def test_opening_a_scene_with_an_unmappable_task_fails_immediately(monkeypatch):
     datagen = _load_datagen()
-    _scene_with_tasks(datagen, monkeypatch, ["at-category apple_27 fridge", "at-category bowl fridge"])
+    _scene_with_tasks(
+        datagen, monkeypatch, ["at-category apple_27 fridge", "at-category bowl fridge"]
+    )
 
     with pytest.raises(RuntimeError, match=r"scene 5: tasks \[\(at-category bowl fridge\)\]"):
         datagen._open_scene_run(5, ([], []), None)
@@ -160,3 +164,72 @@ def test_opening_a_scene_whose_tasks_all_map_succeeds(monkeypatch):
     run = datagen._open_scene_run(5, ([], []), None)
 
     assert run.data.env.scene.objects == {"apple_27"}
+
+
+def test_every_scene_gets_a_fresh_worker_process(datagen, monkeypatch):
+    monkeypatch.setattr(datagen, "ProcessPoolExecutor", _InlineExecutor)
+    monkeypatch.setattr(datagen, "_generate_scene_data", lambda *args: 0)
+
+    datagen._run_workers({5: 1, 9: 2}, ([], []), None)
+
+    assert _InlineExecutor.created_with["max_tasks_per_child"] == datagen.SCENES_PER_WORKER == 1
+
+
+def test_memory_usage_reports_a_peak(datagen):
+    current_gb, peak_gb = datagen._memory_usage_gb()
+
+    assert 0 < peak_gb < 1024
+    assert current_gb is None or 0 < current_gb < 1024
+
+
+def test_memory_is_logged_when_a_scene_opens_and_finishes(datagen, monkeypatch, capsys):
+    _recording_outcomes(datagen, monkeypatch, [True, True])
+
+    _generate(datagen, target=2)
+
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("[scene 5]")]
+    assert [line.split(" (")[0] for line in lines] == ["[scene 5] opened", "[scene 5] finished"]
+    assert "peak" in lines[-1]
+
+
+def test_memory_is_logged_when_a_scene_fails(datagen, monkeypatch, capsys):
+    _recording_outcomes(datagen, monkeypatch, [False] * datagen.MAX_FAILED_RECORDINGS)
+
+    with pytest.raises(RuntimeError):
+        _generate(datagen, target=1)
+
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("[scene 5]")]
+    assert [line.split(" (")[0] for line in lines] == ["[scene 5] opened", "[scene 5] failed"]
+
+
+@pytest.mark.parametrize("seconds, logged", [(5.0, False), (75.0, True)])
+def test_slow_datums_are_logged(seconds, logged, monkeypatch, capsys, tmp_path):
+    datagen = _load_datagen()
+    monkeypatch.setattr(datagen, "get_procthor_10k_dir", lambda: tmp_path)
+    clock = iter([0.0, seconds])
+    monkeypatch.setattr(datagen.time, "perf_counter", lambda: next(clock))
+    monkeypatch.setattr(datagen, "convert_state_to_positive_preconditions", lambda *args: None)
+    def compute(*args, search_stats):
+        searches = (("(at-category cup_3 fridge)", 1200), ("(at-category bowl_2 sofa)", 30000))
+        for goal, expanded in searches:
+            search_stats.append(datagen.SearchStats(goal, expanded, 30000, expanded < 30000))
+        return -1, None
+
+    monkeypatch.setattr(datagen, "compute_interruption_value", compute)
+    data = SimpleNamespace(
+        search_problem=SimpleNamespace(interrupting_task_dist=([], []), actions=[]),
+        planner_parameters=SimpleNamespace(heuristic_fn=0), neg_to_pos_mapping={},
+    )
+
+    recorded = datagen._record_datum(
+        SimpleNamespace(state=None), data, ([], []), scene_seed=5, scene_key=1, file_counter=7
+    )
+
+    assert recorded is False
+    out = capsys.readouterr().out
+    expected = (
+        "[scene 5] slow datum 7: 75s (unsolvable task, not recorded); "
+        "largest search 30000/30000 expansions (100%) for (at-category bowl_2 sofa); "
+        "all 2 searches 31200/60000 (52%)"
+    )
+    assert (expected in out) == logged

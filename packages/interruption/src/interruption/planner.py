@@ -64,6 +64,19 @@ class PlannerConfig:
 
 
 @dataclass
+class SearchStats:
+    """How much of its expansion budget one astar_search call used."""
+    goal: Goal | None = None
+    expanded: int = 0
+    budget: int = 0
+    success: bool = False
+
+    @property
+    def fraction(self) -> float:
+        return self.expanded / self.budget if self.budget else 0.0
+
+
+@dataclass
 class InterruptionTrajectory:
     """
     Data structure used to represent search tree trajectories (paths).
@@ -229,9 +242,14 @@ def astar_search(
     interruption_problem: InterruptionSearchProblem,
     search_params: PlannerConfig,
     num_steps: int = 30000,
+    show_progress: bool = False,
+    stats: SearchStats | None = None,
 ) -> tuple[list[Action], float, bool, SceneGraph | None]:
     """
-    Astar algorithm implementation.
+    Astar algorithm implementation. show_progress prints the goal and a progress
+    bar over num_steps; off by default, since callers like data generation run
+    many searches across parallel workers. stats, when given, is filled in with
+    the nodes expanded against the num_steps budget.
     """
     # caches keyed by resulting-state fluents; see create_child's docstring for
     # why ev_cache is exact and heuristic_cache is an approximation
@@ -267,8 +285,9 @@ def astar_search(
     )
 
     # search loop
-    print(f"Current Goal: {interruption_problem.goal}")
-    with tqdm(total=num_steps) as pbar:
+    if show_progress:
+        print(f"Current Goal: {interruption_problem.goal}")
+    with tqdm(total=num_steps, disable=not show_progress) as pbar:
         while num_expanded_nodes < num_steps:
             # some logging functionality for debugging
             if SEARCH_DEBUG:
@@ -279,6 +298,7 @@ def astar_search(
 
             # check for goal condition being met
             if interruption_problem.goal.evaluate(expand.state.fluents):
+                _fill_stats(stats, interruption_problem.goal, num_expanded_nodes, num_steps, True)
                 return expand.get_plan(), expand.cost, True, expand.scene_graph#, curr_state
 
             # check if we've already expanded this state
@@ -382,8 +402,16 @@ def astar_search(
             pbar.update(1)
 
     # goal not reached, get best trajectory found
+    _fill_stats(stats, interruption_problem.goal, num_expanded_nodes, num_steps, False)
     best_found, _, _ = heapq.heappop(frontier)
     return best_found.get_plan(), best_found.cost, False, best_found.scene_graph
+
+
+def _fill_stats(
+    stats: SearchStats | None, goal: Goal, expanded: int, budget: int, success: bool
+) -> None:
+    if stats is not None:
+        stats.goal, stats.expanded, stats.budget, stats.success = goal, expanded, budget, success
 
 
 def compute_interruption_value(
@@ -391,11 +419,13 @@ def compute_interruption_value(
     actions: list[Action],
     interrupting_task_dist: tuple[list[Goal], list[float]],
     heuristic_fn: float | Callable[[State, Goal, list[Action], float], float] = 0,
+    search_stats: Optional[list[SearchStats]] = None,
 ) -> tuple[float, Optional[list[float]]]:
     """
     Computes the expected value of a state for a task distribution.
     Returns -1 if a successful plan for one of the tasks in the task distribution
-    was unable to be found. Otherwise returns the expected cost.
+    was unable to be found. Otherwise returns the expected cost. search_stats,
+    when given, gets one SearchStats appended per search run.
     """
     task_costs = []
     expected_cost = 0.0
@@ -413,11 +443,15 @@ def compute_interruption_value(
             task,
             actions
         )
+        stats = SearchStats()
         _, cost, success, _ = astar_search(
             (state, None),
             search_problem,
-            search_params
+            search_params,
+            stats=stats,
         )
+        if search_stats is not None:
+            search_stats.append(stats)
 
         if not success:
             return -1, None

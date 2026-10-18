@@ -430,3 +430,62 @@ def test_optimal_make_sandwhich_noint(heuristic_fn, interruption_prob_fn):
         'assemble robot1 turkey bread sandwhich countertop1'
     ]
     assert [a.name for a in plan] == solution
+
+
+@pytest.mark.parametrize("show_progress", [False, True])
+def test_astar_search_prints_progress_only_when_asked(show_progress, capsys):
+    move_actions = construct_move_operator(4).instantiate(
+        {"robot": {"robot1"}, "location": {"kitchen", "living_room"}}
+    )
+    initial_state = State(time=0, fluents={F("at robot1 kitchen"), F("free robot1")})
+    goal = F("at robot1 living_room") & F("free robot1")
+    search_problem = InterruptionSearchProblem(goal, move_actions)
+
+    astar_search(
+        (initial_state, None), search_problem, PlannerConfig(True, 0),
+        show_progress=show_progress,
+    )
+
+    captured = capsys.readouterr()
+    assert ("Current Goal" in captured.out) == show_progress
+    assert ("it/s" in captured.err or "it]" in captured.err) == show_progress
+
+
+def test_search_stats_report_expansions_against_the_budget():
+    from interruption.planner import SearchStats
+
+    move_actions = construct_move_operator(4).instantiate(
+        {"robot": {"robot1"}, "location": {"kitchen", "living_room"}}
+    )
+    initial_state = State(time=0, fluents={F("at robot1 kitchen"), F("free robot1")})
+    goal = F("at robot1 living_room") & F("free robot1")
+    stats = SearchStats()
+
+    astar_search(
+        (initial_state, None), InterruptionSearchProblem(goal, move_actions),
+        PlannerConfig(True, 0), num_steps=50, stats=stats,
+    )
+
+    assert stats.success and stats.budget == 50
+    assert 0 < stats.expanded < 50
+    assert stats.fraction == stats.expanded / 50
+
+
+def test_search_stats_show_an_exhausted_budget():
+    from interruption.planner import SearchStats
+
+    move_actions = construct_move_operator(4).instantiate(
+        {"robot": {"robot1"}, "location": {"kitchen", "living_room"}}
+    )
+    initial_state = State(time=0, fluents={F("at robot1 kitchen"), F("free robot1")})
+    stats = SearchStats()
+
+    # unreachable goal: the search runs until its budget is spent
+    astar_search(
+        (initial_state, None),
+        InterruptionSearchProblem(LiteralGoal(F("at robot1 garage")), move_actions),
+        PlannerConfig(True, 0), num_steps=1, stats=stats,
+    )
+
+    assert not stats.success
+    assert (stats.expanded, stats.budget, stats.fraction) == (1, 1, 1.0)

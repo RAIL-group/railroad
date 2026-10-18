@@ -11,6 +11,8 @@ import json
 import multiprocessing
 import os
 import random
+import resource
+import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
@@ -36,7 +38,7 @@ from interruption.constants import (
     NUM_TASKS, PROCTHOR_SEED, FILTER_OBJECTS, NUM_ROOMS_FILTER, ONE_ROOM_FILTER,
 )
 from interruption.learning.data import write_compressed_pickle
-from interruption.planner import astar_search, compute_interruption_value
+from interruption.planner import SearchStats, astar_search, compute_interruption_value
 from interruption.utilities import (
     RandomVariableType, get_task_arrival_prob, extract_relevant_objects,
     filter_procthor_scenes, find_exemplar_scene, remap_scene_objects_and_locations
@@ -63,6 +65,17 @@ WRITE_OUT_INDIVIDUAL_TASK_COSTS = True
 # throughput degrading (see benchmark_thor_concurrency.py: 8 is the
 # peak-throughput point, 16+ regresses, 24 produced an outright hang).
 MAX_WORKERS = 8
+# Scenes a worker process generates before it is replaced by a fresh one. Python
+# keeps memory a process has freed rather than returning it to the OS, so a
+# long-lived worker would carry its largest search's footprint into every later
+# scene; a fresh process starts each scene from the import baseline instead.
+SCENES_PER_WORKER = 1
+# How often (in datums) a worker logs its memory use while generating a scene;
+# it also logs at the start and end of every scene.
+MEMORY_LOG_EVERY = 25
+# A datum whose labels take longer than this (seconds) to compute is logged, with
+# whether it was recorded, so slow searches stay visible without progress bars.
+SLOW_DATUM_SECONDS = 60
 
 # Folded into the per-(scene, count) random.seed() used for task sampling, so
 # different scenes don't draw identical task sequences at the same count.
@@ -324,7 +337,9 @@ def _run_workers(
     num_workers = min(MAX_WORKERS, len(scene_keys))
     total_written = 0
     failures: dict[int, str] = {}
-    with ProcessPoolExecutor(max_workers=num_workers, mp_context=ctx) as executor:
+    with ProcessPoolExecutor(
+        max_workers=num_workers, mp_context=ctx, max_tasks_per_child=SCENES_PER_WORKER
+    ) as executor:
         futures = {
             executor.submit(
                 _generate_scene_data, scene_seed, scene_key, task_distribution,
@@ -378,56 +393,112 @@ def _generate_scene_data(
     count = 0
     stalled_visits = 0
     failed_recordings = 0
+    _log_memory(scene_seed, "opened", count, target)
+    try:
+        while count < target:
+            plan = _plan_next_task(run, scene_seed)
+            if plan is None:
+                # nothing plannable even after reshuffling - the next visit reshuffles
+                # again, but fail loudly rather than spin forever
+                stalled_visits += 1
+                if stalled_visits >= MAX_STALLED_VISITS:
+                    raise RuntimeError(f"no plannable task in scene {scene_seed}")
+                continue
+            stalled_visits = 0
 
-    while count < target:
-        plan = _plan_next_task(run, scene_seed)
-        if plan is None:
-            # nothing plannable even after reshuffling - the next visit reshuffles
-            # again, but fail loudly rather than spin forever
-            stalled_visits += 1
-            if stalled_visits >= MAX_STALLED_VISITS:
-                raise RuntimeError(f"no plannable task in scene {scene_seed}")
-            continue
-        stalled_visits = 0
+            walk_env = data.env
+            next_env = None
+            second_state_recorded = False
+            for step, converted_action in enumerate(plan):
+                if count >= target:
+                    break
 
-        walk_env = data.env
-        next_env = None
-        second_state_recorded = False
-        for step, converted_action in enumerate(plan):
-            if count >= target:
-                break
-
-            if step == 0 and run.start_state_recorded:
-                recorded = True  # the previous visit's walk already wrote this state
-            else:
-                recorded = _record_datum(
-                    walk_env, data, task_distribution, scene_seed, scene_key, file_counter=count,
-                )
-                if recorded:
-                    count += 1
-                    failed_recordings = 0
+                if step == 0 and run.start_state_recorded:
+                    recorded = True  # the previous visit's walk already wrote this state
                 else:
-                    failed_recordings += 1
-                    if failed_recordings >= MAX_FAILED_RECORDINGS:
-                        raise RuntimeError(
-                            f"{failed_recordings} consecutive states of scene {scene_seed} "
-                            "have a task that can't be solved, so no datum could be "
-                            f"recorded ({count}/{target} written)"
-                        )
-            if step == 1:
-                second_state_recorded = recorded
+                    recorded = _record_datum(
+                        walk_env, data, task_distribution, scene_seed, scene_key,
+                        file_counter=count,
+                    )
+                    if recorded:
+                        count += 1
+                        failed_recordings = 0
+                        if count % MEMORY_LOG_EVERY == 0 and count < target:
+                            _log_memory(scene_seed, "generating", count, target)
+                    else:
+                        failed_recordings += 1
+                        if failed_recordings >= MAX_FAILED_RECORDINGS:
+                            raise RuntimeError(
+                                f"{failed_recordings} consecutive states of scene {scene_seed} "
+                                "have a task that can't be solved, so no datum could be "
+                                f"recorded ({count}/{target} written)"
+                            )
+                if step == 1:
+                    second_state_recorded = recorded
 
-            action = get_action_by_name(walk_env.get_actions(), converted_action.name)
-            walk_env.act(action)
-            walk_env.update_scene_graph(action)
-            if step == 0:
-                next_env = walk_env.fork()
+                action = get_action_by_name(walk_env.get_actions(), converted_action.name)
+                walk_env.act(action)
+                walk_env.update_scene_graph(action)
+                if step == 0:
+                    next_env = walk_env.fork()
 
-        assert next_env is not None
-        data.env = next_env
-        run.start_state_recorded = second_state_recorded
-
+            assert next_env is not None
+            data.env = next_env
+            run.start_state_recorded = second_state_recorded
+    except BaseException:
+        # a failing scene is the one whose memory you want to see
+        _log_memory(scene_seed, "failed", count, target)
+        raise
+    _log_memory(scene_seed, "finished", count, target)
     return count
+
+
+def _log_slow_datum(
+    scene_seed: int, file_counter: int, elapsed: float, recorded: bool,
+    search_stats: list[SearchStats],
+) -> None:
+    """One line: the datum's time and outcome, and how much of the expansion
+    budget its searches used - the largest one, and in total."""
+    outcome = "recorded" if recorded else "unsolvable task, not recorded"
+    line = f"[scene {scene_seed}] slow datum {file_counter}: {elapsed:.0f}s ({outcome})"
+    if search_stats:
+        largest = max(search_stats, key=lambda stats: stats.expanded)
+        expanded = sum(stats.expanded for stats in search_stats)
+        budget = sum(stats.budget for stats in search_stats)
+        line += (
+            f"; largest search {largest.expanded}/{largest.budget} expansions "
+            f"({largest.fraction:.0%}) for {largest.goal}; "
+            f"all {len(search_stats)} searches {expanded}/{budget} ({expanded / budget:.0%})"
+        )
+    print(line, flush=True)
+
+
+def _memory_usage_gb() -> tuple[float | None, float]:
+    """
+    (current, peak) resident memory of this process, in GB. Current comes from
+    /proc and is None where that doesn't exist (macOS); peak is the process's
+    high-water mark, which with SCENES_PER_WORKER = 1 is this scene's peak.
+    """
+    # ru_maxrss is in kilobytes on Linux but bytes on macOS
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    peak_gb = peak / 2**30 if sys.platform == "darwin" else peak / 2**20
+    try:
+        with open("/proc/self/statm", encoding="utf-8") as f:
+            resident_pages = int(f.read().split()[1])
+        current_gb = resident_pages * os.sysconf("SC_PAGE_SIZE") / 2**30
+    except OSError:
+        current_gb = None
+    return current_gb, peak_gb
+
+
+def _log_memory(scene_seed: int, stage: str, count: int, target: int) -> None:
+    current_gb, peak_gb = _memory_usage_gb()
+    current = "n/a" if current_gb is None else f"{current_gb:.2f} GB"
+    print(
+        f"[scene {scene_seed}] {stage} ({count}/{target} datums): "
+        f"memory {current}, peak {peak_gb:.2f} GB (pid {os.getpid()})",
+        flush=True,
+    )
 
 
 def _record_datum(
@@ -447,12 +518,18 @@ def _record_datum(
     if datum_pickle_path(scene_seed, scene_key, file_counter).exists():
         return True
     assert data.search_problem.interrupting_task_dist is not None
+    start = time.perf_counter()
+    search_stats: list[SearchStats] = []
     expected_value, task_costs = compute_interruption_value(
         convert_state_to_positive_preconditions(env.state, data.neg_to_pos_mapping),
         data.search_problem.actions,
         data.search_problem.interrupting_task_dist,
         data.planner_parameters.heuristic_fn,
+        search_stats=search_stats,
     )
+    elapsed = time.perf_counter() - start
+    if elapsed > SLOW_DATUM_SECONDS:
+        _log_slow_datum(scene_seed, file_counter, elapsed, expected_value != -1, search_stats)
     if expected_value == -1:
         return False
     write_datum_to_file(
