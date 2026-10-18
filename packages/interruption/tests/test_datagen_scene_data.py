@@ -284,3 +284,35 @@ def test_prewarm_needs_a_display_only_when_caches_are_missing(monkeypatch, tmp_p
     assert "ai2thor-xorg --height 4096 --width 4096 start 1" in str(error.value)
     assert "export DISPLAY=:1" in str(error.value)
     assert "ai2thor-xorg stop 1" in str(error.value)
+
+
+def test_releasing_memory_collects_and_trims_where_glibc_exists(monkeypatch):
+    datagen = _load_datagen()
+    calls = []
+    monkeypatch.setattr(datagen.gc, "collect", lambda: calls.append("collect"))
+    libc = SimpleNamespace(malloc_trim=lambda pad: calls.append(pad))
+    monkeypatch.setattr(datagen, "_LIBC", libc)
+
+    datagen._release_freed_memory()
+    assert calls == ["collect", 0]
+
+    monkeypatch.setattr(datagen, "_LIBC", None)  # macOS: no glibc, collection only
+    datagen._release_freed_memory()
+    assert calls == ["collect", 0, "collect"]
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_memory_is_released_after_each_computed_datum(enabled, monkeypatch, tmp_path):
+    datagen = _load_datagen()
+    monkeypatch.setattr(datagen, "get_procthor_10k_dir", lambda: tmp_path)
+    monkeypatch.setattr(datagen, "RELEASE_MEMORY_AFTER_DATUM", enabled)
+    released = []
+    monkeypatch.setattr(datagen, "_release_freed_memory", lambda: released.append(True))
+    monkeypatch.setattr(datagen, "_expected_task_cost", lambda env, data, stats: (-1, None))
+    data = SimpleNamespace(search_problem=SimpleNamespace(interrupting_task_dist=([], [])))
+
+    datagen._record_datum(
+        SimpleNamespace(state=None), data, ([], []), scene_seed=5, scene_key=1, file_counter=0
+    )
+
+    assert released == ([True] if enabled else [])

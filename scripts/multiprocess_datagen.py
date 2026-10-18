@@ -6,6 +6,8 @@ updated in datagen.py
 """
 from functools import partial
 from typing import Sequence
+import ctypes
+import gc
 import hashlib
 import json
 import multiprocessing
@@ -76,6 +78,10 @@ MEMORY_LOG_EVERY = 25
 # A datum whose labels take longer than this (seconds) to compute is logged, with
 # whether it was recorded, so slow searches stay visible without progress bars.
 SLOW_DATUM_SECONDS = 60
+# After computing each datum's labels, hand the memory its searches freed back to
+# the OS (see _release_freed_memory), so a scene's footprint follows what it
+# currently needs rather than its largest search so far.
+RELEASE_MEMORY_AFTER_DATUM = True
 
 # Folded into the per-(scene, count) random.seed() used for task sampling, so
 # different scenes don't draw identical task sequences at the same count.
@@ -562,6 +568,32 @@ def _log_slow_datum(
     print(line, flush=True)
 
 
+def _load_libc() -> ctypes.CDLL | None:
+    """glibc, for malloc_trim; None where it isn't available (macOS)."""
+    if not sys.platform.startswith("linux"):
+        return None
+    try:
+        return ctypes.CDLL("libc.so.6")
+    except OSError:
+        return None
+
+
+_LIBC = _load_libc()
+
+
+def _release_freed_memory() -> None:
+    """
+    Returns memory freed by the last datum's searches to the OS. Collects
+    unreachable objects, then asks glibc to release its free heap pages
+    (malloc_trim), which covers the search's C++ states and fluent copies. Python's
+    own small-object memory is only returned in whole blocks, so some stays held.
+    A no-op beyond the collection where glibc isn't available.
+    """
+    gc.collect()
+    if _LIBC is not None:
+        _LIBC.malloc_trim(0)
+
+
 def _memory_usage_gb() -> tuple[float | None, float]:
     """
     (current, peak) resident memory of this process, in GB. Current comes from
@@ -611,6 +643,8 @@ def _record_datum(
     search_stats: list[SearchStats] = []
     expected_value, task_costs = _expected_task_cost(env, data, search_stats)
     elapsed = time.perf_counter() - start
+    if RELEASE_MEMORY_AFTER_DATUM:
+        _release_freed_memory()
     if elapsed > SLOW_DATUM_SECONDS:
         _log_slow_datum(scene_seed, file_counter, elapsed, expected_value != -1, search_stats)
     if expected_value == -1:
