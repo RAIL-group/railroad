@@ -17,7 +17,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 # from functools import partial
 from pathlib import Path
 
@@ -33,21 +33,20 @@ from interruption.experiments import (
     ExperimentSeeds,
     initialize_experiment_data,
 )
-from interruption.planning_framework import PlannerMode
+from interruption.planning_framework import PlannerMode, search_with_retry
 from interruption.constants import (
     NUM_TASKS, PROCTHOR_SEED, FILTER_OBJECTS, NUM_ROOMS_FILTER, ONE_ROOM_FILTER,
 )
 from interruption.learning.data import write_compressed_pickle
-from interruption.planner import SearchStats, astar_search, compute_interruption_value
+from interruption.planner import InterruptionSearchProblem, PlannerConfig, SearchStats
 from interruption.utilities import (
-    RandomVariableType, get_task_arrival_prob, extract_relevant_objects,
+    RandomVariableType, get_action_cost, get_task_arrival_prob, extract_relevant_objects,
     filter_procthor_scenes, find_exemplar_scene, remap_scene_objects_and_locations
 )
 from railroad.core import (
     Action,
     Fluent,
     Goal,
-    convert_state_to_positive_preconditions,
     get_action_by_name,
 )
 from railroad.environment.procthor.resources import REMAP_DIR_ENV_VAR, get_procthor_10k_dir
@@ -246,6 +245,9 @@ def _compute_scene_keys(selection: SceneSelection) -> dict[int, int]:
         # remap never relies on objects inside ignored containers
         "duplicate_removal": "objects only",
         "remap_skips_ignored_containers": True,
+        # searches go through search_with_retry: a failed search is retried over
+        # only its goal's objects; plans for walking may also decompose the task
+        "goal_object_filtering": "search_with_retry: goal-object retry, decomposition for walks",
     }
     # a plain scene is fully determined by its seed (the dataset is static),
     # so it contributes None; a remapped one contributes its actual content
@@ -504,6 +506,38 @@ def _generate_scene_data(
     return count
 
 
+def _expected_task_cost(
+    env: KitchenProcTHOREnvironment, data: ExperimentData, search_stats: list[SearchStats]
+) -> tuple[float, list[float] | None]:
+    """
+    The expected cost of completing a task drawn from the task distribution, from
+    env's state, and each task's cost; (-1, None) if some task can't be solved.
+    Each task is planned with search_with_retry, the same retry the experiments use,
+    but without decomposition: a label needs the cost of the whole task, not of a
+    sub-task. Fresh planner parameters per datum, so its labels don't depend on
+    what earlier datums needed. Costs are undiscounted sums of action costs.
+    """
+    assert data.search_problem.interrupting_task_dist is not None
+    params = PlannerConfig(False, data.planner_parameters.heuristic_fn, 1)
+    goals, probs = data.search_problem.interrupting_task_dist
+    task_costs = []
+    expected_cost = 0.0
+    for goal, prob in zip(goals, probs):
+        problem = InterruptionSearchProblem(goal, data.search_problem.actions)
+        plan, success, *_ = search_with_retry(
+            PlannerMode.MYOPIC, env, problem, params, data.neg_to_pos_mapping,
+            allow_decomposition=False, search_stats=search_stats,
+        )
+        if not success:
+            return -1, None
+        cost = 0.0
+        for action in plan:
+            cost += get_action_cost(action)
+        task_costs.append(cost)
+        expected_cost += prob * cost
+    return expected_cost, task_costs
+
+
 def _log_slow_datum(
     scene_seed: int, file_counter: int, elapsed: float, recorded: bool,
     search_stats: list[SearchStats],
@@ -521,6 +555,10 @@ def _log_slow_datum(
             f"({largest.fraction:.0%}) for {largest.goal}; "
             f"all {len(search_stats)} searches {expanded}/{budget} ({expanded / budget:.0%})"
         )
+        retries = [stats for stats in search_stats if stats.filtered]
+        if retries:
+            solved = sum(stats.success for stats in retries)
+            line += f"; {len(retries)} retried over goal objects, {solved} solved"
     print(line, flush=True)
 
 
@@ -571,13 +609,7 @@ def _record_datum(
     assert data.search_problem.interrupting_task_dist is not None
     start = time.perf_counter()
     search_stats: list[SearchStats] = []
-    expected_value, task_costs = compute_interruption_value(
-        convert_state_to_positive_preconditions(env.state, data.neg_to_pos_mapping),
-        data.search_problem.actions,
-        data.search_problem.interrupting_task_dist,
-        data.planner_parameters.heuristic_fn,
-        search_stats=search_stats,
-    )
+    expected_value, task_costs = _expected_task_cost(env, data, search_stats)
     elapsed = time.perf_counter() - start
     if elapsed > SLOW_DATUM_SECONDS:
         _log_slow_datum(scene_seed, file_counter, elapsed, expected_value != -1, search_stats)
@@ -725,16 +757,17 @@ def _sample_plan(run: _SceneRun, scene_seed: int) -> list[Action] | None:
         i for i, goal in enumerate(scene_goals) if not goal.evaluate(data.env.state.fluents)
     ]
     interrupting_goals, _ = data.search_problem.interrupting_task_dist
-    initial_state = convert_state_to_positive_preconditions(
-        data.env.state, data.neg_to_pos_mapping
-    )
+    # fresh parameters per sample, so a sample doesn't depend on earlier ones
+    params = replace(data.planner_parameters, max_task_complexity=-1)
     while candidate_indices:
         random.seed(DATA_GENERATION_SEED + scene_seed * SEED_STRIDE + run.attempt)
         run.attempt += 1
         chosen_index = random.choice(candidate_indices)
         data.search_problem.goal = interrupting_goals[chosen_index]
-        plan, _, success, _ = astar_search(
-            (initial_state, None), data.search_problem, data.planner_parameters
+        # the experiments' retry, decomposition included: walking the scene only
+        # needs a plan that makes progress, not one for the whole task
+        plan, success, *_ = search_with_retry(
+            PlannerMode.MYOPIC, data.env, data.search_problem, params, data.neg_to_pos_mapping
         )
         if success and plan:
             return plan
