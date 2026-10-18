@@ -13,12 +13,12 @@ from railroad.core import get_action_by_name
 from railroad.environment.procthor.resources import get_procthor_10k_dir
 
 # a fork needs a real scene, and building one without its cache would launch Unity
-_CACHE = get_procthor_10k_dir() / "cache" / "deduped" / f"scene_{PROCTHOR_SEED}.pkl"
+_CACHE = get_procthor_10k_dir() / "cache" / f"scene_{PROCTHOR_SEED}.pkl"
 pytestmark = pytest.mark.skipif(not _CACHE.exists(), reason=f"no cached scene at {_CACHE}")
 
 
 def _build() -> KitchenProcTHOREnvironment:
-    env = construct_procthor_kitchen_environment(PROCTHOR_SEED, remove_duplicates=True)
+    env = construct_procthor_kitchen_environment(PROCTHOR_SEED, remove_duplicate_objects=True)
     env.get_actions()  # ground once, as the datagen pipeline does before its first fork
     return env
 

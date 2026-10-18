@@ -50,7 +50,7 @@ class ProcTHOREnvironment(OccupancyGridPathingMixin, ObjectSearchEnvironment, AB
         objects_by_type: Dict[str, Set[str]],
         object_seed: int | None = None,
         relevant_objects: list[str] | None = None,
-        remove_duplicates: bool = False,
+        remove_duplicate_objects: bool = False,
         operators: List[Operator] | None = None,
         resolution: float = 0.05,
         validate: bool = True,
@@ -65,10 +65,12 @@ class ProcTHOREnvironment(OccupancyGridPathingMixin, ObjectSearchEnvironment, AB
                 resolves operators from ``define_operators()``.
             resolution: Grid resolution in meters
             validate: Whether to validate objects/locations exist in scene
+            remove_duplicate_objects: see ThorInterface
         """
         self.scene = ProcTHORScene(
             seed=seed, object_seed=object_seed, resolution=resolution,
-            relevant_objects=relevant_objects, remove_duplicates=remove_duplicates
+            relevant_objects=relevant_objects,
+            remove_duplicate_objects=remove_duplicate_objects,
         )
 
         location_registry = LocationRegistry(

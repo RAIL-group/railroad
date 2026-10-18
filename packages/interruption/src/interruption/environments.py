@@ -229,11 +229,13 @@ def construct_procthor_kitchen_environment(
     seed: int,
     object_seed: int | None = None,
     relevant_objects: Optional[list[str]] = None,
-    remove_duplicates: bool = False
+    remove_duplicate_objects: bool = False
 ) -> KitchenProcTHOREnvironment:
     """
     Constructs a KitchenProcTHOREnvironment representing the scene 
-    corresponding to the scene from ProcTHOR-10k.
+    corresponding to the scene from ProcTHOR-10k. remove_duplicate_objects keeps
+    one object per object category; duplicate containers are always kept, since
+    they are part of the home's real layout.
     """
     initial_fluents = {
         F("at robot1 start_loc"), F("free robot1"),
@@ -250,7 +252,7 @@ def construct_procthor_kitchen_environment(
         },
         object_seed,
         relevant_objects,
-        remove_duplicates
+        remove_duplicate_objects=remove_duplicate_objects,
     )
 
     # Fully populate symbolic environment now that scene is available internally.
@@ -352,7 +354,7 @@ def get_scene_task_distribution(
     """
     if remap_dir is not None:
         return get_task_distribution_from_remap_dir(remap_dir, scene_filter, NUM_ROOMS_FILTER)
-    env = construct_procthor_kitchen_environment(procthor_seed, remove_duplicates=True)
+    env = construct_procthor_kitchen_environment(procthor_seed, remove_duplicate_objects=True)
     return get_alfred_task_distribution(
         env.scene.objects,
         set(env.scene.locations),

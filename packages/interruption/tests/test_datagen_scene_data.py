@@ -25,13 +25,18 @@ class _Env:
         return _Env()
 
 
-@pytest.fixture
-def datagen(monkeypatch):
+def _load_datagen():
     spec = importlib.util.spec_from_file_location("multiprocess_datagen_under_test", _SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
 
+
+@pytest.fixture
+def datagen(monkeypatch):
+    """The script, with scene opening and planning stubbed out."""
+    module = _load_datagen()
     run = SimpleNamespace(data=SimpleNamespace(env=_Env()), start_state_recorded=False)
     plan = [SimpleNamespace(name=f"action{i}") for i in range(3)]
     monkeypatch.setattr(module, "_open_scene_run", lambda *args: run)
@@ -126,3 +131,31 @@ def test_a_dead_worker_stops_the_run(datagen, monkeypatch):
 
     with pytest.raises(RuntimeError, match="lower MAX_WORKERS"):
         datagen._run_workers({5: 1}, ([], []), None)
+
+
+def _scene_with_tasks(datagen, monkeypatch, tasks):
+    """Stubs scene construction: a scene with one object and one location."""
+    from railroad.core import Fluent, LiteralGoal
+
+    config = SimpleNamespace(interrupting_task_dist=([LiteralGoal(Fluent(t)) for t in tasks], []))
+    scene = SimpleNamespace(objects={"apple_27"}, locations={"fridge_5": (0, 0)})
+    data = SimpleNamespace(env=SimpleNamespace(scene=scene))
+    monkeypatch.setattr(datagen, "initialize_experiment_config", lambda *args: config)
+    monkeypatch.setattr(datagen, "initialize_experiment_data", lambda *args, **kwargs: data)
+
+
+def test_opening_a_scene_with_an_unmappable_task_fails_immediately(monkeypatch):
+    datagen = _load_datagen()
+    _scene_with_tasks(datagen, monkeypatch, ["at apple_27 fridge_5", "at bowl fridge_5"])
+
+    with pytest.raises(RuntimeError, match=r"scene 5: tasks \[\(at bowl fridge_5\)\]"):
+        datagen._open_scene_run(5, ([], []), None)
+
+
+def test_opening_a_scene_whose_tasks_all_map_succeeds(monkeypatch):
+    datagen = _load_datagen()
+    _scene_with_tasks(datagen, monkeypatch, ["at apple_27 fridge_5"])
+
+    run = datagen._open_scene_run(5, ([], []), None)
+
+    assert run.data.env.scene.objects == {"apple_27"}

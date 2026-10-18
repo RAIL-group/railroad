@@ -753,9 +753,15 @@ def _remap_locations(
 def _remap_objects(
     scene: dict[str, Any], target_objects: set[str], rng: random.Random
 ) -> set[str]:
-    """Mutates scene in place. Returns any target categories left unfilled."""
+    """
+    Mutates scene in place. Returns any target categories left unfilled.
+    Children of IGNORE_CONTAINERS containers neither count as present nor get
+    relabeled: the environment drops them along with their container.
+    """
     all_children = [
-        child for container in scene["objects"] for child in container.get("children", [])
+        child for container in scene["objects"]
+        if get_generic_name(container["id"]) not in IGNORE_CONTAINERS
+        for child in container.get("children", [])
     ]
     existing = {get_generic_name(child["id"]) for child in all_children}
     missing = sorted(target_objects - existing)  # sorted: see _remap_locations
@@ -783,11 +789,13 @@ def _relabel(entity: dict[str, Any], target_category: str) -> None:
 def _scene_categories(scene: dict[str, Any]) -> tuple[set[str], set[str]]:
     """
     (pickupable object categories, location categories) of a ProcTHOR scene
-    JSON, by the same definitions find_exemplar_scene uses.
+    JSON, as an environment built from it has them: objects inside an
+    IGNORE_CONTAINERS container don't count, since it is dropped with them.
     """
     obj_categories = {
         get_generic_name(child["id"])
         for container in scene["objects"]
+        if get_generic_name(container["id"]) not in IGNORE_CONTAINERS
         for child in container.get("children", [])
         if get_generic_name(child["id"]) in PICKUPABLE_OBJECT_TYPES
     }

@@ -20,6 +20,7 @@ from interruption.utilities import (
     get_task_distribution_from_remap_dir,
     remap_scene_objects_and_locations,
     use_remapped_scenes,
+    SceneRemappingError,
 )
 from railroad.core import Fluent, State, get_next_actions
 from railroad.environment.procthor.resources import get_procthor_10k_dir
@@ -275,6 +276,46 @@ def test_find_shared_obj_loc_scenes_zero_quota_not_allowed():
 )
 def test_get_augmented_task_dist(current_task, task_dist, sol):
     assert get_augmented_task_dist(current_task, task_dist) == sol
+
+
+def _box_scene(objects_in_box: list[str], objects_elsewhere: list[str]) -> dict:
+    """A one-room scene with a Box (an ignored container) and a Sofa."""
+    square = [{"x": x, "y": 0, "z": z} for x, z in [(0, 0), (0, 10), (10, 10), (10, 0)]]
+    return {
+        "rooms": [{"roomType": "LivingRoom", "floorPolygon": square}],
+        "objects": [
+            {"id": "Box|1|0", "position": {"x": 2, "y": 0, "z": 2}, "children": [
+                {"id": f"{obj}|surface|1|{i}"} for i, obj in enumerate(objects_in_box)
+            ]},
+            {"id": "Sofa|1|1", "position": {"x": 5, "y": 0, "z": 5}, "children": [
+                {"id": f"{obj}|surface|1|{10 + i}"} for i, obj in enumerate(objects_elsewhere)
+            ]},
+        ],
+    }
+
+
+def _children(scene: dict, container_prefix: str) -> list[str]:
+    container = next(c for c in scene["objects"] if c["id"].startswith(container_prefix))
+    return [child["id"].split("|")[0].lower() for child in container["children"]]
+
+
+def test_remap_ignores_objects_inside_ignored_containers():
+    # the only apple is inside a Box, which the environment drops: it doesn't
+    # count as present, so a spare object outside the box becomes the apple
+    scene = _box_scene(objects_in_box=["Apple"], objects_elsewhere=["Pen"])
+
+    out = remap_scene_objects_and_locations({7: scene}, {"apple"}, {"sofa"}, seed=0)
+
+    assert _children(out[7], "Sofa") == ["apple"]
+    assert _children(out[7], "Box") == ["apple"]  # left as it was, but irrelevant
+
+
+def test_remap_never_relabels_objects_inside_ignored_containers():
+    # the only spare object is inside the Box, so the apple can't be placed
+    scene = _box_scene(objects_in_box=["Pen"], objects_elsewhere=[])
+
+    with pytest.raises(SceneRemappingError):
+        remap_scene_objects_and_locations({7: scene}, {"apple"}, {"sofa"}, seed=0)
 
 
 _REMAP_SCRIPT = """

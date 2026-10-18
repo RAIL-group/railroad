@@ -28,7 +28,7 @@ class ProcTHORScene:
         object_seed: int | None = None,
         resolution: float = 0.05,
         relevant_objects: list[str] | None = None,
-        remove_duplicates: bool = False
+        remove_duplicate_objects: bool = False,
     ) -> None:
         """Initialize ProcTHOR scene.
 
@@ -36,10 +36,12 @@ class ProcTHORScene:
             seed: Random seed for scene selection (0-9999 for ProcTHOR-10k)
             object_seed: Random seed for randomizing the locations of the objects within the scene
             resolution: Grid resolution in meters
+            remove_duplicate_objects: see ThorInterface
         """
         self._thor = ThorInterface(
             seed=seed, object_seed=object_seed, resolution=resolution,
-            relevant_objects=relevant_objects, remove_duplicates=remove_duplicates
+            relevant_objects=relevant_objects,
+            remove_duplicate_objects=remove_duplicate_objects,
         )
 
         # Build location registry

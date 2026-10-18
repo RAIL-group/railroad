@@ -143,7 +143,7 @@ def _run(case: BenchmarkCase, experiment_mode: PlannerMode) -> dict:
     result = run_experiment(
         config,
         experiment_mode,
-        remove_duplicates=True,
+        remove_duplicate_objects=True,
         benchmark_flag=True,
         relevant_objects=(
             extract_relevant_objects(config.interrupting_task_dist[0])

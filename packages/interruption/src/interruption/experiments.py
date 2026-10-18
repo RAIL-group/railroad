@@ -101,7 +101,7 @@ class DashboardData:
 def run_experiment(
     config: ExperimentConfig,
     experiment_mode: PlannerMode,
-    remove_duplicates: bool,
+    remove_duplicate_objects: bool,
     benchmark_flag: bool = False,
     relevant_objects: Optional[list[str]] = None,
     show_plot: bool = False,
@@ -114,7 +114,7 @@ def run_experiment(
     the execution sequence.
     """
     experiment_data = initialize_experiment_data(
-        config, experiment_mode, relevant_objects, remove_duplicates, H_MULTIPLIER
+        config, experiment_mode, relevant_objects, remove_duplicate_objects, H_MULTIPLIER
     )
 
     # print out the actual action probabilities
@@ -138,7 +138,7 @@ def run_experiment(
     # setup for deterministic replay for dashboard
     dash_env = construct_procthor_kitchen_environment(
         config.seeds.procthor_seed, config.seeds.object_placement_seed,
-        relevant_objects, remove_duplicates
+        relevant_objects, remove_duplicate_objects
     )
 
     # keep track of the task_sequence as part of the output
@@ -360,7 +360,7 @@ def initialize_experiment_data(
     config: ExperimentConfig,
     planner_mode: PlannerMode,
     relevant_objects: Optional[list[str]] = None,
-    remove_duplicates: bool = False,
+    remove_duplicate_objects: bool = False,
     h_multiplier: float = 1
 ) -> ExperimentData:
     """
@@ -373,7 +373,7 @@ def initialize_experiment_data(
         config.seeds.procthor_seed,
         object_seed=config.seeds.object_placement_seed,
         relevant_objects=relevant_objects,
-        remove_duplicates=remove_duplicates
+        remove_duplicate_objects=remove_duplicate_objects
     )
 
     # convert generic name of objects/containers in goals to actual names of
