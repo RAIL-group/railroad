@@ -64,10 +64,11 @@ class KitchenProcTHOREnvironment(ProcTHOREnvironment):
     def define_operators(self) -> list[Operator]:
         move_op = operators.construct_move_operator(self.estimate_move_time)
         left_pick_op = construct_pick_with_left_hand_operator(10.0)
-        right_pick_op = construct_pick_with_right_hand_operator(10.0)
+        #right_pick_op = construct_pick_with_right_hand_operator(10.0)
         left_place_op = construct_place_with_left_hand_operator(10.0)
-        right_place_op = construct_place_with_right_hand_operator(10.0)
-        return [move_op, left_pick_op, right_pick_op, left_place_op, right_place_op]
+        #right_place_op = construct_place_with_right_hand_operator(10.0)
+        # return [move_op, left_pick_op, right_pick_op, left_place_op, right_place_op]
+        return [move_op, left_pick_op, left_place_op]
 
 
     def update_scene_graph(self, action: Action) -> None:

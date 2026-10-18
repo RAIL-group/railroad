@@ -15,7 +15,6 @@ from railroad.core import (
     LiteralGoal,
     AndGoal,
     convert_goal_to_positive_preconditions,
-    # convert_state_to_positive_preconditions,
     ff_heuristic,
     get_action_by_name,
 )
@@ -32,12 +31,7 @@ from .dashboard_adapters import AstarDashboardPlanner
 from .environments import construct_procthor_kitchen_environment, KitchenProcTHOREnvironment
 from .learning.models.gcn import AnticipateGCN
 from .learning.utils import get_torch_device
-# from .planner import astar_search, PlannerConfig, InterruptionSearchProblem
 from .planner import PlannerConfig, InterruptionSearchProblem
-# from .planning_framework import (
-#     get_no_int_prob, get_no_int_discount, anticipatory_planner, ap_heuristic_fn,
-#     PlannerMode, search_with_retry, search_without_retry
-# )
 from .planning_framework import (
     ap_heuristic_fn, PlannerMode, search_with_retry, search_without_retry
 )
@@ -577,14 +571,6 @@ def execute_deterministic_replay(
             if action_name == "Failed Task":
                 dash_env.apply_time_penalty(PLANNER_FAILURE_COST)
 
-        # if action_name != "Failed Task":
-        #     try:
-        #         action = get_action_by_name(dash_env.get_actions(), action_name)
-        #         dash_env.act(action)
-        #     except ValueError:
-
-        # else:
-        #     dash_env.apply_time_penalty(PLANNER_FAILURE_COST)
         dashboard.update(adapter, converted_action_name)
 
 

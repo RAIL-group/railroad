@@ -8,11 +8,10 @@ from railroad.core import Action, Fluent, Goal, State, get_next_actions
 from railroad.environment.procthor.scenegraph import SceneGraph
 
 from .constants import SEARCH_DEBUG
+from .cost_formulations import CostFormulation, DefaultFormulation, StepTerms
 from .utilities import (
     get_action_cost,
     get_next_state,
-    get_reward,
-    get_discounted_value,
     get_updated_scene_graph
 )
 
@@ -50,6 +49,18 @@ class PlannerConfig:
     # this (when provided) to pre-warm ev_cache before create_child runs; falls back
     # to calling interruption_value_fn once per child when left as None.
     interruption_value_batch_fn: Callable[[list[SceneGraph]], list[float]] | None = None
+    # how a search step's costs are computed (see cost_formulations.py); None ->
+    # DefaultFormulation, built from discount_by_no_int_prob, discount and
+    # current_task_reward above
+    cost_formulation: CostFormulation | None = None
+
+    def get_cost_formulation(self) -> CostFormulation:
+        """The cost formulation the search uses."""
+        if self.cost_formulation is not None:
+            return self.cost_formulation
+        return DefaultFormulation(
+            self.discount_by_no_int_prob, self.discount, self.current_task_reward
+        )
 
 
 @dataclass
@@ -60,7 +71,9 @@ class InterruptionTrajectory:
     state: State
     # action that was executed from the parent state that resulted in the current state
     action: Optional[Action]
-    no_interruption_prob: float
+    # running discount of the path so far (gamma_t), applied to the next step's costs;
+    # see cost_formulations.py for how each step updates it
+    discount_factor: float
     scene_graph: SceneGraph | None
     cost: float = 0.0
     value: float = 0.0
@@ -90,6 +103,9 @@ class InterruptionTrajectory:
         value computed for the other one's timing. This can change search order (and
         so which valid plan is found first) but never corrupts accumulated_cost, since
         the heuristic value only ever feeds estimated_future_cost/h_value, not cost.
+
+        The costs themselves come from planner_params' cost formulation (see
+        cost_formulations.py).
         """
         next_state, _ = get_next_state(self.state, action)
         next_state_key = frozenset(next_state.fluents)
@@ -109,11 +125,9 @@ class InterruptionTrajectory:
                 if ev_cache is not None:
                     ev_cache[next_state_key] = interrupting_task_ev
 
-        accumulated_cost = self.cost + get_reward(
-            action,
-            self.no_interruption_prob,
-            interrupting_task_ev * interruption_prob
-        )
+        formulation = planner_params.get_cost_formulation()
+        terms = self.step_terms(action, interruption_prob, interrupting_task_ev)
+        accumulated_cost = formulation.accumulated_cost(terms)
 
         # compute estimated future cost (h(s'))
         if isinstance(planner_params.heuristic_fn, (int, float)):
@@ -129,16 +143,9 @@ class InterruptionTrajectory:
                 if heuristic_cache is not None:
                     heuristic_cache[next_state_key] = undiscounted_future_cost
 
-        if planner_params.discount_by_no_int_prob:
-            discount_factor = self.no_interruption_prob * (1-interruption_prob)
-        else:
-            assert planner_params.discount is not None
-            discount_factor = self.no_interruption_prob * planner_params.discount
-
-        estimated_future_cost = get_discounted_value(
-            undiscounted_future_cost,
-            discount_factor,
-            planner_params.current_task_reward
+        discount_factor = formulation.child_discount(terms)
+        estimated_future_cost = formulation.estimated_future_cost(
+            terms, discount_factor, undiscounted_future_cost
         )
 
         return InterruptionTrajectory(
@@ -146,11 +153,26 @@ class InterruptionTrajectory:
             value=accumulated_cost+estimated_future_cost,
             state=next_state,
             action=action,
-            no_interruption_prob=discount_factor,
+            discount_factor=discount_factor,
             discounted_h_value=estimated_future_cost,
             h_value=undiscounted_future_cost,
             scene_graph=scene_graph,
             parent=self,
+        )
+
+    def step_terms(
+        self, action: Action, interruption_prob: float, interrupting_task_ev: float
+    ) -> StepTerms:
+        """
+        The inputs a cost formulation reads for the step from this trajectory
+        through action.
+        """
+        return StepTerms(
+            parent_cost=self.cost,
+            parent_discount=self.discount_factor,
+            action_cost=get_action_cost(action),
+            interruption_prob=interruption_prob,
+            interrupting_task_ev=interrupting_task_ev,
         )
 
     def get_plan(self: "InterruptionTrajectory") -> list[Action]:
@@ -206,7 +228,7 @@ def astar_search(
     initial_state: tuple[State, SceneGraph | None],
     interruption_problem: InterruptionSearchProblem,
     search_params: PlannerConfig,
-    num_steps: int = 100000,
+    num_steps: int = 30000,
 ) -> tuple[list[Action], float, bool, SceneGraph | None]:
     """
     Astar algorithm implementation.
@@ -221,6 +243,7 @@ def astar_search(
     # search. This is exact, not an approximation like heuristic_cache: it never
     # discards a candidate whose true accumulated_cost we haven't actually computed.
     best_cost: dict[frozenset[Fluent], float] = {}
+    cost_formulation = search_params.get_cost_formulation()
 
     # the heap stores tuple(traj, heuristic_value, insertion_order)
     frontier = []
@@ -236,7 +259,7 @@ def astar_search(
             InterruptionTrajectory(
                 state=initial_state[0],
                 action=None,
-                no_interruption_prob=1,
+                discount_factor=1,
                 # interruption_probs=[],
                 scene_graph=initial_state[1]
             ), -1, 0
@@ -316,8 +339,8 @@ def astar_search(
 
             # frontier dedup: with ev_cache now warm for every candidate above (when
             # a batch fn was available), accumulated_cost can be computed exactly
-            # with no GCN/heuristic call at all -- it's the same get_reward call
-            # create_child makes internally, just evaluated early. Skip create_child
+            # with no GCN/heuristic call at all -- it's the same cost formulation
+            # create_child uses internally, just evaluated early. Skip create_child
             # entirely for a candidate that isn't strictly better than the best path
             # already pushed to the same resulting state this search. When ev_cache
             # can't be trusted to already hold every candidate's value (no batch fn,
@@ -337,10 +360,8 @@ def astar_search(
                         if search_params.interruption_value_fn is not None
                         else 0
                     )
-                    tentative_cost = expand.cost + get_reward(
-                        action,
-                        expand.no_interruption_prob,
-                        interrupting_task_ev * interruption_prob
+                    tentative_cost = cost_formulation.accumulated_cost(
+                        expand.step_terms(action, interruption_prob, interrupting_task_ev)
                     )
                     if tentative_cost >= best_cost.get(next_state_key, float("inf")):
                         continue

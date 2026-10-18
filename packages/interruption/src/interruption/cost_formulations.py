@@ -1,0 +1,103 @@
+"""
+Cost formulations for the interruption-aware A* search.
+
+A formulation decides how one search step (parent -> child, via an action) turns
+into the child's accumulated cost g, its running discount, and the discounted
+estimate of its future cost. Selected per planner through
+PlannerConfig.cost_formulation; to try a new one, subclass DefaultFormulation
+and override only the method being changed, e.g.
+
+    @dataclass(frozen=True)
+    class NoEVInAccumulatedCost(DefaultFormulation):
+        def accumulated_cost(self, terms: StepTerms) -> float:
+            return terms.parent_cost + terms.parent_discount * terms.action_cost
+"""
+from dataclasses import dataclass
+from typing import Protocol
+
+
+@dataclass(frozen=True)
+class StepTerms:
+    """
+    Everything a cost formulation may read for one parent -> child step. It holds
+    nothing derived from the heuristic: astar_search computes accumulated costs
+    before the heuristic is evaluated, to prune candidate children.
+    """
+    parent_cost: float           # accumulated cost g of the parent
+    parent_discount: float       # the parent's running discount (gamma_t)
+    action_cost: float           # c(a)
+    interruption_prob: float     # probability of an interrupting task arriving after a
+    interrupting_task_ev: float  # learned value of the child state, 0 without a model
+
+
+class CostFormulation(Protocol):
+    def child_discount(self, terms: StepTerms) -> float:
+        """The child's running discount (gamma_{t+1})."""
+        ...
+
+    def accumulated_cost(self, terms: StepTerms) -> float:
+        """The child's accumulated cost g'."""
+        ...
+
+    def estimated_future_cost(
+        self, terms: StepTerms, child_discount: float, undiscounted_future_cost: float
+    ) -> float:
+        """The discounted estimate of the child's future cost, from its heuristic value."""
+        ...
+
+
+@dataclass(frozen=True)
+class DefaultFormulation:
+    """
+    The original formulation:
+        gamma_{t+1} = gamma_t * (1 - p)        if discount_by_no_int_prob
+                    = gamma_t * discount       otherwise
+        g'          = g + gamma_t * (c(a) + p * V(s'))
+        future      = gamma_{t+1} * (h(s') + current_task_reward)
+    """
+    discount_by_no_int_prob: bool
+    discount: float | None = None
+    current_task_reward: float = 0
+
+    def child_discount(self, terms: StepTerms) -> float:
+        if self.discount_by_no_int_prob:
+            return terms.parent_discount * (1 - terms.interruption_prob)
+        assert self.discount is not None
+        return terms.parent_discount * self.discount
+
+    def accumulated_cost(self, terms: StepTerms) -> float:
+        return terms.parent_cost + terms.parent_discount * (
+            terms.action_cost + terms.interrupting_task_ev * terms.interruption_prob
+        )
+
+    def estimated_future_cost(
+        self, terms: StepTerms, child_discount: float, undiscounted_future_cost: float
+    ) -> float:
+        return child_discount * (undiscounted_future_cost + self.current_task_reward)
+
+
+@dataclass(frozen=True)
+class TerminalVAP:
+    """
+    The original formulation:
+        gamma_{t+1} = gamma_t * (1 - p)        if discount_by_no_int_prob
+                    = gamma_t * discount       otherwise
+        g'          = g + gamma_t * (c(a) + p * V(s'))
+        future      = gamma_{t+1} * (h(s') + current_task_reward)
+    """
+    discount_by_no_int_prob: bool
+    discount: float | None = None
+
+    def child_discount(self, terms: StepTerms) -> float:
+        if self.discount_by_no_int_prob:
+            return terms.parent_discount * (1 - terms.interruption_prob)
+        assert self.discount is not None
+        return terms.parent_discount * self.discount
+
+    def accumulated_cost(self, terms: StepTerms) -> float:
+        return terms.parent_cost + terms.parent_discount * terms.action_cost
+
+    def estimated_future_cost(
+        self, terms: StepTerms, child_discount: float, undiscounted_future_cost: float
+    ) -> float:
+        return child_discount * undiscounted_future_cost

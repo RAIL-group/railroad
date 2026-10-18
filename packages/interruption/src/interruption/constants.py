@@ -20,7 +20,7 @@ MODEL_NAME = "best_model_one_room_multi_scene_lr=0.001.pt"
 EXPERIMENT_REPEATS = 30
 TIMEOUT = 3600
 # filter out non-task-relevant objects
-FILTER_OBJECTS = True
+FILTER_OBJECTS = False
 # current task gets augmented by arriving task
 AUGMENT_TASK = True
 # retry upon solver failing to find a plan
