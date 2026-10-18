@@ -20,14 +20,16 @@ import pandas as pd
 from railroad.bench.analysis import BenchmarkAnalyzer
 
 RETRY_METRIC = "metrics.required_search_retry"
+FILTERING_METRIC = "metrics.required_object_filtering"
 # parameter that labels a case, newest name first
 CASE_LABEL_PARAMS = ["params.arrival_exceedance", "params.time_between_arrivals"]
 
 
 def summarize_search_retries(df: pd.DataFrame) -> pd.DataFrame:
     """One row per (benchmark, case): runs, runs with a result, runs with a retry."""
-    if RETRY_METRIC not in df.columns:
-        df = df.assign(**{RETRY_METRIC: float("nan")})
+    for metric in (RETRY_METRIC, FILTERING_METRIC):
+        if metric not in df.columns:
+            df = df.assign(**{metric: float("nan")})
     label = next((col for col in CASE_LABEL_PARAMS if col in df.columns), None)
 
     rows = []
@@ -43,6 +45,8 @@ def summarize_search_retries(df: pd.DataFrame) -> pd.DataFrame:
             "runs": len(case),
             "reported": len(reported),
             "with_retry": int((reported > 0).sum()),
+            # runs that logged the filtering metric and needed a goal-object retry
+            "with_object_filtering": int((case[FILTERING_METRIC].dropna() > 0).sum()),
         })
         rows.append(row)
     return pd.DataFrame(rows).sort_values(["benchmark", "case"], ignore_index=True)
@@ -73,6 +77,8 @@ def main() -> None:
     print(summary.to_string(index=False))
     print("\nwith_retry: runs that required at least one search retry, out of the "
           "'reported' runs that logged a result")
+    print("with_object_filtering: runs where a failed search was retried over only "
+          "its goal's objects")
     if summary["reported"].sum() == 0:
         print("no run in this experiment logged required_search_retry "
               "(it predates the metric, or isn't an interruption benchmark)")

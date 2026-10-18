@@ -208,21 +208,21 @@ def test_slow_datums_are_logged(seconds, logged, monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(datagen, "get_procthor_10k_dir", lambda: tmp_path)
     clock = iter([0.0, seconds])
     monkeypatch.setattr(datagen.time, "perf_counter", lambda: next(clock))
-    monkeypatch.setattr(datagen, "convert_state_to_positive_preconditions", lambda *args: None)
-    def compute(*args, search_stats):
+    def expected_task_cost(env, data, search_stats):
         searches = (("(at-category cup_3 fridge)", 1200), ("(at-category bowl_2 sofa)", 30000))
         for goal, expanded in searches:
             search_stats.append(datagen.SearchStats(goal, expanded, 30000, expanded < 30000))
         return -1, None
 
-    monkeypatch.setattr(datagen, "compute_interruption_value", compute)
+    monkeypatch.setattr(datagen, "_expected_task_cost", expected_task_cost)
     data = SimpleNamespace(
         search_problem=SimpleNamespace(interrupting_task_dist=([], []), actions=[]),
         planner_parameters=SimpleNamespace(heuristic_fn=0), neg_to_pos_mapping={},
     )
 
     recorded = datagen._record_datum(
-        SimpleNamespace(state=None), data, ([], []), scene_seed=5, scene_key=1, file_counter=7
+        SimpleNamespace(state=None, scene=SimpleNamespace(objects=set())), data, ([], []),
+        scene_seed=5, scene_key=1, file_counter=7,
     )
 
     assert recorded is False

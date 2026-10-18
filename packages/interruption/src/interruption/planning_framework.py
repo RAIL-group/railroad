@@ -22,7 +22,10 @@ from .constants import (
     AP_SEED
 )
 from .environments import KitchenProcTHOREnvironment
-from .planner import InterruptionSearchProblem, PlannerConfig, astar_search
+from .planner import (
+    InterruptionSearchProblem, PlannerConfig, SearchStats, astar_search,
+    filter_actions_to_objects, goal_objects,
+)
 
 
 class PlannerMode(Enum):
@@ -257,12 +260,15 @@ def search_without_retry(
     environment: KitchenProcTHOREnvironment,
     search_problem: InterruptionSearchProblem,
     planner_parameters: PlannerConfig,
-    neg_to_pos_mapping: dict[F, F]
-) -> tuple[list[Action], bool, int]:
+    neg_to_pos_mapping: dict[F, F],
+    stats: SearchStats | None = None,
+) -> tuple[list[Action], bool, int, int]:
     """
     Wrapper function of the planning algorithms used in the task sequence
     with continous task arrival experiments. Returns a tuple containing the
-    plan, success_flag, and the number of search retries (always 0).
+    plan, success_flag, the number of failed searches and the number of searches
+    retried over goal objects (both always 0; see search_with_retry). stats, when
+    given, is filled in by the A* search (not by the anticipatory planner).
     """
     initial_state = convert_state_to_positive_preconditions(
         environment.state, neg_to_pos_mapping
@@ -284,9 +290,9 @@ def search_without_retry(
         )
 
         plan, _, success, _ = astar_search(
-            state_scene_graph, search_problem, planner_parameters
+            state_scene_graph, search_problem, planner_parameters, stats=stats
         )
-    return plan, success, 0
+    return plan, success, 0, 0
 
 
 def search_with_retry(
@@ -294,14 +300,21 @@ def search_with_retry(
     environment: KitchenProcTHOREnvironment,
     search_problem: InterruptionSearchProblem,
     planner_parameters: PlannerConfig,
-    neg_to_pos_mapping: dict[F, F]
-) -> tuple[list[Action], bool, int]:
+    neg_to_pos_mapping: dict[F, F],
+    allow_decomposition: bool = True,
+    search_stats: list[SearchStats] | None = None,
+) -> tuple[list[Action], bool, int, int]:
     """
     A wrapper function for planning algorithms utilized as part of interruption
     experiments. If a task is too complex to be solved within the alotted search
-    budget, then the complex task is decomposed into a smaller sub-task to be solved.
-    Returns a tuple containing the plan, success_flag, and the number of search retries,
-    i.e. failed searches before a sub-task the solver could find a plan for.
+    budget, the same sub-task is first retried over only the actions involving its
+    own objects; if that also fails, the complex task is decomposed into a smaller
+    sub-task to be solved. Gives up, unsuccessfully, once no single-goal sub-task
+    can be solved, or straight after the goal-object retry when allow_decomposition
+    is False (when only a plan for the whole task will do). Returns a tuple
+    containing the plan, success_flag, the number of failed searches, and the number
+    of searches retried over goal objects. search_stats, when given, gets a
+    SearchStats per A* search.
     """
     initial_state = convert_state_to_positive_preconditions(
         environment.state, neg_to_pos_mapping
@@ -311,8 +324,11 @@ def search_with_retry(
         if planner_parameters.max_task_complexity == -1
         else planner_parameters.max_task_complexity
     )
+    initial_num_goals = num_goals
     task = search_problem.goal
+    all_objects = environment.scene.objects
     failure_count = 0
+    filtered_searches = 0
 
     while True:
         # find easiest to accomplish sub-task
@@ -324,26 +340,79 @@ def search_with_retry(
         )
         search_problem.goal = ranked_sub_goals[0]
 
-        plan, success, _ = search_without_retry(
+        stats = _new_stats(search_stats)
+        plan, success, *_ = search_without_retry(
             planner_mode, environment, search_problem,
-            planner_parameters, neg_to_pos_mapping
+            planner_parameters, neg_to_pos_mapping, stats
         )
+
+        # retry the same sub-task over only its own objects before shrinking it
+        if not success:
+            failure_count += 1
+            filtered_searches += 1
+            plan, success = _search_over_goal_objects(
+                planner_mode, environment, search_problem,
+                planner_parameters, neg_to_pos_mapping, all_objects,
+                _new_stats(search_stats, filtered=True),
+            )
 
         if success:
             break
 
         # solver didn't successfully find a plan
-        num_goals-=1
-        failure_count+=1
+        failure_count += 1
+        # a single goal can't be decomposed further; stopping here also keeps the
+        # complexity limit at 1 or more, which _decompose_task requires
+        if not allow_decomposition or num_goals == 1:
+            break
+        num_goals -= 1
 
     # restore the original task
     search_problem.goal = task
 
     # keep track of the maximum number of goals within a task the planner can solve
-    if failure_count > 0:
+    if num_goals < initial_num_goals:
         planner_parameters.max_task_complexity = num_goals
 
-    return plan, success, failure_count
+    return plan, success, failure_count, filtered_searches
+
+
+def _search_over_goal_objects(
+    planner_mode: PlannerMode,
+    environment: KitchenProcTHOREnvironment,
+    search_problem: InterruptionSearchProblem,
+    planner_parameters: PlannerConfig,
+    neg_to_pos_mapping: dict[F, F],
+    all_objects: set[str],
+    stats: SearchStats | None = None,
+) -> tuple[list[Action], bool]:
+    """
+    search_without_retry over only the actions involving the current goal's objects
+    (see planner.filter_actions_to_objects). search_problem is shared across calls,
+    so its actions are restored afterwards, like the goal in search_with_retry.
+    """
+    actions = search_problem.actions
+    keep = goal_objects(search_problem.goal, all_objects)
+    search_problem.actions = filter_actions_to_objects(actions, keep, all_objects)
+    try:
+        plan, success, *_ = search_without_retry(
+            planner_mode, environment, search_problem, planner_parameters, neg_to_pos_mapping,
+            stats,
+        )
+    finally:
+        search_problem.actions = actions
+    return plan, success
+
+
+def _new_stats(
+    search_stats: list[SearchStats] | None, filtered: bool = False
+) -> SearchStats | None:
+    """A SearchStats appended to search_stats, or None when stats aren't being collected."""
+    if search_stats is None:
+        return None
+    stats = SearchStats(filtered=filtered)
+    search_stats.append(stats)
+    return stats
 
 
 def _decompose_task(

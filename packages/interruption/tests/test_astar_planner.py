@@ -19,7 +19,7 @@ from interruption.utilities import (
     get_discounted_value,
     get_reward
 )
-from railroad.core import Fluent as F, LiteralGoal
+from railroad.core import Action, Fluent as F, LiteralGoal
 from railroad.core import Operator, State, ff_heuristic, get_next_actions
 from railroad.environment.symbolic import SymbolicEnvironment
 from railroad.operators.core import (
@@ -489,3 +489,28 @@ def test_search_stats_show_an_exhausted_budget():
 
     assert not stats.success
     assert (stats.expanded, stats.budget, stats.fraction) == (1, 1, 1.0)
+
+
+def _named_actions(*names):
+    return [Action(set(), [], name=name) for name in names]
+
+
+def test_goal_objects_are_the_objects_its_literals_name():
+    from interruption.planner import goal_objects
+
+    goal = F("at-category cup_3 fridge") & F("at-category bowl_2 sofa")
+    assert goal_objects(goal, {"cup_3", "bowl_2", "apple_41"}) == {"cup_3", "bowl_2"}
+
+
+def test_filtering_keeps_moves_and_the_goal_objects_actions():
+    from interruption.planner import filter_actions_to_objects
+
+    actions = _named_actions(
+        "move robot1 countertop_1 fridge_5",
+        "pick-left robot1 countertop countertop_1 cup_3",
+        "pick-left robot1 countertop countertop_1 apple_41",
+    )
+    kept = filter_actions_to_objects(actions, {"cup_3"}, {"cup_3", "apple_41"})
+    assert [a.name for a in kept] == [
+        "move robot1 countertop_1 fridge_5", "pick-left robot1 countertop countertop_1 cup_3"
+    ]

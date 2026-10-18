@@ -301,26 +301,122 @@ def test_problem_object_is_reusable_across_calls(ap_setup):
     assert fake2.calls[0].goal is ap_setup.original_goal
 
 
-@pytest.mark.parametrize(argnames="num_failures", argvalues=[0, 2])
-def test_search_with_retry_reports_number_of_retries(monkeypatch, num_failures):
-    # the solver fails num_failures times before finding a plan for a sub-task
-    outcomes = iter([False] * num_failures + [True])
-    monkeypatch.setattr(
-        pf, "search_without_retry", lambda *args: (["plan"], next(outcomes), 0)
-    )
+def _run_search_with_retry(monkeypatch, outcomes, **kwargs):
+    """
+    search_with_retry on a 3-goal task whose searches succeed or fail in the given
+    order. Returns its result, every search's action names, and the stand-ins.
+    """
+    from railroad.core import Action
+
+    outcomes = iter(outcomes)
+    searched_actions = []
+
+    def search(mode, env, problem, *args):
+        searched_actions.append([a.name for a in problem.actions])
+        return ["plan"], next(outcomes), 0, 0
+
+
+    monkeypatch.setattr(pf, "search_without_retry", search)
     monkeypatch.setattr(pf, "convert_state_to_positive_preconditions", lambda state, _: state)
     monkeypatch.setattr(pf, "_get_task_goal_count", lambda goal: 3)
     monkeypatch.setattr(pf, "_decompose_task", lambda state, task, *args: [task])
 
-    goal = LiteralGoal(F("at apple fridge"))
-    search_problem = SimpleNamespace(goal=goal, actions=[])
+    goal = LiteralGoal(F("at-category apple_41 fridge"))
+    actions = [
+        Action(set(), [], name="move robot1 countertop_1 fridge_5"),
+        Action(set(), [], name="pick-left robot1 countertop countertop_1 apple_41"),
+        Action(set(), [], name="pick-left robot1 countertop countertop_1 pan_28"),
+    ]
+    search_problem = SimpleNamespace(goal=goal, actions=actions)
     planner_parameters = SimpleNamespace(max_task_complexity=-1, heuristic_fn=None)
+    environment = SimpleNamespace(state=None, scene=SimpleNamespace(objects={"apple_41", "pan_28"}))
 
     search_with_retry: Any = pf.search_with_retry  # called with stand-in arguments
-    plan, success, num_retries = search_with_retry(
-        pf.PlannerMode.MYOPIC, SimpleNamespace(state=None), search_problem, planner_parameters, {}
+    result = search_with_retry(
+        pf.PlannerMode.MYOPIC, environment, search_problem, planner_parameters, {}, **kwargs
+    )
+    return result, searched_actions, search_problem, planner_parameters, goal, actions
+
+
+def test_search_with_retry_needs_nothing_more_when_the_first_search_succeeds(monkeypatch):
+    result, searched, problem, params, goal, actions = _run_search_with_retry(monkeypatch, [True])
+
+    assert result == (["plan"], True, 0, 0)
+    assert len(searched) == 1
+    assert params.max_task_complexity == -1
+
+
+def test_search_with_retry_retries_over_goal_objects_before_shrinking(monkeypatch):
+    result, searched, problem, params, goal, actions = _run_search_with_retry(
+        monkeypatch, [False, True]
     )
 
-    assert (plan, success, num_retries) == (["plan"], True, num_failures)
-    assert search_problem.goal is goal
-    assert planner_parameters.max_task_complexity == (-1 if num_failures == 0 else 1)
+    assert result == (["plan"], True, 1, 1)
+    # the retry saw only the move and the apple's actions, not the pan's
+    assert searched[1] == [
+        "move robot1 countertop_1 fridge_5", "pick-left robot1 countertop countertop_1 apple_41"
+    ]
+    # the task was solved whole, so the planner's complexity limit is unchanged
+    assert params.max_task_complexity == -1
+    assert problem.goal is goal and problem.actions is actions
+
+
+def test_search_with_retry_shrinks_the_task_only_when_both_searches_fail(monkeypatch):
+    result, searched, problem, params, goal, actions = _run_search_with_retry(
+        monkeypatch, [False, False, True]
+    )
+
+    assert result == (["plan"], True, 2, 1)
+    assert params.max_task_complexity == 2
+    assert problem.goal is goal and problem.actions is actions
+
+
+def test_search_with_retry_gives_up_when_no_single_goal_can_be_solved(monkeypatch):
+    # every search fails: 3 task sizes, an unfiltered and a filtered search each
+    result, searched, problem, params, goal, actions = _run_search_with_retry(
+        monkeypatch, [False] * 6
+    )
+
+    assert result == (["plan"], False, 6, 3)
+    # never below 1, which _decompose_task needs on the next call
+    assert params.max_task_complexity == 1
+    assert problem.goal is goal and problem.actions is actions
+
+
+def test_search_with_retry_works_again_after_giving_up(monkeypatch):
+    # giving up must not leave state behind that breaks the next call
+    result, searched, problem, params, goal, actions = _run_search_with_retry(
+        monkeypatch, [False] * 6
+    )
+    monkeypatch.setattr(pf, "search_without_retry", lambda *args, **kwargs: (["plan"], True, 0, 0))
+    monkeypatch.setattr(pf, "_decompose_task", _decompose_requiring_a_size)
+
+    search_with_retry: Any = pf.search_with_retry
+    environment = SimpleNamespace(state=None, scene=SimpleNamespace(objects={"apple_41"}))
+    assert search_with_retry(
+        pf.PlannerMode.MYOPIC, environment, problem, params, {}
+    )[:2] == (["plan"], True)
+
+
+def _decompose_requiring_a_size(state, task, actions, heuristic_fn, num_goals_in_subtask):
+    assert num_goals_in_subtask > 0  # as the real _decompose_task does
+    return [task]
+
+
+def test_search_with_retry_without_decomposition_stops_after_the_goal_object_retry(monkeypatch):
+    result, searched, problem, params, goal, actions = _run_search_with_retry(
+        monkeypatch, [False, False], allow_decomposition=False
+    )
+
+    assert result == (["plan"], False, 2, 1)
+    assert len(searched) == 2
+    assert params.max_task_complexity == -1
+
+
+def test_search_with_retry_records_stats_for_both_searches(monkeypatch):
+    from interruption.planner import SearchStats
+
+    stats: list[SearchStats] = []
+    _run_search_with_retry(monkeypatch, [False, True], search_stats=stats)
+
+    assert [s.filtered for s in stats] == [False, True]

@@ -70,6 +70,8 @@ class SearchStats:
     expanded: int = 0
     budget: int = 0
     success: bool = False
+    # a retry over only the goal's own objects, after an unfiltered search failed
+    filtered: bool = False
 
     @property
     def fraction(self) -> float:
@@ -414,6 +416,23 @@ def _fill_stats(
         stats.goal, stats.expanded, stats.budget, stats.success = goal, expanded, budget, success
 
 
+def goal_objects(goal: Goal, all_objects: set[str]) -> set[str]:
+    """The objects among all_objects that any literal of goal names."""
+    return {arg for literal in goal.get_all_literals() for arg in literal.args if arg in all_objects}
+
+
+def filter_actions_to_objects(
+    actions: list[Action], keep: set[str], all_objects: set[str]
+) -> list[Action]:
+    """
+    The actions that involve no object of all_objects outside keep; actions
+    involving no object at all (moves) are always kept. An action's arguments are
+    the words of its name after the operator name.
+    """
+    excluded = all_objects - keep
+    return [action for action in actions if excluded.isdisjoint(action.name.split(" ")[1:])]
+
+
 def compute_interruption_value(
     state: State,
     actions: list[Action],
@@ -445,10 +464,7 @@ def compute_interruption_value(
         )
         stats = SearchStats()
         _, cost, success, _ = astar_search(
-            (state, None),
-            search_problem,
-            search_params,
-            stats=stats,
+            (state, None), search_problem, search_params, stats=stats
         )
         if search_stats is not None:
             search_stats.append(stats)
