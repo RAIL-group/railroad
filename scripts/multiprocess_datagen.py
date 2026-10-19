@@ -17,6 +17,7 @@ import random
 import resource
 import sys
 import time
+import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
 from contextlib import contextmanager
@@ -437,6 +438,8 @@ def _run_workers(
             except Exception as e:  # noqa: BLE001 - one bad scene shouldn't stop the run
                 failures[scene_seed] = f"{type(e).__name__}: {e}"
                 print(f"[{done}/{len(futures)}] scene {scene_seed} failed: {failures[scene_seed]}")
+                # includes the worker's own traceback, which the pool attaches as the cause
+                print("".join(traceback.format_exception(e)), flush=True)
             else:
                 total_written += written
                 durations[scene_seed] = seconds

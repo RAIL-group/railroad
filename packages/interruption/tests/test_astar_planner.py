@@ -514,3 +514,32 @@ def test_filtering_keeps_moves_and_the_goal_objects_actions():
     assert [a.name for a in kept] == [
         "move robot1 countertop_1 fridge_5", "pick-left robot1 countertop countertop_1 cup_3"
     ]
+
+
+def test_a_search_that_exhausts_every_reachable_state_returns_failure():
+    from interruption.planner import SearchStats
+
+    move_actions = construct_move_operator(4).instantiate(
+        {"robot": {"robot1"}, "location": {"kitchen", "living_room"}}
+    )
+    initial_state = State(time=0, fluents={F("at robot1 kitchen"), F("free robot1")})
+    stats = SearchStats()
+
+    # unreachable, and the reachable space is far smaller than the budget
+    plan, cost, success, _ = astar_search(
+        (initial_state, None),
+        InterruptionSearchProblem(LiteralGoal(F("at robot1 garage")), move_actions),
+        PlannerConfig(True, 0), num_steps=1000, stats=stats,
+    )
+
+    assert (plan, cost, success) == ([], float("inf"), False)
+    assert 0 < stats.expanded < 1000 and not stats.success
+
+
+def test_held_objects_are_the_objects_in_a_robots_hands():
+    from interruption.planner import held_objects
+
+    state = State(time=0, fluents={
+        F("holding-in-left robot1 bowl_32"), F("at apple_38 countertop_4"), F("free robot1"),
+    })
+    assert held_objects(state, {"bowl_32", "apple_38"}) == {"bowl_32"}

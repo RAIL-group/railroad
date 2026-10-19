@@ -95,6 +95,9 @@ class InterruptionTrajectory:
     discounted_h_value: float = 0.0
     h_value: float = 0.0
     parent: Optional["InterruptionTrajectory"] = None
+    # the state's fluents as a hashable key, built once and shared by every cache
+    # and set in astar_search, rather than rebuilt (and stored again) by each
+    key: frozenset[Fluent] | None = None
 
     def create_child(
         self,
@@ -104,6 +107,8 @@ class InterruptionTrajectory:
         interruption_prob: float,
         ev_cache: Optional[dict[frozenset[Fluent], float]] = None,
         heuristic_cache: Optional[dict[frozenset[Fluent], float]] = None,
+        next_state: State | None = None,
+        next_state_key: frozenset[Fluent] | None = None,
     ) -> 'InterruptionTrajectory':
         """
         Helper function for creation of trajectories to add to the frontier.
@@ -121,9 +126,14 @@ class InterruptionTrajectory:
 
         The costs themselves come from planner_params' cost formulation (see
         cost_formulations.py).
+
+        next_state/next_state_key, when given, are the resulting state and its key,
+        which astar_search has already computed; they are computed here otherwise.
         """
-        next_state, _ = get_next_state(self.state, action)
-        next_state_key = frozenset(next_state.fluents)
+        if next_state is None:
+            next_state, _ = get_next_state(self.state, action)
+        if next_state_key is None:
+            next_state_key = frozenset(next_state.fluents)
 
         # compute accumulated cost (g(traj))
         interrupting_task_ev = 0
@@ -173,6 +183,7 @@ class InterruptionTrajectory:
             h_value=undiscounted_future_cost,
             scene_graph=scene_graph,
             parent=self,
+            key=next_state_key,
         )
 
     def step_terms(
@@ -264,6 +275,13 @@ def astar_search(
     # discards a candidate whose true accumulated_cost we haven't actually computed.
     best_cost: dict[frozenset[Fluent], float] = {}
     cost_formulation = search_params.get_cost_formulation()
+    # one key object per distinct state, however many paths reach it: every
+    # cache, set and trajectory above shares it rather than holding its own copy
+    state_keys: dict[frozenset[Fluent], frozenset[Fluent]] = {}
+
+    def shared_key(state: State) -> frozenset[Fluent]:
+        key = frozenset(state.fluents)
+        return state_keys.setdefault(key, key)
 
     # the heap stores tuple(traj, heuristic_value, insertion_order)
     frontier = []
@@ -281,7 +299,8 @@ def astar_search(
                 action=None,
                 discount_factor=1,
                 # interruption_probs=[],
-                scene_graph=initial_state[1]
+                scene_graph=initial_state[1],
+                key=shared_key(initial_state[0]),
             ), -1, 0
         )
     )
@@ -290,7 +309,7 @@ def astar_search(
     if show_progress:
         print(f"Current Goal: {interruption_problem.goal}")
     with tqdm(total=num_steps, disable=not show_progress) as pbar:
-        while num_expanded_nodes < num_steps:
+        while num_expanded_nodes < num_steps and frontier:
             # some logging functionality for debugging
             if SEARCH_DEBUG:
                 print_frontier_trace(num_expanded_nodes, frontier)
@@ -304,10 +323,11 @@ def astar_search(
                 return expand.get_plan(), expand.cost, True, expand.scene_graph#, curr_state
 
             # check if we've already expanded this state
-            if expand.state.fluents in expanded:
+            assert expand.key is not None
+            if expand.key in expanded:
                 continue
             # otherwise add it
-            expanded.add(frozenset(expand.state.fluents))
+            expanded.add(expand.key)
             # expand search tree
             num_expanded_nodes+=1
 
@@ -326,7 +346,7 @@ def astar_search(
                     )
                 )
 
-                next_state_key = frozenset(next_state.fluents)
+                next_state_key = shared_key(next_state)
                 # check if this state has already been expanded
                 if next_state_key in expanded:
                     continue
@@ -396,7 +416,9 @@ def astar_search(
                     action,
                     interruption_prob,
                     ev_cache,
-                    heuristic_cache
+                    heuristic_cache,
+                    next_state=next_state,
+                    next_state_key=next_state_key,
                 )
                 heapq.heappush(frontier, (child_traj, child_traj.h_value, insertion_order))
                 insertion_order+=1
@@ -405,6 +427,10 @@ def astar_search(
 
     # goal not reached, get best trajectory found
     _fill_stats(stats, interruption_problem.goal, num_expanded_nodes, num_steps, False)
+    if not frontier:
+        # every reachable state was expanded without reaching the goal: it is
+        # unreachable with these actions, which a filtered action set makes common
+        return [], float("inf"), False, initial_state[1]
     best_found, _, _ = heapq.heappop(frontier)
     return best_found.get_plan(), best_found.cost, False, best_found.scene_graph
 
@@ -418,7 +444,22 @@ def _fill_stats(
 
 def goal_objects(goal: Goal, all_objects: set[str]) -> set[str]:
     """The objects among all_objects that any literal of goal names."""
-    return {arg for literal in goal.get_all_literals() for arg in literal.args if arg in all_objects}
+    return {
+        arg for literal in goal.get_all_literals() for arg in literal.args if arg in all_objects
+    }
+
+
+def held_objects(state: State, all_objects: set[str]) -> set[str]:
+    """
+    The objects among all_objects that a robot is holding in state
+    (holding-in-left / holding-in-right / holding fluents). A filtered search must
+    keep them: with its hands full, a robot that can't put them down can't pick up
+    anything else.
+    """
+    return {
+        fluent.args[-1] for fluent in state.fluents
+        if fluent.name.startswith("holding") and fluent.args and fluent.args[-1] in all_objects
+    }
 
 
 def filter_actions_to_objects(

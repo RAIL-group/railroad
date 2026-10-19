@@ -24,7 +24,7 @@ from .constants import (
 from .environments import KitchenProcTHOREnvironment
 from .planner import (
     InterruptionSearchProblem, PlannerConfig, SearchStats, astar_search,
-    filter_actions_to_objects, goal_objects,
+    filter_actions_to_objects, goal_objects, held_objects,
 )
 
 
@@ -388,11 +388,14 @@ def _search_over_goal_objects(
 ) -> tuple[list[Action], bool]:
     """
     search_without_retry over only the actions involving the current goal's objects
-    (see planner.filter_actions_to_objects). search_problem is shared across calls,
-    so its actions are restored afterwards, like the goal in search_with_retry.
+    and any object the robot is holding, which it may need to put down first (see
+    planner.filter_actions_to_objects). search_problem is shared across calls, so
+    its actions are restored afterwards, like the goal in search_with_retry.
     """
     actions = search_problem.actions
-    keep = goal_objects(search_problem.goal, all_objects)
+    keep = goal_objects(search_problem.goal, all_objects) | held_objects(
+        environment.state, all_objects
+    )
     search_problem.actions = filter_actions_to_objects(actions, keep, all_objects)
     try:
         plan, success, *_ = search_without_retry(

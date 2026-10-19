@@ -301,7 +301,7 @@ def test_problem_object_is_reusable_across_calls(ap_setup):
     assert fake2.calls[0].goal is ap_setup.original_goal
 
 
-def _run_search_with_retry(monkeypatch, outcomes, **kwargs):
+def _run_search_with_retry(monkeypatch, outcomes, held=(), **kwargs):
     """
     search_with_retry on a 3-goal task whose searches succeed or fail in the given
     order. Returns its result, every search's action names, and the stand-ins.
@@ -329,7 +329,9 @@ def _run_search_with_retry(monkeypatch, outcomes, **kwargs):
     ]
     search_problem = SimpleNamespace(goal=goal, actions=actions)
     planner_parameters = SimpleNamespace(max_task_complexity=-1, heuristic_fn=None)
-    environment = SimpleNamespace(state=None, scene=SimpleNamespace(objects={"apple_41", "pan_28"}))
+    state = State(0.0, {F(f"holding-in-left robot1 {obj}") for obj in held})
+    scene = SimpleNamespace(objects={"apple_41", "pan_28"})
+    environment = SimpleNamespace(state=state, scene=scene)
 
     search_with_retry: Any = pf.search_with_retry  # called with stand-in arguments
     result = search_with_retry(
@@ -420,3 +422,15 @@ def test_search_with_retry_records_stats_for_both_searches(monkeypatch):
     _run_search_with_retry(monkeypatch, [False, True], search_stats=stats)
 
     assert [s.filtered for s in stats] == [False, True]
+
+
+def test_the_goal_object_retry_keeps_objects_the_robot_is_holding(monkeypatch):
+    # holding the pan, the robot must be able to put it down to pick up the apple
+    result, searched, *_ = _run_search_with_retry(monkeypatch, [False, True], held=["pan_28"])
+
+    assert result[:2] == (["plan"], True)
+    assert searched[1] == [
+        "move robot1 countertop_1 fridge_5",
+        "pick-left robot1 countertop countertop_1 apple_41",
+        "pick-left robot1 countertop countertop_1 pan_28",
+    ]
