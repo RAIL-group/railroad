@@ -1,4 +1,3 @@
-import functools
 import random
 
 import pytest
@@ -11,6 +10,7 @@ from interruption.experiments import (
     _get_scene_objects_locations,
     _map_goal_to_scene,
 )
+from interruption.planner import FFHeuristic
 from interruption.planning_framework import (
     ap_heuristic_fn, PlannerMode
 )
@@ -292,15 +292,7 @@ def test_get_planner_config_selects_fields_per_mode(
     assert (result.interruption_value_fn is not None) == expects_interruption_value_fn
     assert result.current_task_reward == 0
 
-    assert isinstance(result.heuristic_fn, functools.partial)
-    assert result.heuristic_fn.func is ap_heuristic_fn
-    assert len(result.heuristic_fn.args) == 0
-    if expects_weights is None:
-        assert len(result.heuristic_fn.keywords) == 1
-        assert result.heuristic_fn.keywords == {"h_multi": 1}
-    else:
-        assert len(result.heuristic_fn.keywords) == 2
-        assert result.heuristic_fn.keywords == {"h_multi": 1, "weights": expects_weights}
+    assert result.heuristic_fn == FFHeuristic(multiplier=1, weights=expects_weights)
 
 
 def test_get_planner_config_myopic_interruption_prob_fn_is_ignored(mock_gcn):
@@ -334,8 +326,12 @@ def test_get_planner_config_interruption_heuristic_behaves_without_v_ap(mock_gcn
     goal = LiteralGoal(F("at r1 target"))
 
     heuristic_fn = result.heuristic_fn
-    assert isinstance(heuristic_fn, functools.partial)
+    assert isinstance(heuristic_fn, FFHeuristic)
     assert heuristic_fn(state, goal, actions, 999.0) == 5.0
+    # identical to the ap_heuristic_fn it stands in for
+    assert heuristic_fn(state, goal, actions, 999.0) == ap_heuristic_fn(
+        state, goal, actions, 999.0, h_multi=1
+    )
 
 
 def test_get_planner_config_interruption_ap_heuristic_adds_v_ap(mock_gcn):
@@ -354,5 +350,8 @@ def test_get_planner_config_interruption_ap_heuristic_adds_v_ap(mock_gcn):
     goal = LiteralGoal(F("at r1 target"))
 
     heuristic_fn = result.heuristic_fn
-    assert isinstance(heuristic_fn, functools.partial)
+    assert isinstance(heuristic_fn, FFHeuristic)
     assert heuristic_fn(state, goal, actions, 3.0) == pytest.approx(5.0 * INT_H_WEIGHTS[0] + 3.0)
+    assert heuristic_fn(state, goal, actions, 3.0) == ap_heuristic_fn(
+        state, goal, actions, 3.0, weights=INT_H_WEIGHTS, h_multi=1
+    )

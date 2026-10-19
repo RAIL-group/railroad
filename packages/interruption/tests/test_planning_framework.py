@@ -394,7 +394,9 @@ def test_search_with_retry_works_again_after_giving_up(monkeypatch):
     monkeypatch.setattr(pf, "_decompose_task", _decompose_requiring_a_size)
 
     search_with_retry: Any = pf.search_with_retry
-    environment = SimpleNamespace(state=None, scene=SimpleNamespace(objects={"apple_41"}))
+    environment = SimpleNamespace(
+        state=State(0.0, set()), scene=SimpleNamespace(objects={"apple_41"})
+    )
     assert search_with_retry(
         pf.PlannerMode.MYOPIC, environment, problem, params, {}
     )[:2] == (["plan"], True)

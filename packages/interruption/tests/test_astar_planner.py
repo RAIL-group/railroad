@@ -434,6 +434,7 @@ def test_optimal_make_sandwhich_noint(heuristic_fn, interruption_prob_fn):
 
 @pytest.mark.parametrize("show_progress", [False, True])
 def test_astar_search_prints_progress_only_when_asked(show_progress, capsys):
+    # the Python search draws a progress bar; the C++ one only prints the goal
     move_actions = construct_move_operator(4).instantiate(
         {"robot": {"robot1"}, "location": {"kitchen", "living_room"}}
     )
@@ -442,7 +443,7 @@ def test_astar_search_prints_progress_only_when_asked(show_progress, capsys):
     search_problem = InterruptionSearchProblem(goal, move_actions)
 
     astar_search(
-        (initial_state, None), search_problem, PlannerConfig(True, 0),
+        (initial_state, None), search_problem, PlannerConfig(True, 0, use_cpp_search=False),
         show_progress=show_progress,
     )
 

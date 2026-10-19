@@ -774,3 +774,74 @@ def test_either_dining_table_satisfies_an_at_category_goal(table):
 
     assert goal.evaluate(env.fluents)
     assert F("at-category cup_3 countertop") not in env.fluents
+
+
+def _blocking_two_table_env():
+    """_two_table_env with the blocking move, pick and place operators."""
+    from railroad.operators.core import construct_move_operator_blocking
+    from interruption.operators import (
+        construct_pick_with_left_hand_operator_blocking,
+        construct_place_with_left_hand_operator_blocking,
+    )
+
+    env = _two_table_env()
+    env.define_operators = lambda: [  # type: ignore[method-assign]
+        construct_move_operator_blocking(1.0),
+        construct_pick_with_left_hand_operator_blocking(1.0),
+        construct_place_with_left_hand_operator_blocking(1.0),
+    ]
+    env._operators = env.define_operators()
+    env.invalidate_grounding()
+    return env
+
+
+def _available(env) -> set[str]:
+    from railroad.core import get_next_actions
+
+    return {a.name for a in get_next_actions(env.state, env.get_actions())}
+
+
+def test_a_robot_that_just_moved_can_still_pick_and_then_move_again():
+    from railroad.core import get_action_by_name
+
+    env = _blocking_two_table_env()
+    act = lambda name: env.act(get_action_by_name(env.get_actions(), name))  # noqa: E731
+
+    act("pick-left robot1 countertop countertop_1 cup_3")
+    assert "place-left robot1 countertop countertop_1 cup_3" not in _available(env)  # just picked
+    act("move robot1 countertop_1 diningtable_6")
+    assert not any(n.startswith("move ") for n in _available(env))         # just moved
+    act("place-left robot1 diningtable diningtable_6 cup_3")
+    assert "pick-left robot1 diningtable diningtable_6 cup_3" not in _available(env)  # just placed
+    assert any(n.startswith("move ") for n in _available(env))             # the move block expired
+
+
+def test_blocking_clean_ups_dont_count_towards_an_actions_cost():
+    from interruption.operators import construct_pick_with_left_hand_operator_blocking
+    from interruption.utilities import get_action_cost
+    from railroad.operators.core import construct_move_operator_blocking
+
+    objects = {
+        "robot": {"robot1"}, "location": {"countertop_1", "fridge_5"}, "object": {"cup_3"},
+        "category": {"countertop", "fridge"},
+    }
+    move = next(a for a in construct_move_operator_blocking(5.0).instantiate(objects)
+                if a.name == "move robot1 countertop_1 fridge_5")
+    picks = construct_pick_with_left_hand_operator_blocking(10.0).instantiate(objects)
+    assert get_action_cost(move) == 5.0
+    assert {get_action_cost(a) for a in picks} == {10.0}
+
+
+def test_a_plan_starts_without_blocking_facts():
+    from interruption.planning_framework import _planning_state
+    from railroad.core import get_action_by_name
+
+    env = _blocking_two_table_env()
+    env.act(get_action_by_name(env.get_actions(), "move robot1 countertop_1 diningtable_6"))
+    assert F("just-moved robot1") in env.state.fluents and env.state.upcoming_effects
+
+    start = _planning_state(env.state, {})
+
+    assert not any(f.name == "just-moved" for f in start.fluents)
+    assert not start.upcoming_effects
+    assert F("at robot1 diningtable_6") in start.fluents and F("free robot1") in start.fluents

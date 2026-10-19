@@ -22,6 +22,7 @@ from .constants import (
     AP_SEED
 )
 from .environments import KitchenProcTHOREnvironment
+from .operators import BLOCKING_PREDICATES, only_clears_blocking_facts
 from .planner import (
     InterruptionSearchProblem, PlannerConfig, SearchStats, astar_search,
     filter_actions_to_objects, goal_objects, held_objects,
@@ -255,6 +256,22 @@ def _get_task_relevant_objects(task: Goal) -> set[str]:
 
 
 # wrapper search functions
+def _planning_state(state: State, neg_to_pos_mapping: dict[F, F]) -> State:
+    """
+    The state a plan starts from: the environment's state without blocking facts
+    or their pending clean-ups (see operators.BLOCKING_PREDICATES), converted to
+    positive preconditions. Blocking keeps a plan from moving twice in a row, but
+    a new plan may need to start with a move even if the robot has just moved.
+    """
+    unblocked = State(
+        state.time,
+        {fluent for fluent in state.fluents if fluent.name not in BLOCKING_PREDICATES},
+        [(time, effect) for time, effect in state.upcoming_effects
+         if not only_clears_blocking_facts(effect)],
+    )
+    return convert_state_to_positive_preconditions(unblocked, neg_to_pos_mapping)
+
+
 def search_without_retry(
     planner_mode: PlannerMode,
     environment: KitchenProcTHOREnvironment,
@@ -270,9 +287,7 @@ def search_without_retry(
     retried over goal objects (both always 0; see search_with_retry). stats, when
     given, is filled in by the A* search (not by the anticipatory planner).
     """
-    initial_state = convert_state_to_positive_preconditions(
-        environment.state, neg_to_pos_mapping
-    )
+    initial_state = _planning_state(environment.state, neg_to_pos_mapping)
 
     if planner_mode == PlannerMode.ANTICIPATORY_PLANNING:
         plan, _, success = anticipatory_planner(
@@ -316,9 +331,7 @@ def search_with_retry(
     of searches retried over goal objects. search_stats, when given, gets a
     SearchStats per A* search.
     """
-    initial_state = convert_state_to_positive_preconditions(
-        environment.state, neg_to_pos_mapping
-    )
+    initial_state = _planning_state(environment.state, neg_to_pos_mapping)
     num_goals = (
         _get_task_goal_count(search_problem.goal)
         if planner_parameters.max_task_complexity == -1

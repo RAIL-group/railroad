@@ -39,7 +39,7 @@ from interruption.experiments import (
 )
 from interruption.planning_framework import PlannerMode, search_with_retry
 from interruption.constants import (
-    NUM_TASKS, PROCTHOR_SEED, FILTER_OBJECTS, NUM_ROOMS_FILTER, ONE_ROOM_FILTER,
+    RELAXED_PLAN_FILTERING, NUM_TASKS, PROCTHOR_SEED, FILTER_OBJECTS, NUM_ROOMS_FILTER, ONE_ROOM_FILTER,
 )
 from interruption.learning.data import write_compressed_pickle
 from interruption.planner import InterruptionSearchProblem, PlannerConfig, SearchStats
@@ -259,6 +259,8 @@ def _compute_scene_keys(selection: SceneSelection) -> dict[int, int]:
         # searches go through search_with_retry: a failed search is retried over
         # only its goal's objects; plans for walking may also decompose the task
         "goal_object_filtering": "search_with_retry: goal-object retry, decomposition for walks",
+        # searches first run over only the goal's relaxed-plan objects and locations
+        "relaxed_plan_filtering": RELAXED_PLAN_FILTERING,
     }
     # a plain scene is fully determined by its seed (the dataset is static),
     # so it contributes None; a remapped one contributes its actual content
@@ -614,7 +616,10 @@ def _expected_task_cost(
     what earlier datums needed. Costs are undiscounted sums of action costs.
     """
     assert data.search_problem.interrupting_task_dist is not None
-    params = PlannerConfig(False, data.planner_parameters.heuristic_fn, 1)
+    params = PlannerConfig(
+        False, data.planner_parameters.heuristic_fn, 1,
+        relaxed_plan_filtering=data.planner_parameters.relaxed_plan_filtering,
+    )
     goals, probs = data.search_problem.interrupting_task_dist
     task_costs = []
     expected_cost = 0.0

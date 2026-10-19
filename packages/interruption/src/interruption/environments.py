@@ -14,10 +14,9 @@ from .operators import (
     construct_assemble_operator,
     # construct_gripper_pick_operator,
     # construct_gripper_place_operator,
-    construct_pick_with_left_hand_operator,
-    construct_pick_with_right_hand_operator,
-    construct_place_with_left_hand_operator,
-    construct_place_with_right_hand_operator,
+    construct_pick_with_left_hand_operator_blocking,
+    construct_place_with_left_hand_operator_blocking,
+    only_clears_blocking_facts,
 )
 from .alfred_task_generator import get_task_list
 from .constants import NUM_ROOMS_FILTER, NUM_TASKS, ONE_ROOM_FILTER
@@ -62,11 +61,13 @@ class KitchenProcTHOREnvironment(ProcTHOREnvironment):
         return clone
 
     def define_operators(self) -> list[Operator]:
-        move_op = operators.construct_move_operator(self.estimate_move_time)
-        left_pick_op = construct_pick_with_left_hand_operator(10.0)
-        #right_pick_op = construct_pick_with_right_hand_operator(10.0)
-        left_place_op = construct_place_with_left_hand_operator(10.0)
-        #right_place_op = construct_place_with_right_hand_operator(10.0)
+        # blocking variants: no move straight after a move, no placing an object
+        # straight after picking it, no picking it straight back up after placing
+        move_op = operators.construct_move_operator_blocking(self.estimate_move_time)
+        left_pick_op = construct_pick_with_left_hand_operator_blocking(10.0)
+        #right_pick_op = construct_pick_with_right_hand_operator_blocking(10.0)
+        left_place_op = construct_place_with_left_hand_operator_blocking(10.0)
+        #right_place_op = construct_place_with_right_hand_operator_blocking(10.0)
         # return [move_op, left_pick_op, right_pick_op, left_place_op, right_place_op]
         return [move_op, left_pick_op, left_place_op]
 
@@ -90,7 +91,11 @@ class KitchenProcTHOREnvironment(ProcTHOREnvironment):
         graph. Objects the robot holds are part of the shuffle (see
         permute_object_containers). Requires no skill in flight.
         """
-        if self.state.upcoming_effects:
+        # a blocking fact's pending clean-up is all that remains after an action;
+        # anything else means an action is still under way
+        if not all(
+            only_clears_blocking_facts(effect) for _, effect in self.state.upcoming_effects
+        ):
             raise RuntimeError("cannot randomize object locations while skills are in flight")
 
         graph = self.scene.scene_graph

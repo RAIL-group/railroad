@@ -28,6 +28,8 @@ from railroad.core import (
 )
 from railroad.core import Fluent as F
 from railroad.environment.procthor.resources import REMAP_DIR_ENV_VAR, get_procthor_10k_dir
+
+from .operators import BLOCKING_PREDICATES
 from railroad.environment.procthor.scenegraph import SceneGraph
 from railroad.environment.procthor.thor_interface import IGNORE_CONTAINERS
 from railroad.environment.procthor.utils import get_generic_name
@@ -46,9 +48,17 @@ class RandomVariableType(Enum):
 # utility functions for interruption anticipatory planning
 def get_action_cost(action: Action) -> float:
     """
-    Gets the total cost (reward) of performing an action.
+    Gets the total cost (reward) of performing an action: the time at which the
+    robot is free again, plus any extra cost. Effects after that, such as a
+    blocking operator's clean-up (see operators.BLOCKING_PREDICATES), don't count;
+    an action that never frees a robot costs its last effect's time.
     """
-    return action.effects[-1].time + action.extra_cost
+    free_times = [
+        effect.time for effect in action.effects
+        if any(f.name == "free" and not f.negated for f in effect.resulting_fluents)
+    ]
+    end_time = max(free_times) if free_times else action.effects[-1].time
+    return end_time + action.extra_cost
 
 
 def get_reward(action: Action, discount_factor: float, additional_reward: float) -> float:
@@ -96,6 +106,13 @@ def negative_fluent_preprocessing(actions: list[Action], state: State, goals: li
     negative_preconditions = extract_negative_preconditions(actions)
     for goal in goals:
         negative_preconditions = negative_preconditions | extract_negative_goal_fluents(goal)
+    # Blocking facts stay negative: the search checks negative preconditions by
+    # absence, and the FF heuristic's relaxation ignores them, so converting them
+    # would only add a positive fact per object (not-just-picked/-placed) to every
+    # state - most of a state's size - for no change in what is planned.
+    negative_preconditions = {
+        fluent for fluent in negative_preconditions if fluent.name not in BLOCKING_PREDICATES
+    }
     mapping = create_positive_fluent_mapping(negative_preconditions)
 
     # convert actions using mapping

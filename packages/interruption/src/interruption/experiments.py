@@ -25,15 +25,15 @@ from railroad.environment.procthor.environment import ProcTHOREnvironment
 
 from .constants import (
     ACTION_PROB_DEBUG, INT_H_WEIGHTS, AUGMENT_DISCOUNT_FACTOR, H_MULTIPLIER,
-    PLANNER_FAILURE_COST
+    PLANNER_FAILURE_COST, RELAXED_PLAN_FILTERING
 )
 from .dashboard_adapters import AstarDashboardPlanner
 from .environments import construct_procthor_kitchen_environment, KitchenProcTHOREnvironment
 from .learning.models.gcn import AnticipateGCN
 from .learning.utils import get_torch_device
-from .planner import PlannerConfig, InterruptionSearchProblem
+from .planner import FFHeuristic, PlannerConfig, InterruptionSearchProblem
 from .planning_framework import (
-    ap_heuristic_fn, PlannerMode, search_with_retry, search_without_retry
+    PlannerMode, search_with_retry, search_without_retry
 )
 from .utilities import (
     get_action_cost,
@@ -429,7 +429,7 @@ def _get_planner_config(
     interruption_prob_fn: float | Callable[[float], float],
     h_multiplier: float = 1
 ) -> PlannerConfig:
-    heuristic_fn = partial(ap_heuristic_fn, h_multi=h_multiplier)
+    heuristic_fn = FFHeuristic(multiplier=h_multiplier)
     if planner_mode in [PlannerMode.MYOPIC, PlannerMode.ANTICIPATORY_PLANNING]:
         discount_by_no_int_prob = False
         discount=1
@@ -451,7 +451,7 @@ def _get_planner_config(
         )
         current_task_reward=0
         if planner_mode == PlannerMode.INTERRUPTION_AP:
-            heuristic_fn = partial(ap_heuristic_fn, h_multi=h_multiplier, weights=INT_H_WEIGHTS)
+            heuristic_fn = FFHeuristic(multiplier=h_multiplier, weights=INT_H_WEIGHTS)
     return PlannerConfig(
         discount_by_no_int_prob=discount_by_no_int_prob,
         heuristic_fn=heuristic_fn,
@@ -463,6 +463,7 @@ def _get_planner_config(
         # returns; getattr(..., None) so a mocked/stubbed eval fn (or a None one, for
         # MYOPIC) without a .batch attribute just disables batching, not an error.
         interruption_value_batch_fn=getattr(interruption_value_fn, "batch", None),
+        relaxed_plan_filtering=RELAXED_PLAN_FILTERING,
     )
 
 

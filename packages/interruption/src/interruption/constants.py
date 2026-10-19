@@ -25,6 +25,9 @@ FILTER_OBJECTS = False
 AUGMENT_TASK = True
 # retry upon solver failing to find a plan
 RETRY_WITH_SUBGOALS = True
+# search first over only the objects and locations of the goal's relaxed plan,
+# falling back to the full problem if that fails (planner.relaxed_plan_problem)
+RELAXED_PLAN_FILTERING = True
 
 # number of tasks in the task distribution
 # current: 2-room -> 16; 1-room -> 11

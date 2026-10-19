@@ -51,6 +51,7 @@ struct FFBackwardResult {
   double h_max;                         // max of optimistic_cost over goal_fluents
   double h_ff;                          // sum of action_duration over unique actions on relaxed plan
   std::unordered_set<Fluent> on_path;   // every fluent visited while walking back
+  std::unordered_set<const Action*> plan_actions;  // the relaxed plan: actions h_ff sums over
 };
 
 // Walk back from `goal_fluents` via best_optimistic_achiever, computing three
@@ -66,7 +67,7 @@ inline FFBackwardResult ff_backward_optimistic(
     const std::unordered_set<Fluent> &goal_fluents,
     bool at_implies_found = true) {
 
-  FFBackwardResult result{0.0, 0.0, 0.0, {}};
+  FFBackwardResult result{0.0, 0.0, 0.0, {}, {}};
   if (goal_fluents.empty()) return result;
 
   // Local, possibly-augmented copy of the goal branch. augment_at_with_found
@@ -78,12 +79,12 @@ inline FFBackwardResult ff_backward_optimistic(
   for (const auto& gf : goals) {
     if (!forward.known_fluents.count(gf)) {
       double inf = std::numeric_limits<double>::infinity();
-      return {inf, inf, inf, {}};
+      return {inf, inf, inf, {}, {}};
     }
   }
 
   std::unordered_set<Fluent>& on_path = result.on_path;
-  std::unordered_set<const Action*> actions_on_path;
+  std::unordered_set<const Action*>& actions_on_path = result.plan_actions;
   std::unordered_set<Fluent> frontier = goals;
   while (!frontier.empty()) {
     std::unordered_set<Fluent> next_frontier;

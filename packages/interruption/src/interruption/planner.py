@@ -1,13 +1,18 @@
 import heapq
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Optional
 from tqdm import tqdm
 
-from railroad.core import Action, Fluent, Goal, State, get_next_actions
+from railroad._bindings import astar_search as _astar_search_cpp
+from railroad._bindings import relaxed_plan_action_indices as _relaxed_plan_action_indices
+from railroad.core import (
+    Action, Fluent, Goal, State, ff_heuristic, get_next_actions, project_action,
+    project_state, relevant_predicates,
+)
 from railroad.environment.procthor.scenegraph import SceneGraph
 
-from .constants import SEARCH_DEBUG
+from .constants import LAMBDA_ADD, LAMBDA_FF, LAMBDA_MAX, SEARCH_DEBUG
 from .cost_formulations import CostFormulation, DefaultFormulation, StepTerms
 from .utilities import (
     get_action_cost,
@@ -54,6 +59,14 @@ class PlannerConfig:
     # current_task_reward above
     cost_formulation: CostFormulation | None = None
 
+    # run eligible searches with the C++ A* (see astar_search); False forces the
+    # Python implementation, e.g. to compare the two
+    use_cpp_search: bool = True
+    # search first over only the objects and locations the relaxed plan for the
+    # goal uses, falling back to the full problem if that fails (see
+    # relaxed_plan_problem)
+    relaxed_plan_filtering: bool = False
+
     def get_cost_formulation(self) -> CostFormulation:
         """The cost formulation the search uses."""
         if self.cost_formulation is not None:
@@ -61,6 +74,27 @@ class PlannerConfig:
         return DefaultFormulation(
             self.discount_by_no_int_prob, self.discount, self.current_task_reward
         )
+
+
+@dataclass(frozen=True)
+class FFHeuristic:
+    """
+    h = multiplier * ff_heuristic(LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF), plus the
+    learned value v_ap when weights are given (see planning_framework's
+    ap_heuristic_fn, which this computes identically). Being a plain object rather
+    than a closure lets astar_search hand it to the C++ search.
+    """
+    multiplier: float = 1
+    weights: tuple[float, float] | None = None
+
+    def __call__(self, state: State, goal: Goal, actions: list[Action], v_ap: float = 0) -> float:
+        h_val = ff_heuristic(state, goal, actions, LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF)
+        if self.weights is None:
+            return self.multiplier * h_val
+        ff_weight, v_ap_weight = self.weights
+        # NOTE: temporary fix, as in ap_heuristic_fn
+        assert ff_weight == 1 and v_ap_weight == 1
+        return self.multiplier * h_val + v_ap
 
 
 @dataclass
@@ -72,6 +106,9 @@ class SearchStats:
     success: bool = False
     # a retry over only the goal's own objects, after an unfiltered search failed
     filtered: bool = False
+    # actions in the relaxed-plan-filtered problem this search ran on; 0 when it
+    # ran on the full problem (see relaxed_plan_problem)
+    relaxed_plan_actions: int = 0
 
     @property
     def fraction(self) -> float:
@@ -263,7 +300,31 @@ def astar_search(
     bar over num_steps; off by default, since callers like data generation run
     many searches across parallel workers. stats, when given, is filled in with
     the nodes expanded against the num_steps budget.
+
+    Searches with no learned value function, the default cost formulation and a
+    constant or FFHeuristic heuristic run in C++ (railroad's astar.hpp), with
+    identical results; others, and search_params.use_cpp_search=False, run here.
     """
+    if search_params.relaxed_plan_filtering:
+        narrowed = relaxed_plan_problem(initial_state[0], interruption_problem)
+        if narrowed is not None:
+            result = astar_search(
+                initial_state, narrowed, replace(search_params, relaxed_plan_filtering=False),
+                num_steps, show_progress, stats,
+            )
+            if stats is not None:
+                stats.relaxed_plan_actions = len(narrowed.actions)
+            if result[2]:
+                return result
+        # otherwise: nothing to narrow, or the narrowed problem failed - solve it all
+        if stats is not None:
+            stats.relaxed_plan_actions = 0
+
+    if search_params.use_cpp_search and _cpp_search_applies(search_params):
+        return _astar_search_cpp_path(
+            initial_state, interruption_problem, search_params, num_steps, show_progress, stats
+        )
+
     # caches keyed by resulting-state fluents; see create_child's docstring for
     # why ev_cache is exact and heuristic_cache is an approximation
     ev_cache: dict[frozenset[Fluent], float] = {}
@@ -433,6 +494,135 @@ def astar_search(
         return [], float("inf"), False, initial_state[1]
     best_found, _, _ = heapq.heappop(frontier)
     return best_found.get_plan(), best_found.cost, False, best_found.scene_graph
+
+
+def relaxed_plan_problem(
+    state: State, problem: InterruptionSearchProblem
+) -> InterruptionSearchProblem | None:
+    """
+    The problem narrowed to what its relaxed plan uses: FF's relaxed plan for the
+    goal from state (deletes and negative preconditions ignored, as in the
+    heuristic), together with every action directly achieving a goal fluent (so
+    every table, say, that would satisfy "on a table" - the relaxed plan picks
+    just one), names objects, locations and the like as its actions' arguments;
+    only actions whose arguments are all among those, or among what a robot is
+    holding, are kept. Held objects are added because the relaxation ignores a
+    full hand, so its plan never puts down what the robot holds - which may be
+    needed before anything else can be picked up. None when there's nothing to
+    narrow: the goal holds, is unreachable, or every action survives.
+    """
+    actions = problem.actions
+    plan = _relaxed_plan_action_indices(
+        state, problem.goal, actions, LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF
+    )
+    if not plan:
+        return None
+    keep = {arg for i in plan for arg in actions[i].name.split(" ")[1:]}
+    keep |= {
+        arg for fluent in state.fluents if fluent.name.startswith("holding") for arg in fluent.args
+    }
+    kept = [action for action in actions if keep.issuperset(action.name.split(" ")[1:])]
+    if len(kept) == len(actions):
+        return None
+    return replace(problem, actions=kept)
+
+
+def _cpp_search_applies(search_params: PlannerConfig) -> bool:
+    """Whether the C++ A* computes exactly what the Python one would."""
+    return (
+        search_params.interruption_value_fn is None
+        and type(search_params.get_cost_formulation()) is DefaultFormulation
+        and (
+            isinstance(search_params.heuristic_fn, (int, float))
+            or isinstance(search_params.heuristic_fn, FFHeuristic)
+        )
+    )
+
+
+# (id of an action list, relevant predicates) -> (that list, projected actions, costs);
+# searches reuse one action list many times, so its projection is built once
+_PROJECTION_CACHE: dict[tuple[int, frozenset[str]], tuple[list[Action], list[Action], list[float]]] = {}
+_PROJECTION_CACHE_SIZE = 8
+
+
+def _projected_actions(
+    actions: list[Action], relevant: frozenset[str]
+) -> tuple[list[Action], list[float]]:
+    """
+    The actions without effects on predicates nothing reads (railroad's relevance
+    projection, as MCTSPlanner uses it), and each action's cost, cached per list.
+    """
+    key = (id(actions), relevant)
+    cached = _PROJECTION_CACHE.get(key)
+    if cached is not None and cached[0] is actions:
+        return cached[1], cached[2]
+    projected = [project_action(action, relevant) for action in actions]
+    costs = [get_action_cost(action) for action in actions]
+    if len(_PROJECTION_CACHE) >= _PROJECTION_CACHE_SIZE:
+        _PROJECTION_CACHE.pop(next(iter(_PROJECTION_CACHE)))
+    _PROJECTION_CACHE[key] = (actions, projected, costs)
+    return projected, costs
+
+
+def _astar_search_cpp_path(
+    initial_state: tuple[State, SceneGraph | None],
+    interruption_problem: InterruptionSearchProblem,
+    search_params: PlannerConfig,
+    num_steps: int,
+    show_progress: bool,
+    stats: SearchStats | None,
+) -> tuple[list[Action], float, bool, SceneGraph | None]:
+    """
+    astar_search in C++. States and actions are first projected onto the
+    predicates the search can read (bisimulation-preserving, so the plan is
+    unchanged), and the scene graph, which the C++ search doesn't track, is
+    rebuilt afterwards by replaying the plan.
+    """
+    state, scene_graph = initial_state
+    goal = interruption_problem.goal
+    actions = interruption_problem.actions
+    if show_progress:
+        print(f"Current Goal: {goal}")
+
+    relevant = frozenset(relevant_predicates(actions, goal, state.upcoming_effects))
+    projected, costs = _projected_actions(actions, relevant)
+    prob_fn = search_params.planner_interruption_prob_fn or 0
+    probs = (
+        [float(prob_fn)] * len(actions) if isinstance(prob_fn, (int, float))
+        else [prob_fn(cost) for cost in costs]
+    )
+    heuristic = search_params.heuristic_fn
+    use_ff = isinstance(heuristic, FFHeuristic)
+    multiplier = heuristic.multiplier if isinstance(heuristic, FFHeuristic) else 1.0
+    h_constant = float(heuristic) if isinstance(heuristic, (int, float)) else 0.0
+    formulation = search_params.get_cost_formulation()
+    assert isinstance(formulation, DefaultFormulation)
+
+    result = _astar_search_cpp(
+        project_state(state, relevant), goal, projected, costs, probs,
+        num_steps=num_steps, use_ff=use_ff, h_constant=h_constant,
+        heuristic_multiplier=multiplier,
+        lambda_add=LAMBDA_ADD, lambda_max=LAMBDA_MAX, lambda_ff=LAMBDA_FF,
+        discount_by_interruption=formulation.discount_by_no_int_prob,
+        fixed_discount=1.0 if formulation.discount is None else formulation.discount,
+        task_reward=formulation.current_task_reward,
+    )
+    plan = [actions[i] for i in result["plan"]]
+    _fill_stats(stats, goal, result["expanded"], num_steps, result["success"])
+    return plan, result["cost"], result["success"], _replay_scene_graph(state, scene_graph, plan)
+
+
+def _replay_scene_graph(
+    state: State, scene_graph: SceneGraph | None, plan: list[Action]
+) -> SceneGraph | None:
+    """The scene graph after plan, updated step by step as the Python search does."""
+    if scene_graph is None or not plan:
+        return scene_graph
+    scene_graph = scene_graph.shallow_copy()
+    for action in plan:
+        state, _ = get_next_state(state, action)
+        get_updated_scene_graph(scene_graph, state, action)
+    return scene_graph
 
 
 def _fill_stats(

@@ -29,6 +29,10 @@ Probabilistic PDDL planning system.
   `goal.hpp`, and provides the public introspection helpers and the
   top-level `ff_heuristic` orchestrator (see "Header split" below).
 - **planner.hpp**: MCTS planner implementation
+- **astar.hpp**: A* over the same temporal transition model (`transition`
+  advances to the next free robot), with discounted path costs, fluent-keyed
+  duplicate pruning and heuristic caching, over the relaxed-reachable
+  (`get_usable_actions`) actions only
 - **constants.hpp**: Global constants
 
 ## Heuristic Functions
@@ -153,6 +157,7 @@ struct FFBackwardResult {
   double h_max;                         // max optimistic_cost over goal fluents
   double h_ff;                          // Σ action_duration over plan actions
   std::unordered_set<Fluent> on_path;   // fluents visited while walking back
+  std::unordered_set<const Action*> plan_actions;  // the relaxed plan itself
 };
 ```
 

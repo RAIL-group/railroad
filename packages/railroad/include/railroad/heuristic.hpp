@@ -527,4 +527,64 @@ inline double ff_heuristic(const State &input_state,
   return dtime + min_cost;
 }
 
+// The actions on the relaxed plan ff_heuristic extracts for `goal` from
+// `input_state`: the goal branch with the smallest mixed cost (as
+// ff_heuristic's minimum picks it), walked back via each fluent's best
+// optimistic achiever. Like the heuristic, the relaxation ignores deletes and
+// negative preconditions. With include_goal_achievers, every action that
+// directly achieves one of that branch's goal fluents is added too: the
+// relaxed plan commits to one of several equivalent ways to finish (say, which
+// of two tables to put something on), which the real plan may not prefer.
+// Returned as indices into `all_actions`; empty when the goal already holds or
+// can't be reached.
+inline std::vector<std::size_t> relaxed_plan_action_indices(
+    const State &input_state,
+    const GoalBase *goal,
+    const std::vector<Action> &all_actions,
+    double lambda_add = 0.5,
+    double lambda_max = 0.0,
+    double lambda_ff = 0.5,
+    bool at_implies_found = true,
+    bool include_goal_achievers = true) {
+  std::vector<std::size_t> indices;
+  if (!goal) return indices;
+  GoalType type = goal->get_type();
+  if (type == GoalType::TRUE_GOAL || type == GoalType::FALSE_GOAL) return indices;
+
+  auto relaxed_result = transition(input_state, nullptr, true);
+  if (relaxed_result.empty()) return indices;
+  std::unordered_set<Fluent> initial_fluents(
+      relaxed_result[0].first.fluents().begin(), relaxed_result[0].first.fluents().end());
+
+  auto forward = ff_forward_phase(initial_fluents, all_actions);
+  compute_optimistic_costs(forward);
+  BranchView branch_view(goal, forward);
+
+  double best_cost = std::numeric_limits<double>::infinity();
+  std::unordered_set<const Action*> best_plan;
+  for (const auto& branch : branch_view.get()) {
+    auto opt = ff_backward_optimistic(forward, branch, at_implies_found);
+    if (opt.h_add == std::numeric_limits<double>::infinity()) continue;
+    double mixed = lambda_add * opt.h_add + lambda_max * opt.h_max + lambda_ff * opt.h_ff
+                 + relaxed_plan_prob_delta(forward, opt.on_path);
+    if (mixed < best_cost) {
+      best_cost = mixed;
+      best_plan = std::move(opt.plan_actions);
+      if (include_goal_achievers) {
+        for (const auto& goal_fluent : branch) {
+          if (forward.initial_fluents.count(goal_fluent)) continue;
+          auto it = forward.achievers_by_fluent.find(goal_fluent);
+          if (it == forward.achievers_by_fluent.end()) continue;
+          for (const auto& achiever : it->second) best_plan.insert(achiever.action);
+        }
+      }
+    }
+  }
+
+  for (std::size_t i = 0; i < all_actions.size(); ++i) {
+    if (best_plan.count(&all_actions[i])) indices.push_back(i);
+  }
+  return indices;
+}
+
 } // namespace railroad

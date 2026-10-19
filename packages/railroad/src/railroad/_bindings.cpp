@@ -1,4 +1,5 @@
 #define RAILROAD_USE_PYBIND
+#include "railroad/astar.hpp"
 #include "railroad/core.hpp"
 #include "railroad/heuristic.hpp"
 #include "railroad/goal.hpp"
@@ -724,6 +725,68 @@ PYBIND11_MODULE(_bindings, m) {
         "(thread-local: applies to planner calls from the calling thread)");
 
   // ff_heuristic with Goal object
+  m.def("relaxed_plan_action_indices",
+        [](const State &state, const GoalPtr &goal, const std::vector<Action> &all_actions,
+           double lambda_add, double lambda_max, double lambda_ff, bool at_implies_found,
+           bool include_goal_achievers) {
+          return relaxed_plan_action_indices(state, goal.get(), all_actions, lambda_add,
+                                             lambda_max, lambda_ff, at_implies_found,
+                                             include_goal_achievers);
+        },
+        "Indices into all_actions of the actions on the relaxed plan ff_heuristic "
+        "extracts for the goal from the state (deletes and negative preconditions "
+        "ignored), plus, with include_goal_achievers, every action directly "
+        "achieving a goal fluent; empty when the goal holds or is unreachable.",
+        py::arg("state"), py::arg("goal"), py::arg("all_actions"),
+        py::arg("lambda_add") = 0.5, py::arg("lambda_max") = 0.0,
+        py::arg("lambda_ff") = 0.5, py::arg("at_implies_found") = true,
+        py::arg("include_goal_achievers") = true);
+
+  m.def(
+      "astar_search",
+      [](const State &state, const GoalPtr &goal, const std::vector<Action> &actions,
+         const std::vector<double> &action_costs,
+         const std::vector<double> &interruption_probs, int num_steps, bool use_ff,
+         double h_constant, double heuristic_multiplier, double lambda_add,
+         double lambda_max, double lambda_ff, bool at_implies_found,
+         bool discount_by_interruption, double fixed_discount, double task_reward) {
+        AStarParams params;
+        params.num_steps = num_steps;
+        params.use_ff = use_ff;
+        params.h_constant = h_constant;
+        params.heuristic_multiplier = heuristic_multiplier;
+        params.lambda_add = lambda_add;
+        params.lambda_max = lambda_max;
+        params.lambda_ff = lambda_ff;
+        params.at_implies_found = at_implies_found;
+        params.discount_by_interruption = discount_by_interruption;
+        params.fixed_discount = fixed_discount;
+        params.task_reward = task_reward;
+        AStarResult r = astar(state, actions, goal.get(), action_costs,
+                              interruption_probs, params);
+        py::dict out;
+        out["plan"] = r.plan;
+        out["cost"] = r.cost;
+        out["success"] = r.success;
+        out["expanded"] = r.expanded;
+        out["generated"] = r.generated;
+        out["pushed"] = r.pushed;
+        return out;
+      },
+      "A* over the temporal state space (see astar.hpp). Returns a dict with the "
+      "plan as indices into `actions`, its accumulated cost, success, and counts "
+      "of expanded nodes, generated successors and frontier pushes. "
+      "action_costs[i] / interruption_probs[i] belong to actions[i]; "
+      "h = heuristic_multiplier * ff_heuristic(lambda_*), or h_constant when "
+      "use_ff is false.",
+      py::arg("state"), py::arg("goal"), py::arg("actions"), py::arg("action_costs"),
+      py::arg("interruption_probs"), py::arg("num_steps") = 30000,
+      py::arg("use_ff") = true, py::arg("h_constant") = 0.0,
+      py::arg("heuristic_multiplier") = 1.0, py::arg("lambda_add") = 0.0,
+      py::arg("lambda_max") = 0.0, py::arg("lambda_ff") = 1.0,
+      py::arg("at_implies_found") = true, py::arg("discount_by_interruption") = false,
+      py::arg("fixed_discount") = 1.0, py::arg("task_reward") = 0.0);
+
   m.def("ff_heuristic",
         [](const State &state, const GoalPtr &goal,
            const std::vector<Action> &all_actions,
