@@ -845,3 +845,53 @@ def test_a_plan_starts_without_blocking_facts():
     assert not any(f.name == "just-moved" for f in start.fluents)
     assert not start.upcoming_effects
     assert F("at robot1 diningtable_6") in start.fluents and F("free robot1") in start.fluents
+
+
+def _plan_boundary_env():
+    """_blocking_two_table_env, finishing pending blocking clean-ups when needed."""
+    from railroad.environment.symbolic import SymbolicEnvironment
+    from interruption.environments import FinishesBlockingCleanUps
+
+    env = _blocking_two_table_env()
+
+    class Env(FinishesBlockingCleanUps, SymbolicEnvironment):
+        pass
+
+    env.__class__ = Env  # same environment, with the mixin's act
+    return env
+
+
+@pytest.mark.parametrize("first, second", [
+    ("move robot1 countertop_1 diningtable_6", "move robot1 diningtable_6 diningtable_9"),
+    ("pick-left robot1 countertop countertop_1 cup_3",
+     "place-left robot1 countertop countertop_1 cup_3"),
+])
+def test_a_new_plan_may_start_with_what_the_last_action_blocks(first, second):
+    # a new plan starts without blocking facts, so its first action can be one the
+    # previous action blocks: the environment lets the clean-up happen first
+    from railroad.core import get_action_by_name
+
+    env = _plan_boundary_env()
+    env.act(get_action_by_name(env.get_actions(), first))
+    time_after_first = env.time
+
+    env.act(get_action_by_name(env.get_actions(), second))
+
+    assert env.time == pytest.approx(time_after_first + 0.1 + 1.0)  # clean-up, then the action
+    assert not env.state.upcoming_effects or all(
+        f.name.startswith("just-") for _, e in env.state.upcoming_effects
+        for f in e.resulting_fluents
+    )
+
+
+def test_an_action_blocked_for_another_reason_still_fails():
+    from railroad.core import get_action_by_name
+
+    env = _plan_boundary_env()
+    env.act(get_action_by_name(env.get_actions(), "move robot1 countertop_1 diningtable_6"))
+
+    # nothing to place: not a blocking fact, so act refuses it as before
+    with pytest.raises(ValueError, match="preconditions not satisfied"):
+        env.act(get_action_by_name(
+            env.get_actions(), "place-left robot1 diningtable diningtable_6 cup_3"
+        ))

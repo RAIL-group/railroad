@@ -1,7 +1,7 @@
 import random
 
 import pytest
-from interruption.constants import INT_H_WEIGHTS
+from interruption.constants import INT_H_WEIGHTS, RELAXED_PLAN_FILTERING
 import interruption.experiments as experiments_module
 from interruption.experiments import (
     ExperimentConfig,
@@ -293,6 +293,8 @@ def test_get_planner_config_selects_fields_per_mode(
     assert result.current_task_reward == 0
 
     assert result.heuristic_fn == FFHeuristic(multiplier=1, weights=expects_weights)
+    # narrowing to the task's relaxed plan is for myopic search only
+    assert result.relaxed_plan_filtering == (RELAXED_PLAN_FILTERING and mode == PlannerMode.MYOPIC)
 
 
 def test_get_planner_config_myopic_interruption_prob_fn_is_ignored(mock_gcn):

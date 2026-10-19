@@ -463,7 +463,10 @@ def _get_planner_config(
         # returns; getattr(..., None) so a mocked/stubbed eval fn (or a None one, for
         # MYOPIC) without a .batch attribute just disables batching, not an error.
         interruption_value_batch_fn=getattr(interruption_value_fn, "batch", None),
-        relaxed_plan_filtering=RELAXED_PLAN_FILTERING,
+        # only for myopic search: the interruption-aware and anticipatory planners
+        # get their value from actions on objects the current task doesn't need,
+        # which narrowing to the task's relaxed plan would take away
+        relaxed_plan_filtering=RELAXED_PLAN_FILTERING and planner_mode == PlannerMode.MYOPIC,
     )
 
 

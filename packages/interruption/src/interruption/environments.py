@@ -1,4 +1,5 @@
 from collections import defaultdict
+from collections.abc import Callable
 from typing import Sequence, Optional
 import copy
 import random
@@ -7,7 +8,7 @@ import numpy as np
 from railroad import operators
 from railroad.core import Action, Goal, LiteralGoal, Operator, State
 from railroad.core import Fluent as F
-from railroad.environment import SymbolicEnvironment
+from railroad.environment import Environment, SymbolicEnvironment
 from railroad.environment.procthor.environment import ProcTHOREnvironment
 
 from .operators import (
@@ -28,7 +29,45 @@ from .utilities import (
 )
 
 
-class KitchenProcTHOREnvironment(ProcTHOREnvironment):
+class FinishesBlockingCleanUps(Environment):
+    """
+    Environment mixin: an action blocked only by a blocking fact whose clean-up
+    is still pending (see operators.BLOCKING_PREDICATES) first lets that clean-up
+    happen. List it before the concrete Environment subclass.
+    """
+
+    def act(self, action: Action, loop_callback_fn: Callable[[], None] | None = None) -> State:
+        """
+        Environment.act, except that an action blocked only by a blocking fact
+        whose clean-up is still pending (see operators.BLOCKING_PREDICATES) first
+        lets that clean-up happen, at most BLOCKING_DURATION later. Blocking keeps
+        a plan from moving twice in a row, but a new plan starts without blocking
+        facts and may begin with a move straight after the last plan's.
+        """
+        if not self.state.satisfies_precondition(action) and self._only_blocking_clean_ups_pending():
+            self._finish_pending_effects()
+        return super().act(action, loop_callback_fn)
+
+    def _only_blocking_clean_ups_pending(self) -> bool:
+        upcoming = self.state.upcoming_effects
+        return bool(upcoming) and all(
+            only_clears_blocking_facts(effect) for _, effect in upcoming
+        )
+
+    def _finish_pending_effects(self) -> None:
+        """Advances time until every in-flight skill has applied all its effects."""
+        while self._active_skills:
+            next_time = min(skill.time_to_next_event for skill in self._active_skills)
+            if next_time == float("inf"):
+                break
+            for skill in self._active_skills:
+                skill.advance(next_time, self)
+            self._time = next_time
+            self._active_skills = [skill for skill in self._active_skills if not skill.is_done]
+            self._after_skills_advanced(next_time)
+
+
+class KitchenProcTHOREnvironment(FinishesBlockingCleanUps, ProcTHOREnvironment):
     """
     Kitchen ProcTHOR environment with relevant internal operator construction.
     """
