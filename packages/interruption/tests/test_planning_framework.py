@@ -436,3 +436,48 @@ def test_the_goal_object_retry_keeps_objects_the_robot_is_holding(monkeypatch):
         "pick-left robot1 countertop countertop_1 apple_41",
         "pick-left robot1 countertop countertop_1 pan_28",
     ]
+
+
+def _halo_setup(monkeypatch):
+    """A scene where the countertop is on the route and the bed is not."""
+    from railroad.core import LiteralGoal
+
+    monkeypatch.setattr(pf, "_get_occupany_grid_paths", lambda plan, grid, locations: ["route"])
+    monkeypatch.setattr(pf, "check_intersects", lambda paths, position: position == (1, 1))
+    scene = SimpleNamespace(
+        grid=None,
+        objects={"apple_1", "mug_2", "statue_3"},
+        locations={
+            "start_loc": (0, 0), "countertop_4": (1, 1), "bed_5": (9, 9),
+            "fridge_6": (5, 0), "fridge_7": (6, 0),
+        },
+    )
+    state = State(0.0, {
+        F("at apple_1 countertop_4"),   # on the route, and a future task wants it in a fridge
+        F("at statue_3 countertop_4"),  # on the route, but no task names it
+        F("at mug_2 bed_5"),            # a future task names it, but it's off the route
+    })
+    tasks = [LiteralGoal(F("at-category apple_1 fridge")), LiteralGoal(F("at-category mug_2 sofa"))]
+    problem = SimpleNamespace(interrupting_task_dist=(tasks, [0.5, 0.5]))
+    return SimpleNamespace(scene=scene, state=state), problem
+
+
+def test_the_interruption_halo_is_nearby_objects_future_tasks_need_and_where(monkeypatch):
+    environment, problem = _halo_setup(monkeypatch)
+
+    halo = pf.interruption_halo(environment, problem, core_plan=[])  # type: ignore[arg-type]
+
+    # the apple, where it is, and every fridge (its tasks' target category)
+    assert halo == {"apple_1", "countertop_4", "countertop", "fridge", "fridge_6", "fridge_7"}
+
+
+def test_no_task_distribution_means_no_halo(monkeypatch):
+    environment, problem = _halo_setup(monkeypatch)
+    problem.interrupting_task_dist = None
+
+    halo = pf.interruption_halo(environment, problem, core_plan=[])  # type: ignore[arg-type]
+    assert halo == frozenset()
+
+
+def test_halo_filtering_is_off_unless_asked_for():
+    assert PlannerConfig(False, 0, 1).interruption_halo_filtering is False

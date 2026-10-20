@@ -365,3 +365,89 @@ def test_scene_log_lines_include_the_elapsed_time(datagen, monkeypatch, capsys):
 
     finished = [line for line in capsys.readouterr().out.splitlines() if "finished" in line]
     assert finished and " after " in finished[0] and finished[0].split(" after ")[1][0].isdigit()
+
+
+@pytest.mark.parametrize("fraction, expected", [(0.0, 0), (1.0, 2000)])
+def test_the_audited_fraction_is_honoured_at_the_extremes(
+    datagen, monkeypatch, fraction, expected
+):
+    monkeypatch.setattr(datagen, "LABEL_AUDIT_FRACTION", fraction)
+    assert sum(datagen._is_audited(5, counter) for counter in range(2000)) == expected
+
+
+def test_about_the_configured_fraction_of_datums_is_audited(datagen, monkeypatch):
+    monkeypatch.setattr(datagen, "LABEL_AUDIT_FRACTION", 0.05)
+    audited = sum(datagen._is_audited(5, counter) for counter in range(4000))
+    assert 140 < audited < 260  # ~200, and the same every run (seeded)
+    assert audited == sum(datagen._is_audited(5, counter) for counter in range(4000))
+
+
+def _audit_data():
+    from railroad.core import Fluent, LiteralGoal
+
+    goals = [
+        LiteralGoal(Fluent("at-category cup_3 fridge")),
+        LiteralGoal(Fluent("at-category pan_2 sofa")),
+    ]
+    problem = SimpleNamespace(interrupting_task_dist=(goals, [0.5, 0.5]))
+    return SimpleNamespace(search_problem=problem)
+
+
+def test_the_audit_records_both_costs_and_logs_only_differences(
+    datagen, monkeypatch, capsys, tmp_path
+):
+    unfiltered = iter([10.0, 12.5])
+    monkeypatch.setattr(datagen, "_task_cost", lambda *args, **kwargs: next(unfiltered))
+
+    datagen._audit_labels(
+        None, _audit_data(), [10.0, 14.0], scene_seed=5, scene_key=1, file_counter=7
+    )
+
+    rows = (tmp_path / "label_audit_5_1.csv").read_text().splitlines()
+    assert rows == [
+        "file_counter,task,filtered_cost,unfiltered_cost",
+        "7,(at-category cup_3 fridge),10.0,10.0",
+        "7,(at-category pan_2 sofa),14.0,12.5",
+    ]
+    out = capsys.readouterr().out
+    assert "[scene 5] audit datum 7: 1/2 task cost(s) differ" in out and "pan_2" in out
+
+
+def test_the_audit_summary_counts_differences_across_scenes(datagen, monkeypatch, capsys):
+    unfiltered = iter([10.0, 12.5, None, 8.0])
+    monkeypatch.setattr(datagen, "_task_cost", lambda *args, **kwargs: next(unfiltered))
+    for scene_seed, scene_key, filtered in ((5, 1, [10.0, 14.0]), (9, 2, [9.0, 8.0])):
+        datagen._audit_labels(
+            None, _audit_data(), filtered, scene_seed=scene_seed, scene_key=scene_key,
+            file_counter=0,
+        )
+    capsys.readouterr()
+
+    datagen._summarize_label_audit({5: 1, 9: 2, 32: 3})  # scene 32 has no audit file
+
+    assert capsys.readouterr().out.strip() == (
+        "Label audit: 4 task costs rechecked without relaxed-plan filtering; "
+        "1 differ (worst +12.0%); 1 unsolved unfiltered"
+    )
+
+
+@pytest.mark.parametrize("filtering, audited, expected_audits", [
+    (True, True, 1), (True, False, 0), (False, True, 0),
+])
+def test_record_datum_audits_only_selected_datums_with_filtering_on(
+    datagen, monkeypatch, filtering, audited, expected_audits
+):
+    audits = []
+    monkeypatch.setattr(datagen, "_expected_task_cost", lambda env, data, stats: (5.0, [5.0]))
+    monkeypatch.setattr(datagen, "_is_audited", lambda seed, counter: audited)
+    monkeypatch.setattr(datagen, "_audit_labels", lambda *args: audits.append(args))
+    monkeypatch.setattr(datagen, "write_datum_to_file", lambda *args: None)
+    monkeypatch.setattr(datagen, "WRITE_OUT_INDIVIDUAL_TASK_COSTS", False)
+    data = SimpleNamespace(
+        search_problem=SimpleNamespace(interrupting_task_dist=([], [])),
+        planner_parameters=SimpleNamespace(relaxed_plan_filtering=filtering),
+    )
+    env = SimpleNamespace(scene=SimpleNamespace(scene_graph=None))
+
+    assert datagen._record_datum(env, data, ([], []), scene_seed=5, scene_key=1, file_counter=3)
+    assert len(audits) == expected_audits

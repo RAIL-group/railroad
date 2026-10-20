@@ -18,7 +18,7 @@ from railroad.operators._utils import OptNumeric, _to_numeric
 #   just-picked ?r ?obj   - no placing an object straight after picking it up
 #   just-placed ?r ?obj   - no picking an object straight up after placing it
 # They only constrain plans; a planner's starting state drops them (see
-# planning_framework._planning_state), since a new plan may need to start with a
+# planning_framework.planning_state), since a new plan may need to start with a
 # move even if the robot has just moved.
 BLOCKING_PREDICATES = frozenset({"just-moved", "just-picked", "just-placed"})
 # how long after the blocking action ends its blocking fact stays true

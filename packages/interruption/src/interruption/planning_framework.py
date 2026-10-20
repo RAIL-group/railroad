@@ -24,8 +24,8 @@ from .constants import (
 from .environments import KitchenProcTHOREnvironment
 from .operators import BLOCKING_PREDICATES, only_clears_blocking_facts
 from .planner import (
-    InterruptionSearchProblem, PlannerConfig, SearchStats, astar_search,
-    filter_actions_to_objects, goal_objects, held_objects,
+    FFHeuristic, InterruptionSearchProblem, PlannerConfig, SearchStats, astar_search,
+    filter_actions_to_objects, goal_objects, held_objects, relaxed_plan_problem,
 )
 
 
@@ -256,7 +256,7 @@ def _get_task_relevant_objects(task: Goal) -> set[str]:
 
 
 # wrapper search functions
-def _planning_state(state: State, neg_to_pos_mapping: dict[F, F]) -> State:
+def planning_state(state: State, neg_to_pos_mapping: dict[F, F]) -> State:
     """
     The state a plan starts from: the environment's state without blocking facts
     or their pending clean-ups (see operators.BLOCKING_PREDICATES), converted to
@@ -287,7 +287,7 @@ def search_without_retry(
     retried over goal objects (both always 0; see search_with_retry). stats, when
     given, is filled in by the A* search (not by the anticipatory planner).
     """
-    initial_state = _planning_state(environment.state, neg_to_pos_mapping)
+    initial_state = planning_state(environment.state, neg_to_pos_mapping)
 
     if planner_mode == PlannerMode.ANTICIPATORY_PLANNING:
         plan, _, success = anticipatory_planner(
@@ -304,10 +304,86 @@ def search_without_retry(
             else environment.scene.scene_graph
         )
 
-        plan, _, success, _ = astar_search(
-            state_scene_graph, search_problem, planner_parameters, stats=stats
-        )
+        plan: list[Action] = []
+        success = False
+        if (
+            planner_parameters.interruption_halo_filtering
+            and planner_mode in (PlannerMode.INTERRUPTION, PlannerMode.INTERRUPTION_AP)
+        ):
+            narrowed = _halo_problem(environment, search_problem, planner_parameters, initial_state)
+            if narrowed is not None:
+                plan, _, success, _ = astar_search(
+                    state_scene_graph, narrowed, planner_parameters, stats=stats
+                )
+        if not success:  # no halo, or the narrowed problem failed: solve it all
+            plan, _, success, _ = astar_search(
+                state_scene_graph, search_problem, planner_parameters, stats=stats
+            )
     return plan, success, 0, 0
+
+
+def interruption_halo(
+    environment: KitchenProcTHOREnvironment,
+    search_problem: InterruptionSearchProblem,
+    core_plan: list[Action],
+) -> frozenset[str]:
+    """
+    What an interruption-aware planner may also want to act on, beyond the
+    current task: the objects near core_plan's route (focused sampling's
+    geometry - containers within its buffer of the movement paths) that some
+    task in the interrupting task distribution names, plus the containers those
+    tasks want them in. Moving any other object can't make a future task
+    cheaper, and these are the cheap ones to move on the way. Returned as names
+    (objects, locations, location categories) for relaxed_plan_problem.
+    """
+    scene = environment.scene
+    task_dist = search_problem.interrupting_task_dist
+    task_goals = task_dist[0] if task_dist else []
+    # future-task object -> the location categories its tasks target (at-category goals)
+    targets: dict[str, set[str]] = {}
+    for goal in task_goals:
+        for literal in goal.get_all_literals():
+            if literal.name == "at-category" and len(literal.args) == 2:
+                targets.setdefault(literal.args[0], set()).add(literal.args[1])
+    if not targets:
+        return frozenset()
+
+    paths = _get_occupany_grid_paths(core_plan, scene.grid, scene.locations)
+    object_at = {
+        fluent.args[0]: fluent.args[1] for fluent in environment.state.fluents
+        if fluent.name == "at" and len(fluent.args) == 2 and fluent.args[0] in scene.objects
+    }
+    halo: set[str] = set()
+    for obj, location in object_at.items():
+        if obj in targets and location in scene.locations and location != "start_loc" \
+                and check_intersects(paths, scene.locations[location]):
+            halo |= {obj, location, location.split("_")[0]}
+            halo |= targets[obj]
+            halo |= {loc for loc in scene.locations if loc.split("_")[0] in targets[obj]}
+    return frozenset(halo)
+
+
+def _halo_problem(
+    environment: KitchenProcTHOREnvironment,
+    search_problem: InterruptionSearchProblem,
+    planner_parameters: PlannerConfig,
+    initial_state: State,
+) -> InterruptionSearchProblem | None:
+    """
+    The interruption search problem narrowed to the current task's relaxed plan
+    and its interruption_halo, found from a fast myopic plan for the task; None
+    when there's nothing to narrow.
+    """
+    heuristic = planner_parameters.heuristic_fn
+    multiplier = heuristic.multiplier if isinstance(heuristic, FFHeuristic) else 1
+    myopic = PlannerConfig(
+        False, FFHeuristic(multiplier=multiplier), 1, relaxed_plan_filtering=True
+    )
+    core_plan, _, success, _ = astar_search((initial_state, None), search_problem, myopic)
+    if not success:
+        return None
+    halo = interruption_halo(environment, search_problem, core_plan)
+    return relaxed_plan_problem(initial_state, search_problem, also_keep=halo)
 
 
 def search_with_retry(
@@ -331,7 +407,7 @@ def search_with_retry(
     of searches retried over goal objects. search_stats, when given, gets a
     SearchStats per A* search.
     """
-    initial_state = _planning_state(environment.state, neg_to_pos_mapping)
+    initial_state = planning_state(environment.state, neg_to_pos_mapping)
     num_goals = (
         _get_task_goal_count(search_problem.goal)
         if planner_parameters.max_task_complexity == -1

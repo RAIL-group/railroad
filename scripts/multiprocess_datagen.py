@@ -7,6 +7,7 @@ updated in datagen.py
 from functools import partial
 from typing import Sequence
 import copy
+import csv
 import ctypes
 import gc
 import hashlib
@@ -37,12 +38,15 @@ from interruption.experiments import (
     ExperimentSeeds,
     initialize_experiment_data,
 )
-from interruption.planning_framework import PlannerMode, search_with_retry
+from interruption.planning_framework import PlannerMode, planning_state, search_with_retry
 from interruption.constants import (
-    RELAXED_PLAN_FILTERING, NUM_TASKS, PROCTHOR_SEED, FILTER_OBJECTS, NUM_ROOMS_FILTER, ONE_ROOM_FILTER,
+    RELAXED_PLAN_FILTERING, NUM_TASKS, PROCTHOR_SEED, FILTER_OBJECTS, NUM_ROOMS_FILTER,
+    ONE_ROOM_FILTER,
 )
 from interruption.learning.data import write_compressed_pickle
-from interruption.planner import InterruptionSearchProblem, PlannerConfig, SearchStats
+from interruption.planner import (
+    InterruptionSearchProblem, PlannerConfig, SearchStats, astar_search
+)
 from interruption.utilities import (
     RandomVariableType, get_action_cost, get_task_arrival_prob, extract_relevant_objects,
     filter_procthor_scenes, find_exemplar_scene, remap_scene_objects_and_locations
@@ -84,6 +88,11 @@ SLOW_DATUM_SECONDS = 60
 # the OS (see _release_freed_memory), so a scene's footprint follows what it
 # currently needs rather than its largest search so far.
 RELEASE_MEMORY_AFTER_DATUM = True
+# Fraction of datums whose labels are also computed without relaxed-plan
+# filtering, to measure how often filtering finds a costlier plan than the full
+# search would. Only checks; labels always come from the filtered searches. The
+# per-task comparisons go to label_audit_<scene>_<key>.csv; main summarizes them.
+LABEL_AUDIT_FRACTION = 0.01
 
 # Folded into the per-(scene, count) random.seed() used for task sampling, so
 # different scenes don't draw identical task sequences at the same count.
@@ -165,6 +174,7 @@ def main(prewarm_only: bool = False):
             scene_keys, task_distribution, relevant_objects, scene_costs
         )
 
+    _summarize_label_audit(scene_keys)
     print(f"Data Generation took: {time.perf_counter() - start: .4f} seconds")
     print(
         f"Wrote {total_written} data points ({NUM_DATUM} for each of "
@@ -173,6 +183,33 @@ def main(prewarm_only: bool = False):
     if failures:
         details = "\n".join(f"  scene {seed}: {error}" for seed, error in sorted(failures.items()))
         raise RuntimeError(f"{len(failures)} scene(s) failed:\n{details}")
+
+
+def _summarize_label_audit(scene_keys: dict[int, int]) -> None:
+    """One line over every scene's label audit (see _audit_labels)."""
+    compared = differing = unsolved = 0
+    worst = 0.0
+    for scene_seed, scene_key in scene_keys.items():
+        path = _csv_path("label_audit", scene_seed, scene_key)
+        if not path.exists():
+            continue
+        with open(path, encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                compared += 1
+                filtered = float(row["filtered_cost"])
+                if row["unfiltered_cost"] == "":
+                    unsolved += 1
+                    continue
+                unfiltered = float(row["unfiltered_cost"])
+                if abs(filtered - unfiltered) > 1e-9:
+                    differing += 1
+                    if unfiltered > 0:
+                        worst = max(worst, filtered / unfiltered - 1)
+    if compared:
+        print(
+            f"Label audit: {compared} task costs rechecked without relaxed-plan filtering; "
+            f"{differing} differ (worst {worst:+.1%}); {unsolved} unsolved unfiltered"
+        )
 
 
 def _select_scenes(scene_filter: dict[str, int | set[str]]) -> SceneSelection:
@@ -256,9 +293,10 @@ def _compute_scene_keys(selection: SceneSelection) -> dict[int, int]:
         # remap never relies on objects inside ignored containers
         "duplicate_removal": "objects only",
         "remap_skips_ignored_containers": True,
-        # searches go through search_with_retry: a failed search is retried over
-        # only its goal's objects; plans for walking may also decompose the task
-        "goal_object_filtering": "search_with_retry: goal-object retry, decomposition for walks",
+        # labels: one search per task (relaxed-plan actions, then the full problem);
+        # walks: search_with_retry (goal-object retry, task decomposition)
+        "label_search": "astar: relaxed-plan actions then full problem",
+        "walk_search": "search_with_retry",
         # searches first run over only the goal's relaxed-plan objects and locations
         "relaxed_plan_filtering": RELAXED_PLAN_FILTERING,
     }
@@ -610,33 +648,95 @@ def _expected_task_cost(
     """
     The expected cost of completing a task drawn from the task distribution, from
     env's state, and each task's cost; (-1, None) if some task can't be solved.
-    Each task is planned with search_with_retry, the same retry the experiments use,
-    but without decomposition: a label needs the cost of the whole task, not of a
-    sub-task. Fresh planner parameters per datum, so its labels don't depend on
-    what earlier datums needed. Costs are undiscounted sums of action costs.
+    Each task is one search for the whole task (see _task_cost). Costs are
+    undiscounted sums of action costs.
     """
     assert data.search_problem.interrupting_task_dist is not None
-    params = PlannerConfig(
-        False, data.planner_parameters.heuristic_fn, 1,
-        relaxed_plan_filtering=data.planner_parameters.relaxed_plan_filtering,
-    )
+    filtering = data.planner_parameters.relaxed_plan_filtering
     goals, probs = data.search_problem.interrupting_task_dist
     task_costs = []
     expected_cost = 0.0
     for goal, prob in zip(goals, probs):
-        problem = InterruptionSearchProblem(goal, data.search_problem.actions)
-        plan, success, *_ = search_with_retry(
-            PlannerMode.MYOPIC, env, problem, params, data.neg_to_pos_mapping,
-            allow_decomposition=False, search_stats=search_stats,
-        )
-        if not success:
+        cost = _task_cost(env, data, goal, filtering, search_stats)
+        if cost is None:
             return -1, None
-        cost = 0.0
-        for action in plan:
-            cost += get_action_cost(action)
         task_costs.append(cost)
         expected_cost += prob * cost
     return expected_cost, task_costs
+
+
+def _task_cost(
+    env: KitchenProcTHOREnvironment, data: ExperimentData, goal: Goal,
+    relaxed_plan_filtering: bool, search_stats: list[SearchStats] | None = None,
+) -> float | None:
+    """
+    One task's label cost (see _expected_task_cost); None if it can't be solved.
+    A single A* search from env's state for the whole task: with
+    relaxed_plan_filtering, first over the task's relaxed-plan actions, then over
+    the full problem if that fails (see planner.astar_search); without, over the
+    full problem only. Fresh planner parameters each time, so it doesn't depend on
+    earlier searches.
+    """
+    params = PlannerConfig(
+        False, data.planner_parameters.heuristic_fn, 1,
+        relaxed_plan_filtering=relaxed_plan_filtering,
+    )
+    problem = InterruptionSearchProblem(goal, data.search_problem.actions)
+    stats = SearchStats()
+    plan, _, success, _ = astar_search(
+        (planning_state(env.state, data.neg_to_pos_mapping), None), problem, params, stats=stats
+    )
+    if search_stats is not None:
+        search_stats.append(stats)
+    if not success:
+        return None
+    cost = 0.0
+    for action in plan:
+        cost += get_action_cost(action)
+    return cost
+
+
+def _is_audited(scene_seed: int, file_counter: int) -> bool:
+    """Whether this datum's labels are audited: a fixed, seeded LABEL_AUDIT_FRACTION."""
+    draw = random.Random(_stable_hash([DATA_GENERATION_SEED, "audit", scene_seed, file_counter]))
+    return draw.random() < LABEL_AUDIT_FRACTION
+
+
+def _audit_labels(
+    env: KitchenProcTHOREnvironment, data: ExperimentData, task_costs: list[float],
+    scene_seed: int, scene_key: int, file_counter: int,
+) -> None:
+    """
+    Recomputes each task's cost without relaxed-plan filtering and records both,
+    one CSV row per task: file_counter, task, filtered_cost, unfiltered_cost
+    (empty if unsolvable within the budget). Logs a line if any differ.
+    """
+    assert data.search_problem.interrupting_task_dist is not None
+    goals, _ = data.search_problem.interrupting_task_dist
+    rows, differing = [], []
+    for goal, filtered_cost in zip(goals, task_costs):
+        unfiltered_cost = _task_cost(env, data, goal, relaxed_plan_filtering=False)
+        rows.append((file_counter, str(goal), filtered_cost, unfiltered_cost))
+        if unfiltered_cost is None or abs(filtered_cost - unfiltered_cost) > 1e-9:
+            differing.append((goal, filtered_cost, unfiltered_cost))
+    path = _csv_path("label_audit", scene_seed, scene_key)
+    write_header = not path.exists()
+    with open(path, "a", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        if write_header:
+            writer.writerow(["file_counter", "task", "filtered_cost", "unfiltered_cost"])
+        for counter, task, filtered, unfiltered in rows:
+            writer.writerow(
+                [counter, task, repr(filtered), "" if unfiltered is None else repr(unfiltered)]
+            )
+    if differing:
+        print(
+            f"[scene {scene_seed}] audit datum {file_counter}: {len(differing)}/{len(rows)} task "
+            f"cost(s) differ without filtering: "
+            + "; ".join(f"{goal} {f:.2f} vs {u if u is None else round(u, 2)}"
+                        for goal, f, u in differing),
+            flush=True,
+        )
 
 
 def _log_slow_datum(
@@ -656,10 +756,9 @@ def _log_slow_datum(
             f"({largest.fraction:.0%}) for {largest.goal}; "
             f"all {len(search_stats)} searches {expanded}/{budget} ({expanded / budget:.0%})"
         )
-        retries = [stats for stats in search_stats if stats.filtered]
-        if retries:
-            solved = sum(stats.success for stats in retries)
-            line += f"; {len(retries)} retried over goal objects, {solved} solved"
+        narrowed = sum(stats.relaxed_plan_actions > 0 for stats in search_stats)
+        if narrowed:
+            line += f"; {narrowed} solved over their relaxed-plan actions alone"
     print(line, flush=True)
 
 
@@ -747,6 +846,12 @@ def _record_datum(
         _log_slow_datum(scene_seed, file_counter, elapsed, expected_value != -1, search_stats)
     if expected_value == -1:
         return False
+    if (
+        LABEL_AUDIT_FRACTION > 0 and data.planner_parameters.relaxed_plan_filtering
+        and _is_audited(scene_seed, file_counter)
+    ):
+        assert task_costs is not None
+        _audit_labels(env, data, task_costs, scene_seed, scene_key, file_counter)
     write_datum_to_file(
         scene_seed, scene_key, (env.scene.scene_graph, expected_value), file_counter
     )

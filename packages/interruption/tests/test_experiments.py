@@ -293,8 +293,10 @@ def test_get_planner_config_selects_fields_per_mode(
     assert result.current_task_reward == 0
 
     assert result.heuristic_fn == FFHeuristic(multiplier=1, weights=expects_weights)
-    # narrowing to the task's relaxed plan is for myopic search only
-    assert result.relaxed_plan_filtering == (RELAXED_PLAN_FILTERING and mode == PlannerMode.MYOPIC)
+    # narrowing to the task's relaxed plan: myopic search and the anticipatory planner
+    assert result.relaxed_plan_filtering == (
+        RELAXED_PLAN_FILTERING and mode in (PlannerMode.MYOPIC, PlannerMode.ANTICIPATORY_PLANNING)
+    )
 
 
 def test_get_planner_config_myopic_interruption_prob_fn_is_ignored(mock_gcn):

@@ -833,14 +833,14 @@ def test_blocking_clean_ups_dont_count_towards_an_actions_cost():
 
 
 def test_a_plan_starts_without_blocking_facts():
-    from interruption.planning_framework import _planning_state
+    from interruption.planning_framework import planning_state
     from railroad.core import get_action_by_name
 
     env = _blocking_two_table_env()
     env.act(get_action_by_name(env.get_actions(), "move robot1 countertop_1 diningtable_6"))
     assert F("just-moved robot1") in env.state.fluents and env.state.upcoming_effects
 
-    start = _planning_state(env.state, {})
+    start = planning_state(env.state, {})
 
     assert not any(f.name == "just-moved" for f in start.fluents)
     assert not start.upcoming_effects

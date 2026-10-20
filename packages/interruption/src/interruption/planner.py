@@ -66,6 +66,10 @@ class PlannerConfig:
     # goal uses, falling back to the full problem if that fails (see
     # relaxed_plan_problem)
     relaxed_plan_filtering: bool = False
+    # interruption-aware planners: search first over the current task's relaxed
+    # plan plus a halo of nearby objects future tasks need and where they need
+    # them, falling back to the full problem (see planning_framework.interruption_halo)
+    interruption_halo_filtering: bool = False
 
     def get_cost_formulation(self) -> CostFormulation:
         """The cost formulation the search uses."""
@@ -497,7 +501,7 @@ def astar_search(
 
 
 def relaxed_plan_problem(
-    state: State, problem: InterruptionSearchProblem
+    state: State, problem: InterruptionSearchProblem, also_keep: frozenset[str] = frozenset()
 ) -> InterruptionSearchProblem | None:
     """
     The problem narrowed to what its relaxed plan uses: FF's relaxed plan for the
@@ -508,7 +512,8 @@ def relaxed_plan_problem(
     only actions whose arguments are all among those, or among what a robot is
     holding, are kept. Held objects are added because the relaxation ignores a
     full hand, so its plan never puts down what the robot holds - which may be
-    needed before anything else can be picked up. None when there's nothing to
+    needed before anything else can be picked up. also_keep adds further names
+    (objects, locations, categories) to keep. None when there's nothing to
     narrow: the goal holds, is unreachable, or every action survives.
     """
     actions = problem.actions
@@ -521,6 +526,7 @@ def relaxed_plan_problem(
     keep |= {
         arg for fluent in state.fluents if fluent.name.startswith("holding") for arg in fluent.args
     }
+    keep |= also_keep
     kept = [action for action in actions if keep.issuperset(action.name.split(" ")[1:])]
     if len(kept) == len(actions):
         return None
@@ -541,7 +547,8 @@ def _cpp_search_applies(search_params: PlannerConfig) -> bool:
 
 # (id of an action list, relevant predicates) -> (that list, projected actions, costs);
 # searches reuse one action list many times, so its projection is built once
-_PROJECTION_CACHE: dict[tuple[int, frozenset[str]], tuple[list[Action], list[Action], list[float]]] = {}
+_CachedProjection = tuple[list[Action], list[Action], list[float]]
+_PROJECTION_CACHE: dict[tuple[int, frozenset[str]], _CachedProjection] = {}
 _PROJECTION_CACHE_SIZE = 8
 
 
