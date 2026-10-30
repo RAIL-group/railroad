@@ -5,10 +5,12 @@ from typing import Any
 import pytest
 
 import interruption.planners as planners_module
-from interruption.cost_formulations import NO_INTERRUPTION, DefaultFormulation
+from interruption.cost_formulations import (
+    NO_INTERRUPTION, DefaultFormulation, TerminalValueFormulation,
+)
 from interruption.planner import FFHeuristic, PlannerConfig
 from interruption.planners import (
-    AnticipatoryPlanner, InterruptionAPPlanner, InterruptionPlanner, MyopicPlanner,
+    AnticipatoryPlanner, AnticipatorySearchPlanner, InterruptionAPPlanner, MyopicPlanner,
 )
 from railroad.core import Fluent as F, LiteralGoal, State
 from railroad.operators.core import construct_move_operator, construct_pick_operator
@@ -47,13 +49,10 @@ def test_anticipatory_planner_config_is_myopic_with_the_value_model():
     assert config.relaxed_plan_filtering is True
 
 
-@pytest.mark.parametrize("planner_cls, weights", [
-    (InterruptionPlanner, None), (InterruptionAPPlanner, (1, 1)),
-])
-def test_interruption_planner_config(planner_cls, weights):
-    config = planner_cls(ev_model=_ev, interruption_prob_fn=0.1).config
+def test_interruption_ap_planner_config():
+    config = InterruptionAPPlanner(ev_model=_ev, interruption_prob_fn=0.1).config
 
-    assert config.heuristic_fn == FFHeuristic(multiplier=1, weights=weights)
+    assert config.heuristic_fn == FFHeuristic(multiplier=1)
     assert config.cost_formulation == DefaultFormulation(discount=NO_INTERRUPTION)
     assert config.planner_interruption_prob_fn == 0.1
     assert config.interruption_value_fn is _ev
@@ -64,9 +63,9 @@ def test_interruption_planner_config(planner_cls, weights):
 
 
 def test_a_planner_variant_is_a_constructor_argument():
-    config = InterruptionAPPlanner(ev_model=_ev, discount=1.0, halo_filtering=True).config
+    config = InterruptionAPPlanner(ev_model=_ev, discount=0.95, halo_filtering=True).config
 
-    assert config.cost_formulation == DefaultFormulation(discount=1.0)
+    assert config.cost_formulation == DefaultFormulation(discount=0.95)
     assert config.interruption_halo_filtering is True
 
 
@@ -114,11 +113,11 @@ def test_myopic_planner_searches_without_a_scene_graph(captured_searches):
     assert call.config == MyopicPlanner().config
 
 
-def test_interruption_planner_defaults_to_the_problems_arrival_model(captured_searches):
+def test_interruption_ap_planner_defaults_to_the_problems_arrival_model(captured_searches):
     problem: Any = SimpleNamespace(interruption_prob_fn=0.3)
 
-    InterruptionPlanner(ev_model=_ev).plan(_environment(), problem, {})
-    InterruptionPlanner(ev_model=_ev, interruption_prob_fn=0.1).plan(_environment(), problem, {})
+    InterruptionAPPlanner(ev_model=_ev).plan(_environment(), problem, {})
+    InterruptionAPPlanner(ev_model=_ev, interruption_prob_fn=0.1).plan(_environment(), problem, {})
 
     assert [call.config.planner_interruption_prob_fn for call in captured_searches] == [0.3, 0.1]
     assert all(call.scene_graph == "graph" for call in captured_searches)
@@ -148,14 +147,6 @@ def _move_problem():
     return state, LiteralGoal(F("at r1 target")), actions
 
 
-def test_interruption_planner_heuristic_ignores_the_value():
-    state, goal, actions = _move_problem()
-    heuristic_fn = InterruptionPlanner(ev_model=_ev).config.heuristic_fn
-    assert isinstance(heuristic_fn, FFHeuristic)
-
-    assert heuristic_fn(state, goal, actions, 999.0) == 5.0
-
-
 def test_interruption_ap_planner_heuristic_adds_the_value():
     state, goal, actions = _move_problem()
     heuristic_fn = InterruptionAPPlanner(ev_model=_ev).config.heuristic_fn
@@ -175,16 +166,11 @@ def _move_and_pick_problem():
     return state, LiteralGoal(F("holding r1 box")), actions
 
 
-def test_ff_heuristic_without_weights_ignores_the_value():
+def test_ff_heuristic_adds_the_value():
     state, goal, actions = _move_and_pick_problem()
 
-    assert FFHeuristic()(state, goal, actions, 1000.0) == 7.0
-
-
-def test_ff_heuristic_with_weights_adds_the_value():
-    state, goal, actions = _move_and_pick_problem()
-
-    assert FFHeuristic(weights=(1, 1))(state, goal, actions, 3.5) == pytest.approx(10.5)
+    assert FFHeuristic()(state, goal, actions) == 7.0
+    assert FFHeuristic()(state, goal, actions, 3.5) == pytest.approx(10.5)
 
 
 @pytest.mark.parametrize("v_ap", [0.0, -2.0, 100.0])
@@ -192,11 +178,71 @@ def test_ff_heuristic_adds_the_value_unscaled_and_unclamped(v_ap):
     state, goal, actions = _move_and_pick_problem()
     base = FFHeuristic()(state, goal, actions)
 
-    assert FFHeuristic(weights=(1, 1))(state, goal, actions, v_ap) == pytest.approx(base + v_ap)
+    assert FFHeuristic()(state, goal, actions, v_ap) == pytest.approx(base + v_ap)
 
 
 def test_ff_heuristic_multiplier_scales_only_the_ff_estimate():
     state, goal, actions = _move_and_pick_problem()
 
     assert FFHeuristic(multiplier=2)(state, goal, actions) == 14.0
-    assert FFHeuristic(multiplier=2, weights=(1, 1))(state, goal, actions, 3.0) == 17.0
+    assert FFHeuristic(multiplier=2)(state, goal, actions, 3.0) == 17.0
+
+
+def test_anticipatory_search_planner_config():
+    config = AnticipatorySearchPlanner(ev_model=_ev).config
+
+    # interruption-AP's search and heuristic, with the terminal-value objective
+    assert config.heuristic_fn == FFHeuristic(multiplier=1)
+    assert config.cost_formulation == TerminalValueFormulation()
+    assert config.planner_interruption_prob_fn == 0.0
+    assert config.interruption_value_fn is _ev
+    assert config.relaxed_plan_filtering is False
+    assert config.interruption_halo_filtering is False
+    assert AnticipatorySearchPlanner(ev_model=_ev, h_multiplier=3).myopic() == MyopicPlanner(
+        h_multiplier=3
+    )
+
+
+class _StubSceneGraph(SimpleNamespace):
+    """Stands in for a SceneGraph: carries the fluents of the state it describes."""
+
+    def shallow_copy(self):
+        return _StubSceneGraph(fluents=self.fluents)
+
+
+def test_anticipatory_search_minimizes_plan_cost_plus_the_goal_states_value(monkeypatch):
+    """
+    Reaching the target directly costs 4; picking up the book first costs 3 more.
+    The value of finishing without the book is 10, with it 0: the cheapest plan
+    ends at 4 + 10 = 14, the anticipatory one at 3 + 4 + 0 = 7.
+    """
+    import interruption.planner as planner_module
+    from interruption.planner import InterruptionSearchProblem, astar_search
+
+    monkeypatch.setattr(
+        planner_module, "get_updated_scene_graph",
+        lambda sg, state, action: setattr(sg, "fluents", frozenset(state.fluents)),
+    )
+    objects_by_type = {"robot": {"robot1"}, "location": {"kitchen", "target"}, "object": {"book"}}
+    actions = [
+        *construct_move_operator(4.0).instantiate(objects_by_type),
+        *construct_pick_operator(3.0).instantiate(objects_by_type),
+    ]
+    state = State(time=0, fluents={
+        F("at robot1 kitchen"), F("free robot1"), F("at book kitchen"), ~F("hand-full robot1"),
+    })
+    problem = InterruptionSearchProblem(LiteralGoal(F("at robot1 target")), actions)
+
+    def value(scene_graph) -> float:
+        return 0.0 if F("holding robot1 book") in scene_graph.fluents else 10.0
+
+    def plan(config, scene_graph):
+        actions_taken, _, success, _ = astar_search((state, scene_graph), problem, config)
+        assert success
+        return [action.name for action in actions_taken]
+
+    graph = _StubSceneGraph(fluents=frozenset(state.fluents))
+    assert plan(AnticipatorySearchPlanner(ev_model=value).config, graph) == [
+        "pick robot1 kitchen book", "move robot1 kitchen target",
+    ]
+    assert plan(MyopicPlanner().config, None) == ["move robot1 kitchen target"]

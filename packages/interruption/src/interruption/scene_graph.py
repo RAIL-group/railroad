@@ -9,7 +9,6 @@ from railroad.core import (
     Action,
     State,
 )
-from railroad.core import Fluent as F
 from railroad.environment.procthor.scenegraph import SceneGraph
 
 
@@ -54,22 +53,14 @@ def _update_held_objects_position(
     Helper function for updating the position attribute of object nodes
     that are currently held by the robot. `robot_name` is the environment's
     name for the robot, as the holding-in-* fluents use it (e.g. "robot1"); the
-    scene graph's own node for the robot is named differently ("robot").
+    scene graph's own node for the robot is named differently ("robot"). An
+    object's name ends in its node index (e.g. spoon_14), as in
+    get_updated_scene_graph.
     """
-    for idx in scene_graph.object_indices:
-        obj = (
-            scene_graph.get_node_name_by_idx(idx) +
-            f"_{idx}"
-        )
-        robot_holding_object = (
-            F(f"holding-in-left {robot_name} {obj}") in state.fluents or
-            F(f"holding-in-right {robot_name} {obj}") in state.fluents
-        )
-
-        if robot_holding_object:
-            scene_graph.nodes[idx]["position"] = (
-                scene_graph.nodes[robot_idx]["position"]
-            )
+    for fluent in state.fluents:
+        if fluent.name in ("holding-in-left", "holding-in-right") and fluent.args[0] == robot_name:
+            obj_idx = int(fluent.args[1].split("_")[-1])
+            scene_graph.nodes[obj_idx]["position"] = scene_graph.nodes[robot_idx]["position"]
 
 
 def get_object_container_slots(scene_graph: SceneGraph) -> list[int]:

@@ -2,7 +2,7 @@
 A module for keeping track of experiment related user-defined constants.
 
 Planner settings aren't here: they're arguments of the planners in planners.py
-(e.g. InterruptionAPPlanner(discount=1.0)). The failure cost is
+(e.g. AnticipatoryPlanner(ev_model=..., num_samples=40)). The failure cost is
 Scenario.failure_cost (scenarios.py).
 """
 import os

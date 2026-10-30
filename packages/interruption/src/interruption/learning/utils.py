@@ -1,3 +1,4 @@
+import math
 from typing import Any
 from interruption.learning.data import CSVPickleDataset
 from torch.utils.data import Subset, random_split
@@ -58,18 +59,9 @@ def compute_edge_features(
     into the format expected by a GCN.
     """
     # euclidean distance between source node and dest node
-    edge_costs = []
-    src_indices = []
-    dest_indices = []
-    for (src_idx, dest_idx) in edges:
-        edge_costs.append(np.linalg.norm(
-            [
-                x1 - x2
-                for x1, x2 in zip(nodes[src_idx]["position"], nodes[dest_idx]["position"])
-            ]
-        ))
-        src_indices.append(src_idx)
-        dest_indices.append(dest_idx)
+    edge_costs = [math.dist(nodes[src]["position"], nodes[dest]["position"]) for src, dest in edges]
+    src_indices = [src for src, _ in edges]
+    dest_indices = [dest for _, dest in edges]
 
     # scale distances
     # 600 because engineering things

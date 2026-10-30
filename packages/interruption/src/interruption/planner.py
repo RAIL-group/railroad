@@ -66,20 +66,15 @@ class PlannerConfig:
 @dataclass(frozen=True)
 class FFHeuristic:
     """
-    h = multiplier * ff_heuristic(LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF), plus the
-    learned value v_ap when weights are given. Being a plain object rather than a
+    h = multiplier * ff_heuristic(LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF) + v_ap, the
+    learned value of the state, which astar_search passes only for a search with
+    an interruption_value_fn (0 otherwise). Being a plain object rather than a
     closure lets astar_search hand it to the C++ search.
     """
     multiplier: float = 1
-    weights: tuple[float, float] | None = None
 
     def __call__(self, state: State, goal: Goal, actions: list[Action], v_ap: float = 0) -> float:
         h_val = ff_heuristic(state, goal, actions, LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF)
-        if self.weights is None:
-            return self.multiplier * h_val
-        ff_weight, v_ap_weight = self.weights
-        # NOTE: temporary fix: only unit weights are supported
-        assert ff_weight == 1 and v_ap_weight == 1
         return self.multiplier * h_val + v_ap
 
 
@@ -345,7 +340,6 @@ def astar_search(
                 state=initial_state[0],
                 action=None,
                 discount_factor=1,
-                # interruption_probs=[],
                 scene_graph=initial_state[1],
                 key=shared_key(initial_state[0]),
             ), -1, 0

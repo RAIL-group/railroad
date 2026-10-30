@@ -128,7 +128,7 @@ class GCNEvalFn:
         if gcn_data.x is not None:
             gcn_data.batch = torch.zeros(gcn_data.x.size(0), dtype=torch.long)
 
-            with torch.no_grad():
+            with torch.inference_mode():
                 out = self._model.forward(convert_batch_format(gcn_data), self._device)
                 out = out[:, 0].detach().cpu().numpy()
                 return out[0]
@@ -150,7 +150,7 @@ class GCNEvalFn:
 
         indices, valid_items = zip(*valid)
         batch = Batch.from_data_list(list(valid_items))
-        with torch.no_grad():
+        with torch.inference_mode():
             out = self._model.forward(convert_batch_format(batch), self._device)
             out = out[:, 0].detach().cpu().numpy()
         for idx, value in zip(indices, out):

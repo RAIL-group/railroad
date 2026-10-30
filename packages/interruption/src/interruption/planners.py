@@ -7,7 +7,8 @@ one planner variant, so a variant is just a constructor argument:
         "myopic": MyopicPlanner(),
         "ap": AnticipatoryPlanner(ev_model=ev_model, num_samples=40),
         "int_ap": InterruptionAPPlanner(ev_model=ev_model),
-        "int_ap_d1": InterruptionAPPlanner(ev_model=ev_model, discount=1.0),
+        "int_ap_halo": InterruptionAPPlanner(ev_model=ev_model, halo_filtering=True),
+        "ap_search": AnticipatorySearchPlanner(ev_model=ev_model),
     }
 
 Pass one to run_experiment, or to search_with_retry / search_without_retry; they
@@ -17,13 +18,16 @@ from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
+import torch
+
 from railroad.core import Action, Fluent as F
 from railroad.environment.procthor.scenegraph import SceneGraph
 
-from .cost_formulations import NO_INTERRUPTION, DefaultFormulation, Discount
+from .cost_formulations import (
+    NO_INTERRUPTION, DefaultFormulation, Discount, TerminalValueFormulation,
+)
 from .environments import KitchenProcTHOREnvironment
 from .learning.models.gcn import AnticipateGCN
-from .learning.utils import get_torch_device
 from .planner import (
     FFHeuristic, InterruptionSearchProblem, PlannerConfig, SearchStats, astar_search,
 )
@@ -31,8 +35,12 @@ from .planning_framework import _halo_problem, anticipatory_planner, planning_st
 
 
 def load_ev_model(model_path: Path | str) -> Callable[[SceneGraph], float]:
-    """The learned expected-value model (an AnticipateGCN) saved at model_path."""
-    return AnticipateGCN.get_net_eval_fn(model_path, get_torch_device())
+    """
+    The learned expected-value model (an AnticipateGCN) saved at model_path, run
+    on the CPU: planning evaluates small scene graphs a few at a time, which the
+    CPU does faster than a GPU (about 3x per graph on an Apple MPS GPU).
+    """
+    return AnticipateGCN.get_net_eval_fn(model_path, torch.device("cpu"))
 
 
 def _batch_fn(ev_model: Callable[[SceneGraph], float] | None):
@@ -125,10 +133,11 @@ class AnticipatoryPlanner:
 
 
 @dataclass(frozen=True, kw_only=True)
-class InterruptionPlanner:
+class InterruptionAPPlanner:
     """
     Interruption-aware A*: each step's cost includes the chance an interrupting
-    task arrives during it times ev_model's value of the state it leads to.
+    task arrives during it times ev_model's value of the state it leads to, and
+    the heuristic adds that value to the FF estimate (see planner.FFHeuristic).
     """
     ev_model: Callable[[SceneGraph], float]
     # the planner's task-arrival model: a probability per action, or a function
@@ -138,9 +147,6 @@ class InterruptionPlanner:
     # it; a number is a fixed discount factor (1.0: undiscounted)
     discount: Discount = NO_INTERRUPTION
     h_multiplier: float = 1
-    # (FF weight, value weight) to add the value of the state to the heuristic;
-    # None leaves it out
-    h_weights: tuple[float, float] | None = None
     # search first over the task's relaxed plan plus a halo of nearby objects
     # future tasks need (planning_framework.interruption_halo)
     halo_filtering: bool = False
@@ -148,7 +154,7 @@ class InterruptionPlanner:
 
     def __post_init__(self):
         object.__setattr__(self, "config", PlannerConfig(
-            heuristic_fn=FFHeuristic(multiplier=self.h_multiplier, weights=self.h_weights),
+            heuristic_fn=FFHeuristic(multiplier=self.h_multiplier),
             cost_formulation=DefaultFormulation(discount=self.discount),
             planner_interruption_prob_fn=self.interruption_prob_fn,
             interruption_value_fn=self.ev_model,
@@ -168,28 +174,80 @@ class InterruptionPlanner:
             config = replace(
                 config, planner_interruption_prob_fn=search_problem.interruption_prob_fn
             )
-        initial_state = planning_state(environment.state, neg_to_pos_mapping)
-        state_scene_graph = (initial_state, environment.scene.scene_graph)
-
-        plan: list[Action] = []
-        success = False
-        if config.interruption_halo_filtering:
-            narrowed = _halo_problem(environment, search_problem, config, initial_state)
-            if narrowed is not None:
-                plan, _, success, _ = astar_search(
-                    state_scene_graph, narrowed, config, stats=stats
-                )
-        if not success:  # no halo, or the narrowed problem failed: solve it all
-            plan, _, success, _ = astar_search(
-                state_scene_graph, search_problem, config, stats=stats
-            )
-        return plan, success
+        return _value_search(config, environment, search_problem, neg_to_pos_mapping, stats)
 
     def myopic(self) -> MyopicPlanner:
         return MyopicPlanner(h_multiplier=self.h_multiplier)
 
 
 @dataclass(frozen=True, kw_only=True)
-class InterruptionAPPlanner(InterruptionPlanner):
-    """InterruptionPlanner with the state's value added to the FF heuristic."""
-    h_weights: tuple[float, float] | None = (1, 1)
+class AnticipatorySearchPlanner:
+    """
+    The anticipatory planning objective without sampling: one A* search for the
+    plan minimizing its cost plus ev_model's value of the state the current task
+    ends in,
+
+        V(s) = r(s, a) + V(s'),   V(s_goal) = V_AP(s_goal),
+
+    so tasks are assumed never to arrive mid-task (see
+    cost_formulations.TerminalValueFormulation). Everything else is
+    InterruptionAPPlanner's: the same search and heuristic, FF(s) + V_AP(s),
+    which is exactly V_AP(s) once the task is done, ranking finished plans by
+    cost + V_AP. Short of the goal, V_AP(s) stands in for the value of the goal
+    state ahead.
+    """
+    ev_model: Callable[[SceneGraph], float]
+    h_multiplier: float = 1
+    # search first over the task's relaxed plan plus a halo of nearby objects
+    # future tasks need (planning_framework.interruption_halo)
+    halo_filtering: bool = False
+    config: PlannerConfig = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self):
+        object.__setattr__(self, "config", PlannerConfig(
+            heuristic_fn=FFHeuristic(multiplier=self.h_multiplier),
+            # V(s) = r(s, a) + V(s'): no p * V_AP(s') step term, no discount
+            cost_formulation=TerminalValueFormulation(),
+            # no task arrives mid-task
+            planner_interruption_prob_fn=0.0,
+            interruption_value_fn=self.ev_model,
+            interruption_value_batch_fn=_batch_fn(self.ev_model),
+            interruption_halo_filtering=self.halo_filtering,
+        ))
+
+    def plan(
+        self,
+        environment: KitchenProcTHOREnvironment,
+        search_problem: InterruptionSearchProblem,
+        neg_to_pos_mapping: dict[F, F],
+        stats: SearchStats | None = None,
+    ) -> tuple[list[Action], bool]:
+        return _value_search(self.config, environment, search_problem, neg_to_pos_mapping, stats)
+
+    def myopic(self) -> MyopicPlanner:
+        return MyopicPlanner(h_multiplier=self.h_multiplier)
+
+
+def _value_search(
+    config: PlannerConfig,
+    environment: KitchenProcTHOREnvironment,
+    search_problem: InterruptionSearchProblem,
+    neg_to_pos_mapping: dict[F, F],
+    stats: SearchStats | None,
+) -> tuple[list[Action], bool]:
+    """
+    A* with the learned value over the scene graph: first over the task's halo
+    problem when config asks for it, then over the whole problem if that fails.
+    """
+    initial_state = planning_state(environment.state, neg_to_pos_mapping)
+    state_scene_graph = (initial_state, environment.scene.scene_graph)
+
+    plan: list[Action] = []
+    success = False
+    if config.interruption_halo_filtering:
+        narrowed = _halo_problem(environment, search_problem, config, initial_state)
+        if narrowed is not None:
+            plan, _, success, _ = astar_search(state_scene_graph, narrowed, config, stats=stats)
+    if not success:  # no halo, or the narrowed problem failed: solve it all
+        plan, _, success, _ = astar_search(state_scene_graph, search_problem, config, stats=stats)
+    return plan, success

@@ -60,7 +60,7 @@ CONFIGS = {
         planner_interruption_prob_fn=ARRIVAL_FN,
     ),
     "fixed_discount_with_reward": dict(
-        heuristic_fn=FFHeuristic(weights=(1, 1)),
+        heuristic_fn=FFHeuristic(),
         cost_formulation=DefaultFormulation(0.95, current_task_reward=5),
         planner_interruption_prob_fn=ARRIVAL_FN,
     ),

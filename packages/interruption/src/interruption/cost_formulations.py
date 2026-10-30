@@ -83,3 +83,27 @@ class DefaultFormulation:
         return child_discount * (undiscounted_future_cost + self.current_task_reward)
 
 
+@dataclass(frozen=True)
+class TerminalValueFormulation:
+    """
+    The anticipatory planning objective (planners.AnticipatorySearchPlanner): no
+    task arrives mid-task, so the learned value V_AP is charged once, for the
+    state the task ends in, and never per step:
+        gamma_{t+1} = 1
+        g'          = g + c(a)                  V(s) = r(s, a) + V(s')
+        future      = h(s')                     V(s_goal) = V_AP(s_goal)
+    With FFHeuristic, h(s') = FF(s') + V_AP(s'), which is V_AP(s') once the task
+    is done (FF = 0). It is DefaultFormulation(discount=1.0) with no task
+    arrivals (p = 0): InterruptionAPPlanner's objective without its
+    p * V_AP(s') step term.
+    """
+    def child_discount(self, terms: StepTerms) -> float:
+        return 1.0
+
+    def accumulated_cost(self, terms: StepTerms) -> float:
+        return terms.parent_cost + terms.action_cost
+
+    def estimated_future_cost(
+        self, terms: StepTerms, child_discount: float, undiscounted_future_cost: float
+    ) -> float:
+        return undiscounted_future_cost

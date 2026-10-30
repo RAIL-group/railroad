@@ -2,7 +2,8 @@
 Scenario testing: compares the total task-sequence cost of the plans executed by
   - the interruption-aware anticipatory planner (InterruptionAPPlanner),
   - the sampling-based vanilla anticipatory planner (AnticipatoryPlanner), and
-  - InterruptionAPPlanner with a fixed discount factor of 1,
+  - the vanilla anticipatory objective searched without sampling
+    (AnticipatorySearchPlanner),
 on the same scenarios (scene, starting task, task sequence, arrival seeds).
 """
 from collections.abc import Callable
@@ -13,7 +14,9 @@ from interruption.constants import (
 )
 from interruption.cost_formulations import NO_INTERRUPTION
 from interruption.experiments import RunResult, execute
-from interruption.planners import AnticipatoryPlanner, InterruptionAPPlanner, load_ev_model
+from interruption.planners import (
+    AnticipatoryPlanner, AnticipatorySearchPlanner, InterruptionAPPlanner, load_ev_model,
+)
 from interruption.planning_framework import Planner
 from interruption.scenarios import Scenario
 from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
@@ -47,7 +50,7 @@ def make_planners(ev_model: Callable[[SceneGraph], float]) -> dict[str, Planner]
         # interruption-AP planner: by the chance no task arrives during each step
         "interruption_ap": InterruptionAPPlanner(ev_model=ev_model, discount=NO_INTERRUPTION),
         "anticipatory_planning": AnticipatoryPlanner(ev_model=ev_model),
-        "interruption_ap_discount_1": InterruptionAPPlanner(ev_model=ev_model, discount=1.0),
+        "ap_search": AnticipatorySearchPlanner(ev_model=ev_model),
     }
 
 

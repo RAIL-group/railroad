@@ -19,7 +19,8 @@ from ..constants import (
 from ..cost_formulations import NO_INTERRUPTION
 from ..experiments import run_experiment
 from ..planners import (
-    AnticipatoryPlanner, InterruptionAPPlanner, MyopicPlanner, load_ev_model,
+    AnticipatoryPlanner, AnticipatorySearchPlanner, InterruptionAPPlanner, MyopicPlanner,
+    load_ev_model,
 )
 from ..planning_framework import Planner
 from ..scenarios import Scenario
@@ -61,6 +62,10 @@ def _interruption_ap(case: BenchmarkCase) -> Planner:
 
 def _anticipatory(case: BenchmarkCase) -> Planner:
     return AnticipatoryPlanner(ev_model=load_ev_model(MODEL_PATH))
+
+
+def _anticipatory_search(case: BenchmarkCase) -> Planner:
+    return AnticipatorySearchPlanner(ev_model=load_ev_model(MODEL_PATH))
 
 
 def _myopic(case: BenchmarkCase) -> Planner:
@@ -125,3 +130,7 @@ bench_interruption_ap = _register(
 )
 bench_myopic = _register(_myopic, "procthor_myopic", "myopic", "myopic")
 bench_ap = _register(_anticipatory, "procthor_ap", "anticipatory planning", "ap")
+bench_ap_search = _register(
+    _anticipatory_search, "procthor_ap_search", "anticipatory planning (search, no sampling)",
+    "ap_search",
+)

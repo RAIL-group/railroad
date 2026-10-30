@@ -11,7 +11,9 @@ from typing import Any
 import pytest
 
 from interruption import planner as planner_module
-from interruption.cost_formulations import NO_INTERRUPTION, DefaultFormulation, StepTerms
+from interruption.cost_formulations import (
+    NO_INTERRUPTION, DefaultFormulation, StepTerms, TerminalValueFormulation,
+)
 from interruption.planner import (
     FFHeuristic,
     InterruptionSearchProblem,
@@ -86,7 +88,6 @@ ARRIVAL_FN = partial(get_task_arrival_prob, RandomVariableType.CONTINUOUS, -1, 3
 # search without a value function would otherwise run in C++ (test_cpp_astar.py
 # checks the two agree).
 FF = dict(heuristic_fn=FFHeuristic(), use_cpp_search=False)
-FF_EV = dict(heuristic_fn=FFHeuristic(weights=(1, 1)), use_cpp_search=False)
 SCENARIOS: dict[str, dict[str, Any]] = {
     "myopic_constant_h": dict(heuristic_fn=0, cost_formulation=DefaultFormulation(1.0)),
     "myopic_ff": dict(**FF, cost_formulation=DefaultFormulation(1.0)),
@@ -103,15 +104,15 @@ SCENARIOS: dict[str, dict[str, Any]] = {
         planner_interruption_prob_fn=ARRIVAL_FN,
     ),
     "ev_no_batch": dict(
-        **FF_EV, cost_formulation=DefaultFormulation(1.0),
+        **FF, cost_formulation=DefaultFormulation(1.0),
         planner_interruption_prob_fn=ARRIVAL_FN, ev=True,
     ),
     "ev_batch": dict(
-        **FF_EV, cost_formulation=DefaultFormulation(1.0),
+        **FF, cost_formulation=DefaultFormulation(1.0),
         planner_interruption_prob_fn=ARRIVAL_FN, ev=True, batch=True,
     ),
     "ev_batch_int_prob_discount": dict(
-        **FF_EV, cost_formulation=DefaultFormulation(NO_INTERRUPTION),
+        **FF, cost_formulation=DefaultFormulation(NO_INTERRUPTION),
         planner_interruption_prob_fn=0.1, ev=True, batch=True,
     ),
 }
@@ -368,3 +369,35 @@ def test_a_custom_formulation_reaches_both_cost_call_sites(name, monkeypatch):
         assert cost > golden_cost
     # once per child in create_child, plus once per candidate in the pruning step
     assert len(calls) > num_children > 0
+
+
+@pytest.mark.parametrize("interruption_prob", [0.0, 0.3])
+@pytest.mark.parametrize("interrupting_task_ev", [0.0, 12.0])
+def test_terminal_value_steps_cost_only_their_action(interruption_prob, interrupting_task_ev):
+    # V(s) = r(s, a) + V(s'): no p * V_AP(s') term and no discount, whatever p is
+    terms = StepTerms(
+        parent_cost=5.0, parent_discount=1.0, action_cost=4.0,
+        interruption_prob=interruption_prob, interrupting_task_ev=interrupting_task_ev,
+    )
+    formulation = TerminalValueFormulation()
+
+    assert formulation.accumulated_cost(terms) == 9.0
+    assert formulation.child_discount(terms) == 1.0
+    # V_AP enters only through the heuristic: FF(s') + V_AP(s'), V_AP alone at the goal
+    assert formulation.estimated_future_cost(terms, 1.0, 7.0) == 7.0
+
+
+@pytest.mark.parametrize("interrupting_task_ev", [0.0, 12.0])
+def test_terminal_value_is_the_default_formulation_without_task_arrivals(interrupting_task_ev):
+    terms = StepTerms(
+        parent_cost=5.0, parent_discount=1.0, action_cost=4.0,
+        interruption_prob=0.0, interrupting_task_ev=interrupting_task_ev,
+    )
+    terminal, default = TerminalValueFormulation(), DefaultFormulation(discount=1.0)
+
+    assert terminal.accumulated_cost(terms) == default.accumulated_cost(terms)
+    assert terminal.child_discount(terms) == default.child_discount(terms)
+    assert terminal.estimated_future_cost(terms, 1.0, 7.0) == default.estimated_future_cost(
+        terms, 1.0, 7.0
+    )
+
