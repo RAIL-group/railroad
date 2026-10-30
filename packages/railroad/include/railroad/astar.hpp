@@ -36,8 +36,10 @@ namespace railroad {
 // where p is the action's interruption probability. With p = 0, a fixed
 // discount of 1 and no task reward this is plain A* on summed action costs.
 // Ties are broken by h, then by insertion order. States are identified by
-// their fluents alone (not time or queued effects), as the expanded set,
-// the duplicate-pruning table and the heuristic cache all key on them.
+// their fluents and their queued effects at their times relative to now (see
+// state_key), as the expanded set, the duplicate-pruning table and the
+// heuristic cache all key on them: two states differing only in the clock are
+// one state, but not two waiting different times for a queued effect.
 
 struct AStarParams {
   int num_steps = 10000;
@@ -68,38 +70,12 @@ struct AStarResult {
 
 namespace astar_detail {
 
-// A state's fluents as a hashable key. The fluent set lives in a node (or in
-// a successor being examined), so a key is just its hash plus a pointer.
-struct FluentKey {
-  std::size_t hash;
-  const std::unordered_set<Fluent> *fluents;
-};
-
-inline std::size_t hash_fluents(const std::unordered_set<Fluent> &fluents) {
-  std::size_t h = fluents.size();
-  std::size_t mixed = 0;
-  for (const auto &f : fluents) {
-    std::size_t fh = f.hash();
-    hash_combine(fh, 0x9e3779b97f4a7c15ULL);
-    mixed ^= fh; // order-independent
-  }
-  hash_combine(h, mixed);
-  return h;
+// A state's identity in the search: the hash of its zero-time copy, i.e. of
+// its fluents and queued effects relative to now (State compares by hash), as
+// the Python search's state_key has it.
+inline std::size_t state_key(const State &state) {
+  return state.copy_and_zero_out_time().hash();
 }
-
-struct FluentKeyHash {
-  std::size_t operator()(const FluentKey &k) const noexcept { return k.hash; }
-};
-
-struct FluentKeyEq {
-  bool operator()(const FluentKey &a, const FluentKey &b) const noexcept {
-    return a.hash == b.hash && (a.fluents == b.fluents || *a.fluents == *b.fluents);
-  }
-};
-
-template <typename V>
-using FluentMap = std::unordered_map<FluentKey, V, FluentKeyHash, FluentKeyEq>;
-using FluentKeySet = std::unordered_set<FluentKey, FluentKeyHash, FluentKeyEq>;
 
 struct Node {
   State state;
@@ -109,7 +85,7 @@ struct Node {
   double value;         // g + discounted future estimate: the priority
   double h;             // undiscounted heuristic: the first tie-break
   double discount;      // running discount applied to the next step
-  std::size_t key_hash;
+  std::size_t key;      // state_key(state)
 };
 
 struct QueueEntry {
@@ -183,16 +159,15 @@ inline AStarResult astar(const State &root_state,
                         params.lambda_max, params.lambda_ff, params.at_implies_found);
   };
 
-  std::deque<Node> nodes; // stable addresses: keys point into node states
-  FluentKeySet expanded;
-  FluentMap<double> best_cost;
-  FluentMap<double> heuristic_cache;
+  std::deque<Node> nodes;
+  std::unordered_set<std::size_t> expanded;
+  std::unordered_map<std::size_t, double> best_cost;
+  std::unordered_map<std::size_t, double> heuristic_cache;
   std::priority_queue<QueueEntry> frontier;
   long insertion_order = 1;
   AStarResult result;
 
-  nodes.push_back(Node{root_state, -1, 0, 0.0, 0.0, 0.0, 1.0,
-                       hash_fluents(root_state.fluents())});
+  nodes.push_back(Node{root_state, -1, 0, 0.0, 0.0, 0.0, 1.0, state_key(root_state)});
   frontier.push(QueueEntry{0.0, -1.0, 0, 0});
 
   while (result.expanded < params.num_steps && !frontier.empty()) {
@@ -211,9 +186,8 @@ inline AStarResult astar(const State &root_state,
       return result;
     }
 
-    const FluentKey current_key{nodes[current].key_hash, &nodes[current].state.fluents()};
-    if (expanded.count(current_key)) continue;
-    expanded.insert(current_key);
+    if (expanded.count(nodes[current].key)) continue;
+    expanded.insert(nodes[current].key);
     ++result.expanded;
 
     // a reference stays valid while children are pushed: deque::push_back
@@ -232,30 +206,24 @@ inline AStarResult astar(const State &root_state,
       ++result.generated;
 
       const std::size_t index = index_of.at(action);
-      const FluentKey probe{hash_fluents(next_state.fluents()), &next_state.fluents()};
-      if (expanded.count(probe)) continue;
+      const std::size_t key = state_key(next_state);
+      if (expanded.count(key)) continue;
 
       const double p = interruption_probs[index];
       const double cost = parent_cost + parent_discount * (action_costs[index] + 0.0 * p);
-      auto best = best_cost.find(probe);
+      auto best = best_cost.find(key);
       if (best != best_cost.end() && cost >= best->second) continue;
 
-      nodes.push_back(Node{std::move(next_state), current, index, cost, 0.0, 0.0, 0.0,
-                           probe.hash});
+      nodes.push_back(Node{std::move(next_state), current, index, cost, 0.0, 0.0, 0.0, key});
       Node &child = nodes.back();
-      const FluentKey child_key{child.key_hash, &child.state.fluents()};
-      if (best != best_cost.end()) {
-        best->second = cost;
-      } else {
-        best_cost.emplace(child_key, cost);
-      }
+      best_cost[key] = cost;
 
-      auto cached = heuristic_cache.find(child_key);
+      auto cached = heuristic_cache.find(key);
       if (cached != heuristic_cache.end()) {
         child.h = cached->second;
       } else {
         child.h = heuristic(child.state);
-        heuristic_cache.emplace(child_key, child.h);
+        heuristic_cache.emplace(key, child.h);
       }
       child.discount = params.discount_by_interruption
                            ? parent_discount * (1 - p)

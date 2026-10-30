@@ -12,10 +12,11 @@ from interruption.planner import (
     FFHeuristic, InterruptionSearchProblem, PlannerConfig, SearchStats, astar_search,
 )
 from interruption.task_arrival import RandomVariableType, get_task_arrival_prob
-from railroad.core import Fluent as F, LiteralGoal, State
+from railroad.core import Fluent as F, GroundedEffect, LiteralGoal, State
 from railroad.operators.core import (
     construct_move_operator,
     construct_move_operator_blocking,
+    construct_no_op_operator,
     construct_pick_operator,
     construct_place_operator,
 )
@@ -88,6 +89,44 @@ def test_cpp_search_matches_python_search(name, blocking_moves):
     assert python[2] and cpp == python  # same plan, same cost bit for bit, same expansions
 
 
+@pytest.mark.parametrize("heuristic_fn", [0, FFHeuristic()])
+@pytest.mark.parametrize("arrival", [20.0, 30.0, 60.0])
+def test_cpp_search_matches_python_search_while_waiting_for_a_queued_effect(
+    heuristic_fn, arrival
+):
+    """
+    The goal arrives by itself, by a queued effect, while the robot can act or
+    wait (no_op). Both searches must generate the same successors: a robot waits
+    only when it can do nothing else, as the C++ get_next_actions has it. (The
+    Python railroad.core.get_next_actions lets it wait anyway; with it, the
+    Python search found a cost-20 plan here and the C++ one cost 24.) And both
+    must tell states waiting different times apart (see planner.state_key):
+    keyed on fluents alone, they couldn't wait more than ~25s for the effect.
+    """
+    objects = {"robot": {"robot1"}, "location": {"kitchen", "hall", "office"}, "object": {"book"}}
+    operators = [
+        construct_move_operator_blocking(5.0), construct_pick_operator(2.0),
+        construct_place_operator(2.0), construct_no_op_operator(5.0),
+    ]
+    actions = [a for op in operators for a in op.instantiate(objects)]
+    state = State(
+        0, {F("at robot1 kitchen"), F("free robot1"), F("at book kitchen"), ~F("hand-full robot1")},
+        [(arrival, GroundedEffect(time=arrival, resulting_fluents={F("delivered package")}))],
+    )
+    problem = InterruptionSearchProblem(LiteralGoal(F("delivered package")), actions)
+    results = []
+    for use_cpp in (False, True):
+        stats = SearchStats()
+        plan, cost, success, _ = astar_search(
+            (state, None), problem,
+            PlannerConfig(heuristic_fn=heuristic_fn, use_cpp_search=use_cpp), stats=stats,
+        )
+        results.append(([a.name for a in plan], cost, success, stats.expanded))
+    python, cpp = results
+    assert python[2] and cpp == python
+    assert python[1] == arrival  # waits no longer than the effect takes
+
+
 @pytest.mark.parametrize("name", ["constant_h", "ff"])
 def test_cpp_search_matches_python_search_when_the_budget_runs_out(name):
     python, cpp = _both(CONFIGS[name], num_steps=3)
@@ -137,7 +176,7 @@ def _three_object_problem(holding_book=False):
 
 
 def test_relaxed_plan_problem_keeps_only_what_the_relaxed_plan_uses():
-    from interruption.planner import relaxed_plan_problem
+    from interruption.narrowing import relaxed_plan_problem
 
     state, goal, actions = _three_object_problem()
     narrowed = relaxed_plan_problem(state, InterruptionSearchProblem(goal, actions))

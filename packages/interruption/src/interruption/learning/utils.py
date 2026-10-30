@@ -17,7 +17,7 @@ def prepare_gcn_input(
     into a form that can be passed as input to a GCN.
     """
     # read-only: node/edge features are extracted below, nothing here mutates the
-    # graph, so no copy is needed (unlike create_child's scene_graph, which does
+    # graph, so no copy is needed (unlike a search node's scene_graph, which does
     # get mutated and must be copied before being passed in).
     graph = datum[0]
     expected_value = datum[1]

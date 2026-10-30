@@ -2,11 +2,11 @@
 import pytest
 from interruption.cost_formulations import NO_INTERRUPTION, DefaultFormulation
 from interruption.planner import (
-    InterruptionTrajectory,
     InterruptionSearchProblem,
     PlannerConfig,
+    SearchNode,
+    _PythonSearch,
     astar_search,
-    check_value_cache,
 )
 from interruption.utilities import (
     get_next_state,
@@ -22,19 +22,6 @@ from railroad.operators.core import (
 # global
 INTERRUPTION_PROB = 0.1
 NO_INT = DefaultFormulation(NO_INTERRUPTION)
-
-def test_check_value_cache():
-    initial_state = State(
-        time=0,
-        fluents={F("at robot1 kitchen"), F("free robot1")}
-    )
-    initial_fluents = frozenset(initial_state.fluents)
-
-    value_cache = {}
-    assert not check_value_cache(initial_fluents, value_cache)
-
-    value_cache[initial_fluents] = 2.5
-    assert check_value_cache(initial_fluents, value_cache)
 
 
 @pytest.mark.parametrize("heuristic_fn", [0, 5])
@@ -60,28 +47,23 @@ def test_construct_trajectory(heuristic_fn):
     applicable_actions = get_next_actions(initial_state, move_actions)
     assert len(applicable_actions) == 1
     action = applicable_actions[0]
-    new_state, next_interruption_prob = get_next_state(initial_state, action, 0.1)
+    new_state, _ = get_next_state(initial_state, action, 0.1)
 
-    traj = InterruptionTrajectory(
-        state=initial_state,
-        action=None,
-        discount_factor=1,
-        scene_graph=None
+    root = SearchNode(state=initial_state, action=None, discount_factor=1, scene_graph=None)
+    search = _PythonSearch(
+        InterruptionSearchProblem(goal, applicable_actions),
+        PlannerConfig(
+            heuristic_fn=heuristic_fn, cost_formulation=NO_INT, planner_interruption_prob_fn=0.1
+        ),
     )
-    search_problem = InterruptionSearchProblem(goal, applicable_actions)
-    planner_params = PlannerConfig(heuristic_fn=heuristic_fn, cost_formulation=NO_INT)
-    new_traj = traj.create_child(
-        search_problem,
-        planner_params,
-        action,
-        next_interruption_prob
-    )
+    (candidate,) = search.successors(root, expanded=set())
+    child = search.child(root, candidate, value=0.0)
 
-    assert new_traj.cost == 4
-    assert new_traj.value == new_traj.cost + heuristic_fn * 0.9
-    assert new_traj.state == new_state
-    assert new_traj.action == action
-    assert new_traj.discount_factor == 0.9
+    assert child.cost == 4
+    assert child.value == child.cost + heuristic_fn * 0.9
+    assert child.state == new_state
+    assert child.action == action
+    assert child.discount_factor == 0.9
 
 
 @pytest.mark.parametrize("heuristic_fn", [0, 5, ff_heuristic])
@@ -238,14 +220,14 @@ def _named_actions(*names):
 
 
 def test_goal_objects_are_the_objects_its_literals_name():
-    from interruption.planner import goal_objects
+    from interruption.narrowing import goal_objects
 
     goal = F("at-category cup_3 fridge") & F("at-category bowl_2 sofa")
     assert goal_objects(goal, {"cup_3", "bowl_2", "apple_41"}) == {"cup_3", "bowl_2"}
 
 
 def test_filtering_keeps_moves_and_the_goal_objects_actions():
-    from interruption.planner import filter_actions_to_objects
+    from interruption.narrowing import filter_actions_to_objects
 
     actions = _named_actions(
         "move robot1 countertop_1 fridge_5",
@@ -279,7 +261,7 @@ def test_a_search_that_exhausts_every_reachable_state_returns_failure():
 
 
 def test_held_objects_are_the_objects_in_a_robots_hands():
-    from interruption.planner import held_objects
+    from interruption.narrowing import held_objects
 
     state = State(time=0, fluents={
         F("holding-in-left robot1 bowl_32"), F("at apple_38 countertop_4"), F("free robot1"),

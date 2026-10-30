@@ -20,10 +20,10 @@ from railroad.navigation.pathing import get_cost_and_path
 from .constants import AP_DEBUG
 from .environments import KitchenProcTHOREnvironment
 from .operators import BLOCKING_PREDICATES, only_clears_blocking_facts
-from .planner import (
-    FFHeuristic, InterruptionSearchProblem, PlannerConfig, SearchStats, astar_search,
+from .narrowing import (
     filter_actions_to_objects, goal_objects, held_objects, relaxed_plan_problem,
 )
+from .planner import FFHeuristic, InterruptionSearchProblem, PlannerConfig, SearchStats, astar_search
 
 
 class Planner(Protocol):
@@ -61,8 +61,8 @@ class RetryState:
 
 def anticipatory_planner(
     initial_state: tuple[State, SceneGraph],
-    interruption_problem: InterruptionSearchProblem,
-    search_params: PlannerConfig,
+    search_problem: InterruptionSearchProblem,
+    config: PlannerConfig,
     scene: ProcTHORScene,
     neg_to_pos_mapping: dict[F, F],
     num_samples: int = 20,
@@ -70,7 +70,7 @@ def anticipatory_planner(
 ) -> tuple[list[Action], float, bool]:
     """
     Implementation of the anticipatory planning framework for large-scale environments from
-    Talukder et al. search_params.interruption_value_fn is the learned value of a goal
+    Talukder et al. config.interruption_value_fn is the learned value of a goal
     state; the searches themselves are myopic. At most num_samples augmented tasks,
     sampled with seed, are evaluated.
     """
@@ -81,13 +81,13 @@ def anticipatory_planner(
     best_value_total = float("inf")
 
     # the searches are myopic; the value model only scores their goal states
-    assert search_params.interruption_value_fn is not None
-    ev_model = search_params.interruption_value_fn
-    search_params = replace(search_params, interruption_value_fn=None)
+    assert config.interruption_value_fn is not None
+    ev_model = config.interruption_value_fn
+    config = replace(config, interruption_value_fn=None)
 
     # run myopic planner to get initial plan/value of s_g
     plan, value_sg, success, scene_graph_sg = astar_search(
-        initial_state, interruption_problem, search_params
+        initial_state, search_problem, config
     )
     assert scene_graph_sg is not None
 
@@ -103,11 +103,11 @@ def anticipatory_planner(
         print(f"V_AP of augmented goal state: {ev_model(scene_graph_sg):.4f}")
         print(f"V_s_g + V_AP = {best_value_total:.4f}")
 
-    assert isinstance(interruption_problem.goal, Goal)
-    non_augmented_goal = interruption_problem.goal
+    assert isinstance(search_problem.goal, Goal)
+    non_augmented_goal = search_problem.goal
 
     selected_locations, selected_objects = focused_sampling(
-        interruption_problem.goal,
+        search_problem.goal,
         best_plan,
         scene.grid,
         scene.locations,
@@ -116,7 +116,7 @@ def anticipatory_planner(
 
     # get sampled augmentated tasks
     sampled_augmented_tasks = _get_sampled_augmented_tasks(
-        interruption_problem.goal, selected_locations, selected_objects, neg_to_pos_mapping
+        search_problem.goal, selected_locations, selected_objects, neg_to_pos_mapping
     )
     random_sampled_augmented_tasks = (
         rng.sample(sampled_augmented_tasks, k=num_samples)
@@ -125,10 +125,10 @@ def anticipatory_planner(
     )
 
     for task in random_sampled_augmented_tasks:
-        interruption_problem.goal = task
+        search_problem.goal = task
         # run myopic planner to get initial plan/value of s_g
         plan, value_sg, success, scene_graph_sg = astar_search(
-            initial_state, interruption_problem, search_params
+            initial_state, search_problem, config
         )
 
         assert scene_graph_sg is not None
@@ -145,7 +145,7 @@ def anticipatory_planner(
             best_plan = plan
 
     # restore the non-augmented goal for future tasks
-    interruption_problem.goal = non_augmented_goal
+    search_problem.goal = non_augmented_goal
 
     return best_plan, best_value_sg, best_value_total != float("inf")
 
@@ -328,7 +328,7 @@ def interruption_halo(
 def _halo_problem(
     environment: KitchenProcTHOREnvironment,
     search_problem: InterruptionSearchProblem,
-    planner_parameters: PlannerConfig,
+    config: PlannerConfig,
     initial_state: State,
 ) -> InterruptionSearchProblem | None:
     """
@@ -336,7 +336,7 @@ def _halo_problem(
     and its interruption_halo, found from a fast myopic plan for the task; None
     when there's nothing to narrow.
     """
-    heuristic = planner_parameters.heuristic_fn
+    heuristic = config.heuristic_fn
     multiplier = heuristic.multiplier if isinstance(heuristic, FFHeuristic) else 1
     myopic = PlannerConfig(
         heuristic_fn=FFHeuristic(multiplier=multiplier), relaxed_plan_filtering=True
@@ -440,7 +440,7 @@ def _search_over_goal_objects(
     """
     search_without_retry over only the actions involving the current goal's objects
     and any object the robot is holding, which it may need to put down first (see
-    planner.filter_actions_to_objects). search_problem is shared across calls, so
+    narrowing.filter_actions_to_objects). search_problem is shared across calls, so
     its actions are restored afterwards, like the goal in search_with_retry.
     """
     actions = search_problem.actions

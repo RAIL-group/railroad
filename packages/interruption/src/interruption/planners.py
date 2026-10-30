@@ -54,7 +54,7 @@ class MyopicPlanner:
     """A* for the current task alone."""
     h_multiplier: float = 1
     # search first over only the objects and locations of the goal's relaxed
-    # plan, falling back to the full problem (planner.relaxed_plan_problem)
+    # plan, falling back to the full problem (narrowing.relaxed_plan_problem)
     relaxed_plan_filtering: bool = True
     config: PlannerConfig = field(init=False, repr=False, compare=False)
 

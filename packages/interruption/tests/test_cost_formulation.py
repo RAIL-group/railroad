@@ -1,7 +1,8 @@
 """
 Pins astar_search's results to the cost formulation it used before
-cost_formulations.py existed: GOLDEN was recorded from the pre-refactor
-create_child/astar_search, so the default formulation must reproduce it exactly.
+cost_formulations.py existed: GOLDEN was recorded from the search as it was then
+(InterruptionTrajectory.create_child, now planner._PythonSearch.child), so the
+default formulation must reproduce it exactly.
 """
 from dataclasses import asdict, dataclass, replace
 from functools import partial
@@ -17,13 +18,13 @@ from interruption.cost_formulations import (
 from interruption.planner import (
     FFHeuristic,
     InterruptionSearchProblem,
-    InterruptionTrajectory,
+    SearchNode,
+    _PythonSearch,
     PlannerConfig,
     astar_search,
 )
-from interruption.utilities import get_next_state
 from interruption.task_arrival import RandomVariableType, get_task_arrival_prob
-from railroad.core import Fluent as F, State, get_next_actions
+from railroad.core import Fluent as F, State
 from railroad.operators.core import (
     construct_move_operator,
     construct_pick_operator,
@@ -147,20 +148,19 @@ def run_scenario(name: str, monkeypatch, **overrides) -> tuple[list[str], float]
 
 def first_children(name: str, monkeypatch, **overrides) -> dict[str, tuple[float, ...]]:
     """
-    Every child of the initial state, as create_child builds it:
+    Every child of the initial state, as the Python search builds it:
     action name -> (cost, value, discount, h_value, discounted_h_value).
     """
     search_problem, initial_state, scene_graph, config = _setup(name, monkeypatch, **overrides)
-    root = InterruptionTrajectory(
+    root = SearchNode(
         state=initial_state, action=None, discount_factor=1, scene_graph=scene_graph
     )
+    search = _PythonSearch(search_problem, config)
+    candidates = search.successors(root, expanded=set())
     children = {}
-    for action in get_next_actions(initial_state, search_problem.actions):
-        _, interruption_prob = get_next_state(
-            initial_state, action, config.planner_interruption_prob_fn or 0
-        )
-        child = root.create_child(search_problem, config, action, interruption_prob)
-        children[action.name] = (
+    for candidate, value in zip(candidates, search.learned_values(root, candidates)):
+        child = search.child(root, candidate, value)
+        children[candidate.action.name] = (
             child.cost, child.value, child.discount_factor,
             child.h_value, child.discounted_h_value,
         )
@@ -338,18 +338,18 @@ class _DoubledActionCost(DefaultFormulation):
 
 @pytest.mark.parametrize("name", ["myopic_constant_h", "ev_batch"])
 def test_a_custom_formulation_reaches_both_cost_call_sites(name, monkeypatch):
-    # both scenarios take astar_search's pruning path, which computes a child's
-    # accumulated cost before create_child does; it must use the same formulation
+    # the search's pruning computes a child's accumulated cost before child()
+    # does; both must use the same formulation
     calls = []
     num_children = 0
-    create_child = InterruptionTrajectory.create_child
+    child = _PythonSearch.child
 
-    def counting_create_child(self, *args, **kwargs):
+    def counting_child(self, *args, **kwargs):
         nonlocal num_children
         num_children += 1
-        return create_child(self, *args, **kwargs)
+        return child(self, *args, **kwargs)
 
-    monkeypatch.setattr(InterruptionTrajectory, "create_child", counting_create_child)
+    monkeypatch.setattr(_PythonSearch, "child", counting_child)
 
     @dataclass(frozen=True)
     class _Recording(_DoubledActionCost):
@@ -367,7 +367,7 @@ def test_a_custom_formulation_reaches_both_cost_call_sites(name, monkeypatch):
         assert cost == pytest.approx(2 * golden_cost)
     else:
         assert cost > golden_cost
-    # once per child in create_child, plus once per candidate in the pruning step
+    # once per child in child(), plus once per candidate in the pruning step
     assert len(calls) > num_children > 0
 
 

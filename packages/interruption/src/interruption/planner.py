@@ -1,21 +1,36 @@
 import heapq
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
-from typing import Optional
+from typing import NamedTuple, Optional
 from tqdm import tqdm
 
-from railroad._bindings import astar_search as _astar_search_cpp
-from railroad._bindings import relaxed_plan_action_indices as _relaxed_plan_action_indices
+from railroad._bindings import astar_search as _cpp_astar_search
+# the C++ search's own successor generator, so both searches expand a state into
+# the same successors (railroad.core.get_next_actions is an older Python version
+# without its rule that a robot waits, no_op, only when it can do nothing else)
+from railroad._bindings import get_next_actions
 from railroad.core import (
-    Action, Fluent, Goal, State, ff_heuristic, get_next_actions, project_action,
-    project_state, relevant_predicates,
+    Action, Goal, State, ff_heuristic, project_action, project_state,
+    relevant_predicates,
 )
 from railroad.environment.procthor.scenegraph import SceneGraph
 
 from .constants import LAMBDA_ADD, LAMBDA_FF, LAMBDA_MAX, SEARCH_DEBUG
 from .cost_formulations import CostFormulation, DefaultFormulation, NO_INTERRUPTION, StepTerms
 from .utilities import get_action_cost, get_next_state
+from .narrowing import relaxed_plan_problem
 from .scene_graph import get_updated_scene_graph
+
+def state_key(state: State) -> State:
+    """
+    What makes two search states the same: their fluents and their upcoming
+    effects at their times relative to now, so states differing only in the
+    clock are one state, but not states waiting different times for an effect.
+    railroad's State hashes and compares on time, fluents and upcoming effects,
+    so its zero-time copy (as MCTSPlanner roots its search) is that key.
+    """
+    return state.copy_and_zero_out_time()
+
 
 # data structures for astar search
 @dataclass
@@ -40,11 +55,10 @@ class PlannerConfig:
     heuristic_fn: Callable[[State, Goal, list[Action], float], float] | float
     planner_interruption_prob_fn: float | Callable[[float], float] | None = None
     interruption_value_fn: Callable[[SceneGraph], float] | None = None
-    # optional batched form of interruption_value_fn: takes every one of an expanded
-    # node's candidate children's scene graphs and returns one value per graph, in
-    # order, via a single model call instead of one call per child. astar_search uses
-    # this (when provided) to pre-warm ev_cache before create_child runs; falls back
-    # to calling interruption_value_fn once per child when left as None.
+    # optional batched form of interruption_value_fn: takes the scene graphs of an
+    # expanded node's new successor states and returns one value per graph, in
+    # order, in a single model call (see _PythonSearch.learned_values); when None,
+    # interruption_value_fn is called once per state.
     interruption_value_batch_fn: Callable[[list[SceneGraph]], list[float]] | None = None
     # how a search step's costs are computed, including its discount (see
     # cost_formulations.py); the default is undiscounted
@@ -97,118 +111,32 @@ class SearchStats:
 
 
 @dataclass
-class InterruptionTrajectory:
+class SearchNode:
     """
-    Data structure used to represent search tree trajectories (paths).
+    A node of the Python A* search: a state, the action and parent node that
+    reached it, and its costs under the search's cost formulation.
     """
     state: State
-    # action that was executed from the parent state that resulted in the current state
+    # the action that reached state from the parent's state; None at the root
     action: Optional[Action]
     # running discount of the path so far (gamma_t), applied to the next step's costs;
     # see cost_formulations.py for how each step updates it
     discount_factor: float
     scene_graph: SceneGraph | None
+    # accumulated cost g; value is the priority, g + discounted_h_value
     cost: float = 0.0
     value: float = 0.0
     discounted_h_value: float = 0.0
     h_value: float = 0.0
-    parent: Optional["InterruptionTrajectory"] = None
-    # the state's fluents as a hashable key, built once and shared by every cache
-    # and set in astar_search, rather than rebuilt (and stored again) by each
-    key: frozenset[Fluent] | None = None
-
-    def create_child(
-        self,
-        search_problem: InterruptionSearchProblem,
-        planner_params: PlannerConfig,
-        action: Action,
-        interruption_prob: float,
-        ev_cache: Optional[dict[frozenset[Fluent], float]] = None,
-        heuristic_cache: Optional[dict[frozenset[Fluent], float]] = None,
-        next_state: State | None = None,
-        next_state_key: frozenset[Fluent] | None = None,
-    ) -> 'InterruptionTrajectory':
-        """
-        Helper function for creation of trajectories to add to the frontier.
-
-        ev_cache/heuristic_cache, when provided, are keyed by the resulting state's
-        fluents -- the same notion of "same state" astar_search's own `expanded` set
-        already uses. interruption_value_fn is a pure function of those fluents (the
-        scene graph it's evaluated on only ever reflects active fluents, never time or
-        pending effects), so ev_cache is exact. heuristic_fn is NOT exact under this
-        key: ff_heuristic also reads state.time and pending timed effects, so two
-        fluent-identical states reached with different timing can get a heuristic
-        value computed for the other one's timing. This can change search order (and
-        so which valid plan is found first) but never corrupts accumulated_cost, since
-        the heuristic value only ever feeds estimated_future_cost/h_value, not cost.
-
-        The costs themselves come from planner_params' cost formulation (see
-        cost_formulations.py).
-
-        next_state/next_state_key, when given, are the resulting state and its key,
-        which astar_search has already computed; they are computed here otherwise.
-        """
-        if next_state is None:
-            next_state, _ = get_next_state(self.state, action)
-        if next_state_key is None:
-            next_state_key = frozenset(next_state.fluents)
-
-        # compute accumulated cost (g(traj))
-        interrupting_task_ev = 0
-        scene_graph = None
-        if self.scene_graph is not None:
-            scene_graph = self.scene_graph.shallow_copy()
-            get_updated_scene_graph(scene_graph, next_state, action)
-        if planner_params.interruption_value_fn is not None:
-            assert scene_graph is not None
-            if ev_cache is not None and check_value_cache(next_state_key, ev_cache):
-                interrupting_task_ev = ev_cache[next_state_key]
-            else:
-                interrupting_task_ev = planner_params.interruption_value_fn(scene_graph)
-                if ev_cache is not None:
-                    ev_cache[next_state_key] = interrupting_task_ev
-
-        formulation = planner_params.cost_formulation
-        terms = self.step_terms(action, interruption_prob, interrupting_task_ev)
-        accumulated_cost = formulation.accumulated_cost(terms)
-
-        # compute estimated future cost (h(s'))
-        if isinstance(planner_params.heuristic_fn, (int, float)):
-            undiscounted_future_cost = planner_params.heuristic_fn
-        else:
-            v_ap = 0 if planner_params.interruption_value_fn is None else interrupting_task_ev
-            if heuristic_cache is not None and check_value_cache(next_state_key, heuristic_cache):
-                undiscounted_future_cost = heuristic_cache[next_state_key]
-            else:
-                undiscounted_future_cost = planner_params.heuristic_fn(
-                    next_state, search_problem.goal, search_problem.actions, v_ap
-                )
-                if heuristic_cache is not None:
-                    heuristic_cache[next_state_key] = undiscounted_future_cost
-
-        discount_factor = formulation.child_discount(terms)
-        estimated_future_cost = formulation.estimated_future_cost(
-            terms, discount_factor, undiscounted_future_cost
-        )
-
-        return InterruptionTrajectory(
-            cost=accumulated_cost,
-            value=accumulated_cost+estimated_future_cost,
-            state=next_state,
-            action=action,
-            discount_factor=discount_factor,
-            discounted_h_value=estimated_future_cost,
-            h_value=undiscounted_future_cost,
-            scene_graph=scene_graph,
-            parent=self,
-            key=next_state_key,
-        )
+    parent: Optional["SearchNode"] = None
+    # the state's state_key, shared with the search's caches (see _PythonSearch.key)
+    key: State | None = None
 
     def step_terms(
         self, action: Action, interruption_prob: float, interrupting_task_ev: float
     ) -> StepTerms:
         """
-        The inputs a cost formulation reads for the step from this trajectory
+        The inputs a cost formulation reads for the step from this node
         through action.
         """
         return StepTerms(
@@ -219,9 +147,9 @@ class InterruptionTrajectory:
             interrupting_task_ev=interrupting_task_ev,
         )
 
-    def get_plan(self: "InterruptionTrajectory") -> list[Action]:
+    def get_plan(self) -> list[Action]:
         """
-        Recovers the plan that resulted in the trajectory.
+        Recovers the plan that resulted in the node.
         """
         plan = []
         current_node = self
@@ -234,48 +162,33 @@ class InterruptionTrajectory:
 
     def get_plan_cost(self):
         """
-        Returns actual cost of a trajectory, without factoring the interruption probabilities.
+        Returns actual cost of a node's plan, without factoring the interruption probabilities.
         """
         plan_cost = 0
         for act in self.get_plan():
             plan_cost+=get_action_cost(act)
         return plan_cost
 
-    def __eq__(self, other):
-        if not isinstance(other, InterruptionTrajectory):
-            raise NotImplementedError
-        return self.value == other.value
 
-    def __lt__(self, other):
-        if not isinstance(other, InterruptionTrajectory):
-            raise NotImplementedError
-        return self.value < other.value
-
-
-    def __le__(self, other):
-        if not isinstance(other, InterruptionTrajectory):
-            raise NotImplementedError
-        return self.value <= other.value
-
-    def __gt__(self, other):
-        if not isinstance(other, InterruptionTrajectory):
-            raise NotImplementedError
-        return self.value > other.value
-
-    def __ge__(self, other):
-        if not isinstance(other, InterruptionTrajectory):
-            raise NotImplementedError
-        return self.value >= other.value
+class SearchResult(NamedTuple):
+    """What astar_search returns; unpacks as (plan, cost, success, scene_graph)."""
+    plan: list[Action]
+    # the plan's accumulated cost under the search's cost formulation
+    cost: float
+    # whether the plan reaches the goal; if not, it's the best partial plan found
+    success: bool
+    # the scene graph after the plan
+    scene_graph: SceneGraph | None
 
 
 def astar_search(
     initial_state: tuple[State, SceneGraph | None],
-    interruption_problem: InterruptionSearchProblem,
-    search_params: PlannerConfig,
+    search_problem: InterruptionSearchProblem,
+    config: PlannerConfig,
     num_steps: int = 30000,
     show_progress: bool = False,
     stats: SearchStats | None = None,
-) -> tuple[list[Action], float, bool, SceneGraph | None]:
+) -> SearchResult:
     """
     Astar algorithm implementation. show_progress prints the goal and a progress
     bar over num_steps; off by default, since callers like data generation run
@@ -284,239 +197,220 @@ def astar_search(
 
     Searches with no learned value function, the default cost formulation and a
     constant or FFHeuristic heuristic run in C++ (railroad's astar.hpp), with
-    identical results; others, and search_params.use_cpp_search=False, run here.
+    identical results; others, and config.use_cpp_search=False, run here.
     """
-    if search_params.relaxed_plan_filtering:
-        narrowed = relaxed_plan_problem(initial_state[0], interruption_problem)
+    if config.relaxed_plan_filtering:
+        narrowed = relaxed_plan_problem(initial_state[0], search_problem)
         if narrowed is not None:
             result = astar_search(
-                initial_state, narrowed, replace(search_params, relaxed_plan_filtering=False),
+                initial_state, narrowed, replace(config, relaxed_plan_filtering=False),
                 num_steps, show_progress, stats,
             )
             if stats is not None:
                 stats.relaxed_plan_actions = len(narrowed.actions)
-            if result[2]:
+            if result.success:
                 return result
         # otherwise: nothing to narrow, or the narrowed problem failed - solve it all
         if stats is not None:
             stats.relaxed_plan_actions = 0
 
-    if search_params.use_cpp_search and _cpp_search_applies(search_params):
-        return _astar_search_cpp_path(
-            initial_state, interruption_problem, search_params, num_steps, show_progress, stats
+    if config.use_cpp_search and _cpp_search_applies(config):
+        return _astar_search_cpp(
+            initial_state, search_problem, config, num_steps, show_progress, stats
         )
+    return _PythonSearch(search_problem, config).run(initial_state, num_steps, show_progress, stats)
 
-    # caches keyed by resulting-state fluents; see create_child's docstring for
-    # why ev_cache is exact and heuristic_cache is an approximation
-    ev_cache: dict[frozenset[Fluent], float] = {}
-    heuristic_cache: dict[frozenset[Fluent], float] = {}
-    # best accumulated_cost seen so far per resulting-state fluents, used below to
-    # skip create_child (and so the ff_heuristic/GCN work inside it) for a candidate
-    # that's provably no better than one already pushed for the same state this
-    # search. This is exact, not an approximation like heuristic_cache: it never
-    # discards a candidate whose true accumulated_cost we haven't actually computed.
-    best_cost: dict[frozenset[Fluent], float] = {}
-    cost_formulation = search_params.cost_formulation
-    # one key object per distinct state, however many paths reach it: every
-    # cache, set and trajectory above shares it rather than holding its own copy
-    state_keys: dict[frozenset[Fluent], frozenset[Fluent]] = {}
 
-    def shared_key(state: State) -> frozenset[Fluent]:
-        key = frozenset(state.fluents)
-        return state_keys.setdefault(key, key)
+class _Candidate(NamedTuple):
+    """A successor of an expanded node, before it's costed."""
+    action: Action
+    state: State
+    key: State
+    # the chance a task arrives during action
+    interruption_prob: float
 
-    # the heap stores tuple(traj, heuristic_value, insertion_order)
-    frontier = []
-    expanded = set()
-    insertion_order = 1
-    # keeps track of number of astar search iterations
-    num_expanded_nodes = 0
 
-    # push initial state onto heap
-    heapq.heappush(
-        frontier,
-        (
-            InterruptionTrajectory(
-                state=initial_state[0],
-                action=None,
-                discount_factor=1,
-                scene_graph=initial_state[1],
-                key=shared_key(initial_state[0]),
-            ), -1, 0
+class _PythonSearch:
+    """
+    astar_search in Python, for the searches the C++ one can't run: those with a
+    learned value function, or another cost formulation or heuristic. It holds
+    what every node of one search shares: the problem, the settings, and caches
+    keyed by state_key -- each state's learned value and heuristic value, and the
+    cheapest accumulated cost a path to it has had. The caches are exact: the
+    learned value reads only the fluents (through the scene graph), and
+    ff_heuristic the fluents and the upcoming effects relative to the state's
+    time, all of which the key holds.
+    """
+
+    def __init__(self, search_problem: InterruptionSearchProblem, config: PlannerConfig):
+        self.search_problem = search_problem
+        self.config = config
+        self.values: dict[State, float] = {}
+        self.heuristic_values: dict[State, float] = {}
+        self.best_costs: dict[State, float] = {}
+        # one key object per distinct state, however many paths reach it, shared by
+        # every cache and node rather than each holding its own copy
+        self._keys: dict[State, State] = {}
+
+    def key(self, state: State) -> State:
+        key = state_key(state)
+        return self._keys.setdefault(key, key)
+
+    def run(
+        self,
+        initial_state: tuple[State, SceneGraph | None],
+        num_steps: int,
+        show_progress: bool,
+        stats: SearchStats | None,
+    ) -> SearchResult:
+        state, scene_graph = initial_state
+        goal = self.search_problem.goal
+        expanded: set[State] = set()
+        root = SearchNode(
+            state=state, action=None, discount_factor=1, scene_graph=scene_graph,
+            key=self.key(state),
         )
-    )
+        # entries are (value, h, insertion order, node): the lowest value first, ties
+        # to the lower heuristic, then to the earlier push (as astar.hpp's QueueEntry)
+        frontier: list[tuple[float, float, int, SearchNode]] = [(root.value, -1, 0, root)]
+        insertion_order = 1
+        num_expanded_nodes = 0
 
-    # search loop
-    if show_progress:
-        print(f"Current Goal: {interruption_problem.goal}")
-    with tqdm(total=num_steps, disable=not show_progress) as pbar:
-        while num_expanded_nodes < num_steps and frontier:
-            # some logging functionality for debugging
-            if SEARCH_DEBUG:
-                print_frontier_trace(num_expanded_nodes, frontier)
+        if show_progress:
+            print(f"Current Goal: {goal}")
+        with tqdm(total=num_steps, disable=not show_progress) as pbar:
+            while num_expanded_nodes < num_steps and frontier:
+                if SEARCH_DEBUG:
+                    print_frontier_trace(num_expanded_nodes, frontier)
 
-            # find expansion node
-            expand, _, _ = heapq.heappop(frontier)
-
-            # check for goal condition being met
-            if interruption_problem.goal.evaluate(expand.state.fluents):
-                _fill_stats(stats, interruption_problem.goal, num_expanded_nodes, num_steps, True)
-                return expand.get_plan(), expand.cost, True, expand.scene_graph#, curr_state
-
-            # check if we've already expanded this state
-            assert expand.key is not None
-            if expand.key in expanded:
-                continue
-            # otherwise add it
-            expanded.add(expand.key)
-            # expand search tree
-            num_expanded_nodes+=1
-
-            # resolve each candidate action's next_state/interruption_prob once,
-            # filtering out any that would re-expand an already-closed state
-            candidates = []
-            for action in get_next_actions(expand.state, interruption_problem.actions):
-                # probability of interruption after taking action from current state
-                next_state, interruption_prob = get_next_state(
-                    expand.state,
-                    action,
-                    (
-                        search_params.planner_interruption_prob_fn
-                        if search_params.planner_interruption_prob_fn is not None
-                        else 0
-                    )
-                )
-
-                next_state_key = shared_key(next_state)
-                # check if this state has already been expanded
-                if next_state_key in expanded:
+                node = heapq.heappop(frontier)[-1]
+                if goal.evaluate(node.state.fluents):
+                    _fill_stats(stats, goal, num_expanded_nodes, num_steps, True)
+                    return SearchResult(node.get_plan(), node.cost, True, node.scene_graph)
+                assert node.key is not None
+                if node.key in expanded:
                     continue
-                candidates.append((action, next_state, next_state_key, interruption_prob))
+                expanded.add(node.key)
+                num_expanded_nodes += 1
 
-            # batch-evaluate interruption_value_fn once across all of this node's
-            # candidate children instead of once per child inside create_child -- the
-            # GCN forward pass dominates create_child's cost, and torch_geometric
-            # batches naturally. create_child still does its own (uncached) call when
-            # this isn't provided, so this is purely an optimization, not a behavior
-            # change to what gets computed.
-            if (
-                search_params.interruption_value_batch_fn is not None
-                and expand.scene_graph is not None
-            ):
-                batch_keys: list[frozenset[Fluent]] = []
-                batch_graphs: list[SceneGraph] = []
-                seen_keys: set[frozenset[Fluent]] = set()
-                for action, next_state, next_state_key, _ in candidates:
-                    if next_state_key in ev_cache or next_state_key in seen_keys:
+                candidates = self.successors(node, expanded)
+                for candidate, value in zip(candidates, self.learned_values(node, candidates)):
+                    # a path to the state no cheaper than one already pushed would only
+                    # be discarded when popped: skip building it
+                    cost = self.config.cost_formulation.accumulated_cost(
+                        node.step_terms(candidate.action, candidate.interruption_prob, value)
+                    )
+                    if cost >= self.best_costs.get(candidate.key, float("inf")):
                         continue
-                    seen_keys.add(next_state_key)
-                    scene_graph = expand.scene_graph.shallow_copy()
-                    get_updated_scene_graph(scene_graph, next_state, action)
-                    batch_keys.append(next_state_key)
-                    batch_graphs.append(scene_graph)
-                if batch_graphs:
-                    for key, ev in zip(
-                        batch_keys, search_params.interruption_value_batch_fn(batch_graphs)
-                    ):
-                        ev_cache[key] = ev
+                    self.best_costs[candidate.key] = cost
 
-            # frontier dedup: with ev_cache now warm for every candidate above (when
-            # a batch fn was available), accumulated_cost can be computed exactly
-            # with no GCN/heuristic call at all -- it's the same cost formulation
-            # create_child uses internally, just evaluated early. Skip create_child
-            # entirely for a candidate that isn't strictly better than the best path
-            # already pushed to the same resulting state this search. When ev_cache
-            # can't be trusted to already hold every candidate's value (no batch fn,
-            # or no scene graph), skip this filtering and fall back to today's
-            # behavior of costing every candidate via create_child.
-            can_precompute_ev = (
-                search_params.interruption_value_fn is None
-                or (
-                    search_params.interruption_value_batch_fn is not None
-                    and expand.scene_graph is not None
-                )
+                    child = self.child(node, candidate, value)
+                    heapq.heappush(frontier, (child.value, child.h_value, insertion_order, child))
+                    insertion_order += 1
+
+                pbar.update(1)
+
+        # goal not reached, get best node found
+        _fill_stats(stats, goal, num_expanded_nodes, num_steps, False)
+        if not frontier:
+            # every reachable state was expanded without reaching the goal: it is
+            # unreachable with these actions, which a filtered action set makes common
+            return SearchResult([], float("inf"), False, scene_graph)
+        best_found = heapq.heappop(frontier)[-1]
+        return SearchResult(best_found.get_plan(), best_found.cost, False, best_found.scene_graph)
+
+    def successors(self, node: SearchNode, expanded: set[State]) -> list[_Candidate]:
+        """The successors of node whose states aren't expanded yet."""
+        prob_fn = _arrival_prob_fn(self.config)
+        candidates = []
+        for action in get_next_actions(node.state, self.search_problem.actions):
+            next_state, interruption_prob = get_next_state(node.state, action, prob_fn)
+            key = self.key(next_state)
+            if key not in expanded:
+                candidates.append(_Candidate(action, next_state, key, interruption_prob))
+        return candidates
+
+    def learned_values(self, node: SearchNode, candidates: list[_Candidate]) -> list[float]:
+        """
+        The learned value of each candidate's state (0 without a learned value
+        function), computed once per state: for all of a node's new states in one
+        batched model call when the config has a batched form, one call each otherwise.
+        """
+        value_fn = self.config.interruption_value_fn
+        if value_fn is None:
+            return [0.0] * len(candidates)
+        pending: dict[State, SceneGraph] = {}
+        for candidate in candidates:
+            if candidate.key not in self.values and candidate.key not in pending:
+                pending[candidate.key] = _scene_graph_after(node, candidate)
+        if pending:
+            graphs = list(pending.values())
+            batch_fn = self.config.interruption_value_batch_fn
+            values = batch_fn(graphs) if batch_fn is not None else [value_fn(g) for g in graphs]
+            self.values.update(zip(pending, values))
+        return [self.values[candidate.key] for candidate in candidates]
+
+    def child(self, node: SearchNode, candidate: _Candidate, value: float) -> SearchNode:
+        """
+        The node candidate leads to from node, value being the learned value of its
+        state. Its costs come from the config's cost formulation (see
+        cost_formulations.py), its heuristic from the config's heuristic_fn.
+        """
+        formulation = self.config.cost_formulation
+        terms = node.step_terms(candidate.action, candidate.interruption_prob, value)
+        cost = formulation.accumulated_cost(terms)
+
+        heuristic_fn = self.config.heuristic_fn
+        if isinstance(heuristic_fn, (int, float)):
+            h_value = heuristic_fn
+        elif candidate.key in self.heuristic_values:
+            h_value = self.heuristic_values[candidate.key]
+        else:
+            h_value = heuristic_fn(
+                candidate.state, self.search_problem.goal, self.search_problem.actions, value
             )
-            for action, next_state, next_state_key, interruption_prob in candidates:
-                if can_precompute_ev:
-                    interrupting_task_ev = (
-                        ev_cache.get(next_state_key, 0)
-                        if search_params.interruption_value_fn is not None
-                        else 0
-                    )
-                    tentative_cost = cost_formulation.accumulated_cost(
-                        expand.step_terms(action, interruption_prob, interrupting_task_ev)
-                    )
-                    if tentative_cost >= best_cost.get(next_state_key, float("inf")):
-                        continue
-                    best_cost[next_state_key] = tentative_cost
+            self.heuristic_values[candidate.key] = h_value
 
-                # construct new trajectory
-                child_traj = expand.create_child(
-                    interruption_problem,
-                    search_params,
-                    action,
-                    interruption_prob,
-                    ev_cache,
-                    heuristic_cache,
-                    next_state=next_state,
-                    next_state_key=next_state_key,
-                )
-                heapq.heappush(frontier, (child_traj, child_traj.h_value, insertion_order))
-                insertion_order+=1
-
-            pbar.update(1)
-
-    # goal not reached, get best trajectory found
-    _fill_stats(stats, interruption_problem.goal, num_expanded_nodes, num_steps, False)
-    if not frontier:
-        # every reachable state was expanded without reaching the goal: it is
-        # unreachable with these actions, which a filtered action set makes common
-        return [], float("inf"), False, initial_state[1]
-    best_found, _, _ = heapq.heappop(frontier)
-    return best_found.get_plan(), best_found.cost, False, best_found.scene_graph
+        discount_factor = formulation.child_discount(terms)
+        discounted_h_value = formulation.estimated_future_cost(terms, discount_factor, h_value)
+        return SearchNode(
+            state=candidate.state,
+            action=candidate.action,
+            discount_factor=discount_factor,
+            scene_graph=(
+                None if node.scene_graph is None else _scene_graph_after(node, candidate)
+            ),
+            cost=cost,
+            value=cost + discounted_h_value,
+            discounted_h_value=discounted_h_value,
+            h_value=h_value,
+            parent=node,
+            key=candidate.key,
+        )
 
 
-def relaxed_plan_problem(
-    state: State, problem: InterruptionSearchProblem, also_keep: frozenset[str] = frozenset()
-) -> InterruptionSearchProblem | None:
-    """
-    The problem narrowed to what its relaxed plan uses: FF's relaxed plan for the
-    goal from state (deletes and negative preconditions ignored, as in the
-    heuristic), together with every action directly achieving a goal fluent (so
-    every table, say, that would satisfy "on a table" - the relaxed plan picks
-    just one), names objects, locations and the like as its actions' arguments;
-    only actions whose arguments are all among those, or among what a robot is
-    holding, are kept. Held objects are added because the relaxation ignores a
-    full hand, so its plan never puts down what the robot holds - which may be
-    needed before anything else can be picked up. also_keep adds further names
-    (objects, locations, categories) to keep. None when there's nothing to
-    narrow: the goal holds, is unreachable, or every action survives.
-    """
-    actions = problem.actions
-    plan = _relaxed_plan_action_indices(
-        state, problem.goal, actions, LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF
-    )
-    if not plan:
-        return None
-    keep = {arg for i in plan for arg in actions[i].name.split(" ")[1:]}
-    keep |= {
-        arg for fluent in state.fluents if fluent.name.startswith("holding") for arg in fluent.args
-    }
-    keep |= also_keep
-    kept = [action for action in actions if keep.issuperset(action.name.split(" ")[1:])]
-    if len(kept) == len(actions):
-        return None
-    return replace(problem, actions=kept)
+def _scene_graph_after(node: SearchNode, candidate: _Candidate) -> SceneGraph:
+    """node's scene graph after candidate's action, as a copy; node's own is left as is."""
+    assert node.scene_graph is not None
+    scene_graph = node.scene_graph.shallow_copy()
+    get_updated_scene_graph(scene_graph, candidate.state, candidate.action)
+    return scene_graph
 
 
-def _cpp_search_applies(search_params: PlannerConfig) -> bool:
+def _arrival_prob_fn(config: PlannerConfig) -> float | Callable[[float], float]:
+    """The planner's chance a task arrives during an action (0 without an arrival model)."""
+    prob_fn = config.planner_interruption_prob_fn
+    return 0 if prob_fn is None else prob_fn
+
+
+def _cpp_search_applies(config: PlannerConfig) -> bool:
     """Whether the C++ A* computes exactly what the Python one would."""
     return (
-        search_params.interruption_value_fn is None
-        and type(search_params.cost_formulation) is DefaultFormulation
+        config.interruption_value_fn is None
+        and type(config.cost_formulation) is DefaultFormulation
         and (
-            isinstance(search_params.heuristic_fn, (int, float))
-            or isinstance(search_params.heuristic_fn, FFHeuristic)
+            isinstance(config.heuristic_fn, (int, float))
+            or isinstance(config.heuristic_fn, FFHeuristic)
         )
     )
 
@@ -547,14 +441,14 @@ def _projected_actions(
     return projected, costs
 
 
-def _astar_search_cpp_path(
+def _astar_search_cpp(
     initial_state: tuple[State, SceneGraph | None],
-    interruption_problem: InterruptionSearchProblem,
-    search_params: PlannerConfig,
+    search_problem: InterruptionSearchProblem,
+    config: PlannerConfig,
     num_steps: int,
     show_progress: bool,
     stats: SearchStats | None,
-) -> tuple[list[Action], float, bool, SceneGraph | None]:
+) -> SearchResult:
     """
     astar_search in C++. States and actions are first projected onto the
     predicates the search can read (bisimulation-preserving, so the plan is
@@ -562,27 +456,27 @@ def _astar_search_cpp_path(
     rebuilt afterwards by replaying the plan.
     """
     state, scene_graph = initial_state
-    goal = interruption_problem.goal
-    actions = interruption_problem.actions
+    goal = search_problem.goal
+    actions = search_problem.actions
     if show_progress:
         print(f"Current Goal: {goal}")
 
     relevant = frozenset(relevant_predicates(actions, goal, state.upcoming_effects))
     projected, costs = _projected_actions(actions, relevant)
-    prob_fn = search_params.planner_interruption_prob_fn or 0
+    prob_fn = _arrival_prob_fn(config)
     probs = (
         [float(prob_fn)] * len(actions) if isinstance(prob_fn, (int, float))
         else [prob_fn(cost) for cost in costs]
     )
-    heuristic = search_params.heuristic_fn
+    heuristic = config.heuristic_fn
     use_ff = isinstance(heuristic, FFHeuristic)
     multiplier = heuristic.multiplier if isinstance(heuristic, FFHeuristic) else 1.0
     h_constant = float(heuristic) if isinstance(heuristic, (int, float)) else 0.0
-    formulation = search_params.cost_formulation
+    formulation = config.cost_formulation
     assert isinstance(formulation, DefaultFormulation)
     by_interruption = formulation.discount == NO_INTERRUPTION
 
-    result = _astar_search_cpp(
+    result = _cpp_astar_search(
         project_state(state, relevant), goal, projected, costs, probs,
         num_steps=num_steps, use_ff=use_ff, h_constant=h_constant,
         heuristic_multiplier=multiplier,
@@ -593,7 +487,9 @@ def _astar_search_cpp_path(
     )
     plan = [actions[i] for i in result["plan"]]
     _fill_stats(stats, goal, result["expanded"], num_steps, result["success"])
-    return plan, result["cost"], result["success"], _replay_scene_graph(state, scene_graph, plan)
+    return SearchResult(
+        plan, result["cost"], result["success"], _replay_scene_graph(state, scene_graph, plan)
+    )
 
 
 def _replay_scene_graph(
@@ -616,56 +512,16 @@ def _fill_stats(
         stats.goal, stats.expanded, stats.budget, stats.success = goal, expanded, budget, success
 
 
-def goal_objects(goal: Goal, all_objects: set[str]) -> set[str]:
-    """The objects among all_objects that any literal of goal names."""
-    return {
-        arg for literal in goal.get_all_literals() for arg in literal.args if arg in all_objects
-    }
-
-
-def held_objects(state: State, all_objects: set[str]) -> set[str]:
-    """
-    The objects among all_objects that a robot is holding in state
-    (holding-in-left / holding-in-right / holding fluents). A filtered search must
-    keep them: with its hands full, a robot that can't put them down can't pick up
-    anything else.
-    """
-    return {
-        fluent.args[-1] for fluent in state.fluents
-        if fluent.name.startswith("holding") and fluent.args and fluent.args[-1] in all_objects
-    }
-
-
-def filter_actions_to_objects(
-    actions: list[Action], keep: set[str], all_objects: set[str]
-) -> list[Action]:
-    """
-    The actions that involve no object of all_objects outside keep; actions
-    involving no object at all (moves) are always kept. An action's arguments are
-    the words of its name after the operator name.
-    """
-    excluded = all_objects - keep
-    return [action for action in actions if excluded.isdisjoint(action.name.split(" ")[1:])]
-
-
-def check_value_cache(
-    state: frozenset[Fluent], value_cache: dict[frozenset[Fluent], float]
-) -> bool:
-    """
-    Checks if the value of a state is already cached.
-    """
-    return state in value_cache
-
-
 # debug helper functions
-def print_frontier_trace(step: int, frontier: list[tuple[InterruptionTrajectory, float]]) -> None:
+def print_frontier_trace(
+    step: int, frontier: list[tuple[float, float, int, SearchNode]]
+) -> None:
     """
     Prints out a trace of the trajectories currently stored in the frontier.
     """
     print(f"Planning Step: {step}")
     print(f"Frontier: # of trajectories in frontier = {len(frontier)}\n")
-    for _, traj_tuple in enumerate(frontier[:5]):
-        traj = traj_tuple[0]
+    for *_, traj in frontier[:5]:
         print(f"Value: {traj.value}")
         print(f"Discounted Cost: {traj.cost}; Plan Cost: {traj.get_plan_cost()}")
         print(f"Discounted h-value: {traj.discounted_h_value}; h-value: {traj.h_value}")
