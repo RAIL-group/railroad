@@ -14,11 +14,8 @@ from railroad.environment.procthor.scenegraph import SceneGraph
 
 from .constants import LAMBDA_ADD, LAMBDA_FF, LAMBDA_MAX, SEARCH_DEBUG
 from .cost_formulations import CostFormulation, DefaultFormulation, NO_INTERRUPTION, StepTerms
-from .utilities import (
-    get_action_cost,
-    get_next_state,
-    get_updated_scene_graph
-)
+from .utilities import get_action_cost, get_next_state
+from .scene_graph import get_updated_scene_graph
 
 # data structures for astar search
 @dataclass
@@ -70,9 +67,8 @@ class PlannerConfig:
 class FFHeuristic:
     """
     h = multiplier * ff_heuristic(LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF), plus the
-    learned value v_ap when weights are given (see planning_framework's
-    ap_heuristic_fn, which this computes identically). Being a plain object rather
-    than a closure lets astar_search hand it to the C++ search.
+    learned value v_ap when weights are given. Being a plain object rather than a
+    closure lets astar_search hand it to the C++ search.
     """
     multiplier: float = 1
     weights: tuple[float, float] | None = None
@@ -82,7 +78,7 @@ class FFHeuristic:
         if self.weights is None:
             return self.multiplier * h_val
         ff_weight, v_ap_weight = self.weights
-        # NOTE: temporary fix, as in ap_heuristic_fn
+        # NOTE: temporary fix: only unit weights are supported
         assert ff_weight == 1 and v_ap_weight == 1
         return self.multiplier * h_val + v_ap
 
@@ -656,45 +652,6 @@ def filter_actions_to_objects(
     """
     excluded = all_objects - keep
     return [action for action in actions if excluded.isdisjoint(action.name.split(" ")[1:])]
-
-
-def compute_interruption_value(
-    state: State,
-    actions: list[Action],
-    interrupting_task_dist: tuple[list[Goal], list[float]],
-    heuristic_fn: float | Callable[[State, Goal, list[Action], float], float] = 0,
-    search_stats: Optional[list[SearchStats]] = None,
-) -> tuple[float, Optional[list[float]]]:
-    """
-    Computes the expected value of a state for a task distribution.
-    Returns -1 if a successful plan for one of the tasks in the task distribution
-    was unable to be found. Otherwise returns the expected cost. search_stats,
-    when given, gets one SearchStats appended per search run.
-    """
-    task_costs = []
-    expected_cost = 0.0
-    # setup for myopic planning approach
-    search_params = PlannerConfig(heuristic_fn=heuristic_fn)
-
-    for task, prob in zip(*interrupting_task_dist):
-        # setup data structure for interruption problem where there is
-        # no chance another interrupting task will arrive
-        search_problem = InterruptionSearchProblem(
-            task,
-            actions
-        )
-        stats = SearchStats()
-        _, cost, success, _ = astar_search(
-            (state, None), search_problem, search_params, stats=stats
-        )
-        if search_stats is not None:
-            search_stats.append(stats)
-
-        if not success:
-            return -1, None
-        task_costs.append(cost)
-        expected_cost += (prob * cost)
-    return expected_cost, task_costs
 
 
 def check_value_cache(

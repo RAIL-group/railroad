@@ -10,9 +10,8 @@ from interruption.planner import FFHeuristic, PlannerConfig
 from interruption.planners import (
     AnticipatoryPlanner, InterruptionAPPlanner, InterruptionPlanner, MyopicPlanner,
 )
-from interruption.planning_framework import ap_heuristic_fn
 from railroad.core import Fluent as F, LiteralGoal, State
-from railroad.operators.core import construct_move_operator
+from railroad.operators.core import construct_move_operator, construct_pick_operator
 
 
 def _ev(scene_graph) -> float:
@@ -155,9 +154,6 @@ def test_interruption_planner_heuristic_ignores_the_value():
     assert isinstance(heuristic_fn, FFHeuristic)
 
     assert heuristic_fn(state, goal, actions, 999.0) == 5.0
-    assert heuristic_fn(state, goal, actions, 999.0) == ap_heuristic_fn(
-        state, goal, actions, 999.0, h_multi=1
-    )
 
 
 def test_interruption_ap_planner_heuristic_adds_the_value():
@@ -166,6 +162,41 @@ def test_interruption_ap_planner_heuristic_adds_the_value():
     assert isinstance(heuristic_fn, FFHeuristic)
 
     assert heuristic_fn(state, goal, actions, 3.0) == pytest.approx(5.0 + 3.0)
-    assert heuristic_fn(state, goal, actions, 3.0) == ap_heuristic_fn(
-        state, goal, actions, 3.0, weights=(1, 1), h_multi=1
-    )
+
+
+def _move_and_pick_problem():
+    """Reaching "holding r1 box" costs a move (5.0) and a pick (2.0): 7.0."""
+    objects_by_type = {"robot": ["r1"], "location": ["start", "target"], "object": ["box"]}
+    actions = [
+        *construct_move_operator(5.0).instantiate(objects_by_type),
+        *construct_pick_operator(2.0).instantiate(objects_by_type),
+    ]
+    state = State(time=0, fluents={F("at r1 start"), F("free r1"), F("at box target")})
+    return state, LiteralGoal(F("holding r1 box")), actions
+
+
+def test_ff_heuristic_without_weights_ignores_the_value():
+    state, goal, actions = _move_and_pick_problem()
+
+    assert FFHeuristic()(state, goal, actions, 1000.0) == 7.0
+
+
+def test_ff_heuristic_with_weights_adds_the_value():
+    state, goal, actions = _move_and_pick_problem()
+
+    assert FFHeuristic(weights=(1, 1))(state, goal, actions, 3.5) == pytest.approx(10.5)
+
+
+@pytest.mark.parametrize("v_ap", [0.0, -2.0, 100.0])
+def test_ff_heuristic_adds_the_value_unscaled_and_unclamped(v_ap):
+    state, goal, actions = _move_and_pick_problem()
+    base = FFHeuristic()(state, goal, actions)
+
+    assert FFHeuristic(weights=(1, 1))(state, goal, actions, v_ap) == pytest.approx(base + v_ap)
+
+
+def test_ff_heuristic_multiplier_scales_only_the_ff_estimate():
+    state, goal, actions = _move_and_pick_problem()
+
+    assert FFHeuristic(multiplier=2)(state, goal, actions) == 14.0
+    assert FFHeuristic(multiplier=2, weights=(1, 1))(state, goal, actions, 3.0) == 17.0

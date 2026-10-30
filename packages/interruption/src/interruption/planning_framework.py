@@ -5,19 +5,19 @@ search on smaller sub-tasks. All of it runs planner.astar_search.
 """
 import random
 from dataclasses import dataclass, replace
-from typing import Optional, Callable, Protocol
+from typing import Callable, Protocol
 from itertools import product, combinations
 import numpy as np
 from shapely import geometry
 from railroad.core import (
     Action, State, LiteralGoal, Goal, Fluent as F, convert_goal_to_positive_preconditions
-    , ff_heuristic, convert_state_to_positive_preconditions, AndGoal
+    , convert_state_to_positive_preconditions, AndGoal
 )
 from railroad.environment.procthor.scene import ProcTHORScene
 from railroad.environment.procthor.scenegraph import SceneGraph
 from railroad.navigation.pathing import get_cost_and_path
 
-from .constants import LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF, AP_DEBUG
+from .constants import AP_DEBUG
 from .environments import KitchenProcTHOREnvironment
 from .operators import BLOCKING_PREDICATES, only_clears_blocking_facts
 from .planner import (
@@ -58,33 +58,6 @@ class RetryState:
     """
     max_task_complexity: int = -1
 
-
-# wrapper heuristic functions
-def ap_heuristic_fn(
-    state: State,
-    goal: Goal,
-    actions: list[Action],
-    v_ap: float = 0,
-    weights: Optional[tuple[float, float]] = None,
-    h_multi: float = 1
-) -> float:
-    """
-    A wrapper of the ff_heuristic function for incorporating the expected
-    value over a task distribution resulting from a learned function into
-    the heuristic. When the weights argument is provided, the first element
-    of the tuple is the weight of the ff-heuristic value and the second elemnt
-    is the weight of the v_ap term. Additionally, when a value for weights is not
-    provided, the wrapper simply returns the value of the ff-heuristic.
-    """
-    if weights is None:
-        h_val = ff_heuristic(state, goal, actions, LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF)
-        return h_multi * h_val
-    ff_weight, v_ap_weight = weights
-    # NOTE: temporary fix
-    assert ff_weight == 1 and v_ap_weight == 1
-    return h_multi * ff_heuristic(
-        state, goal, actions, LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF
-    ) + v_ap
 
 def anticipatory_planner(
     initial_state: tuple[State, SceneGraph],

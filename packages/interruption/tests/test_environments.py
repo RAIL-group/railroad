@@ -9,10 +9,8 @@ from interruption.environments import (
     get_alfred_task_distribution,
     location_category,
 )
-from interruption.utilities import (
-    _update_held_objects_position,
-    get_object_container_slots,
-    permute_object_containers,
+from interruption.scene_graph import (
+    _update_held_objects_position, get_object_container_slots, permute_object_containers,
 )
 from railroad.core import Fluent as F, Action
 from railroad.environment.procthor.scene import ProcTHORScene
@@ -717,16 +715,16 @@ def _two_table_env():
     from railroad.operators.core import construct_move_operator
     from interruption.environments import setup_procthor_initial_state
     from interruption.operators import (
-        construct_pick_with_left_hand_operator,
-        construct_place_with_left_hand_operator,
+        construct_pick_with_left_hand_operator_blocking,
+        construct_place_with_left_hand_operator_blocking,
     )
 
     class TwoTableEnv(SymbolicEnvironment):
         def define_operators(self):
             return [
                 construct_move_operator(1.0),
-                construct_pick_with_left_hand_operator(1.0),
-                construct_place_with_left_hand_operator(1.0),
+                construct_pick_with_left_hand_operator_blocking(1.0),
+                construct_place_with_left_hand_operator_blocking(1.0),
             ]
 
     locations = {"countertop_1", "diningtable_6", "diningtable_9"}
@@ -777,7 +775,7 @@ def test_either_dining_table_satisfies_an_at_category_goal(table):
 
 
 def _blocking_two_table_env():
-    """_two_table_env with the blocking move, pick and place operators."""
+    """_two_table_env with the blocking move as well."""
     from railroad.operators.core import construct_move_operator_blocking
     from interruption.operators import (
         construct_pick_with_left_hand_operator_blocking,

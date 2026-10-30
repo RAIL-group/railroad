@@ -3,50 +3,18 @@ import math
 import os
 
 import pytest
-from interruption.utilities import (
-    RandomVariableType,
-    calibrate_beta_parameter,
-    _check_num_rooms,
-    _check_scene_room_types,
-    filter_procthor_scenes,
-    find_exemplar_scene,
-    find_shared_obj_loc_scenes,
-    get_action_cost,
-    get_augmented_task_dist,
-    get_expected_time_next_arrival,
-    get_next_state,
-    get_task_cost_quantile,
-    get_task_arrival_prob,
+from interruption.utilities import get_action_cost, get_next_state
+from interruption.task_arrival import (
+    RandomVariableType, calibrate_beta_parameter, get_expected_time_next_arrival,
+    get_task_cost_quantile, get_task_arrival_prob,
+)
+from interruption.procthor_scenes import (
+    _check_num_rooms, _check_scene_room_types, filter_procthor_scenes, find_exemplar_scene,
     get_task_distribution_from_remap_dir,
-    remap_scene_objects_and_locations,
-    use_remapped_scenes,
-    SceneRemappingError,
+    remap_scene_objects_and_locations, use_remapped_scenes, SceneRemappingError,
 )
 from railroad.core import Fluent, State, get_next_actions
-from railroad.environment.procthor.resources import get_procthor_10k_dir
-from railroad.environment.procthor.utils import get_generic_name
 from railroad.operators.core import construct_move_operator, construct_pick_operator
-
-
-def _load_scene_items(seed: int) -> set[tuple[str, str]]:
-    """
-    Test helper: independently derives a scene's (object/location) item set
-    directly from data.jsonl, mirroring find_shared_obj_loc_scenes' own
-    derivation. Used to verify its output against the raw dataset rather than
-    trusting the function's own bookkeeping.
-    """
-    with open(get_procthor_10k_dir() / "data.jsonl", "r", encoding="utf-8") as f:
-        scene = json.loads(next(line for i, line in enumerate(f) if i == seed))
-    objects = {
-        ("object", get_generic_name(child["id"]))
-        for container in scene["objects"]
-        for child in container.get("children", [])
-    }
-    locations = {
-        ("location", get_generic_name(container["id"]))
-        for container in scene["objects"]
-    }
-    return objects | locations
 
 
 @pytest.mark.parametrize("action_cost", [1, 3, 5])
@@ -139,7 +107,7 @@ def test_get_task_cost_quantile_out_of_range():
 
 
 def test_get_expected_time_next_arrival(tmp_path, monkeypatch):
-    monkeypatch.setattr("interruption.utilities.get_procthor_10k_dir", lambda: tmp_path)
+    monkeypatch.setattr("interruption.task_arrival.get_procthor_10k_dir", lambda: tmp_path)
     (tmp_path / "run_metadata").mkdir()
     (tmp_path / "run_metadata" / "task_cost_quantiles_abc.json").write_text(
         json.dumps({"percentiles": list(range(101)), "costs": [float(p) for p in range(101)]}),
@@ -205,79 +173,6 @@ def test_filter_procthor_scenes(num_rooms, room_types, locations, objects, sol):
     )) == sol
 
 
-@pytest.mark.parametrize(
-    argnames="num_scenes, num_rooms, num_objects, num_locations",
-    argvalues=[
-        (5, {1}, 2, 2),
-        (20, {1}, 3, 1),
-        (50, {1}, 1, 3),
-    ]
-)
-def test_find_shared_obj_loc_scenes_success(num_scenes, num_rooms, num_objects, num_locations):
-    scene_seeds, selected_items, success = find_shared_obj_loc_scenes(
-        num_scenes, num_rooms, num_objects, num_locations
-    )
-    assert success
-    assert len(scene_seeds) >= num_scenes
-
-    # exactly the requested number of DISTINCT objects/locations were
-    # selected - regression check for a prior bug where the same item could
-    # be picked twice, and for a prior bug where a type more common in the
-    # remaining scene pool than the other could overshoot its own quota
-    # while the loop kept searching for the other type
-    selected_objects = {item for item in selected_items if item[0] == "object"}
-    selected_locations = {item for item in selected_items if item[0] == "location"}
-    assert len(selected_objects) == num_objects
-    assert len(selected_locations) == num_locations
-
-    # every returned scene actually contains every selected item, checked
-    # against the raw dataset independently of the function's own bookkeeping
-    for seed in scene_seeds:
-        assert selected_items.issubset(_load_scene_items(seed))
-
-
-def test_find_shared_obj_loc_scenes_infeasible_num_scenes():
-    # more scenes than exist in the whole ProcTHOR-10k dataset - can never succeed
-    scene_seeds, _, success = find_shared_obj_loc_scenes(
-        num_scenes=10001, num_rooms=None, num_objects=1, num_locations=1
-    )
-    assert not success
-    assert len(scene_seeds) < 10001
-
-
-def test_find_shared_obj_loc_scenes_zero_quota_not_allowed():
-    # requesting 0 objects AND 0 locations is a no-op request and disallowed
-    with pytest.raises(AssertionError):
-        find_shared_obj_loc_scenes(
-            num_scenes=1, num_rooms=None, num_objects=0, num_locations=0
-        )
-
-
-@pytest.mark.parametrize(
-    argnames="current_task, task_dist, sol",
-    argvalues=[
-        (
-            Fluent("at spoon bathroom"),
-            ([Fluent("at cup bathroom")], [1.0]),
-            ([Fluent("at spoon bathroom") & Fluent("at cup bathroom")], [1.0])
-        ),
-        (
-            Fluent("at spoon bathroom"),
-            ([Fluent("at cup bathroom"), Fluent("at knife bathroom")], [0.5, 0.5]),
-            (
-                [
-                    Fluent("at spoon bathroom") & Fluent("at cup bathroom"),
-                    Fluent("at spoon bathroom") & Fluent("at knife bathroom")
-                ],
-                [0.5, 0.5]
-            )
-        ),
-    ]
-)
-def test_get_augmented_task_dist(current_task, task_dist, sol):
-    assert get_augmented_task_dist(current_task, task_dist) == sol
-
-
 def _box_scene(objects_in_box: list[str], objects_elsewhere: list[str]) -> dict:
     """A one-room scene with a Box (an ignored container) and a Sofa."""
     square = [{"x": x, "y": 0, "z": z} for x, z in [(0, 0), (0, 10), (10, 10), (10, 0)]]
@@ -322,7 +217,7 @@ _REMAP_SCRIPT = """
 import hashlib
 import json
 
-from interruption.utilities import remap_scene_objects_and_locations
+from interruption.procthor_scenes import remap_scene_objects_and_locations
 
 square = [{"x": x, "y": 0, "z": z} for x, z in [(0, 0), (0, 10), (10, 10), (10, 0)]]
 scene = {
@@ -428,10 +323,10 @@ def test_task_distribution_from_remap_dir_empty_dir(tmp_path):
 
 
 def test_use_remapped_scenes(tmp_path, monkeypatch):
-    import interruption.utilities as utilities
+    import interruption.procthor_scenes as procthor_scenes
     from railroad.environment.procthor.resources import REMAP_DIR_ENV_VAR
 
-    monkeypatch.setattr(utilities, "get_procthor_10k_dir", lambda: tmp_path)
+    monkeypatch.setattr(procthor_scenes, "get_procthor_10k_dir", lambda: tmp_path)
     monkeypatch.delenv(REMAP_DIR_ENV_VAR, raising=False)
     remap_dir = tmp_path / "remapped_scenes" / "abc"
     remap_dir.mkdir(parents=True)

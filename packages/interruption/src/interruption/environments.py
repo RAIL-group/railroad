@@ -4,28 +4,22 @@ from typing import Sequence, Optional
 import copy
 import random
 from pathlib import Path
-import numpy as np
 from railroad import operators
 from railroad.core import Action, Goal, LiteralGoal, Operator, State
 from railroad.core import Fluent as F
-from railroad.environment import Environment, SymbolicEnvironment
+from railroad.environment import Environment
 from railroad.environment.procthor.environment import ProcTHOREnvironment
 
 from .operators import (
-    construct_assemble_operator,
-    # construct_gripper_pick_operator,
-    # construct_gripper_place_operator,
     construct_pick_with_left_hand_operator_blocking,
     construct_place_with_left_hand_operator_blocking,
     only_clears_blocking_facts,
 )
 from .alfred_task_generator import get_task_list
 from .constants import NUM_ROOMS_FILTER, NUM_TASKS, ONE_ROOM_FILTER
-from .utilities import (
-    get_object_container_slots,
-    get_task_distribution_from_remap_dir,
-    get_updated_scene_graph,
-    permute_object_containers,
+from .procthor_scenes import get_task_distribution_from_remap_dir
+from .scene_graph import (
+    get_object_container_slots, get_updated_scene_graph, permute_object_containers,
 )
 
 
@@ -67,11 +61,36 @@ class FinishesBlockingCleanUps(Environment):
             self._after_skills_advanced(next_time)
 
 
+def kitchen_operators(env: "KitchenProcTHOREnvironment") -> list[Operator]:
+    """
+    The kitchen's default operators. Blocking variants: no move straight after a
+    move, no placing an object straight after picking it, no picking it straight
+    back up after placing it. Moves take as long as the scene's path between the
+    locations; picks and places take 10.
+    """
+    move_op = operators.construct_move_operator_blocking(env.estimate_move_time)
+    left_pick_op = construct_pick_with_left_hand_operator_blocking(10.0)
+    left_place_op = construct_place_with_left_hand_operator_blocking(10.0)
+    return [move_op, left_pick_op, left_place_op]
+
+
+# builds an environment's operators; given the environment, so an operator can
+# use its scene (e.g. kitchen_operators' moves, timed by env.estimate_move_time)
+OperatorFactory = Callable[["KitchenProcTHOREnvironment"], list[Operator]]
+
+
 class KitchenProcTHOREnvironment(FinishesBlockingCleanUps, ProcTHOREnvironment):
     """
-    Kitchen ProcTHOR environment with relevant internal operator construction.
+    Kitchen ProcTHOR environment. Its operators come from the operators factory,
+    kitchen_operators unless given, e.g. to add one:
+
+        KitchenProcTHOREnvironment(..., operators=lambda env: [
+            *kitchen_operators(env), construct_no_op_operator(5.0)
+        ])
     """
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, operators: OperatorFactory = kitchen_operators, **kwargs) -> None:
+        # define_operators runs during Environment.__init__, so set this first
+        self._operator_factory = operators
         super().__init__(*args, **kwargs)
         # the scene's original container occupancy, before any action has
         # moved an object - what randomize_object_locations resets to
@@ -100,15 +119,7 @@ class KitchenProcTHOREnvironment(FinishesBlockingCleanUps, ProcTHOREnvironment):
         return clone
 
     def define_operators(self) -> list[Operator]:
-        # blocking variants: no move straight after a move, no placing an object
-        # straight after picking it, no picking it straight back up after placing
-        move_op = operators.construct_move_operator_blocking(self.estimate_move_time)
-        left_pick_op = construct_pick_with_left_hand_operator_blocking(10.0)
-        #right_pick_op = construct_pick_with_right_hand_operator_blocking(10.0)
-        left_place_op = construct_place_with_left_hand_operator_blocking(10.0)
-        #right_place_op = construct_place_with_right_hand_operator_blocking(10.0)
-        # return [move_op, left_pick_op, right_pick_op, left_place_op, right_place_op]
-        return [move_op, left_pick_op, left_place_op]
+        return self._operator_factory(self)
 
 
     def update_scene_graph(self, action: Action) -> None:
@@ -193,102 +204,19 @@ class KitchenProcTHOREnvironment(FinishesBlockingCleanUps, ProcTHOREnvironment):
         self._time += time
 
 
-# helper functions
-def construct_simple_kitchen_environment() -> SymbolicEnvironment:
-    """
-    Constructs a SymbolicEnvironment representing the simple kitchen
-    environment used for prototyping.
-    """
-    locations = {
-        "refrigerator": np.array([0, 0]),
-        "pantry": np.array([1, 0]),
-        "countertop1": np.array([1,1]),
-        "countertop2": np.array([2,1]),
-        "table": np.array([0,2])
-    }
-
-    objects_by_type = {
-        "robot": {"robot1"},
-        "location": set(locations),
-        "object": {"turkey", "bread", "sandwhich"}
-    }
-
-    pick_time = 1
-    place_time =1
-    assemble_time = 1
-
-    # define operators
-    def move_time(robot, loc_from, loc_to):
-        return float(np.linalg.norm(locations[loc_from] - locations[loc_to]))
-
-    move = operators.construct_move_operator(move_time)
-    pick = operators.construct_pick_operator(pick_time)
-    place = operators.construct_place_operator(place_time)
-    assemble = construct_assemble_operator(assemble_time)
-
-    # initial state
-    initial_fluents = {
-        F("free robot1"), F("at robot1 table"), F("is-turkey turkey"), F("is-bread bread"),
-        ~F("hand-full robot1"), F("at turkey refrigerator"), F("at bread pantry"),
-        ~F("prep-station table"), F("prep-station countertop2"), ~F("prep-station refrigerator"),
-        ~F("sandwhich-made"), F("prep-station countertop1"), F("is-sandwhich sandwhich"),
-        ~F("prep-station pantry")
-    }
-    initial_state = State(0.0, initial_fluents)
-
-    env = SymbolicEnvironment(
-        state=initial_state, objects_by_type=objects_by_type,
-        operators=[move, pick, place, assemble],
-    )
-    return env
-
-
-def get_simple_task_distribution() -> list[tuple[list[Goal], list[float]]]:
-    """
-    Returns the task distributions for the prototype kitchen scenario.
-    """
-    interrupting_task_dists = [
-        (
-            [
-                (
-                    ~F("at turkey countertop1") & ~F("at bread countertop1") &
-                    ~F("hand-full robot1") & ~F("at sandwhich countertop1")
-                )
-            ],
-            [1.0]
-        ),
-        (
-        [
-            (
-                ~F("at turkey countertop2") & ~F("at bread countertop2") &
-                ~F("hand-full robot1") & ~F("at sandwhich countertop2")
-            )
-        ],
-        [1.0]
-        )
-    ]
-
-    return interrupting_task_dists
-
-
-def get_simple_goal() -> F | Goal:
-    """
-    Gets the initial goal for the prototype kitchen scenario.
-    """
-    return (F("sandwhich-made") & F("at sandwhich table"))
-
-
 def construct_procthor_kitchen_environment(
     seed: int,
     object_seed: int | None = None,
     relevant_objects: Optional[list[str]] = None,
-    remove_duplicate_objects: bool = False
+    remove_duplicate_objects: bool = False,
+    operators: OperatorFactory = kitchen_operators,
 ) -> KitchenProcTHOREnvironment:
     """
     Constructs a KitchenProcTHOREnvironment representing the scene 
     corresponding to the scene from ProcTHOR-10k. remove_duplicate_objects keeps
     one object per object category; duplicate containers are always kept, since
-    they are part of the home's real layout.
+    they are part of the home's real layout. operators builds the environment's
+    operators (see KitchenProcTHOREnvironment).
     """
     initial_fluents = {
         F("at robot1 start_loc"), F("free robot1"),
@@ -306,6 +234,7 @@ def construct_procthor_kitchen_environment(
         object_seed,
         relevant_objects,
         remove_duplicate_objects=remove_duplicate_objects,
+        operators=operators,
     )
 
     # Fully populate symbolic environment now that scene is available internally.
@@ -343,31 +272,6 @@ def setup_procthor_initial_state(
         for obj in objects_by_location[loc]
         for fluent in (F(f"at {obj} {loc}"), F(f"at-category {obj} {location_category(loc)}"))
     )
-
-
-def get_example_procthor_task_distribution(index: int) -> tuple[Sequence[Goal], list[float]]:
-    """
-    Returns the task distribution for an example ProcTHOR kitchen scenario
-    (seed=201).
-    """
-    tasks_dists = [
-        [LiteralGoal(F("at spraybottle garbagecan"))],
-        [
-            LiteralGoal(F("at spraybottle garbagecan")),
-            LiteralGoal(F("at spraybottle fridge")),
-            LiteralGoal(F("at apple stool")),
-            LiteralGoal(F("at apple shelvingunit")),
-            LiteralGoal(F("at spoon countertop")),
-            LiteralGoal(F("at spoon fridge")),
-            LiteralGoal(F("at peppershaker garbagecan")),
-            LiteralGoal(F("at peppershaker stool")),
-            LiteralGoal(F("at knife countertop")),
-            LiteralGoal(F("at knife garbagecan"))
-        ]
-    ]
-    probs = [[1/len(dist)] * len(dist) for dist in tasks_dists]
-
-    return list(zip(tasks_dists, probs))[index]
 
 
 def get_alfred_task_distribution(

@@ -18,7 +18,7 @@ LAMBDA_MAX = 0
 LAMBDA_FF = 0.5
 
 ## debug output, turned on per run with an environment variable, e.g.
-##   INTERRUPTION_SEARCH_DEBUG=1 uv run python scripts/experiment_script.py
+##   INTERRUPTION_SEARCH_DEBUG=1 uv run python scripts/interruption/experiment_script.py
 AP_DEBUG = _env_flag("INTERRUPTION_AP_DEBUG")
 ACTION_PROB_DEBUG = _env_flag("INTERRUPTION_ACTION_PROB_DEBUG")
 SEARCH_DEBUG = _env_flag("INTERRUPTION_SEARCH_DEBUG")
@@ -67,8 +67,8 @@ OBJ_PLACEMENT_SEED = None
 # task-arrival rates, each given as the fraction of the training tasks that take
 # longer to complete than the median time to the next arrival (0 -> no
 # interruptions). Turned into the average time between arrivals by
-# utilities.get_expected_time_next_arrival, from the task-cost quantiles that
-# scripts/generate_task_cost_distribution.py --write-quantiles writes for
+# task_arrival.get_expected_time_next_arrival, from the task-cost quantiles that
+# scripts/interruption/generate_task_cost_distribution.py --write-quantiles writes for
 # REMAPPED_SCENES_HASH.
 ARRIVAL_EXCEEDANCE_FRACTIONS = [0, 0.05, 0.10, 0.25, 0.50, 0.75, 0.95]
 # experiment seed for each arrival rate above (paired by position)

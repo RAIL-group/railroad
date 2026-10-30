@@ -84,3 +84,25 @@ def test_a_fork_does_not_keep_its_ancestors_alive():
 
     assert parent_ref() is None
     assert child.get_actions()  # the child's operators must not need the freed parent
+
+
+def _with_no_op(env):
+    from railroad.operators import construct_no_op_operator
+    from interruption.environments import kitchen_operators
+    return [*kitchen_operators(env), construct_no_op_operator(5.0)]
+
+
+def test_operators_are_the_kitchens_unless_given_and_forks_keep_them():
+    default = _build()
+    custom = construct_procthor_kitchen_environment(
+        PROCTHOR_SEED, remove_duplicate_objects=True, operators=_with_no_op
+    )
+
+    def names(env):
+        return {action.name for action in env.get_actions()}
+
+    assert "no_op robot1" not in names(default)
+    assert "no_op robot1" in names(custom)
+    # the custom operators come in addition to the kitchen's
+    assert names(default) < names(custom)
+    assert "no_op robot1" in names(custom.fork())

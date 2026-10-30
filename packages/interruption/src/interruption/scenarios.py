@@ -22,18 +22,15 @@ from .constants import (
 )
 from .environments import (
     KitchenProcTHOREnvironment,
+    OperatorFactory,
     construct_procthor_kitchen_environment,
+    kitchen_operators,
     get_example_procthor_goal,
     get_scene_task_distribution,
 )
-from .utilities import (
-    RandomVariableType,
-    extract_relevant_objects,
-    get_expected_time_next_arrival,
-    get_task_arrival_prob,
-    randomize_task_distribution_order,
-    use_remapped_scenes,
-)
+from .utilities import extract_relevant_objects, randomize_task_distribution_order
+from .task_arrival import RandomVariableType, get_expected_time_next_arrival, get_task_arrival_prob
+from .procthor_scenes import use_remapped_scenes
 
 
 @dataclass(frozen=True)
@@ -76,8 +73,10 @@ class Scenario:
     # object per category
     relevant_objects: list[str] | None = None
     remove_duplicate_objects: bool = True
+    # builds the environment's operators; see environments.KitchenProcTHOREnvironment
+    operators: OperatorFactory = kitchen_operators
     # the multi-scene data-generation run whose remapped scene to load (see
-    # utilities.use_remapped_scenes); None loads the plain scene
+    # procthor_scenes.use_remapped_scenes); None loads the plain scene
     remap_hash: str | None = None
     # the average time between task arrivals task_arrival_fn was built from,
     # when known; recorded with results, not used to run the scenario
@@ -98,6 +97,7 @@ class Scenario:
         augment_task: bool = AUGMENT_TASK,
         retry_with_subgoals: bool = RETRY_WITH_SUBGOALS,
         failure_cost: float = 500,
+        operators: OperatorFactory = kitchen_operators,
     ) -> "Scenario":
         """
         A ProcTHOR scenario on the scene's task distribution: the one the
@@ -105,7 +105,7 @@ class Scenario:
 
         arrival_exceedance sets how often tasks arrive, as the fraction of the
         training tasks that take longer than the median time to the next arrival
-        (0: never; see utilities.get_expected_time_next_arrival). experiment_seed
+        (0: never; see task_arrival.get_expected_time_next_arrival). experiment_seed
         decides when they arrive. task_sample_seed shuffles the task order and
         picks the first task from it; None keeps the stored order and starts
         with the example goal.
@@ -147,6 +147,7 @@ class Scenario:
                 extract_relevant_objects(task_distribution[0]) if filter_objects else None
             ),
             remap_hash=remap_hash,
+            operators=operators,
             time_between_arrivals=time_between_arrivals,
         )
 
@@ -159,4 +160,5 @@ class Scenario:
             object_seed=self.seeds.object_placement_seed,
             relevant_objects=self.relevant_objects,
             remove_duplicate_objects=self.remove_duplicate_objects,
+            operators=self.operators,
         )

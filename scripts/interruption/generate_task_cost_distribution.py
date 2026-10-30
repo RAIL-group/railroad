@@ -4,24 +4,24 @@ interrupting tasks used in the expected-value targets of the training dataset.
 
 Input data lives in ``<procthor-10k>/pickles/task_costs/`` -- one compressed
 pickle per (scene, object-placement, plan-step, task) tuple, written by
-``scripts/multiprocess_datagen.py`` when ``WRITE_OUT_INDIVIDUAL_TASK_COSTS`` is
+``scripts/interruption/multiprocess_datagen.py`` when ``WRITE_OUT_INDIVIDUAL_TASK_COSTS`` is
 set. Each pickle is ``(SceneGraph, LiteralGoal task, float cost)`` where ``cost``
 is the A* plan cost to complete that single task from the datum's state.
 
 Usage:
-    uv run python scripts/generate_task_cost_distribution.py
-    uv run python scripts/generate_task_cost_distribution.py --group-by object
-    uv run python scripts/generate_task_cost_distribution.py \
+    uv run python scripts/interruption/generate_task_cost_distribution.py
+    uv run python scripts/interruption/generate_task_cost_distribution.py --group-by object
+    uv run python scripts/interruption/generate_task_cost_distribution.py \
         --scene-seed '2??' --exclude-scene-seed 205 '21?'
-    uv run python scripts/generate_task_cost_distribution.py \
+    uv run python scripts/interruption/generate_task_cost_distribution.py \
         --data-dir resources/procthor-10k/pickles/task_costs \
         --out-image task_cost_cdf.jpeg --out-data task_cost_cdf.npz
-    uv run python scripts/generate_task_cost_distribution.py --write-quantiles
+    uv run python scripts/interruption/generate_task_cost_distribution.py --write-quantiles
 
 ``--write-quantiles`` persists the percentiles of the pooled costs to
 ``<procthor-10k>/run_metadata/task_cost_quantiles_<run-key>.json``, which the
 experiments turn into task-arrival rates (see
-``interruption.utilities.get_expected_time_next_arrival``).
+``interruption.task_arrival.get_expected_time_next_arrival``).
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ from tqdm import tqdm
 
 from interruption.constants import REMAPPED_SCENES_HASH
 from interruption.learning.data import load_compressed_pickle
-from interruption.utilities import task_cost_quantiles_path
+from interruption.task_arrival import task_cost_quantiles_path
 from railroad.environment.procthor.resources import get_procthor_10k_dir
 from railroad.environment.procthor.utils import get_generic_name
 
@@ -166,7 +166,7 @@ def write_quantiles(
 ) -> Path:
     """Write the 0..100th percentiles of the pooled costs, plus provenance.
 
-    Read back by ``interruption.utilities.load_task_cost_quantiles``.
+    Read back by ``interruption.task_arrival.load_task_cost_quantiles``.
     """
     percentiles = list(range(101))
     costs = np.percentile([r.cost for r in records], percentiles)

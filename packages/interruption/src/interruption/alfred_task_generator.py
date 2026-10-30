@@ -62,11 +62,6 @@ def get_feasible_conditions():
     return feasible_conditions
 
 
-def unique(sequence):
-    seen = set()
-    return [x for x in sequence if not (x in seen or seen.add(x))]
-
-
 def categorize_strings(str_list):
     result = {}
     for string in str_list:

@@ -1,6 +1,11 @@
 """
-Tests for local (patched) changes to the vendored `railroad` package.
-See patches/railroad/ at the repo root for the corresponding diffs.
+Tests for the interruption project's changes to railroad's ProcTHOR scene
+graph and ThorInterface, made directly in packages/railroad:
+  - SceneGraph's 5-element node-type schema, which adds a ROBOT type, and
+    parent lookup for objects a robot holds;
+  - ThorInterface's object-location randomization: grouping objects by
+    container, and saving, loading and caching randomized scenes per object seed;
+  - the robot node ThorInterface adds to the scene graph.
 """
 import types
 

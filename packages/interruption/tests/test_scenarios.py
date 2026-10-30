@@ -123,3 +123,25 @@ def test_run_result_metrics_keep_the_benchmark_keys():
         "had_failed_search": True, "actions": ["move a b", "Failed Task"],
         "log_html": "", "log_plot": b'',
     }
+
+
+def test_a_scenario_builds_its_environment_with_its_operators(monkeypatch):
+    built = {}
+    monkeypatch.setattr(
+        scenarios_module, "construct_procthor_kitchen_environment",
+        lambda seed, **kwargs: built.update(kwargs, seed=seed) or "env",
+    )
+
+    def operators(env):
+        return []
+
+    scenario = _scenario(operators=operators, relevant_objects=["spoon_14"])
+
+    assert scenario.build_environment() == "env"
+    assert built == {
+        "seed": scenario.seeds.procthor_seed,
+        "object_seed": scenario.seeds.object_placement_seed,
+        "relevant_objects": ["spoon_14"],
+        "remove_duplicate_objects": True,
+        "operators": operators,
+    }

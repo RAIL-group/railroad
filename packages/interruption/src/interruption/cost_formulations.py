@@ -83,24 +83,3 @@ class DefaultFormulation:
         return child_discount * (undiscounted_future_cost + self.current_task_reward)
 
 
-@dataclass(frozen=True)
-class TerminalVAP:
-    """
-    The original formulation:
-        gamma_{t+1} = gamma_t * (1 - p)        if discount is NO_INTERRUPTION
-                    = gamma_t * discount       otherwise
-        g'          = g + gamma_t * (c(a) + p * V(s'))
-        future      = gamma_{t+1} * (h(s') + current_task_reward)
-    """
-    discount: Discount = 1.0
-
-    def child_discount(self, terms: StepTerms) -> float:
-        return _child_discount(self.discount, terms)
-
-    def accumulated_cost(self, terms: StepTerms) -> float:
-        return terms.parent_cost + terms.parent_discount * terms.action_cost
-
-    def estimated_future_cost(
-        self, terms: StepTerms, child_discount: float, undiscounted_future_cost: float
-    ) -> float:
-        return child_discount * undiscounted_future_cost

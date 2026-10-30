@@ -13,13 +13,14 @@ import pytest
 from interruption import planner as planner_module
 from interruption.cost_formulations import NO_INTERRUPTION, DefaultFormulation, StepTerms
 from interruption.planner import (
+    FFHeuristic,
     InterruptionSearchProblem,
     InterruptionTrajectory,
     PlannerConfig,
     astar_search,
 )
-from interruption.planning_framework import ap_heuristic_fn
-from interruption.utilities import RandomVariableType, get_next_state, get_task_arrival_prob
+from interruption.utilities import get_next_state
+from interruption.task_arrival import RandomVariableType, get_task_arrival_prob
 from railroad.core import Fluent as F, State, get_next_actions
 from railroad.operators.core import (
     construct_move_operator,
@@ -80,34 +81,37 @@ def _batch_ev(scene_graphs) -> list[float]:
 
 ARRIVAL_FN = partial(get_task_arrival_prob, RandomVariableType.CONTINUOUS, -1, 30)
 
-# name -> PlannerConfig kwargs (plus "ev" / "batch" for the learned value function)
+# name -> PlannerConfig kwargs (plus "ev" / "batch" for the learned value function).
+# The FF scenarios run the Python search they were recorded with: an FFHeuristic
+# search without a value function would otherwise run in C++ (test_cpp_astar.py
+# checks the two agree).
+FF = dict(heuristic_fn=FFHeuristic(), use_cpp_search=False)
+FF_EV = dict(heuristic_fn=FFHeuristic(weights=(1, 1)), use_cpp_search=False)
 SCENARIOS: dict[str, dict[str, Any]] = {
     "myopic_constant_h": dict(heuristic_fn=0, cost_formulation=DefaultFormulation(1.0)),
-    "myopic_ff": dict(
-        cost_formulation=DefaultFormulation(1.0), heuristic_fn=partial(ap_heuristic_fn)
-    ),
+    "myopic_ff": dict(**FF, cost_formulation=DefaultFormulation(1.0)),
     "no_int_prob_discount": dict(
-        cost_formulation=DefaultFormulation(NO_INTERRUPTION), heuristic_fn=partial(ap_heuristic_fn),
+        **FF, cost_formulation=DefaultFormulation(NO_INTERRUPTION),
         planner_interruption_prob_fn=0.1,
     ),
     "arrival_fn_discount": dict(
-        cost_formulation=DefaultFormulation(NO_INTERRUPTION), heuristic_fn=partial(ap_heuristic_fn),
+        **FF, cost_formulation=DefaultFormulation(NO_INTERRUPTION),
         planner_interruption_prob_fn=ARRIVAL_FN,
     ),
     "fixed_discount_with_reward": dict(
-        cost_formulation=DefaultFormulation(0.95, current_task_reward=5),
-        heuristic_fn=partial(ap_heuristic_fn), planner_interruption_prob_fn=ARRIVAL_FN,
+        **FF, cost_formulation=DefaultFormulation(0.95, current_task_reward=5),
+        planner_interruption_prob_fn=ARRIVAL_FN,
     ),
     "ev_no_batch": dict(
-        cost_formulation=DefaultFormulation(1.0), heuristic_fn=partial(ap_heuristic_fn, weights=(1, 1)),
+        **FF_EV, cost_formulation=DefaultFormulation(1.0),
         planner_interruption_prob_fn=ARRIVAL_FN, ev=True,
     ),
     "ev_batch": dict(
-        cost_formulation=DefaultFormulation(1.0), heuristic_fn=partial(ap_heuristic_fn, weights=(1, 1)),
+        **FF_EV, cost_formulation=DefaultFormulation(1.0),
         planner_interruption_prob_fn=ARRIVAL_FN, ev=True, batch=True,
     ),
     "ev_batch_int_prob_discount": dict(
-        cost_formulation=DefaultFormulation(NO_INTERRUPTION), heuristic_fn=partial(ap_heuristic_fn, weights=(1, 1)),
+        **FF_EV, cost_formulation=DefaultFormulation(NO_INTERRUPTION),
         planner_interruption_prob_fn=0.1, ev=True, batch=True,
     ),
 }

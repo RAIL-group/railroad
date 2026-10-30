@@ -35,10 +35,7 @@ from .environments import KitchenProcTHOREnvironment
 from .planner import InterruptionSearchProblem
 from .planning_framework import Planner, RetryState, search_with_retry, search_without_retry
 from .scenarios import Scenario
-from .utilities import (
-    get_action_cost,
-    negative_fluent_preprocessing,
-)
+from .utilities import get_action_cost, negative_fluent_preprocessing
 
 
 @dataclass

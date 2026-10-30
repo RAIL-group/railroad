@@ -7,9 +7,9 @@ run of the interruption benchmarks. Runs that never produced a result (timeouts,
 errors) have no such metric, so the count is reported against the runs that did.
 
 Usage:
-    uv run python scripts/summarize_search_retries.py
-    uv run python scripts/summarize_search_retries.py railroad_bench_1790693927
-    uv run python scripts/summarize_search_retries.py --tracking-uri sqlite:///mlflow.db
+    uv run python scripts/interruption/summarize_search_retries.py
+    uv run python scripts/interruption/summarize_search_retries.py railroad_bench_1790693927
+    uv run python scripts/interruption/summarize_search_retries.py --tracking-uri sqlite:///mlflow.db
 """
 from __future__ import annotations
 

@@ -11,7 +11,7 @@ from interruption.cost_formulations import NO_INTERRUPTION, DefaultFormulation
 from interruption.planner import (
     FFHeuristic, InterruptionSearchProblem, PlannerConfig, SearchStats, astar_search,
 )
-from interruption.utilities import RandomVariableType, get_task_arrival_prob
+from interruption.task_arrival import RandomVariableType, get_task_arrival_prob
 from railroad.core import Fluent as F, LiteralGoal, State
 from railroad.operators.core import (
     construct_move_operator,

@@ -46,9 +46,10 @@ from interruption.learning.data import write_compressed_pickle
 from interruption.planner import (
     InterruptionSearchProblem, PlannerConfig, SearchStats, astar_search
 )
-from interruption.utilities import (
-    RandomVariableType, get_action_cost, get_task_arrival_prob, extract_relevant_objects,
-    filter_procthor_scenes, find_exemplar_scene, remap_scene_objects_and_locations
+from interruption.utilities import get_action_cost, extract_relevant_objects
+from interruption.task_arrival import RandomVariableType, get_task_arrival_prob
+from interruption.procthor_scenes import (
+    filter_procthor_scenes, find_exemplar_scene, remap_scene_objects_and_locations,
 )
 from railroad.core import (
     Action,
@@ -146,7 +147,7 @@ def main(prewarm_only: bool = False):
     Data-generation entrypoint: select scenes -> build the task distribution ->
     key each scene -> build any missing scene caches -> generate each scene's data
     in a pool of workers. prewarm_only stops after the caches are built
-    (`python scripts/multiprocess_datagen.py --prewarm-only`), so they can be built
+    (`python scripts/interruption/multiprocess_datagen.py --prewarm-only`), so they can be built
     ahead of a run.
     """
     start = time.perf_counter()
@@ -1047,10 +1048,9 @@ def datum_pickle_path(
     function so the existence check in `_record_datum` and the write in
     `write_datum_to_file` can never disagree about the filename.
 
-    `object_randomization_seed` is a real object seed on the legacy
-    get_randomized_procthor_data path; on the path `_generate_scene_data`
-    uses, it carries the scene's content-addressed key instead (see `main`),
-    so the existence check only matches data generated from identical inputs.
+    `object_randomization_seed` carries the scene's content-addressed key (see
+    `main`), so the existence check only matches data generated from identical
+    inputs.
     """
     return (
         Path(get_procthor_10k_dir()) / "pickles"
@@ -1122,43 +1122,6 @@ def _csv_path(prefix: str, scene_seed: int, key: int) -> Path:
     different inputs writes a different CSV instead of appending to this one.
     """
     return Path(get_procthor_10k_dir()) / f"{prefix}_{scene_seed}_{key}.csv"
-
-
-# --------------------------------------------------------------------------- #
-# Legacy / standalone - not on main()'s path, kept for reference and possible
-# reinstatement (see SEED_STRIDE and datum_pickle_path above)
-# --------------------------------------------------------------------------- #
-def get_randomized_procthor_data(
-    goal: Goal,
-    task_distribution: tuple[Sequence[Goal], list[float]],
-    procthor_seed: int,
-    start_seed: int,
-    num_objects: int,
-    num_locations: int
-) -> tuple[ExperimentData, int]:
-    """
-    Helper function for ensuring that the randomized object procthor environment
-    has all objects/locations of the original scene.
-    """
-    while True:
-        data = initialize_experiment_data(
-            initialize_scenario(
-                goal,
-                task_distribution,
-                procthor_seed,
-                start_seed,
-                extract_relevant_objects(task_distribution[0]) if FILTER_OBJECTS else None,
-            ),
-            PLANNER,
-        )
-
-        if (
-            len(data.env.scene.objects) == num_objects and
-            len(data.env.scene.locations) == num_locations
-        ):
-            return data, start_seed
-
-        start_seed+=1
 
 
 if __name__ == "__main__":

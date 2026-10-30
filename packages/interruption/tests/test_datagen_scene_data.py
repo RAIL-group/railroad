@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-_SCRIPT = Path(__file__).parents[3] / "scripts" / "multiprocess_datagen.py"
+_SCRIPT = Path(__file__).parents[3] / "scripts" / "interruption" / "multiprocess_datagen.py"
 
 
 class _Env:

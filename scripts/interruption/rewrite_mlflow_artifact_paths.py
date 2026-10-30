@@ -18,14 +18,14 @@ first (``mlflow.db.bak-YYYYmmdd-HHMMSS``) unless ``--no-backup`` is given.
 Examples
 --------
 # auto-detect: old root from the DB, new root = the dir that contains ./mlruns
-uv run python scripts/rewrite_mlflow_artifact_paths.py
+uv run python scripts/interruption/rewrite_mlflow_artifact_paths.py
 
 # inspect, then apply
-uv run python scripts/rewrite_mlflow_artifact_paths.py --db mlflow.db
-uv run python scripts/rewrite_mlflow_artifact_paths.py --db mlflow.db --apply --verify
+uv run python scripts/interruption/rewrite_mlflow_artifact_paths.py --db mlflow.db
+uv run python scripts/interruption/rewrite_mlflow_artifact_paths.py --db mlflow.db --apply --verify
 
 # be explicit about both ends
-uv run python scripts/rewrite_mlflow_artifact_paths.py \
+uv run python scripts/interruption/rewrite_mlflow_artifact_paths.py \
     --old-root /home/rail/smille20/railroad \
     --new-root /Users/sammiller/dev/interruption-project/railroad \
     --apply
