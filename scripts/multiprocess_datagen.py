@@ -22,7 +22,7 @@ import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from concurrent.futures.process import BrokenProcessPool
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 # from functools import partial
 from pathlib import Path
 
@@ -33,15 +33,14 @@ from interruption.environments import (
     get_example_procthor_goal,
 )
 from interruption.experiments import (
-    ExperimentConfig,
     ExperimentData,
-    ExperimentSeeds,
     initialize_experiment_data,
 )
-from interruption.planning_framework import PlannerMode, planning_state, search_with_retry
+from interruption.planners import MyopicPlanner
+from interruption.planning_framework import RetryState, planning_state, search_with_retry
+from interruption.scenarios import ExperimentSeeds, Scenario
 from interruption.constants import (
-    RELAXED_PLAN_FILTERING, NUM_TASKS, PROCTHOR_SEED, FILTER_OBJECTS, NUM_ROOMS_FILTER,
-    ONE_ROOM_FILTER,
+    NUM_TASKS, PROCTHOR_SEED, FILTER_OBJECTS, NUM_ROOMS_FILTER, ONE_ROOM_FILTER,
 )
 from interruption.learning.data import write_compressed_pickle
 from interruption.planner import (
@@ -65,6 +64,11 @@ NUM_DATUM = 800  # datums to generate for each scene seed
 DATA_GENERATION_SEED = 37
 REMOVE_DUPLICATE_OBJECTS = True
 H_MULTIPLIER = 1
+# searches first run over only the objects and locations of the goal's relaxed
+# plan, falling back to the full problem (planner.relaxed_plan_problem)
+RELAXED_PLAN_FILTERING = True
+# the planner that walks each scene
+PLANNER = MyopicPlanner(h_multiplier=H_MULTIPLIER, relaxed_plan_filtering=RELAXED_PLAN_FILTERING)
 WRITE_OUT_INDIVIDUAL_TASK_COSTS = True
 
 # Worker processes, each generating one scene's data at a time. Only affects
@@ -124,7 +128,7 @@ class SceneSelection:
 @dataclass
 class _SceneRun:
     """A scene's persistent environment, plus its RNG bookkeeping."""
-    config: ExperimentConfig
+    scenario: Scenario
     data: ExperimentData
     attempt: int = 0       # goal samples drawn so far; never reused, so no sample repeats
     num_shuffles: int = 0  # reshuffles so far; seeds the next one
@@ -652,7 +656,7 @@ def _expected_task_cost(
     undiscounted sums of action costs.
     """
     assert data.search_problem.interrupting_task_dist is not None
-    filtering = data.planner_parameters.relaxed_plan_filtering
+    filtering = data.planner.config.relaxed_plan_filtering
     goals, probs = data.search_problem.interrupting_task_dist
     task_costs = []
     expected_cost = 0.0
@@ -678,7 +682,7 @@ def _task_cost(
     earlier searches.
     """
     params = PlannerConfig(
-        False, data.planner_parameters.heuristic_fn, 1,
+        heuristic_fn=data.planner.config.heuristic_fn,
         relaxed_plan_filtering=relaxed_plan_filtering,
     )
     problem = InterruptionSearchProblem(goal, data.search_problem.actions)
@@ -847,7 +851,7 @@ def _record_datum(
     if expected_value == -1:
         return False
     if (
-        LABEL_AUDIT_FRACTION > 0 and data.planner_parameters.relaxed_plan_filtering
+        LABEL_AUDIT_FRACTION > 0 and data.planner.config.relaxed_plan_filtering
         and _is_audited(scene_seed, file_counter)
     ):
         assert task_costs is not None
@@ -924,22 +928,18 @@ def _open_scene_run(
     task_distribution: tuple[Sequence[Goal], list[float]],
     relevant_objects: list[str] | None,
 ) -> _SceneRun:
-    config = initialize_experiment_config(
-        get_example_procthor_goal(), task_distribution, scene_seed, None
+    scenario = initialize_scenario(
+        get_example_procthor_goal(), task_distribution, scene_seed, None, relevant_objects
     )
-    data = initialize_experiment_data(
-        config, PlannerMode.MYOPIC, relevant_objects, REMOVE_DUPLICATE_OBJECTS,
-        h_multiplier=H_MULTIPLIER,
-    )
+    data = initialize_experiment_data(scenario, PLANNER)
     # a task naming a category the loaded scene lacks stays generic and can
     # never be solved, so every datum would fail after a full search
-    assert config.interrupting_task_dist is not None
     scene_names = (
         data.env.scene.objects | set(data.env.scene.locations)
         | data.env.objects_by_type["category"]
     )
     unmapped = [
-        goal for goal in config.interrupting_task_dist[0]
+        goal for goal in data.interrupting_task_dist[0]
         if not {arg for literal in goal.get_all_literals() for arg in literal.args} <= scene_names
     ]
     if unmapped:
@@ -947,7 +947,7 @@ def _open_scene_run(
             f"scene {scene_seed}: tasks {unmapped} name categories the loaded scene "
             "doesn't have, so they can never be solved"
         )
-    return _SceneRun(config, data)
+    return _SceneRun(scenario, data)
 
 
 def _plan_next_task(run: _SceneRun, scene_seed: int) -> list[Action] | None:
@@ -983,19 +983,16 @@ def _sample_plan(run: _SceneRun, scene_seed: int) -> list[Action] | None:
     satisfied (a saturated scene) or none can be planned.
     """
     data = run.data
-    assert run.config.interrupting_task_dist is not None
     assert data.search_problem.interrupting_task_dist is not None
 
     # scene_goals are the scene-mapped goals before negative-fluent
     # conversion, so they evaluate against the raw env state; they are
     # index-parallel with the converted goals used for search
-    scene_goals, _ = run.config.interrupting_task_dist
+    scene_goals, _ = data.interrupting_task_dist
     candidate_indices = [
         i for i, goal in enumerate(scene_goals) if not goal.evaluate(data.env.state.fluents)
     ]
     interrupting_goals, _ = data.search_problem.interrupting_task_dist
-    # fresh parameters per sample, so a sample doesn't depend on earlier ones
-    params = replace(data.planner_parameters, max_task_complexity=-1)
     while candidate_indices:
         random.seed(DATA_GENERATION_SEED + scene_seed * SEED_STRIDE + run.attempt)
         run.attempt += 1
@@ -1003,8 +1000,10 @@ def _sample_plan(run: _SceneRun, scene_seed: int) -> list[Action] | None:
         data.search_problem.goal = interrupting_goals[chosen_index]
         # the experiments' retry, decomposition included: walking the scene only
         # needs a plan that makes progress, not one for the whole task
+        # a fresh retry state per sample, so a sample doesn't depend on earlier ones
         plan, success, *_ = search_with_retry(
-            PlannerMode.MYOPIC, data.env, data.search_problem, params, data.neg_to_pos_mapping
+            data.planner, data.env, data.search_problem, data.neg_to_pos_mapping,
+            retry_state=RetryState(),
         )
         if success and plan:
             return plan
@@ -1012,25 +1011,28 @@ def _sample_plan(run: _SceneRun, scene_seed: int) -> list[Action] | None:
     return None
 
 
-def initialize_experiment_config(
+def initialize_scenario(
     goal: Goal,
     task_distribution: tuple[Sequence[Goal], list[float]],
     procthor_seed: int,
     objects_seed: int | None,
-) -> ExperimentConfig:
+    relevant_objects: list[str] | None = None,
+) -> Scenario:
     """
-    Initialize a ExperimentConfig object for randomized object scene generation.
+    The Scenario for randomized object scene generation.
     """
     # in this case, the task_arrival_model won't be used in any meaningful way, because from
     # each state a single task will be solved without considering any possible interruption events.
     task_arrival_fn = partial(
         get_task_arrival_prob, RandomVariableType.CONTINUOUS, -1, float("inf")
     )
-    return ExperimentConfig(
-        ExperimentSeeds(procthor_seed, object_placement_seed=objects_seed),
-        goal,
-        task_distribution,
-        task_arrival_fn
+    return Scenario(
+        seeds=ExperimentSeeds(procthor_seed, object_placement_seed=objects_seed),
+        goal=goal,
+        interrupting_task_dist=task_distribution,
+        task_arrival_fn=task_arrival_fn,
+        relevant_objects=relevant_objects,
+        remove_duplicate_objects=REMOVE_DUPLICATE_OBJECTS,
     )
 
 
@@ -1140,16 +1142,14 @@ def get_randomized_procthor_data(
     """
     while True:
         data = initialize_experiment_data(
-            initialize_experiment_config(
+            initialize_scenario(
                 goal,
                 task_distribution,
                 procthor_seed,
-                start_seed
+                start_seed,
+                extract_relevant_objects(task_distribution[0]) if FILTER_OBJECTS else None,
             ),
-            PlannerMode.MYOPIC,
-            extract_relevant_objects(task_distribution[0])if FILTER_OBJECTS else None,
-            REMOVE_DUPLICATE_OBJECTS,
-            h_multiplier=H_MULTIPLIER
+            PLANNER,
         )
 
         if (

@@ -1,6 +1,6 @@
 import heapq
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Optional
 from tqdm import tqdm
 
@@ -13,7 +13,7 @@ from railroad.core import (
 from railroad.environment.procthor.scenegraph import SceneGraph
 
 from .constants import LAMBDA_ADD, LAMBDA_FF, LAMBDA_MAX, SEARCH_DEBUG
-from .cost_formulations import CostFormulation, DefaultFormulation, StepTerms
+from .cost_formulations import CostFormulation, DefaultFormulation, NO_INTERRUPTION, StepTerms
 from .utilities import (
     get_action_cost,
     get_next_state,
@@ -34,30 +34,24 @@ class InterruptionSearchProblem:
     interruption_prob_fn: float | Callable[[float], float] = 0
 
 
-@dataclass
+@dataclass(frozen=True, kw_only=True)
 class PlannerConfig:
     """
-    Data stucture used to store user-specified hyperparameters for
-    A* Search.
+    The settings of one A* search. Frozen: to vary a setting, build a new config
+    (dataclasses.replace). The planners in planners.py each build theirs.
     """
-    discount_by_no_int_prob: bool
     heuristic_fn: Callable[[State, Goal, list[Action], float], float] | float
-    discount: Optional[float] = None
     planner_interruption_prob_fn: float | Callable[[float], float] | None = None
     interruption_value_fn: Callable[[SceneGraph], float] | None = None
-    current_task_reward: float = 0
-    # maximum number of goals in a task that can be solved within the planner's budget
-    max_task_complexity: int = -1
     # optional batched form of interruption_value_fn: takes every one of an expanded
     # node's candidate children's scene graphs and returns one value per graph, in
     # order, via a single model call instead of one call per child. astar_search uses
     # this (when provided) to pre-warm ev_cache before create_child runs; falls back
     # to calling interruption_value_fn once per child when left as None.
     interruption_value_batch_fn: Callable[[list[SceneGraph]], list[float]] | None = None
-    # how a search step's costs are computed (see cost_formulations.py); None ->
-    # DefaultFormulation, built from discount_by_no_int_prob, discount and
-    # current_task_reward above
-    cost_formulation: CostFormulation | None = None
+    # how a search step's costs are computed, including its discount (see
+    # cost_formulations.py); the default is undiscounted
+    cost_formulation: CostFormulation = field(default_factory=DefaultFormulation)
 
     # run eligible searches with the C++ A* (see astar_search); False forces the
     # Python implementation, e.g. to compare the two
@@ -70,14 +64,6 @@ class PlannerConfig:
     # plan plus a halo of nearby objects future tasks need and where they need
     # them, falling back to the full problem (see planning_framework.interruption_halo)
     interruption_halo_filtering: bool = False
-
-    def get_cost_formulation(self) -> CostFormulation:
-        """The cost formulation the search uses."""
-        if self.cost_formulation is not None:
-            return self.cost_formulation
-        return DefaultFormulation(
-            self.discount_by_no_int_prob, self.discount, self.current_task_reward
-        )
 
 
 @dataclass(frozen=True)
@@ -191,7 +177,7 @@ class InterruptionTrajectory:
                 if ev_cache is not None:
                     ev_cache[next_state_key] = interrupting_task_ev
 
-        formulation = planner_params.get_cost_formulation()
+        formulation = planner_params.cost_formulation
         terms = self.step_terms(action, interruption_prob, interrupting_task_ev)
         accumulated_cost = formulation.accumulated_cost(terms)
 
@@ -339,7 +325,7 @@ def astar_search(
     # search. This is exact, not an approximation like heuristic_cache: it never
     # discards a candidate whose true accumulated_cost we haven't actually computed.
     best_cost: dict[frozenset[Fluent], float] = {}
-    cost_formulation = search_params.get_cost_formulation()
+    cost_formulation = search_params.cost_formulation
     # one key object per distinct state, however many paths reach it: every
     # cache, set and trajectory above shares it rather than holding its own copy
     state_keys: dict[frozenset[Fluent], frozenset[Fluent]] = {}
@@ -537,7 +523,7 @@ def _cpp_search_applies(search_params: PlannerConfig) -> bool:
     """Whether the C++ A* computes exactly what the Python one would."""
     return (
         search_params.interruption_value_fn is None
-        and type(search_params.get_cost_formulation()) is DefaultFormulation
+        and type(search_params.cost_formulation) is DefaultFormulation
         and (
             isinstance(search_params.heuristic_fn, (int, float))
             or isinstance(search_params.heuristic_fn, FFHeuristic)
@@ -602,16 +588,17 @@ def _astar_search_cpp_path(
     use_ff = isinstance(heuristic, FFHeuristic)
     multiplier = heuristic.multiplier if isinstance(heuristic, FFHeuristic) else 1.0
     h_constant = float(heuristic) if isinstance(heuristic, (int, float)) else 0.0
-    formulation = search_params.get_cost_formulation()
+    formulation = search_params.cost_formulation
     assert isinstance(formulation, DefaultFormulation)
+    by_interruption = formulation.discount == NO_INTERRUPTION
 
     result = _astar_search_cpp(
         project_state(state, relevant), goal, projected, costs, probs,
         num_steps=num_steps, use_ff=use_ff, h_constant=h_constant,
         heuristic_multiplier=multiplier,
         lambda_add=LAMBDA_ADD, lambda_max=LAMBDA_MAX, lambda_ff=LAMBDA_FF,
-        discount_by_interruption=formulation.discount_by_no_int_prob,
-        fixed_discount=1.0 if formulation.discount is None else formulation.discount,
+        discount_by_interruption=by_interruption,
+        fixed_discount=1.0 if by_interruption else float(formulation.discount),
         task_reward=formulation.current_task_reward,
     )
     plan = [actions[i] for i in result["plan"]]
@@ -687,11 +674,7 @@ def compute_interruption_value(
     task_costs = []
     expected_cost = 0.0
     # setup for myopic planning approach
-    search_params = PlannerConfig(
-        False,
-        heuristic_fn,
-        1
-    )
+    search_params = PlannerConfig(heuristic_fn=heuristic_fn)
 
     for task, prob in zip(*interrupting_task_dist):
         # setup data structure for interruption problem where there is

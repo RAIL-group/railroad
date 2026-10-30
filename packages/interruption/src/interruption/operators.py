@@ -17,10 +17,11 @@ from railroad.operators._utils import OptNumeric, _to_numeric
 #                           connected, so moving twice is never cheaper than once)
 #   just-picked ?r ?obj   - no placing an object straight after picking it up
 #   just-placed ?r ?obj   - no picking an object straight up after placing it
+#   just-washed ?r ?obj   - no picking an object straight up after washing it
 # They only constrain plans; a planner's starting state drops them (see
 # planning_framework.planning_state), since a new plan may need to start with a
 # move even if the robot has just moved.
-BLOCKING_PREDICATES = frozenset({"just-moved", "just-picked", "just-placed"})
+BLOCKING_PREDICATES = frozenset({"just-moved", "just-picked", "just-placed", "just-washed"})
 # how long after the blocking action ends its blocking fact stays true
 BLOCKING_DURATION = 0.1
 
@@ -58,6 +59,92 @@ def construct_assemble_operator(assemble_time: int):
             ]
         )
     return assemble
+
+
+def construct_brew_coffee_operator(brew_time: OptNumeric, start_time: OptNumeric) -> Operator:
+    """Construct a brew coffee operator.
+
+    The robot is only busy while it starts the coffee maker; it is free again
+    after start_time, while the coffee keeps brewing until brew_time.
+    ?loc is pinned to coffee makers by the static fact `coffee-maker ?loc`.
+
+    Args:
+        brew_time: Time or function for brew duration, from the action's start.
+            Function signature: (robot, location) -> float
+        start_time: Time or function for starting the coffee maker.
+            Function signature: (robot, location) -> float
+
+    Returns:
+        Operator for brewing coffee at a coffee maker.
+    """
+    brew_time_fn = _to_numeric(brew_time)
+    start_time_fn = _to_numeric(start_time)
+    return Operator(
+        name="brew-coffee",
+        parameters=[("?r", "robot"), ("?loc", "location")],
+        preconditions=[
+            F("at ?r ?loc"), F("free ?r"), F("coffee-maker ?loc"),
+            ~F("brewing ?loc"), ~F("brewed ?loc"),
+        ],
+        effects=[
+            Effect(time=0, resulting_fluents={F("not free ?r"), F("brewing ?loc")}),
+            Effect(time=(start_time_fn, ["?r", "?loc"]), resulting_fluents={F("free ?r")}),
+            Effect(
+                time=(brew_time_fn, ["?r", "?loc"]),
+                resulting_fluents={F("not brewing ?loc"), F("brewed ?loc")},
+            ),
+        ],
+    )
+
+
+def construct_wash_operator(wash_time: OptNumeric) -> Operator:
+    """Construct a wash operator (non-blocking).
+
+    The robot washes a dirty object that is in a sink, and is busy until it is
+    clean. ?loc is pinned to sinks by the static fact `sink ?loc`.
+
+    Args:
+        wash_time: Time or function for wash duration.
+            Function signature: (robot, location, object) -> float
+
+    Returns:
+        Operator for washing an object in a sink.
+    """
+    return _wash_operator(wash_time, blocking=False)
+
+
+def construct_wash_operator_blocking(wash_time: OptNumeric) -> Operator:
+    """
+    construct_wash_operator with just-washed blocking: washing sets just-washed,
+    so the blocking pick operators can't pick the object straight back up (see
+    BLOCKING_PREDICATES).
+    """
+    return _wash_operator(wash_time, blocking=True)
+
+
+def _wash_operator(wash_time: OptNumeric, blocking: bool) -> Operator:
+    wash_time_fn = _to_numeric(wash_time)
+    timing_args = ["?r", "?loc", "?obj"]
+    end_fluents = {F("free ?r"), F("not dirty ?obj")}
+    if blocking:
+        end_fluents.add(F("just-washed ?r ?obj"))
+    effects = [
+        Effect(time=0, resulting_fluents={F("not free ?r")}),
+        Effect(time=(wash_time_fn, timing_args), resulting_fluents=end_fluents),
+    ]
+    if blocking:
+        effects.append(Effect(
+            time=(wash_time_fn + BLOCKING_DURATION, timing_args),
+            resulting_fluents={~F("just-washed ?r ?obj")},
+        ))
+    return Operator(
+        name="wash",
+        parameters=[("?r", "robot"), ("?loc", "location"), ("?obj", "object")],
+        preconditions=[
+            F("at ?r ?loc"), F("free ?r"), F("sink ?loc"), F("at ?obj ?loc"), F("dirty ?obj"),
+        ],
+        effects=effects,
+    )
 
 
 def construct_gripper_pick_operator(pick_time: OptNumeric) -> Operator:
@@ -168,15 +255,15 @@ def construct_place_with_right_hand_operator(place_time: OptNumeric) -> Operator
 
 def construct_pick_with_left_hand_operator_blocking(pick_time: OptNumeric) -> Operator:
     """
-    construct_pick_with_left_hand_operator with just-placed blocking: an object
-    can't be picked straight back up after being placed, and picking sets
-    just-picked (see BLOCKING_PREDICATES).
+    construct_pick_with_left_hand_operator with just-placed and just-washed
+    blocking: an object can't be picked straight back up after being placed or
+    washed, and picking sets just-picked (see BLOCKING_PREDICATES).
     """
     return _hand_pick_operator("left", pick_time, blocking=True)
 
 
 def construct_pick_with_right_hand_operator_blocking(pick_time: OptNumeric) -> Operator:
-    """construct_pick_with_right_hand_operator with just-placed blocking."""
+    """construct_pick_with_right_hand_operator with just-placed and just-washed blocking."""
     return _hand_pick_operator("right", pick_time, blocking=True)
 
 
@@ -217,7 +304,7 @@ def _hand_pick_operator(hand: str, pick_time: OptNumeric, blocking: bool) -> Ope
         }),
     ]
     if blocking:
-        preconditions.append(~F("just-placed ?r ?obj"))
+        preconditions.extend([~F("just-placed ?r ?obj"), ~F("just-washed ?r ?obj")])
         end_fluents.add(F("just-picked ?r ?obj"))
     effects.append(Effect(time=(pick_time_fn, timing_args), resulting_fluents=end_fluents))
     if blocking:

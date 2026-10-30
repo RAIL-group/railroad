@@ -3,7 +3,7 @@ Pins astar_search's results to the cost formulation it used before
 cost_formulations.py existed: GOLDEN was recorded from the pre-refactor
 create_child/astar_search, so the default formulation must reproduce it exactly.
 """
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from functools import partial
 from types import SimpleNamespace
 from typing import Any
@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 from interruption import planner as planner_module
-from interruption.cost_formulations import DefaultFormulation, StepTerms
+from interruption.cost_formulations import NO_INTERRUPTION, DefaultFormulation, StepTerms
 from interruption.planner import (
     InterruptionSearchProblem,
     InterruptionTrajectory,
@@ -82,32 +82,32 @@ ARRIVAL_FN = partial(get_task_arrival_prob, RandomVariableType.CONTINUOUS, -1, 3
 
 # name -> PlannerConfig kwargs (plus "ev" / "batch" for the learned value function)
 SCENARIOS: dict[str, dict[str, Any]] = {
-    "myopic_constant_h": dict(discount_by_no_int_prob=False, heuristic_fn=0, discount=1),
+    "myopic_constant_h": dict(heuristic_fn=0, cost_formulation=DefaultFormulation(1.0)),
     "myopic_ff": dict(
-        discount_by_no_int_prob=False, heuristic_fn=partial(ap_heuristic_fn), discount=1
+        cost_formulation=DefaultFormulation(1.0), heuristic_fn=partial(ap_heuristic_fn)
     ),
     "no_int_prob_discount": dict(
-        discount_by_no_int_prob=True, heuristic_fn=partial(ap_heuristic_fn),
+        cost_formulation=DefaultFormulation(NO_INTERRUPTION), heuristic_fn=partial(ap_heuristic_fn),
         planner_interruption_prob_fn=0.1,
     ),
     "arrival_fn_discount": dict(
-        discount_by_no_int_prob=True, heuristic_fn=partial(ap_heuristic_fn),
+        cost_formulation=DefaultFormulation(NO_INTERRUPTION), heuristic_fn=partial(ap_heuristic_fn),
         planner_interruption_prob_fn=ARRIVAL_FN,
     ),
     "fixed_discount_with_reward": dict(
-        discount_by_no_int_prob=False, heuristic_fn=partial(ap_heuristic_fn), discount=0.95,
-        planner_interruption_prob_fn=ARRIVAL_FN, current_task_reward=5,
+        cost_formulation=DefaultFormulation(0.95, current_task_reward=5),
+        heuristic_fn=partial(ap_heuristic_fn), planner_interruption_prob_fn=ARRIVAL_FN,
     ),
     "ev_no_batch": dict(
-        discount_by_no_int_prob=False, heuristic_fn=partial(ap_heuristic_fn, weights=(1, 1)),
-        discount=1, planner_interruption_prob_fn=ARRIVAL_FN, ev=True,
+        cost_formulation=DefaultFormulation(1.0), heuristic_fn=partial(ap_heuristic_fn, weights=(1, 1)),
+        planner_interruption_prob_fn=ARRIVAL_FN, ev=True,
     ),
     "ev_batch": dict(
-        discount_by_no_int_prob=False, heuristic_fn=partial(ap_heuristic_fn, weights=(1, 1)),
-        discount=1, planner_interruption_prob_fn=ARRIVAL_FN, ev=True, batch=True,
+        cost_formulation=DefaultFormulation(1.0), heuristic_fn=partial(ap_heuristic_fn, weights=(1, 1)),
+        planner_interruption_prob_fn=ARRIVAL_FN, ev=True, batch=True,
     ),
     "ev_batch_int_prob_discount": dict(
-        discount_by_no_int_prob=True, heuristic_fn=partial(ap_heuristic_fn, weights=(1, 1)),
+        cost_formulation=DefaultFormulation(NO_INTERRUPTION), heuristic_fn=partial(ap_heuristic_fn, weights=(1, 1)),
         planner_interruption_prob_fn=0.1, ev=True, batch=True,
     ),
 }
@@ -325,16 +325,6 @@ def test_children_match_pre_refactor_values(name, monkeypatch):
     assert first_children(name, monkeypatch) == GOLDEN_FIRST_CHILDREN[name]
 
 
-@pytest.mark.parametrize("name", SCENARIOS)
-def test_explicit_default_formulation_matches_the_one_built_from_config_fields(name, monkeypatch):
-    kwargs = {
-        k: v for k, v in SCENARIOS[name].items()
-        if k in ("discount_by_no_int_prob", "discount", "current_task_reward")
-    }
-    explicit = DefaultFormulation(**kwargs)
-    assert run_scenario(name, monkeypatch, cost_formulation=explicit) == GOLDEN_SEARCH[name]
-
-
 @dataclass(frozen=True)
 class _DoubledActionCost(DefaultFormulation):
     def accumulated_cost(self, terms: StepTerms) -> float:
@@ -362,10 +352,7 @@ def test_a_custom_formulation_reaches_both_cost_call_sites(name, monkeypatch):
             calls.append(terms)
             return super().accumulated_cost(terms)
 
-    base = {
-        k: v for k, v in SCENARIOS[name].items()
-        if k in ("discount_by_no_int_prob", "discount", "current_task_reward")
-    }
+    base = asdict(SCENARIOS[name].get("cost_formulation", DefaultFormulation()))
     plan, cost = run_scenario(name, monkeypatch, cost_formulation=_Recording(**base))
 
     golden_plan, golden_cost = GOLDEN_SEARCH[name]

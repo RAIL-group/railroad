@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from interruption.cost_formulations import NO_INTERRUPTION, DefaultFormulation
 from interruption.planner import (
     FFHeuristic, InterruptionSearchProblem, PlannerConfig, SearchStats, astar_search,
 )
@@ -47,19 +48,21 @@ def _problem(blocking_moves=False):
 
 
 CONFIGS = {
-    "constant_h": dict(discount_by_no_int_prob=False, heuristic_fn=0, discount=1),
-    "ff": dict(discount_by_no_int_prob=False, heuristic_fn=FFHeuristic(), discount=1),
-    "ff_x2": dict(discount_by_no_int_prob=False, heuristic_fn=FFHeuristic(multiplier=2), discount=1),
+    "constant_h": dict(heuristic_fn=0),
+    "ff": dict(heuristic_fn=FFHeuristic()),
+    "ff_x2": dict(heuristic_fn=FFHeuristic(multiplier=2)),
     "interruption_discount": dict(
-        discount_by_no_int_prob=True, heuristic_fn=FFHeuristic(), planner_interruption_prob_fn=0.1,
+        cost_formulation=DefaultFormulation(NO_INTERRUPTION), heuristic_fn=FFHeuristic(),
+        planner_interruption_prob_fn=0.1,
     ),
     "arrival_fn_discount": dict(
-        discount_by_no_int_prob=True, heuristic_fn=FFHeuristic(),
+        cost_formulation=DefaultFormulation(NO_INTERRUPTION), heuristic_fn=FFHeuristic(),
         planner_interruption_prob_fn=ARRIVAL_FN,
     ),
     "fixed_discount_with_reward": dict(
-        discount_by_no_int_prob=False, heuristic_fn=FFHeuristic(weights=(1, 1)), discount=0.95,
-        planner_interruption_prob_fn=ARRIVAL_FN, current_task_reward=5,
+        heuristic_fn=FFHeuristic(weights=(1, 1)),
+        cost_formulation=DefaultFormulation(0.95, current_task_reward=5),
+        planner_interruption_prob_fn=ARRIVAL_FN,
     ),
 }
 
@@ -97,13 +100,10 @@ def test_cpp_search_matches_python_search_when_the_goal_is_unreachable():
 
 
 def test_only_searches_the_cpp_search_computes_identically_go_to_it():
-    from interruption.cost_formulations import DefaultFormulation
     from interruption.planner import _cpp_search_applies
 
     def config(**kwargs: Any) -> PlannerConfig:
-        settings: dict[str, Any] = {
-            "discount_by_no_int_prob": False, "heuristic_fn": FFHeuristic(), "discount": 1,
-        }
+        settings: dict[str, Any] = {"heuristic_fn": FFHeuristic()}
         return PlannerConfig(**{**settings, **kwargs})
 
     class CustomFormulation(DefaultFormulation):
@@ -113,7 +113,7 @@ def test_only_searches_the_cpp_search_computes_identically_go_to_it():
     assert _cpp_search_applies(config(heuristic_fn=0))
     assert not _cpp_search_applies(config(interruption_value_fn=lambda graph: 0.0))
     assert not _cpp_search_applies(config(heuristic_fn=lambda *args: 0.0))
-    assert not _cpp_search_applies(config(cost_formulation=CustomFormulation(False, 1)))
+    assert not _cpp_search_applies(config(cost_formulation=CustomFormulation()))
 
 
 def _three_object_problem(holding_book=False):
@@ -162,7 +162,7 @@ def test_relaxed_plan_filtering_finds_the_same_plan_cost(holding_book):
         stats = SearchStats()
         plan, cost, success, _ = astar_search(
             (state, None), InterruptionSearchProblem(goal, actions),
-            PlannerConfig(False, FFHeuristic(), 1, relaxed_plan_filtering=filtering), stats=stats,
+            PlannerConfig(heuristic_fn=FFHeuristic(), relaxed_plan_filtering=filtering), stats=stats,
         )
         results.append((success, cost, stats.relaxed_plan_actions))
     (full_ok, full_cost, _), (narrow_ok, narrow_cost, kept) = results
@@ -186,10 +186,10 @@ def test_relaxed_plan_filtering_falls_back_to_the_full_problem(monkeypatch):
     stats = SearchStats()
     _, cost, success, _ = astar_search(
         (state, None), InterruptionSearchProblem(goal, actions),
-        PlannerConfig(False, FFHeuristic(), 1, relaxed_plan_filtering=True), stats=stats,
+        PlannerConfig(heuristic_fn=FFHeuristic(), relaxed_plan_filtering=True), stats=stats,
     )
     _, full_cost, _, _ = astar_search(
         (state, None), InterruptionSearchProblem(goal, actions),
-        PlannerConfig(False, FFHeuristic(), 1),
+        PlannerConfig(heuristic_fn=FFHeuristic()),
     )
     assert success and cost == full_cost and stats.relaxed_plan_actions == 0

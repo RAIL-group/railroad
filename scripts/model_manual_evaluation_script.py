@@ -11,13 +11,10 @@ from interruption.environments import (
     get_example_procthor_goal,
     # get_example_procthor_task_distribution,
 )
-from interruption.experiments import (
-    ExperimentConfig,
-    ExperimentSeeds,
-    initialize_experiment_data, ExperimentData
-)
+from interruption.experiments import initialize_experiment_data, ExperimentData
+from interruption.scenarios import ExperimentSeeds, Scenario
 from interruption.planner import compute_interruption_value
-from interruption.planning_framework import PlannerMode
+from interruption.planners import MyopicPlanner, load_ev_model
 from interruption.utilities import RandomVariableType, get_task_arrival_prob
 from railroad.core import (
     convert_state_to_positive_preconditions, Action, get_action_by_name
@@ -50,19 +47,15 @@ def main():
     )
 
     data = initialize_experiment_data(
-        ExperimentConfig(
-            seeds,
-            get_example_procthor_goal(),
-            task_distribution,
-            task_arrival_fn,
-            MODEL_PATH / model_name
+        Scenario(
+            seeds=seeds,
+            goal=get_example_procthor_goal(),
+            interrupting_task_dist=task_distribution,
+            task_arrival_fn=task_arrival_fn,
         ),
-        PlannerMode.ANTICIPATORY_PLANNING, # using AP to get access to the model
-        remove_duplicate_objects=True
+        MyopicPlanner(),
     )
-    assert data.planner_parameters.interruption_value_fn is not None
-    model = data.planner_parameters.interruption_value_fn
-    data.planner_parameters.interruption_value_fn = None
+    model = load_ev_model(MODEL_PATH / model_name)
 
     setup_plan = [
         get_action_by_name(data.search_problem.actions, "move robot1 start_loc fridge_4"),
@@ -105,7 +98,7 @@ def _get_actual_pred_expected_values(
         ),
         data.search_problem.actions,
         data.search_problem.interrupting_task_dist,
-        data.planner_parameters.heuristic_fn
+        data.planner.config.heuristic_fn
     )
 
     # predicted ev

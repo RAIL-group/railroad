@@ -1,11 +1,17 @@
-from typing import Sequence, Optional
+"""
+Running interruption experiments: a planner (planners.py) works through a
+scenario's task sequence (scenarios.py) while tasks arrive.
+
+    result = execute(scenario, planner)          # -> RunResult, no dashboard
+    metrics = run_experiment(scenario, planner)  # also replays the run in the dashboard
+"""
+from typing import Optional
 import random
 import time
 from collections import defaultdict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from functools import partial
-from pathlib import Path
 from rich.console import Console
 
 from railroad.core import (
@@ -23,18 +29,12 @@ from railroad.dashboard._protocols import DashboardPlanner
 from railroad.environment import SymbolicEnvironment
 from railroad.environment.procthor.environment import ProcTHOREnvironment
 
-from .constants import (
-    ACTION_PROB_DEBUG, INT_H_WEIGHTS, AUGMENT_DISCOUNT_FACTOR, H_MULTIPLIER,
-    PLANNER_FAILURE_COST, RELAXED_PLAN_FILTERING
-)
+from .constants import ACTION_PROB_DEBUG
 from .dashboard_adapters import AstarDashboardPlanner
-from .environments import construct_procthor_kitchen_environment, KitchenProcTHOREnvironment
-from .learning.models.gcn import AnticipateGCN
-from .learning.utils import get_torch_device
-from .planner import FFHeuristic, PlannerConfig, InterruptionSearchProblem
-from .planning_framework import (
-    PlannerMode, search_with_retry, search_without_retry
-)
+from .environments import KitchenProcTHOREnvironment
+from .planner import InterruptionSearchProblem
+from .planning_framework import Planner, RetryState, search_with_retry, search_without_retry
+from .scenarios import Scenario
 from .utilities import (
     get_action_cost,
     negative_fluent_preprocessing,
@@ -42,133 +42,142 @@ from .utilities import (
 
 
 @dataclass
-class ExperimentSeeds:
-    """
-    Data struct that contains all the seeds needed to make an
-    interruption experiment deterministic.
-    """
-    procthor_seed: int = 201
-    experiment_seed: int = 240
-    task_sample_seed: int = 75
-    object_placement_seed: int | None = None
-    duplicate_objects_containers_seed: int = 240
-
-
-@dataclass
-class ExperimentConfig:
-    """
-    Data struct that holds all relevant user-provided experiment
-    configuration information. The goal and goals in the task 
-    distribution use the generic names of objects/containers
-    to find matching objects/containers within the scene. These
-    names are then used to update the goals.
-    """
-    seeds: ExperimentSeeds
-    goal: Goal
-    interrupting_task_dist: tuple[Sequence[Goal], list[float]]
-    task_arrival_fn: Callable[[float], float]
-    ev_model_path: Path | str = ""
-    num_task_sequence: int = 2
-    augment_task: bool = False
-    retry_with_subgoals: bool = False
-
-
-@dataclass
 class ExperimentData:
     """
-    Data struct for storage of experiment related data.
+    One run's working state: the environment, the search problem for the current
+    task, and the scenario's goals mapped to the scene's names.
     """
     env: KitchenProcTHOREnvironment
     search_problem: InterruptionSearchProblem
-    planner_parameters: PlannerConfig
+    planner: Planner
     neg_to_pos_mapping: dict[Fluent, Fluent]
+    # Scenario.goal and .interrupting_task_dist in the scene's names
+    goal: Goal
+    interrupting_task_dist: tuple[list[Goal], list[float]]
+    failure_cost: float = 500
+    retry_state: RetryState = field(default_factory=RetryState)
 
 
-@dataclass
-class DashboardData:
+@dataclass(frozen=True)
+class RunResult:
+    """What happened in one run of a scenario."""
+    success: bool
+    # the run's total time, failure penalties included
+    cost: float
+    # each executed action's name, marked " | Goal Complete" / " | Interrupt", and
+    # "Failed Task" for each task the planner found no plan for
+    actions: list[str]
+    # the tasks in the order they arrived, in the scene's names
+    task_sequence: list[Goal]
+    # searches that failed and were retried (the solver fell back to a smaller
+    # sub-task or to only the goal's objects), and of those, the goal-object ones
+    search_retries: int
+    object_filtered_searches: int
+    # seconds spent planning and executing
+    wall_time: float
+
+    @property
+    def had_failed_search(self) -> bool:
+        """Whether a task went unplanned (without retries, it costs Scenario.failure_cost)."""
+        return "Failed Task" in self.actions
+
+    def metrics(self) -> dict:
+        """The result as the benchmark records it (see benchmarks/bench_interruption.py)."""
+        return {
+            "success": self.success,
+            "wall_time": self.wall_time,
+            "plan_cost": self.cost,
+            "actions_count": len(self.actions),
+            "required_search_retry": self.search_retries > 0,
+            "search_retries": self.search_retries,
+            "required_object_filtering": self.object_filtered_searches > 0,
+            "object_filtered_searches": self.object_filtered_searches,
+            "had_failed_search": self.had_failed_search,
+            "actions": self.actions,
+            "log_html": "",
+            "log_plot": b'',
+        }
+
+
+def execute(scenario: Scenario, planner: Planner) -> RunResult:
     """
-    Data struct for storage of dashboard related data.
+    Runs scenario with planner (see planners.py); once every task has arrived,
+    its myopic() planner solves the rest. No dashboard: see run_experiment.
     """
-    dashboard: PlannerDashboard
-    dash_env: ProcTHOREnvironment
-    recording_console: Console | None
-    start_time: float
-    show_plot: bool = False
-    save_plot: str | None = None
-    save_video: str | None = None
+    return _execute(initialize_experiment_data(scenario, planner), scenario)
 
 
 def run_experiment(
-    config: ExperimentConfig,
-    experiment_mode: PlannerMode,
-    remove_duplicate_objects: bool,
-    benchmark_flag: bool = False,
-    relevant_objects: Optional[list[str]] = None,
+    scenario: Scenario,
+    planner: Planner,
+    *,
+    record: bool = False,
     show_plot: bool = False,
     save_plot: str | None = None,
-    save_video: str | None = None
+    save_video: str | None = None,
 ) -> dict:
     """
-    Runs a single experiment, given the parameters specified in main.
-    Returns the total cost of the execution sequence, the initial plan, and a trace of 
-    the execution sequence.
+    execute, then replays the run in the railroad dashboard: live in the terminal,
+    then show_plot / save_plot / save_video; or, with record, silently, adding the
+    dashboard's HTML log ("log_html") and trajectory plot ("log_plot") to the
+    result, as the benchmarks do. Returns RunResult.metrics(), whose wall_time
+    includes the replay.
     """
-    experiment_data = initialize_experiment_data(
-        config, experiment_mode, relevant_objects, remove_duplicate_objects, H_MULTIPLIER
-    )
+    data = initialize_experiment_data(scenario, planner)
+    start_time = time.perf_counter()
+    result = _execute(data, scenario)
 
+    dash_env = scenario.build_environment()
+    task_sequence_goal = _get_task(result.task_sequence)
+    recording_console = Console(record=True, force_terminal=True, width=120) if record else None
+    dashboard = _setup_dashboard(
+        convert_goal_to_positive_preconditions(task_sequence_goal, data.neg_to_pos_mapping),
+        dash_env, recording_console,
+        partial(AstarDashboardPlanner, heuristic_fn=ff_heuristic), record
+    )
+    execute_deterministic_replay(result.actions, dashboard, dash_env, scenario.failure_cost)
+
+    metrics = result.metrics()
+    metrics["wall_time"] = time.perf_counter() - start_time
+    _finish_dashboard(
+        metrics, dashboard, dash_env, recording_console, show_plot, save_plot, save_video
+    )
+    return metrics
+
+
+def _execute(data: ExperimentData, scenario: Scenario) -> RunResult:
     # print out the actual action probabilities
     if ACTION_PROB_DEBUG:
-        _show_action_probabilities(experiment_data)
+        _show_action_probabilities(data)
 
     # set the experiment seed after loading the ProcTHOR scene since it sets the
     # seed to procthor_seed
-    random.seed(config.seeds.experiment_seed)
-
-    recording_console = (
-        Console(record=True, force_terminal=True, width=120) if benchmark_flag else None
-    )
-
+    random.seed(scenario.seeds.experiment_seed)
     start_time = time.perf_counter()
 
     event_trace, task_sequence, search_retries, filtered_searches = (
-        _get_task_sequence_event_trace(experiment_data, config, experiment_mode)
+        _get_task_sequence_event_trace(data, scenario)
     )
-
-    # setup for deterministic replay for dashboard
-    dash_env = construct_procthor_kitchen_environment(
-        config.seeds.procthor_seed, config.seeds.object_placement_seed,
-        relevant_objects, remove_duplicate_objects
+    success = (
+        "Goal Complete" in event_trace[-1]
+        if not scenario.augment_task
+        else _get_task(task_sequence).evaluate(data.env.state.fluents)
     )
-
-    # keep track of the task_sequence as part of the output
-    task_sequence_goal = task_sequence[0]
-    for goal in task_sequence[1:]:
-        task_sequence_goal &= goal
-    pos_goal = convert_goal_to_positive_preconditions(
-        task_sequence_goal, experiment_data.neg_to_pos_mapping
-    )
-
-    dashboard = _setup_dashboard(
-        pos_goal, dash_env, recording_console,
-        partial(AstarDashboardPlanner, heuristic_fn=ff_heuristic), benchmark_flag
-    )
-    execute_deterministic_replay(event_trace, dashboard, dash_env)
-    dash_data = DashboardData(
-        dashboard, dash_env, recording_console,
-        start_time, show_plot, save_plot, save_video
-    )
-    return _get_results(
-        config.augment_task, task_sequence_goal, event_trace, search_retries, filtered_searches,
-        dash_data
+    return RunResult(
+        success=success,
+        cost=float(data.env.state.time),
+        actions=event_trace,
+        task_sequence=task_sequence,
+        search_retries=search_retries,
+        object_filtered_searches=filtered_searches,
+        wall_time=time.perf_counter() - start_time,
     )
 
 
 # helper functions
 def _get_task_sequence_event_trace(
     data: ExperimentData,
-    config: ExperimentConfig,
-    experiment_mode: PlannerMode,
+    scenario: Scenario,
 ) -> tuple[list[str], list[Goal], int, int]:
     """
     Searchs for a plan and executes the plan in the environment for the specificed n length
@@ -180,9 +189,9 @@ def _get_task_sequence_event_trace(
     event_trace = []
     search_retries = 0
     filtered_searches = 0
-    task_arrival_sequence = [config.goal]
-    current_task = config.goal
-    num_incomplete_goals = config.num_task_sequence
+    task_arrival_sequence = [data.goal]
+    current_task = data.goal
+    num_incomplete_goals = scenario.num_task_sequence
     iteration_count = 0
 
     # the termination condition of the loop depends on how solver failure's are handled:
@@ -190,29 +199,31 @@ def _get_task_sequence_event_trace(
     # if the solver is not allowed to retry, then the solver should only be called
     # num_task_sequence+1 times
     termination_condition = (
-        num_incomplete_goals > 0 if config.retry_with_subgoals
-        else iteration_count < config.num_task_sequence
+        num_incomplete_goals > 0 if scenario.retry_with_subgoals
+        else iteration_count < scenario.num_task_sequence
     )
     while termination_condition:
         # use the appropriate solver to plan
-        all_tasks_arrived = len(task_arrival_sequence) == config.num_task_sequence
+        all_tasks_arrived = len(task_arrival_sequence) == scenario.num_task_sequence
 
-        planner_mode = experiment_mode
-        planner_config = data.planner_parameters
+        planner = data.planner
+        retry_state = data.retry_state
         # if all the tasks have arrived, just solve the goals in the task as quick as possible
         if all_tasks_arrived:
-            planner_mode = PlannerMode.MYOPIC
-            planner_config = _get_planner_config(config, PlannerMode.MYOPIC, 0, H_MULTIPLIER)
-            planner_config.max_task_complexity = data.planner_parameters.max_task_complexity
+            planner = data.planner.myopic()
+            # start from the task-size limit the experiment's searches found, without
+            # passing what the myopic searches find back to them
+            retry_state = replace(data.retry_state)
 
-        search_fn = search_with_retry if config.retry_with_subgoals else search_without_retry
-        plan, success, num_retries, num_filtered = search_fn(
-            planner_mode,
-            data.env,
-            data.search_problem,
-            planner_config,
-            data.neg_to_pos_mapping
-        )
+        if scenario.retry_with_subgoals:
+            plan, success, num_retries, num_filtered = search_with_retry(
+                planner, data.env, data.search_problem, data.neg_to_pos_mapping,
+                retry_state=retry_state,
+            )
+        else:
+            plan, success, num_retries, num_filtered = search_without_retry(
+                planner, data.env, data.search_problem, data.neg_to_pos_mapping
+            )
         search_retries += num_retries
         filtered_searches += num_filtered
 
@@ -231,12 +242,12 @@ def _get_task_sequence_event_trace(
         newly_arrived_goal = None
         if not all_tasks_arrived:
             next_task_idx = len(task_arrival_sequence)-1
-            newly_arrived_goal = config.interrupting_task_dist[0][next_task_idx]
+            newly_arrived_goal = data.interrupting_task_dist[0][next_task_idx]
             task_arrival_sequence.append(newly_arrived_goal)
 
         # update the task
         incomplete_goals = _get_incomplete_tasks(
-            config.augment_task, current_task, newly_arrived_goal, completed_goals
+            scenario.augment_task, current_task, newly_arrived_goal, completed_goals
         )
 
         if len(incomplete_goals) > 0:
@@ -248,8 +259,8 @@ def _get_task_sequence_event_trace(
         iteration_count+=1
         # check if another call to the solver should be made
         termination_condition = (
-            num_incomplete_goals > 0 if config.retry_with_subgoals
-            else iteration_count < config.num_task_sequence
+            num_incomplete_goals > 0 if scenario.retry_with_subgoals
+            else iteration_count < scenario.num_task_sequence
         )
 
     return event_trace, task_arrival_sequence, search_retries, filtered_searches
@@ -272,7 +283,7 @@ def _execution_loop(
     if not success:
         event_trace.append("Failed Task")
         # update the state's time to reflect the failed task
-        data.env.apply_time_penalty(PLANNER_FAILURE_COST)
+        data.env.apply_time_penalty(data.failure_cost)
         return completed_goals
 
     # goals not yet credited; shrinks as they complete, so actions taken after the
@@ -360,117 +371,49 @@ def _get_task(goals: list[Goal]) -> Goal:
     return AndGoal(goals) if len(goals) > 1 else goals[0]
 
 
-def initialize_experiment_data(
-    config: ExperimentConfig,
-    planner_mode: PlannerMode,
-    relevant_objects: Optional[list[str]] = None,
-    remove_duplicate_objects: bool = False,
-    h_multiplier: float = 1
-) -> ExperimentData:
+def initialize_experiment_data(scenario: Scenario, planner: Planner) -> ExperimentData:
     """
-    Helper function for initializing the ExperimentData struct, which entails
-    the loading of the environment, setting up the task arrival prob function,
-    setting up the interruption value function, and performing negative fluent
-    preprocessing.
+    A run's starting point: a fresh environment, the scenario's goals mapped to
+    the scene's names, and the search problem for its first task, with negative
+    fluents converted for the FF heuristic. The scenario itself is left unchanged.
     """
-    env = construct_procthor_kitchen_environment(
-        config.seeds.procthor_seed,
-        object_seed=config.seeds.object_placement_seed,
-        relevant_objects=relevant_objects,
-        remove_duplicate_objects=remove_duplicate_objects
-    )
+    env = scenario.build_environment()
 
     # convert generic name of objects/containers in goals to actual names of
     # objects/containers within the scene (ex. spoon_14)
     # duplicate objects/containers are randomly sampled
     scene_objects = _get_scene_objects_locations(
-        config.seeds.duplicate_objects_containers_seed,
+        scenario.seeds.duplicate_objects_containers_seed,
         env.scene.objects
     )
     scene_locations = _get_scene_objects_locations(
-        config.seeds.duplicate_objects_containers_seed,
+        scenario.seeds.duplicate_objects_containers_seed,
         {loc for loc in env.scene.locations if loc != "start_loc"}
     )
-    config.goal = _map_goal_to_scene(config.goal, scene_objects, scene_locations)
-    # don't directly modify the generic interrupting task distribution
-    task_dist = ([], [])
-    for goal, prob in zip(*config.interrupting_task_dist):
-        task_dist[0].append(_map_goal_to_scene(goal, scene_objects, scene_locations))
+    goal = _map_goal_to_scene(scenario.goal, scene_objects, scene_locations)
+    task_dist: tuple[list[Goal], list[float]] = ([], [])
+    for task, prob in zip(*scenario.interrupting_task_dist):
+        task_dist[0].append(_map_goal_to_scene(task, scene_objects, scene_locations))
         task_dist[1].append(prob)
-    config.interrupting_task_dist = task_dist
 
     # fluent pre-processing for usage of FF heuristic
     converted_actions, _, converted_goals, mapping= negative_fluent_preprocessing(
-        env.get_actions(), env.state, [config.goal] + list(config.interrupting_task_dist[0])
+        env.get_actions(), env.state, [goal] + task_dist[0]
     )
 
-    # update config struct to store the new converted goal and task distribution
-    converted_goal = converted_goals[0]
-    converted_interrupting_task_dist = (list(converted_goals[1:]), config.interrupting_task_dist[1])
-
-    # setup planner config based on experiment_mode
     return ExperimentData(
         env,
         InterruptionSearchProblem(
-            converted_goal,
+            converted_goals[0],
             converted_actions,
-            converted_interrupting_task_dist,
-            config.task_arrival_fn,
-            # config.augment_task
+            (list(converted_goals[1:]), task_dist[1]),
+            scenario.task_arrival_fn,
         ),
-        _get_planner_config(config, planner_mode, config.task_arrival_fn, h_multiplier),
-        mapping
-    )
-
-
-def _get_planner_config(
-    config: ExperimentConfig,
-    planner_mode: PlannerMode,
-    interruption_prob_fn: float | Callable[[float], float],
-    h_multiplier: float = 1
-) -> PlannerConfig:
-    heuristic_fn = FFHeuristic(multiplier=h_multiplier)
-    if planner_mode in [PlannerMode.MYOPIC, PlannerMode.ANTICIPATORY_PLANNING]:
-        discount_by_no_int_prob = False
-        discount=1
-
-        planner_interruption_prob_fn=None
-        interruption_value_fn=(
-            None
-            if planner_mode == PlannerMode.MYOPIC
-            else AnticipateGCN.get_net_eval_fn(config.ev_model_path, get_torch_device())
-        )
-        current_task_reward=0
-    else: # PlannerMode.INTERRUPTION or PlannerMode.INTERRUPTION_AP
-        discount_by_no_int_prob = not config.augment_task
-        discount = AUGMENT_DISCOUNT_FACTOR if not discount_by_no_int_prob else None
-
-        planner_interruption_prob_fn=interruption_prob_fn
-        interruption_value_fn=AnticipateGCN.get_net_eval_fn(
-            config.ev_model_path, get_torch_device()
-        )
-        current_task_reward=0
-        if planner_mode == PlannerMode.INTERRUPTION_AP:
-            heuristic_fn = FFHeuristic(multiplier=h_multiplier, weights=INT_H_WEIGHTS)
-    return PlannerConfig(
-        discount_by_no_int_prob=discount_by_no_int_prob,
-        heuristic_fn=heuristic_fn,
-        discount=discount,
-        planner_interruption_prob_fn=planner_interruption_prob_fn,
-        interruption_value_fn=interruption_value_fn,
-        current_task_reward=current_task_reward,
-        # AnticipateGCN.get_net_eval_fn attaches a batched sibling to the eval fn it
-        # returns; getattr(..., None) so a mocked/stubbed eval fn (or a None one, for
-        # MYOPIC) without a .batch attribute just disables batching, not an error.
-        interruption_value_batch_fn=getattr(interruption_value_fn, "batch", None),
-        # for myopic search, and for the anticipatory planner, whose searches are
-        # myopic over goals that name every extra object and location it wants
-        # (so each goal's relaxed plan keeps them). Not for the interruption-aware
-        # planners: they get their value from actions on objects the current task
-        # doesn't need, which narrowing to the task's relaxed plan would take away
-        relaxed_plan_filtering=RELAXED_PLAN_FILTERING and planner_mode in (
-            PlannerMode.MYOPIC, PlannerMode.ANTICIPATORY_PLANNING
-        ),
+        planner,
+        mapping,
+        goal,
+        task_dist,
+        failure_cost=scenario.failure_cost,
     )
 
 
@@ -479,93 +422,63 @@ def _setup_dashboard(
     env: SymbolicEnvironment,
     recording_console: Console | None,
     planner_factory: Callable[[list[Action]], DashboardPlanner] | None,
-    is_benchmark: bool
+    record: bool
 ) -> PlannerDashboard:
     """
-    Helper function for the setting up the dashboard conditionally based on if the 
-    run_experiment function is used for a standalone experiment or as part of a benchmark.
+    The dashboard to replay a run in: started live in the terminal, or, when
+    recording, left silent for its history to be exported.
     """
     dashboard = PlannerDashboard(
         goal,
         env,
         planner_factory=planner_factory,
-        print_on_exit=not is_benchmark,
+        print_on_exit=not record,
         console=recording_console,
     )
 
-    if not is_benchmark:
+    if not record:
         dashboard.start()
     return dashboard
 
 
-def _get_results(
-    augment: bool,
-    all_goals: Goal,
-    event_trace: list[str],
-    search_retries: int,
-    filtered_searches: int,
-    dash_data: DashboardData
-) -> dict:
+def _finish_dashboard(
+    metrics: dict,
+    dashboard: PlannerDashboard,
+    dash_env: SymbolicEnvironment,
+    recording_console: Console | None,
+    show_plot: bool,
+    save_plot: str | None,
+    save_video: str | None,
+) -> None:
     """
-    Helper function for obtaining the conditional necessary results based on if the 
-    run_experiment function is used for a standalone experiment or as part of a benchmark.
+    Ends the replay: records the dashboard's HTML log and trajectory plot into
+    metrics when recording, or stops the live dashboard and shows its plots.
     """
-    success = (
-        "Goal Complete" in event_trace[-1] 
-        if not augment
-        else all_goals.evaluate(dash_data.dash_env.state.fluents)
-    )
+    if recording_console:
+        dashboard.print_history()
+        metrics["log_html"] = recording_console.export_html(inline_styles=True)
 
-    # NOTE: reflected in the benchmark dashboard
-    result = {
-        "success": success,
-        "wall_time": time.perf_counter() - dash_data.start_time,
-        "plan_cost": float(dash_data.dash_env.state.time),
-        "actions_count": len(event_trace),
-        # the solver had to retry on a smaller sub-task at least once
-        "required_search_retry": search_retries > 0,
-        "search_retries": search_retries,
-        # a failed search had to be retried over only its goal's objects
-        "required_object_filtering": filtered_searches > 0,
-        "object_filtered_searches": filtered_searches,
-        # without retries, a failed search costs PLANNER_FAILURE_COST instead
-        "had_failed_search": "Failed Task" in event_trace,
-        "actions": event_trace,
-        "log_html": "",
-        "log_plot": b''
-    }
-
-    if dash_data.recording_console: # if recording_console is not None, this indicates benchmark
-        dash_data.dashboard.print_history()
-        html_output = dash_data.recording_console.export_html(inline_styles=True)
-        result["log_html"] = html_output
-
-        if isinstance(dash_data.dash_env, ProcTHOREnvironment):
+        if isinstance(dash_env, ProcTHOREnvironment):
             try:
                 location_coords = {
                     name: (float(coord[0]), float(coord[1]))
-                    for name, coord in dash_data.dash_env.scene.locations.items()
+                    for name, coord in dash_env.scene.locations.items()
                 }
-                plot_image = dash_data.dashboard.get_plot_image(location_coords=location_coords)
+                plot_image = dashboard.get_plot_image(location_coords=location_coords)
                 if plot_image is not None:
-                    result["log_plot"] = plot_image
+                    metrics["log_plot"] = plot_image
             except Exception as e:
                 print(f"Failed to render trajectory plot: {e}")
     else:
-        dash_data.dashboard.stop()
-        dash_data.dashboard.show_plots(
-            show_plot=dash_data.show_plot,
-            save_video=dash_data.save_video,
-            save_plot=dash_data.save_plot
-        )
-
-    return result
+        dashboard.stop()
+        dashboard.show_plots(show_plot=show_plot, save_video=save_video, save_plot=save_plot)
 
 
 def execute_deterministic_replay(
     event_trace: list[str],
     dashboard: PlannerDashboard,
-    dash_env: KitchenProcTHOREnvironment
+    dash_env: KitchenProcTHOREnvironment,
+    failure_cost: float,
 ) -> None:
     """
     Executes the deterministic replay of an interruption task sequence for viewing in 
@@ -585,7 +498,7 @@ def execute_deterministic_replay(
         except ValueError:
             # action_name was either "Goal Complete" or "Failed Task"
             if action_name == "Failed Task":
-                dash_env.apply_time_penalty(PLANNER_FAILURE_COST)
+                dash_env.apply_time_penalty(failure_cost)
 
         dashboard.update(adapter, converted_action_name)
 

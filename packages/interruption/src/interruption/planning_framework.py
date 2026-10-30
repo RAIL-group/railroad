@@ -1,11 +1,11 @@
 """
-Implementations of the interruption-based, myopic, and anticipatory planning planners
-for ProcTHOR environments. These planner implementations all utilize the astar_search
-function from planner.py
+The search machinery behind the planners in planners.py: the anticipatory planning
+framework, the interruption halo, and search_with_retry, which retries a failed
+search on smaller sub-tasks. All of it runs planner.astar_search.
 """
 import random
-from enum import Enum
-from typing import Optional, Callable
+from dataclasses import dataclass, replace
+from typing import Optional, Callable, Protocol
 from itertools import product, combinations
 import numpy as np
 from shapely import geometry
@@ -17,10 +17,7 @@ from railroad.environment.procthor.scene import ProcTHORScene
 from railroad.environment.procthor.scenegraph import SceneGraph
 from railroad.navigation.pathing import get_cost_and_path
 
-from .constants import (
-    LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF, AP_DEBUG, NUM_AUGMENTED_TASK_SAMPLES,
-    AP_SEED
-)
+from .constants import LAMBDA_ADD, LAMBDA_MAX, LAMBDA_FF, AP_DEBUG
 from .environments import KitchenProcTHOREnvironment
 from .operators import BLOCKING_PREDICATES, only_clears_blocking_facts
 from .planner import (
@@ -29,15 +26,37 @@ from .planner import (
 )
 
 
-class PlannerMode(Enum):
+class Planner(Protocol):
     """
-    Enumeration for interruption-based and baseline planners A*
-    Search settings.
+    A planner an experiment can run; see planners.py for the implementations.
     """
-    MYOPIC = 1
-    ANTICIPATORY_PLANNING = 2
-    INTERRUPTION = 3
-    INTERRUPTION_AP = 4
+    @property
+    def config(self) -> PlannerConfig:
+        """The settings of the planner's A* searches."""
+        ...
+
+    def plan(
+        self,
+        environment: KitchenProcTHOREnvironment,
+        search_problem: InterruptionSearchProblem,
+        neg_to_pos_mapping: dict[F, F],
+        stats: SearchStats | None = None,
+    ) -> tuple[list[Action], bool]:
+        """A plan for search_problem's goal from environment's state, and whether one was found."""
+        ...
+
+    def myopic(self) -> "Planner":
+        """The planner to use once no more tasks will arrive: myopic, with the same heuristic."""
+        ...
+
+
+@dataclass
+class RetryState:
+    """
+    What search_with_retry learns over an experiment's searches: the most goals in
+    a task it could solve within the search budget (-1 until a search has failed).
+    """
+    max_task_complexity: int = -1
 
 
 # wrapper heuristic functions
@@ -72,22 +91,26 @@ def anticipatory_planner(
     interruption_problem: InterruptionSearchProblem,
     search_params: PlannerConfig,
     scene: ProcTHORScene,
-    neg_to_pos_mapping: dict[F, F]
+    neg_to_pos_mapping: dict[F, F],
+    num_samples: int = 20,
+    seed: int = 12,
 ) -> tuple[list[Action], float, bool]:
     """
     Implementation of the anticipatory planning framework for large-scale environments from
-    Talukder et al.
+    Talukder et al. search_params.interruption_value_fn is the learned value of a goal
+    state; the searches themselves are myopic. At most num_samples augmented tasks,
+    sampled with seed, are evaluated.
     """
-    rng = random.Random(AP_SEED)
+    rng = random.Random(seed)
 
     best_plan = []
     best_value_sg = float("inf")
     best_value_total = float("inf")
 
-    # set search_params to match a myopic planner
+    # the searches are myopic; the value model only scores their goal states
     assert search_params.interruption_value_fn is not None
     ev_model = search_params.interruption_value_fn
-    search_params.interruption_value_fn = None
+    search_params = replace(search_params, interruption_value_fn=None)
 
     # run myopic planner to get initial plan/value of s_g
     plan, value_sg, success, scene_graph_sg = astar_search(
@@ -123,8 +146,8 @@ def anticipatory_planner(
         interruption_problem.goal, selected_locations, selected_objects, neg_to_pos_mapping
     )
     random_sampled_augmented_tasks = (
-        rng.sample(sampled_augmented_tasks, k=NUM_AUGMENTED_TASK_SAMPLES)
-        if len(sampled_augmented_tasks) > NUM_AUGMENTED_TASK_SAMPLES
+        rng.sample(sampled_augmented_tasks, k=num_samples)
+        if len(sampled_augmented_tasks) > num_samples
         else sampled_augmented_tasks
     )
 
@@ -148,8 +171,7 @@ def anticipatory_planner(
             best_value_sg = value_sg
             best_plan = plan
 
-    # restore the interruption_value_fn and non_augmented goal attributes for future tasks
-    search_params.interruption_value_fn = ev_model
+    # restore the non-augmented goal for future tasks
     interruption_problem.goal = non_augmented_goal
 
     return best_plan, best_value_sg, best_value_total != float("inf")
@@ -273,52 +295,19 @@ def planning_state(state: State, neg_to_pos_mapping: dict[F, F]) -> State:
 
 
 def search_without_retry(
-    planner_mode: PlannerMode,
+    planner: Planner,
     environment: KitchenProcTHOREnvironment,
     search_problem: InterruptionSearchProblem,
-    planner_parameters: PlannerConfig,
     neg_to_pos_mapping: dict[F, F],
     stats: SearchStats | None = None,
 ) -> tuple[list[Action], bool, int, int]:
     """
-    Wrapper function of the planning algorithms used in the task sequence
-    with continous task arrival experiments. Returns a tuple containing the
-    plan, success_flag, the number of failed searches and the number of searches
-    retried over goal objects (both always 0; see search_with_retry). stats, when
-    given, is filled in by the A* search (not by the anticipatory planner).
+    A single plan from planner, in the same form as search_with_retry: the plan,
+    success_flag, the number of failed searches and the number of searches
+    retried over goal objects (both always 0). stats, when given, is filled in by
+    the A* search (not by the anticipatory planner).
     """
-    initial_state = planning_state(environment.state, neg_to_pos_mapping)
-
-    if planner_mode == PlannerMode.ANTICIPATORY_PLANNING:
-        plan, _, success = anticipatory_planner(
-            (initial_state, environment.scene.scene_graph),
-            search_problem,
-            planner_parameters,
-            environment.scene,
-            neg_to_pos_mapping
-        )
-    else:
-        state_scene_graph = (
-            initial_state,
-            None if planner_mode == PlannerMode.MYOPIC
-            else environment.scene.scene_graph
-        )
-
-        plan: list[Action] = []
-        success = False
-        if (
-            planner_parameters.interruption_halo_filtering
-            and planner_mode in (PlannerMode.INTERRUPTION, PlannerMode.INTERRUPTION_AP)
-        ):
-            narrowed = _halo_problem(environment, search_problem, planner_parameters, initial_state)
-            if narrowed is not None:
-                plan, _, success, _ = astar_search(
-                    state_scene_graph, narrowed, planner_parameters, stats=stats
-                )
-        if not success:  # no halo, or the narrowed problem failed: solve it all
-            plan, _, success, _ = astar_search(
-                state_scene_graph, search_problem, planner_parameters, stats=stats
-            )
+    plan, success = planner.plan(environment, search_problem, neg_to_pos_mapping, stats)
     return plan, success, 0, 0
 
 
@@ -377,7 +366,7 @@ def _halo_problem(
     heuristic = planner_parameters.heuristic_fn
     multiplier = heuristic.multiplier if isinstance(heuristic, FFHeuristic) else 1
     myopic = PlannerConfig(
-        False, FFHeuristic(multiplier=multiplier), 1, relaxed_plan_filtering=True
+        heuristic_fn=FFHeuristic(multiplier=multiplier), relaxed_plan_filtering=True
     )
     core_plan, _, success, _ = astar_search((initial_state, None), search_problem, myopic)
     if not success:
@@ -387,13 +376,13 @@ def _halo_problem(
 
 
 def search_with_retry(
-    planner_mode: PlannerMode,
+    planner: Planner,
     environment: KitchenProcTHOREnvironment,
     search_problem: InterruptionSearchProblem,
-    planner_parameters: PlannerConfig,
     neg_to_pos_mapping: dict[F, F],
     allow_decomposition: bool = True,
     search_stats: list[SearchStats] | None = None,
+    retry_state: RetryState | None = None,
 ) -> tuple[list[Action], bool, int, int]:
     """
     A wrapper function for planning algorithms utilized as part of interruption
@@ -405,13 +394,16 @@ def search_with_retry(
     is False (when only a plan for the whole task will do). Returns a tuple
     containing the plan, success_flag, the number of failed searches, and the number
     of searches retried over goal objects. search_stats, when given, gets a
-    SearchStats per A* search.
+    SearchStats per A* search. retry_state carries the task-size limit found by
+    earlier calls into this one, and is updated with this call's; without one,
+    the call starts with no limit.
     """
+    retry_state = RetryState() if retry_state is None else retry_state
     initial_state = planning_state(environment.state, neg_to_pos_mapping)
     num_goals = (
         _get_task_goal_count(search_problem.goal)
-        if planner_parameters.max_task_complexity == -1
-        else planner_parameters.max_task_complexity
+        if retry_state.max_task_complexity == -1
+        else retry_state.max_task_complexity
     )
     initial_num_goals = num_goals
     task = search_problem.goal
@@ -424,15 +416,14 @@ def search_with_retry(
         ranked_sub_goals = _decompose_task(
             initial_state, task,
             search_problem.actions,
-            planner_parameters.heuristic_fn,
+            planner.config.heuristic_fn,
             min(num_goals, _get_task_goal_count(search_problem.goal))
         )
         search_problem.goal = ranked_sub_goals[0]
 
         stats = _new_stats(search_stats)
         plan, success, *_ = search_without_retry(
-            planner_mode, environment, search_problem,
-            planner_parameters, neg_to_pos_mapping, stats
+            planner, environment, search_problem, neg_to_pos_mapping, stats
         )
 
         # retry the same sub-task over only its own objects before shrinking it
@@ -440,8 +431,7 @@ def search_with_retry(
             failure_count += 1
             filtered_searches += 1
             plan, success = _search_over_goal_objects(
-                planner_mode, environment, search_problem,
-                planner_parameters, neg_to_pos_mapping, all_objects,
+                planner, environment, search_problem, neg_to_pos_mapping, all_objects,
                 _new_stats(search_stats, filtered=True),
             )
 
@@ -461,16 +451,15 @@ def search_with_retry(
 
     # keep track of the maximum number of goals within a task the planner can solve
     if num_goals < initial_num_goals:
-        planner_parameters.max_task_complexity = num_goals
+        retry_state.max_task_complexity = num_goals
 
     return plan, success, failure_count, filtered_searches
 
 
 def _search_over_goal_objects(
-    planner_mode: PlannerMode,
+    planner: Planner,
     environment: KitchenProcTHOREnvironment,
     search_problem: InterruptionSearchProblem,
-    planner_parameters: PlannerConfig,
     neg_to_pos_mapping: dict[F, F],
     all_objects: set[str],
     stats: SearchStats | None = None,
@@ -488,8 +477,7 @@ def _search_over_goal_objects(
     search_problem.actions = filter_actions_to_objects(actions, keep, all_objects)
     try:
         plan, success, *_ = search_without_retry(
-            planner_mode, environment, search_problem, planner_parameters, neg_to_pos_mapping,
-            stats,
+            planner, environment, search_problem, neg_to_pos_mapping, stats
         )
     finally:
         search_problem.actions = actions

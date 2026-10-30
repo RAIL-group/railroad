@@ -2,6 +2,7 @@ from functools import partial
 
 import numpy as np
 import pytest
+from interruption.cost_formulations import NO_INTERRUPTION, DefaultFormulation
 from interruption.operators import construct_assemble_operator
 from interruption.planner import (
     InterruptionTrajectory,
@@ -30,6 +31,7 @@ from railroad.operators.core import (
 
 # global
 INTERRUPTION_PROB = 0.1
+NO_INT = DefaultFormulation(NO_INTERRUPTION)
 
 def test_check_value_cache():
     initial_state = State(
@@ -204,7 +206,7 @@ def test_construct_trajectory(heuristic_fn):
         scene_graph=None
     )
     search_problem = InterruptionSearchProblem(goal, applicable_actions)
-    planner_params = PlannerConfig(True, heuristic_fn)
+    planner_params = PlannerConfig(heuristic_fn=heuristic_fn, cost_formulation=NO_INT)
     new_traj = traj.create_child(
         search_problem,
         planner_params,
@@ -241,7 +243,9 @@ def test_astar_search_nointdist(heuristic_fn):
 
     # testing with no interrupting tasks
     search_problem = InterruptionSearchProblem(goal, move_actions)
-    planner_params = PlannerConfig(True, heuristic_fn, planner_interruption_prob_fn=0.1)
+    planner_params = PlannerConfig(
+        heuristic_fn=heuristic_fn, cost_formulation=NO_INT, planner_interruption_prob_fn=0.1
+    )
 
     plan, plan_cost, success, _ = astar_search(
         (initial_state, None),
@@ -284,7 +288,9 @@ def test_astar_search_nointdist(heuristic_fn):
     )
 
     search_problem = InterruptionSearchProblem(goal, all_actions)
-    planner_params = PlannerConfig(True, heuristic_fn, planner_interruption_prob_fn=0.1)
+    planner_params = PlannerConfig(
+        heuristic_fn=heuristic_fn, cost_formulation=NO_INT, planner_interruption_prob_fn=0.1
+    )
 
     plan, plan_cost, success, _ = astar_search(
         (initial_state, None),
@@ -408,7 +414,10 @@ def test_optimal_make_sandwhich_noint(heuristic_fn, interruption_prob_fn):
     goal = converted_goals[0]
 
     search_problem = InterruptionSearchProblem(goal, actions)
-    planner_params = PlannerConfig(True, heuristic_fn, planner_interruption_prob_fn=interruption_prob_fn)
+    planner_params = PlannerConfig(
+        heuristic_fn=heuristic_fn, cost_formulation=NO_INT,
+        planner_interruption_prob_fn=interruption_prob_fn,
+    )
 
     plan, cost, success, _ = astar_search(
         (initial_state, None),
@@ -443,7 +452,8 @@ def test_astar_search_prints_progress_only_when_asked(show_progress, capsys):
     search_problem = InterruptionSearchProblem(goal, move_actions)
 
     astar_search(
-        (initial_state, None), search_problem, PlannerConfig(True, 0, use_cpp_search=False),
+        (initial_state, None), search_problem,
+        PlannerConfig(heuristic_fn=0, cost_formulation=NO_INT, use_cpp_search=False),
         show_progress=show_progress,
     )
 
@@ -464,7 +474,7 @@ def test_search_stats_report_expansions_against_the_budget():
 
     astar_search(
         (initial_state, None), InterruptionSearchProblem(goal, move_actions),
-        PlannerConfig(True, 0), num_steps=50, stats=stats,
+        PlannerConfig(heuristic_fn=0, cost_formulation=NO_INT), num_steps=50, stats=stats,
     )
 
     assert stats.success and stats.budget == 50
@@ -485,7 +495,7 @@ def test_search_stats_show_an_exhausted_budget():
     astar_search(
         (initial_state, None),
         InterruptionSearchProblem(LiteralGoal(F("at robot1 garage")), move_actions),
-        PlannerConfig(True, 0), num_steps=1, stats=stats,
+        PlannerConfig(heuristic_fn=0, cost_formulation=NO_INT), num_steps=1, stats=stats,
     )
 
     assert not stats.success
@@ -530,7 +540,7 @@ def test_a_search_that_exhausts_every_reachable_state_returns_failure():
     plan, cost, success, _ = astar_search(
         (initial_state, None),
         InterruptionSearchProblem(LiteralGoal(F("at robot1 garage")), move_actions),
-        PlannerConfig(True, 0), num_steps=1000, stats=stats,
+        PlannerConfig(heuristic_fn=0, cost_formulation=NO_INT), num_steps=1000, stats=stats,
     )
 
     assert (plan, cost, success) == ([], float("inf"), False)

@@ -6,8 +6,7 @@ interruption-planning sweeps can be run in parallel and tracked in
 MLflow / viewed via `railroad benchmarks dashboard`.
 """
 import math
-from functools import partial
-from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 from railroad.bench import BenchmarkCase, benchmark
@@ -15,29 +14,21 @@ from railroad.environment.procthor.resources import DEFAULT_RESOURCES_BASE
 
 from ..constants import (
     MODEL_NAME, EXPERIMENT_REPEATS, AUGMENT_TASK, ARRIVAL_EXCEEDANCE_FRACTIONS,
-    INTERRUPTION_SEEDS, PROCTHOR_SEED, OBJ_PLACEMENT_SEED, FILTER_OBJECTS, TIMEOUT,
-    RETRY_WITH_SUBGOALS, REMAPPED_SCENES_HASH
+    INTERRUPTION_SEEDS, PROCTHOR_SEED, TIMEOUT,
 )
-from ..environments import (
-    get_example_procthor_goal,
-    get_scene_task_distribution,
+from ..cost_formulations import NO_INTERRUPTION
+from ..experiments import run_experiment
+from ..planners import (
+    AnticipatoryPlanner, InterruptionAPPlanner, MyopicPlanner, load_ev_model,
 )
-from ..experiments import ExperimentConfig, ExperimentSeeds, run_experiment
-from ..planning_framework import PlannerMode
-from ..utilities import (
-    RandomVariableType, randomize_task_distribution_order, get_task_arrival_prob,
-    extract_relevant_objects, use_remapped_scenes, get_expected_time_next_arrival
-)
+from ..planning_framework import Planner
+from ..scenarios import Scenario
 
 # number of tasks in each sampled task sequence
 NUM_TASK_SEQUENCE = 5
 
-# planner modes that need the learned expected-value model
-_LEARNED_MODES = {
-    PlannerMode.INTERRUPTION,
-    PlannerMode.ANTICIPATORY_PLANNING,
-    PlannerMode.INTERRUPTION_AP,
-}
+# the learned expected-value model of the planners that use one
+MODEL_PATH = DEFAULT_RESOURCES_BASE / "models" / MODEL_NAME
 
 
 def _get_cases() -> list[dict[str, Any]]:
@@ -61,102 +52,53 @@ def _get_cases() -> list[dict[str, Any]]:
     ]
 
 
-def _build_seeds(case: BenchmarkCase, remap_dir: Path | None) -> ExperimentSeeds:
+def _interruption_ap(case: BenchmarkCase) -> Planner:
+    # augmented tasks are solved undiscounted; otherwise each step is discounted
+    # by the chance no task arrives during it
+    discount = 1.0 if case.params["augment_task"] else NO_INTERRUPTION
+    return InterruptionAPPlanner(ev_model=load_ev_model(MODEL_PATH), discount=discount)
+
+
+def _anticipatory(case: BenchmarkCase) -> Planner:
+    return AnticipatoryPlanner(ev_model=load_ev_model(MODEL_PATH))
+
+
+def _myopic(case: BenchmarkCase) -> Planner:
+    return MyopicPlanner()
+
+
+def _scenario(case: BenchmarkCase) -> Scenario:
     """
-    Helper function for deriving the per-repeat experiment seeds of a case.
+    The scenario of one repeat of a case. Built in the worker process, so the
+    remapped scene is set up there before any environment is built, and
+    registering the benchmarks doesn't need the run's task-cost quantiles on disk.
     """
-    return ExperimentSeeds(
-        procthor_seed=case.params["procthor_seed"],
+    return Scenario.procthor(
+        case.params["procthor_seed"],
+        arrival_exceedance=case.params["arrival_exceedance"],
         experiment_seed=case.params["interruption_seed"] + case.repeat_idx,
-        task_sample_seed=case.repeat_idx,
-        # an object seed makes ThorInterface skip the remap, so a remapped
-        # scene keeps the object placement it was generated with
-        object_placement_seed=None if remap_dir else OBJ_PLACEMENT_SEED
-    )
-
-
-def _model_path(experiment_mode: PlannerMode) -> Path | str:
-    """
-    Helper function that returns the path of the learned expected-value model
-    for the planner modes that use it, and an empty string otherwise.
-    """
-    if experiment_mode in _LEARNED_MODES:
-        return DEFAULT_RESOURCES_BASE / f"models/{MODEL_NAME}"
-    return ""
-
-
-def _setup_experiment_config(
-        case: BenchmarkCase,
-        experiment_mode: PlannerMode
-    ) -> tuple[ExperimentConfig, float]:
-    """
-    Helper function for setting up the experimental config for both the 
-    baseline and interruption-based planner benchmark experiments. Also
-    returns the average time between task arrivals the config was built with.
-    """
-    # evaluate on the scenes and task distribution of a data-generation run.
-    # Set per case, in the worker process, before any environment is built.
-    remap_dir = (
-        use_remapped_scenes(REMAPPED_SCENES_HASH, case.params["procthor_seed"])
-        if REMAPPED_SCENES_HASH else None
-    )
-    seeds = _build_seeds(case, remap_dir)
-    # resolved here rather than in the case, so registering the benchmarks
-    # doesn't need the run's task-cost quantiles on disk
-    time_between_arrivals = get_expected_time_next_arrival(
-        case.params["arrival_exceedance"], REMAPPED_SCENES_HASH
-    )
-    task_arrival_fn = partial(
-        get_task_arrival_prob,
-        RandomVariableType.CONTINUOUS,
-        -1,  # arrival_prob: only used by the discrete random variable
-        time_between_arrivals
-    )
-
-    # get task distribution from alfred dataset used during training
-    task_distribution = get_scene_task_distribution(seeds.procthor_seed, remap_dir)
-    if case.params["randomize_task_sequence"]:
-        current_goal, task_distribution = randomize_task_distribution_order(
-            task_distribution, seeds.task_sample_seed
-        )
-    else:
-        current_goal = get_example_procthor_goal()
-
-    config = ExperimentConfig(
-        seeds=seeds,
-        goal=current_goal,
-        interrupting_task_dist=task_distribution,
-        task_arrival_fn=task_arrival_fn,
-        ev_model_path=_model_path(experiment_mode),
+        task_sample_seed=case.repeat_idx if case.params["randomize_task_sequence"] else None,
         num_task_sequence=case.params["num_task_sequence"],
         augment_task=case.params["augment_task"],
-        retry_with_subgoals=RETRY_WITH_SUBGOALS
     )
-    return config, time_between_arrivals
 
 
-def _run(case: BenchmarkCase, experiment_mode: PlannerMode) -> dict:
+def _run(case: BenchmarkCase, make_planner: Callable[[BenchmarkCase], Planner]) -> dict:
     """
-    Runs a single benchmark case with the given planner.
+    Runs a single benchmark case with the planner make_planner builds for it.
     """
-    config, time_between_arrivals = _setup_experiment_config(case, experiment_mode)
-    result = run_experiment(
-        config,
-        experiment_mode,
-        remove_duplicate_objects=True,
-        benchmark_flag=True,
-        relevant_objects=(
-            extract_relevant_objects(config.interrupting_task_dist[0])
-            if FILTER_OBJECTS else None
-        )
-    )
+    scenario = _scenario(case)
+    result = run_experiment(scenario, make_planner(case), record=True)
     # logged as a metric; inf (no interruptions) is left out
-    if math.isfinite(time_between_arrivals):
-        result["time_between_arrivals"] = time_between_arrivals
+    assert scenario.time_between_arrivals is not None
+    if math.isfinite(scenario.time_between_arrivals):
+        result["time_between_arrivals"] = scenario.time_between_arrivals
     return result
 
 
-def _register(experiment_mode: PlannerMode, name: str, label: str, tag: str):
+def _register(
+    make_planner: Callable[[BenchmarkCase], Planner], name: str, label: str, tag: str
+):
     """
     Registers a benchmark that evaluates the given planner on the shared
     benchmark cases.
@@ -172,18 +114,14 @@ def _register(experiment_mode: PlannerMode, name: str, label: str, tag: str):
         repeat=EXPERIMENT_REPEATS,
     )
     def bench(case: BenchmarkCase):
-        return _run(case, experiment_mode)
+        return _run(case, make_planner)
 
     bench.add_cases(_get_cases())
     return bench
 
 
 bench_interruption_ap = _register(
-    PlannerMode.INTERRUPTION_AP, "procthor_interruption_ap", "interruption-ap", "interruption_ap"
+    _interruption_ap, "procthor_interruption_ap", "interruption-ap", "interruption_ap"
 )
-bench_myopic = _register(
-    PlannerMode.MYOPIC, "procthor_myopic", "myopic", "myopic"
-)
-bench_ap = _register(
-    PlannerMode.ANTICIPATORY_PLANNING, "procthor_ap", "anticipatory planning", "ap"
-)
+bench_myopic = _register(_myopic, "procthor_myopic", "myopic", "myopic")
+bench_ap = _register(_anticipatory, "procthor_ap", "anticipatory planning", "ap")

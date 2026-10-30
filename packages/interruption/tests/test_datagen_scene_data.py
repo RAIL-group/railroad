@@ -140,11 +140,13 @@ def _scene_with_tasks(datagen, monkeypatch, tasks):
     """Stubs scene construction: a scene with one object and one location."""
     from railroad.core import Fluent, LiteralGoal
 
-    config = SimpleNamespace(interrupting_task_dist=([LiteralGoal(Fluent(t)) for t in tasks], []))
     scene = SimpleNamespace(objects={"apple_27"}, locations={"fridge_5": (0, 0)})
     env = SimpleNamespace(scene=scene, objects_by_type={"category": {"fridge"}})
-    data = SimpleNamespace(env=env)
-    monkeypatch.setattr(datagen, "initialize_experiment_config", lambda *args: config)
+    # the tasks as initialize_experiment_data maps them to the scene
+    data = SimpleNamespace(
+        env=env, interrupting_task_dist=([LiteralGoal(Fluent(t)) for t in tasks], [])
+    )
+    monkeypatch.setattr(datagen, "initialize_scenario", lambda *args: SimpleNamespace())
     monkeypatch.setattr(datagen, "initialize_experiment_data", lambda *args, **kwargs: data)
 
 
@@ -218,7 +220,7 @@ def test_slow_datums_are_logged(seconds, logged, monkeypatch, capsys, tmp_path):
     monkeypatch.setattr(datagen, "_expected_task_cost", expected_task_cost)
     data = SimpleNamespace(
         search_problem=SimpleNamespace(interrupting_task_dist=([], []), actions=[]),
-        planner_parameters=SimpleNamespace(heuristic_fn=0), neg_to_pos_mapping={},
+        planner=SimpleNamespace(config=SimpleNamespace(heuristic_fn=0)), neg_to_pos_mapping={},
     )
 
     recorded = datagen._record_datum(
@@ -445,7 +447,7 @@ def test_record_datum_audits_only_selected_datums_with_filtering_on(
     monkeypatch.setattr(datagen, "WRITE_OUT_INDIVIDUAL_TASK_COSTS", False)
     data = SimpleNamespace(
         search_problem=SimpleNamespace(interrupting_task_dist=([], [])),
-        planner_parameters=SimpleNamespace(relaxed_plan_filtering=filtering),
+        planner=SimpleNamespace(config=SimpleNamespace(relaxed_plan_filtering=filtering)),
     )
     env = SimpleNamespace(scene=SimpleNamespace(scene_graph=None))
 

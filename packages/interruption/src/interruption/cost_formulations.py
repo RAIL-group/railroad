@@ -13,7 +13,12 @@ and override only the method being changed, e.g.
             return terms.parent_cost + terms.parent_discount * terms.action_cost
 """
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Literal, Protocol
+
+# the discount that, instead of a fixed factor, multiplies by the probability no
+# interrupting task arrives during the step: gamma_{t+1} = gamma_t * (1 - p)
+NO_INTERRUPTION = "no_interruption"
+Discount = float | Literal["no_interruption"]
 
 
 @dataclass(frozen=True)
@@ -28,6 +33,12 @@ class StepTerms:
     action_cost: float           # c(a)
     interruption_prob: float     # probability of an interrupting task arriving after a
     interrupting_task_ev: float  # learned value of the child state, 0 without a model
+
+
+def _child_discount(discount: Discount, terms: StepTerms) -> float:
+    if discount == NO_INTERRUPTION:
+        return terms.parent_discount * (1 - terms.interruption_prob)
+    return terms.parent_discount * discount
 
 
 class CostFormulation(Protocol):
@@ -50,20 +61,16 @@ class CostFormulation(Protocol):
 class DefaultFormulation:
     """
     The original formulation:
-        gamma_{t+1} = gamma_t * (1 - p)        if discount_by_no_int_prob
+        gamma_{t+1} = gamma_t * (1 - p)        if discount is NO_INTERRUPTION
                     = gamma_t * discount       otherwise
         g'          = g + gamma_t * (c(a) + p * V(s'))
         future      = gamma_{t+1} * (h(s') + current_task_reward)
     """
-    discount_by_no_int_prob: bool
-    discount: float | None = None
+    discount: Discount = 1.0
     current_task_reward: float = 0
 
     def child_discount(self, terms: StepTerms) -> float:
-        if self.discount_by_no_int_prob:
-            return terms.parent_discount * (1 - terms.interruption_prob)
-        assert self.discount is not None
-        return terms.parent_discount * self.discount
+        return _child_discount(self.discount, terms)
 
     def accumulated_cost(self, terms: StepTerms) -> float:
         return terms.parent_cost + terms.parent_discount * (
@@ -80,19 +87,15 @@ class DefaultFormulation:
 class TerminalVAP:
     """
     The original formulation:
-        gamma_{t+1} = gamma_t * (1 - p)        if discount_by_no_int_prob
+        gamma_{t+1} = gamma_t * (1 - p)        if discount is NO_INTERRUPTION
                     = gamma_t * discount       otherwise
         g'          = g + gamma_t * (c(a) + p * V(s'))
         future      = gamma_{t+1} * (h(s') + current_task_reward)
     """
-    discount_by_no_int_prob: bool
-    discount: float | None = None
+    discount: Discount = 1.0
 
     def child_discount(self, terms: StepTerms) -> float:
-        if self.discount_by_no_int_prob:
-            return terms.parent_discount * (1 - terms.interruption_prob)
-        assert self.discount is not None
-        return terms.parent_discount * self.discount
+        return _child_discount(self.discount, terms)
 
     def accumulated_cost(self, terms: StepTerms) -> float:
         return terms.parent_cost + terms.parent_discount * terms.action_cost

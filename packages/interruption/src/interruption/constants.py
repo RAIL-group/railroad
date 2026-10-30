@@ -1,16 +1,27 @@
 """
 A module for keeping track of experiment related user-defined constants.
+
+Planner settings aren't here: they're arguments of the planners in planners.py
+(e.g. InterruptionAPPlanner(discount=1.0)). The failure cost is
+Scenario.failure_cost (scenarios.py).
 """
+import os
+
+
+def _env_flag(name: str) -> bool:
+    return os.environ.get(name, "") not in ("", "0")
+
 
 ## railroad heuristic related constants
 LAMBDA_ADD = 0.5
 LAMBDA_MAX = 0
 LAMBDA_FF = 0.5
 
-## debug related constants
-AP_DEBUG = False
-ACTION_PROB_DEBUG = False
-SEARCH_DEBUG = False
+## debug output, turned on per run with an environment variable, e.g.
+##   INTERRUPTION_SEARCH_DEBUG=1 uv run python scripts/experiment_script.py
+AP_DEBUG = _env_flag("INTERRUPTION_AP_DEBUG")
+ACTION_PROB_DEBUG = _env_flag("INTERRUPTION_ACTION_PROB_DEBUG")
+SEARCH_DEBUG = _env_flag("INTERRUPTION_SEARCH_DEBUG")
 
 ## learned function for expected value of interrupting task distribution
 MODEL_NAME = "best_model_one_room_multi_scene_lr=0.001.pt"
@@ -25,9 +36,6 @@ FILTER_OBJECTS = False
 AUGMENT_TASK = True
 # retry upon solver failing to find a plan
 RETRY_WITH_SUBGOALS = True
-# search first over only the objects and locations of the goal's relaxed plan,
-# falling back to the full problem if that fails (planner.relaxed_plan_problem)
-RELAXED_PLAN_FILTERING = True
 
 # number of tasks in the task distribution
 # current: 2-room -> 16; 1-room -> 11
@@ -65,24 +73,3 @@ OBJ_PLACEMENT_SEED = None
 ARRIVAL_EXCEEDANCE_FRACTIONS = [0, 0.05, 0.10, 0.25, 0.50, 0.75, 0.95]
 # experiment seed for each arrival rate above (paired by position)
 INTERRUPTION_SEEDS = [140, 42, 240, 57, 1096, 4065, 720]
-
-## interuption heuristic related constants
-# interruption heuristic weights (ff-heuristic_weight, EV_weight)
-# NOTE: keep EV_weight fixed at 1
-# INT_H_WEIGHTS = (0.35, 1)
-INT_H_WEIGHTS = (1, 1)
-
-# discount factor for augment experiment heuristic function
-# AUGMENT_DISCOUNT_FACTOR = 0.99
-AUGMENT_DISCOUNT_FACTOR = 1
-
-# heuristic multiplier (larger -> more greedy search)
-H_MULTIPLIER = 1
-
-## task failure cost
-# current: 2-room (seed = 64) -> 375; 1-room (seed = 201) -> 500
-PLANNER_FAILURE_COST = 500
-
-# A.P. related constants
-NUM_AUGMENTED_TASK_SAMPLES = 20
-AP_SEED = 12

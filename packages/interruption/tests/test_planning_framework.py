@@ -77,8 +77,8 @@ def test_ap_heuristic_fn_with_v_ap_true_and_zero_matches_without_v_ap():
 # covered:
 #   1. a failed astar_search must not be treated as a solution, must not crash,
 #      and its partial-plan cost must not leak into the returned value;
-#   2. interruption_problem.goal and search_params.interruption_value_fn must be
-#      left exactly as passed in, so the same problem/config objects stay usable
+#   2. interruption_problem.goal must be left exactly as passed in, and the
+#      (frozen) config untouched, so the same problem/config objects stay usable
 #      for the next task (the data-generation loop reuses them).
 
 
@@ -120,12 +120,7 @@ def ap_setup(monkeypatch):
         return 10.0
 
     problem = InterruptionSearchProblem(goal=original_goal, actions=[])
-    config = PlannerConfig(
-        False,
-        heuristic_fn=0.0,
-        discount=1,
-        interruption_value_fn=ev_model
-    )
+    config = PlannerConfig(heuristic_fn=0.0, interruption_value_fn=ev_model)
     scene = MagicMock(spec=ProcTHORScene)
     scene.grid = None
     scene.locations = {}
@@ -257,7 +252,7 @@ def test_goal_restored_when_search_fails(ap_setup):
     assert ap_setup.problem.goal is ap_setup.original_goal
 
 
-def test_interruption_value_fn_restored_after_planning(ap_setup):
+def test_interruption_value_fn_untouched_by_planning(ap_setup):
     ap_setup.run(
         [
             (["p"], 7.0, True, "sg_init"),
@@ -311,7 +306,7 @@ def _run_search_with_retry(monkeypatch, outcomes, held=(), **kwargs):
     outcomes = iter(outcomes)
     searched_actions = []
 
-    def search(mode, env, problem, *args):
+    def search(planner, env, problem, *args):
         searched_actions.append([a.name for a in problem.actions])
         return ["plan"], next(outcomes), 0, 0
 
@@ -328,28 +323,31 @@ def _run_search_with_retry(monkeypatch, outcomes, held=(), **kwargs):
         Action(set(), [], name="pick-left robot1 countertop countertop_1 pan_28"),
     ]
     search_problem = SimpleNamespace(goal=goal, actions=actions)
-    planner_parameters = SimpleNamespace(max_task_complexity=-1, heuristic_fn=None)
+    planner = SimpleNamespace(config=SimpleNamespace(heuristic_fn=None))
+    retry_state = pf.RetryState()
     state = State(0.0, {F(f"holding-in-left robot1 {obj}") for obj in held})
     scene = SimpleNamespace(objects={"apple_41", "pan_28"})
     environment = SimpleNamespace(state=state, scene=scene)
 
     search_with_retry: Any = pf.search_with_retry  # called with stand-in arguments
     result = search_with_retry(
-        pf.PlannerMode.MYOPIC, environment, search_problem, planner_parameters, {}, **kwargs
+        planner, environment, search_problem, {}, retry_state=retry_state, **kwargs
     )
-    return result, searched_actions, search_problem, planner_parameters, goal, actions
+    return result, searched_actions, search_problem, retry_state, goal, actions
 
 
 def test_search_with_retry_needs_nothing_more_when_the_first_search_succeeds(monkeypatch):
-    result, searched, problem, params, goal, actions = _run_search_with_retry(monkeypatch, [True])
+    result, searched, problem, retry_state, goal, actions = _run_search_with_retry(
+        monkeypatch, [True]
+    )
 
     assert result == (["plan"], True, 0, 0)
     assert len(searched) == 1
-    assert params.max_task_complexity == -1
+    assert retry_state.max_task_complexity == -1
 
 
 def test_search_with_retry_retries_over_goal_objects_before_shrinking(monkeypatch):
-    result, searched, problem, params, goal, actions = _run_search_with_retry(
+    result, searched, problem, retry_state, goal, actions = _run_search_with_retry(
         monkeypatch, [False, True]
     )
 
@@ -359,35 +357,35 @@ def test_search_with_retry_retries_over_goal_objects_before_shrinking(monkeypatc
         "move robot1 countertop_1 fridge_5", "pick-left robot1 countertop countertop_1 apple_41"
     ]
     # the task was solved whole, so the planner's complexity limit is unchanged
-    assert params.max_task_complexity == -1
+    assert retry_state.max_task_complexity == -1
     assert problem.goal is goal and problem.actions is actions
 
 
 def test_search_with_retry_shrinks_the_task_only_when_both_searches_fail(monkeypatch):
-    result, searched, problem, params, goal, actions = _run_search_with_retry(
+    result, searched, problem, retry_state, goal, actions = _run_search_with_retry(
         monkeypatch, [False, False, True]
     )
 
     assert result == (["plan"], True, 2, 1)
-    assert params.max_task_complexity == 2
+    assert retry_state.max_task_complexity == 2
     assert problem.goal is goal and problem.actions is actions
 
 
 def test_search_with_retry_gives_up_when_no_single_goal_can_be_solved(monkeypatch):
     # every search fails: 3 task sizes, an unfiltered and a filtered search each
-    result, searched, problem, params, goal, actions = _run_search_with_retry(
+    result, searched, problem, retry_state, goal, actions = _run_search_with_retry(
         monkeypatch, [False] * 6
     )
 
     assert result == (["plan"], False, 6, 3)
     # never below 1, which _decompose_task needs on the next call
-    assert params.max_task_complexity == 1
+    assert retry_state.max_task_complexity == 1
     assert problem.goal is goal and problem.actions is actions
 
 
 def test_search_with_retry_works_again_after_giving_up(monkeypatch):
     # giving up must not leave state behind that breaks the next call
-    result, searched, problem, params, goal, actions = _run_search_with_retry(
+    result, searched, problem, retry_state, goal, actions = _run_search_with_retry(
         monkeypatch, [False] * 6
     )
     monkeypatch.setattr(pf, "search_without_retry", lambda *args, **kwargs: (["plan"], True, 0, 0))
@@ -397,8 +395,9 @@ def test_search_with_retry_works_again_after_giving_up(monkeypatch):
     environment = SimpleNamespace(
         state=State(0.0, set()), scene=SimpleNamespace(objects={"apple_41"})
     )
+    planner = SimpleNamespace(config=SimpleNamespace(heuristic_fn=None))
     assert search_with_retry(
-        pf.PlannerMode.MYOPIC, environment, problem, params, {}
+        planner, environment, problem, {}, retry_state=retry_state
     )[:2] == (["plan"], True)
 
 
@@ -408,13 +407,13 @@ def _decompose_requiring_a_size(state, task, actions, heuristic_fn, num_goals_in
 
 
 def test_search_with_retry_without_decomposition_stops_after_the_goal_object_retry(monkeypatch):
-    result, searched, problem, params, goal, actions = _run_search_with_retry(
+    result, searched, problem, retry_state, goal, actions = _run_search_with_retry(
         monkeypatch, [False, False], allow_decomposition=False
     )
 
     assert result == (["plan"], False, 2, 1)
     assert len(searched) == 2
-    assert params.max_task_complexity == -1
+    assert retry_state.max_task_complexity == -1
 
 
 def test_search_with_retry_records_stats_for_both_searches(monkeypatch):
@@ -480,4 +479,4 @@ def test_no_task_distribution_means_no_halo(monkeypatch):
 
 
 def test_halo_filtering_is_off_unless_asked_for():
-    assert PlannerConfig(False, 0, 1).interruption_halo_filtering is False
+    assert PlannerConfig(heuristic_fn=0).interruption_halo_filtering is False
