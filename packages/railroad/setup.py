@@ -8,6 +8,7 @@ extension build which requires custom logic for pybind11 and stub generation.
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 import subprocess
 from pathlib import Path
@@ -27,7 +28,7 @@ class build_ext_and_stubgen(build_ext):
     """
     Build the C++ extension, then generate .pyi stubs via pybind11-stubgen.
 
-    Generates: src/railroad/_bindings.pyi
+    Generates: src/railroad/_bindings.pyi, and copies it next to the built extension so that wheels carry it too.
     """
 
     def run(self):
@@ -43,11 +44,11 @@ class build_ext_and_stubgen(build_ext):
         # Where to write the final stub inside your source tree/package.
         out_pyi = Path("src/railroad/_bindings.pyi").resolve()
 
-        # Optional: skip if stub is newer than built extension
+        # Skip generating if the stub is newer than the built extension (it is still copied below)
         ext_path = Path(self.get_ext_fullpath(module)).resolve()
-        if out_pyi.exists() and ext_path.exists():
-            if out_pyi.stat().st_mtime >= ext_path.stat().st_mtime:
-                return
+        if out_pyi.exists() and ext_path.exists() and out_pyi.stat().st_mtime >= ext_path.stat().st_mtime:
+            self._copy_stub_to_build(out_pyi, build_lib)
+            return
 
         # Make sure the freshly built extension is importable:
         # - add build_lib to PYTHONPATH
@@ -56,8 +57,8 @@ class build_ext_and_stubgen(build_ext):
             os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
         )
 
-        # Generate stubs into a temp dir under build/
-        stub_out_dir = build_lib / "_stubgen"
+        # Generate stubs into a temp dir outside build_lib (anything under build_lib ends up in the wheel)
+        stub_out_dir = Path(self.build_temp).resolve() / "_stubgen"
         stub_out_dir.mkdir(parents=True, exist_ok=True)
 
         # Run pybind11-stubgen using the current Python executable
@@ -81,6 +82,16 @@ class build_ext_and_stubgen(build_ext):
         stub_content = stub_content.replace("railroad._bindings.", "")
 
         out_pyi.write_text(stub_content, encoding="utf-8")
+        self._copy_stub_to_build(out_pyi, build_lib)
+
+    @staticmethod
+    def _copy_stub_to_build(out_pyi: Path, build_lib: Path) -> None:
+        # build_py copies the package's files into build_lib before build_ext runs, so a stub written to the source
+        # tree here would be missing from a wheel (and so from any non-editable install, e.g. a `git+https`
+        # dependency, where type checkers would see the bindings as Unknown). Put it next to the extension too.
+        dest = build_lib / "railroad" / "_bindings.pyi"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(out_pyi, dest)
 
 
 ext_modules = [

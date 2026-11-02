@@ -4,6 +4,7 @@
 #include "railroad/goal.hpp"
 #include "railroad/planner.hpp"
 #include "railroad/state.hpp"
+#include "railroad/timed_astar.hpp"
 #include <memory>
 #include <pybind11/functional.h>
 #include <pybind11/pybind11.h>
@@ -20,6 +21,34 @@ struct PyConcurrentHeuristic {
   GoalPtr goal;
   std::unique_ptr<ConcurrentHeuristic> h;
 };
+
+namespace {
+
+// timed_astar's model for planners written in Python: every node keeps its successor as one Python State object,
+// so the callbacks see the same object for a state each time (Python-side memos keyed on it hit), and the actions
+// passed to them are the caller's own Action objects.
+struct PyTimedAStarModel {
+  using Handle = py::object;
+  py::list actions;
+  py::object f_step, f_interval, f_terminal, f_heuristic, f_idle;
+
+  Handle make(State &&s) { return py::cast(std::move(s)); }
+  const State &state(const Handle &h) { return h.cast<const State &>(); }
+  double step_cost(const Handle &s, std::size_t a, const Handle &s2) {
+    return f_step(s, actions[a], s2).cast<double>();
+  }
+  double interval_cost(const Handle &s, std::size_t a, const Handle &s2) {
+    return f_interval(s, actions[a], s2).cast<double>();
+  }
+  double terminal_cost(const Handle &s2) { return f_terminal(s2).cast<double>(); }
+  double heuristic(const Handle &s2) { return f_heuristic(s2).cast<double>(); }
+  double idle_cost(const Handle &s, double t0, double t1) { return f_idle(s, t0, t1).cast<double>(); }
+  void check_interrupt() {
+    if (PyErr_CheckSignals() != 0) throw py::error_already_set();
+  }
+};
+
+}  // namespace
 
 PYBIND11_MODULE(_bindings, m) {
   py::class_<Fluent>(m, "Fluent")
@@ -311,6 +340,22 @@ PYBIND11_MODULE(_bindings, m) {
                std::vector<std::pair<double, GroundedEffect>>{})
       .def_property("time", &State::time, &State::set_time)
       .def_property_readonly("fluents", &State::fluents)
+      .def_property_readonly(
+          "fluent_names",
+          [](const State &s) {
+            py::set out;
+            for (const auto &f : s.fluents()) {
+              std::string n = f.is_negated() ? "not " + f.name() : f.name();
+              for (const auto &arg : f.args()) {
+                n += ' ';
+                n += arg;
+              }
+              out.add(py::str(n));
+            }
+            return py::frozenset(out);
+          },
+          "The fluents as plain strings (\"at r1 counter\": str(fluent) without its parentheses), built in one "
+          "call; reading `fluents` creates a Python Fluent object per fluent.")
       .def_property_readonly("upcoming_effects", &State::upcoming_effects)
       .def("satisfies_precondition", &State::satisfies_precondition,
            py::arg("action"), py::arg("relax") = false)
@@ -438,6 +483,44 @@ PYBIND11_MODULE(_bindings, m) {
         },
         py::arg("state"), py::arg("all_actions"),
         "Return list of applicable actions for at least one free robot");
+
+  m.def(
+      "timed_astar_search",
+      [](py::object start, const GoalPtr &goal, py::list actions, py::object heuristic, py::object step_cost,
+         py::object interval_cost, py::object terminal_cost, py::object idle_cost, int budget,
+         bool time_dominance, double seconds_left) {
+        std::vector<Action> acts;
+        acts.reserve(py::len(actions));
+        for (auto a : actions) acts.push_back(a.cast<Action>());
+        PyTimedAStarModel model{actions, step_cost, interval_cost, terminal_cost, heuristic, idle_cost};
+        TimedAStarParams params;
+        params.budget = budget;
+        params.time_dominance = time_dominance;
+        params.interval = !interval_cost.is_none();
+        params.terminal = !terminal_cost.is_none();
+        params.idle_slack = !idle_cost.is_none();
+        params.seconds_left = seconds_left;
+        TimedAStarResult r = timed_astar(start, acts, goal.get(), model, params);
+        py::dict out;
+        out["plan"] = r.plan;
+        out["cost"] = r.cost;
+        out["success"] = r.success;
+        out["timed_out"] = r.timed_out;
+        out["expanded"] = r.expanded;
+        out["generated"] = r.generated;
+        out["pushed"] = r.pushed;
+        return out;
+      },
+      "A* over the temporal state space with clock-dependent costs from Python (see timed_astar.hpp): "
+      "g' = g + step_cost(s, a, s') [+ interval_cost(s, a, s')] [+ terminal_cost(s') at goals], "
+      "f = g' + heuristic(s'). States are keyed on fluents and pending effects at absolute times; with "
+      "time_dominance a copy is pruned by one reached no later at no greater cost (plus idle_cost(s, t0, t1) "
+      "for the wait, when given). Returns a dict: plan (indices into actions), cost, success, timed_out "
+      "(seconds_left ran out), expanded, generated, pushed.",
+      py::arg("start"), py::arg("goal"), py::arg("actions"), py::arg("heuristic"), py::arg("step_cost"),
+      py::arg("interval_cost") = py::none(), py::arg("terminal_cost") = py::none(),
+      py::arg("idle_cost") = py::none(), py::arg("budget") = 20000, py::arg("time_dominance") = true,
+      py::arg("seconds_left") = -1.0);
   m.def("get_usable_actions",
         [](const State &input_state, const std::vector<Action> &all_actions) {
           return get_usable_actions(input_state, all_actions);
